@@ -1,0 +1,15 @@
+.root {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+}
+
+.placeholder {
+  color: var(--color-text-muted);
+}
+
+.placeholderText {
+  font-size: var(--text-base);
+}

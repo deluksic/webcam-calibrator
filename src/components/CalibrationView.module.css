@@ -1,0 +1,44 @@
+.root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-8);
+}
+
+.error {
+  color: var(--color-error);
+  font-size: var(--text-base);
+  text-align: center;
+}
+
+.loading {
+  color: var(--color-text-muted);
+  font-size: var(--text-base);
+}
+
+.feedRow {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.feedPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.feedLabel {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.feedCanvas {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
