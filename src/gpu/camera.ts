@@ -8,7 +8,7 @@
 // Pass 7: render thresholded edges → canvas (render pass)
 
 import { tgpu, d, common, std } from 'typegpu';
-import { sqrt } from 'typegpu/std';
+import { sqrt, atomicAdd } from 'typegpu/std';
 import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler, TgpuBuffer } from 'typegpu';
 
 const WR = 0.2126;
@@ -52,8 +52,7 @@ export function createCameraPipeline(
   const thresholdBuffer = root.createBuffer(d.f32, 0.0).$usage('uniform');
 
   // Histogram buffer: 256 atomic uint32 counters
-  // Each workgroup (0-255) owns its own bin, so no contention
-  const histogramSchema = d.arrayOf(d.u32, HISTOGRAM_BINS);
+  const histogramSchema = d.arrayOf(d.atomic(d.u32), HISTOGRAM_BINS);
   const histogramBuffer = root.createBuffer(histogramSchema).$usage('storage');
 
   // ── Layouts ─────────────────────────────────────────────────────────────
