@@ -44,7 +44,7 @@ export function createGrayscalePipeline(
   });
 
   const displayLayout = tgpu.bindGroupLayout({
-    grayTex: { texture: d.texture2d(d.rgba) },
+    grayTex: { texture: d.texture2d(d.f32) },
     sampler: { sampler: 'filtering' },
   });
 

@@ -5,6 +5,7 @@
 // Pass 4: render Sobel magnitude → canvas (render pass)
 
 import { tgpu, d, common, std } from 'typegpu';
+import { sqrt, atan2 } from 'typegpu/std';
 import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler } from 'typegpu';
 
 const WR = 0.2126;
@@ -48,17 +49,17 @@ export function createCameraPipeline(
   });
 
   const grayLayout = tgpu.bindGroupLayout({
-    rgbaTex: { texture: d.texture2d(d.rgba) },
+    rgbaTex: { texture: d.texture2d(d.f32) },
     grayTex: { storageTexture: d.textureStorage2d('rgba8unorm', 'write-only') },
   });
 
   const sobelLayout = tgpu.bindGroupLayout({
-    grayTex: { texture: d.texture2d(d.rgba) },
+    grayTex: { texture: d.texture2d(d.f32) },
     sobelTex: { storageTexture: d.textureStorage2d('rgba8unorm', 'write-only') },
   });
 
   const displayLayout = tgpu.bindGroupLayout({
-    outputTex: { texture: d.texture2d(d.rgba) },
+    outputTex: { texture: d.texture2d(d.f32) },
     sampler: { sampler: 'filtering' },
   });
 
@@ -118,12 +119,12 @@ export function createCameraPipeline(
     const gy = (bl + 2.0 * b  + br) - (tl + 2.0 * t  + tr);
 
     // Magnitude
-    const magnitude = d.sqrt(gx * gx + gy * gy);
+    const magnitude = sqrt(gx * gx + gy * gy);
     // Normalize to 0-1 range
     const normalized = magnitude * (1.0 / 512.0);
 
     // Store magnitude in R, direction in G (for debugging)
-    const angle = d.atan2(gy, gx);
+    const angle = atan2(gy, gx);
     std.textureStore(sobelLayout.$.sobelTex, input.gid.xy, d.vec4f(normalized, (angle + 3.14159) / 6.28318, 0, 1));
   });
 
@@ -216,7 +217,7 @@ export function processFrame(
                     displayMode === 'grayscale' ? pipeline.grayTex :
                     pipeline.rgbaTex;
   const displayBindGroup = root.createBindGroup(
-    tgpu.bindGroupLayout({ outputTex: { texture: d.texture2d(d.rgba) }, sampler: { sampler: 'filtering' } }),
+    tgpu.bindGroupLayout({ outputTex: { texture: d.texture2d(d.f32) }, sampler: { sampler: 'filtering' } }),
     { outputTex: outputTex, sampler: pipeline.sampler }
   );
   pipeline.displayPipeline.withColorAttachment({ view: pipeline.context }).with(displayBindGroup).draw(3);
