@@ -1,4 +1,4 @@
-import { createSignal, createMemo, isPending } from 'solid-js';
+import { createSignal, createMemo } from 'solid-js';
 import { initGPU } from '../gpu/init';
 import { createCameraPipeline, processFrame, type CameraPipeline } from '../gpu/camera';
 import styles from './CalibrationView.module.css';
@@ -56,14 +56,14 @@ export default function CalibrationView() {
     video.srcObject = stream();
     video.play().catch(() => {});
 
-    // Animation loop
-    const loop = () => {
+    // Render loop using requestVideoFrameCallback
+    const loop = (_timestamp: number, metadata: VideoFrameCallbackMetadata) => {
       if (video.readyState >= 2) {
         processFrame(gpuRoot(), p, video, 'sobel');
       }
-      requestAnimationFrame(loop);
+      video.requestVideoFrameCallback(loop);
     };
-    requestAnimationFrame(loop);
+    video.requestVideoFrameCallback(loop);
   });
 
   return (

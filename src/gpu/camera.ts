@@ -99,24 +99,27 @@ export function createCameraPipeline(
     'use gpu';
     if (input.gid.x >= d.u32(width) || input.gid.y >= d.u32(height)) { return; }
 
+    // Convert gid to vec2i for textureLoad offsets
+    const pos = d.vec2i(input.gid.xy);
+
     // Sobel with clamped coordinates
-    const tl = std.textureLoad(sobelLayout.$.grayTex, input.gid.xy.add(d.vec2i(-1, -1)), 0).r;
-    const t  = std.textureLoad(sobelLayout.$.grayTex, input.gid.xy.add(d.vec2i(0, -1)), 0).r;
-    const tr = std.textureLoad(sobelLayout.$.grayTex, input.gid.xy.add(d.vec2i(1, -1)), 0).r;
-    const ml = std.textureLoad(sobelLayout.$.grayTex, input.gid.xy.add(d.vec2i(-1, 0)), 0).r;
-    const mr = std.textureLoad(sobelLayout.$.grayTex, input.gid.xy.add(d.vec2i(1, 0)), 0).r;
-    const bl = std.textureLoad(sobelLayout.$.grayTex, input.gid.xy.add(d.vec2i(-1, 1)), 0).r;
-    const b  = std.textureLoad(sobelLayout.$.grayTex, input.gid.xy.add(d.vec2i(0, 1)), 0).r;
-    const br = std.textureLoad(sobelLayout.$.grayTex, input.gid.xy.add(d.vec2i(1, 1)), 0).r;
+    const tl = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(-1, -1)), 0).r;
+    const t  = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(0, -1)), 0).r;
+    const tr = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(1, -1)), 0).r;
+    const ml = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(-1, 0)), 0).r;
+    const mr = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(1, 0)), 0).r;
+    const bl = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(-1, 1)), 0).r;
+    const b  = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(0, 1)), 0).r;
+    const br = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(1, 1)), 0).r;
 
     // Sobel X: [-1, 0, 1; -2, 0, 2; -1, 0, 1]
     const gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
     // Sobel Y: [-1, -2, -1; 0, 0, 0; 1, 2, 1]
     const gy = (bl + 2.0 * b  + br) - (tl + 2.0 * t  + tr);
 
-    // Magnitude (approximate, avoiding sqrt)
+    // Magnitude
     const magnitude = d.sqrt(gx * gx + gy * gy);
-    // Normalize to 0-1 range (max possible is ~1284 with 8-bit values)
+    // Normalize to 0-1 range
     const normalized = magnitude * (1.0 / 512.0);
 
     // Store magnitude in R, direction in G (for debugging)
