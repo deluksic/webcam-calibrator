@@ -60,7 +60,9 @@ export default function CalibrationView() {
 
           // Update UI with histogram data
           const bins = await p.histogramBuffer.read();
-          console.log('Histogram bins (first 10):', bins.slice(0, 10));
+          console.log('Histogram bins:', bins.slice(0, 20));
+          console.log('Non-zero bins:', bins.filter(x => x > 0).length);
+          console.log('Bin 0:', bins[0], 'Bin 1:', bins[1], 'Bin 2:', bins[2]);
           console.log('Histogram total:', bins.reduce((a, b) => a + b, 0));
           setHistogramData(bins);
 

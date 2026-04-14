@@ -8,7 +8,7 @@
 // Pass 7: render thresholded edges → canvas (render pass)
 
 import { tgpu, d, common, std } from 'typegpu';
-import { sqrt, atomicAdd, atomicStore } from 'typegpu/std';
+import { sqrt, atomicAdd, atomicStore, storageBarrier } from 'typegpu/std';
 import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler, TgpuBuffer } from 'typegpu';
 
 const WR = 0.2126;
@@ -406,6 +406,9 @@ export async function processFrameAsync(
   pipeline.histogramResetPipeline
     .with(pipeline.histogramResetBindGroup)
     .dispatchWorkgroups(HISTOGRAM_BINS);
+
+  // Memory barrier to ensure reset completes before counting starts
+  storageBarrier();
 
   // Process all pixels with atomic increments
   pipeline.histogramPipeline
