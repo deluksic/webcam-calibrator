@@ -68,3 +68,26 @@
   color: white;
   border-color: var(--color-primary);
 }
+
+.histogramContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.thresholdLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-family: monospace;
+}
+
+.thresholdValue {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.thresholdValue span {
+  color: var(--color-primary);
+}

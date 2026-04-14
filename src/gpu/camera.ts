@@ -144,7 +144,21 @@ export function createCameraPipeline(
 
   const sobelPipeline = root.createComputePipeline({ compute: sobelKernel });
 
-  // ── Pass 4: histogram with atomic operations ───────────────────────────
+  // ── Pass 4: histogram reset kernel ─────────────────────────────────────
+  // First pass: reset all histogram bins to zero
+  const histogramResetKernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [1, 1, 1],
+  })((input) => {
+    'use gpu';
+    const binIdx = input.gid.x;
+    if (binIdx >= d.u32(HISTOGRAM_BINS)) { return; }
+    atomicAdd(histogramLayout.$.histogram[binIdx], d.u32(0));
+  });
+
+  const histogramResetPipeline = root.createComputePipeline({ compute: histogramResetKernel });
+
+  // ── Pass 5: histogram with atomic operations ───────────────────────────
   // Many workgroups, each thread processes pixels and atomically increments bins
   // Uses atomicAdd to safely increment from multiple threads
   const histogramKernel = tgpu.computeFn({
@@ -228,6 +242,11 @@ export function createCameraPipeline(
     sobelTex: sobelTex,
   });
 
+  const histogramResetBindGroup = root.createBindGroup(histogramLayout, {
+    sobelTex: sobelTex,
+    histogram: histogramBuffer,
+  });
+
   const histogramBindGroup = root.createBindGroup(histogramLayout, {
     sobelTex: sobelTex,
     histogram: histogramBuffer,
@@ -273,6 +292,8 @@ export function createCameraPipeline(
     grayBindGroup,
     sobelPipeline,
     sobelBindGroup,
+    histogramResetPipeline,
+    histogramResetBindGroup,
     histogramPipeline,
     histogramBindGroup,
     thresholdPipeline,
@@ -336,7 +357,11 @@ export function processFrame(
     .with(pipeline.sobelBindGroup)
     .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-  // ── Pass 4: apply threshold ─────────────────────────────────────────────
+  // ── Pass 4: reset histogram and apply threshold ───────────────────────
+  pipeline.histogramResetPipeline
+    .with(pipeline.histogramResetBindGroup)
+    .dispatchWorkgroups(HISTOGRAM_BINS);
+
   pipeline.thresholdPipeline
     .with(pipeline.thresholdBindGroup)
     .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
@@ -375,7 +400,12 @@ export async function processFrameAsync(
     .with(pipeline.sobelBindGroup)
     .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-  // ── Pass 4: compute histogram ──────────────────────────────────────────
+  // ── Pass 4: reset histogram and compute new histogram ──────────────────
+  // Reset all bins to zero first
+  pipeline.histogramResetPipeline
+    .with(pipeline.histogramResetBindGroup)
+    .dispatchWorkgroups(HISTOGRAM_BINS);
+
   // Process all pixels with atomic increments
   pipeline.histogramPipeline
     .with(pipeline.histogramBindGroup)
