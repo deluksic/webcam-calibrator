@@ -308,7 +308,7 @@ export type CameraPipeline = ReturnType<typeof createCameraPipeline>;
 export type DisplayMode = 'edges' | 'sobel' | 'grayscale' | 'original';
 
 // ─── Compute adaptive threshold from histogram ──────────────────────────
-function computeThreshold(histogramData: { count: number }[], percentile: number = 0.85): number {
+export function computeThreshold(histogramData: { count: number }[], percentile: number = 0.85): number {
   const totalPixels = histogramData.reduce((a, b) => a + b.count, 0);
   const targetCount = totalPixels * (1 - percentile);
 
