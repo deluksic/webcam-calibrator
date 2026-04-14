@@ -337,8 +337,8 @@ export function computeThreshold(histogramData: number[], percentile: number = 0
   for (let i = 0; i < histogramData.length; i++) {
     cumulative += histogramData[i];
     if (cumulative >= targetCount) {
-      // Return normalized threshold (bin / 256)
-      return i / 256.0;
+      // Return Sobel threshold value (bin / 512, since Sobel is normalized by 1/512)
+      return (i + 1) / 512.0;
     }
   }
   return 0.5; // fallback
