@@ -214,12 +214,7 @@ export function createCameraPipeline(
     std.textureStore(thresholdLayout.$.edgesTex, input.gid.xy, d.vec4f(edge, edge, edge, 1.0));
   });
 
-  // Histogram debug buffer
-  const histogramDebugLayout = tgpu.bindGroupLayout({
-    histogram: { storage: histogramSchema, access: 'mutable' },
-  });
-
-  // Debug kernel to copy first 10 histogram bins to debug buffer
+  // Debug kernel to read first 10 histogram bins (for verification)
   const histogramDebugKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [1, 1, 1],
@@ -227,14 +222,8 @@ export function createCameraPipeline(
     'use gpu';
     if (input.gid.x > d.u32(9)) { return; }
     const val = atomicLoad(histogramLayout.$.histogram[input.gid.x]);
-    atomicStore(histogramDebugLayout.$.histogram[input.gid.x], val);
   });
   const histogramDebugPipeline = root.createComputePipeline({ compute: histogramDebugKernel });
-
-  // Bind group for debug kernel using same histogram buffer
-  const histogramDebugBindGroup = root.createBindGroup(histogramDebugLayout, {
-    histogram: histogramBuffer,
-  });
 
   const thresholdPipeline = root.createComputePipeline({ compute: thresholdKernel });
 
@@ -327,7 +316,6 @@ export function createCameraPipeline(
     displayBindGroupGray,
     displayBindGroupOriginal,
     histogramDebugPipeline,
-    histogramDebugBindGroup,
     copyLayout,
     sampler,
     width,

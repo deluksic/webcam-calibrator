@@ -62,8 +62,8 @@ export default function CalibrationView() {
           const bins = await p.histogramBuffer.read();
           console.log('Histogram from main buffer:', bins.slice(0, 10));
 
-          // Debug: run debug kernel and read from histogram buffer
-          p.histogramDebugPipeline.with(p.histogramDebugBindGroup).dispatchWorkgroups(1);
+          // Debug: run debug kernel with histogram bind group, then read
+          p.histogramDebugPipeline.with(p.histogramBindGroup).dispatchWorkgroups(1);
           const debugBins = await p.histogramBuffer.read();
           console.log('Histogram from debug read:', debugBins.slice(0, 10));
 
