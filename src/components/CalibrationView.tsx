@@ -60,18 +60,14 @@ export default function CalibrationView() {
 
           // Update UI with histogram data
           const bins = await p.histogramBuffer.read();
-          console.log('Histogram from main buffer:', bins.slice(0, 10));
-
-          // Debug: run debug kernel with histogram bind group, then read
-          p.histogramDebugPipeline.with(p.histogramBindGroup).dispatchWorkgroups(1);
-          const debugBins = await p.histogramBuffer.read();
-          console.log('Histogram from debug read:', debugBins.slice(0, 10));
-
+          console.log('Histogram:', bins.slice(0, 20));
           console.log('Non-zero bins:', bins.filter(x => x > 0).length);
-          setHistogramData(bins);
+          console.log('Total:', bins.reduce((a, b) => a + b, 0));
+          console.log('Bin 0:', bins[0], 'Bin 1:', bins[1], 'Bin 2:', bins[2], 'Bin 3:', bins[3], 'Bin 4:', bins[4]);
 
           const thresh = computeThreshold(bins, 0.85);
-          console.log('Computed threshold:', thresh);
+          console.log('Threshold:', thresh);
+          setHistogramData(bins);
           setThreshold(thresh);
         }
         video.requestVideoFrameCallback(loop);

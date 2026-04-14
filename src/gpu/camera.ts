@@ -8,7 +8,7 @@
 // Pass 7: render thresholded edges → canvas (render pass)
 
 import { tgpu, d, common, std } from 'typegpu';
-import { sqrt, atomicAdd, atomicStore, atomicLoad } from 'typegpu/std';
+import { sqrt, atomicAdd, atomicStore } from 'typegpu/std';
 import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler, TgpuBuffer } from 'typegpu';
 
 const WR = 0.2126;
@@ -214,17 +214,6 @@ export function createCameraPipeline(
     std.textureStore(thresholdLayout.$.edgesTex, input.gid.xy, d.vec4f(edge, edge, edge, 1.0));
   });
 
-  // Debug kernel to read first 10 histogram bins (for verification)
-  const histogramDebugKernel = tgpu.computeFn({
-    in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [1, 1, 1],
-  })((input) => {
-    'use gpu';
-    if (input.gid.x > d.u32(9)) { return; }
-    const val = atomicLoad(histogramLayout.$.histogram[input.gid.x]);
-  });
-  const histogramDebugPipeline = root.createComputePipeline({ compute: histogramDebugKernel });
-
   const thresholdPipeline = root.createComputePipeline({ compute: thresholdKernel });
 
   // ── Pass 6: display ──────────────────────────────────────────────────────
@@ -315,7 +304,6 @@ export function createCameraPipeline(
     displayBindGroupSobel,
     displayBindGroupGray,
     displayBindGroupOriginal,
-    histogramDebugPipeline,
     copyLayout,
     sampler,
     width,
