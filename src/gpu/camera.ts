@@ -164,7 +164,7 @@ export function createCameraPipeline(
     if (myBin >= numBins) { return; }
 
     // First thread resets all histogram bins
-    if (myBin == zero) {
+    if (myBin === zero) {
       for (let resetBin = zero; resetBin < numBins; resetBin = resetBin + d.u32(1)) {
         const bucket = histogramLayout.$.histogram[resetBin];
         atomicStore(bucket.count, zero);
@@ -184,7 +184,7 @@ export function createCameraPipeline(
       if (pixelIdx < imgWidth * imgHeight) {
         const mag = std.textureLoad(histogramLayout.$.sobelTex, d.vec2u(px, py), 0).r;
         const pixelBin = d.u32(mag * d.f32(HISTOGRAM_BINS));
-        if (pixelBin == myBin) {
+        if (pixelBin === myBin) {
           localCount = localCount + d.u32(1);
         }
       }
