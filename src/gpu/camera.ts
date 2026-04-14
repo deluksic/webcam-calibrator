@@ -74,7 +74,7 @@ export function createCameraPipeline(
 
   const histogramLayout = tgpu.bindGroupLayout({
     sobelTex: { texture: d.texture2d(d.f32) },
-    histogram: { storage: histogramSchema },
+    histogram: { storage: histogramSchema, access: 'mutable' },
   });
 
   const thresholdLayout = tgpu.bindGroupLayout({
