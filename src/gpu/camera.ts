@@ -157,6 +157,22 @@ export function createCameraPipeline(
     sobelTex: sobelTex,
   });
 
+  // Display bind groups for each mode
+  const displayBindGroupSobel = root.createBindGroup(displayLayout, {
+    outputTex: sobelTex,
+    sampler: sampler,
+  });
+
+  const displayBindGroupGray = root.createBindGroup(displayLayout, {
+    outputTex: grayTex,
+    sampler: sampler,
+  });
+
+  const displayBindGroupOriginal = root.createBindGroup(displayLayout, {
+    outputTex: rgbaTex,
+    sampler: sampler,
+  });
+
   const displayBindGroup = root.createBindGroup(displayLayout, {
     outputTex: sobelTex,
     sampler: sampler,
@@ -173,7 +189,9 @@ export function createCameraPipeline(
     sobelPipeline,
     sobelBindGroup,
     displayPipeline,
-    displayBindGroup,
+    displayBindGroupSobel,
+    displayBindGroupGray,
+    displayBindGroupOriginal,
     copyLayout,
     sampler,
     width,
@@ -213,12 +231,8 @@ export function processFrame(
     .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
   // ── Pass 4: display ─────────────────────────────────────────────────────
-  const outputTex = displayMode === 'sobel' ? pipeline.sobelTex :
-                    displayMode === 'grayscale' ? pipeline.grayTex :
-                    pipeline.rgbaTex;
-  const displayBindGroup = root.createBindGroup(
-    tgpu.bindGroupLayout({ outputTex: { texture: d.texture2d(d.f32) }, sampler: { sampler: 'filtering' } }),
-    { outputTex: outputTex, sampler: pipeline.sampler }
-  );
+  const displayBindGroup = displayMode === 'sobel' ? pipeline.displayBindGroupSobel :
+                          displayMode === 'grayscale' ? pipeline.displayBindGroupGray :
+                          pipeline.displayBindGroupOriginal;
   pipeline.displayPipeline.withColorAttachment({ view: pipeline.context }).with(displayBindGroup).draw(3);
 }
