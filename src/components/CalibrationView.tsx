@@ -1,6 +1,6 @@
 import { createSignal, createMemo, isPending } from 'solid-js';
 import { initGPU } from '../gpu/init';
-import { createGrayscalePipeline, processFrame, type GrayscalePipeline } from '../gpu/grayscale';
+import { createCameraPipeline, processFrame, type CameraPipeline } from '../gpu/camera';
 import styles from './CalibrationView.module.css';
 
 export default function CalibrationView() {
@@ -28,15 +28,15 @@ export default function CalibrationView() {
     });
   });
 
-  // Create grayscale pipeline when GPU, canvas, and frame size are ready
-  const pipeline = createMemo<GrayscalePipeline | null>(() => {
+  // Create camera pipeline when GPU, canvas, and frame size are ready
+  const pipeline = createMemo<CameraPipeline | null>(() => {
     const root = gpuRoot();
     const canvas = canvasEl();
     const size = frameSize();
     if (!root || !canvas) return null;
 
     const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-    return createGrayscalePipeline(root, canvas, size.w, size.h, presentationFormat);
+    return createCameraPipeline(root, canvas, size.w, size.h, presentationFormat);
   });
 
   // Set canvas size and start render loop when pipeline is ready
@@ -59,7 +59,7 @@ export default function CalibrationView() {
     // Animation loop
     const loop = () => {
       if (video.readyState >= 2) {
-        processFrame(gpuRoot(), p, video);
+        processFrame(gpuRoot(), p, video, 'sobel');
       }
       requestAnimationFrame(loop);
     };
