@@ -23,7 +23,7 @@ export function createGrayscalePipeline(
     .$usage('sampled', 'storage', 'render');
 
   const grayTex = root
-    .createTexture({ size: [width, height], format: 'r8unorm', dimension: '2d' })
+    .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
     .$usage('storage', 'sampled');
 
   const sampler = root.createSampler({ minFilter: 'linear', magFilter: 'linear' });
@@ -36,11 +36,11 @@ export function createGrayscalePipeline(
 
   const grayLayout = tgpu.bindGroupLayout({
     rgbaTex: { texture: d.texture2d(d.f32) },
-    grayTex: { storageTexture: d.textureStorage2d('r8unorm', 'write-only') },
+    grayTex: { storageTexture: d.textureStorage2d('rgba8unorm', 'write-only') },
   });
 
   const displayLayout = tgpu.bindGroupLayout({
-    grayTex: { texture: d.texture2d(d.f32) },
+    grayTex: { texture: d.texture2d(d.rgba) },
     sampler: { sampler: 'filtering' },
   });
 
@@ -80,7 +80,8 @@ export function createGrayscalePipeline(
   })((i) => {
     'use gpu';
     const g = std.textureSampleBaseClampToEdge(displayLayout.$.grayTex, displayLayout.$.sampler, i.uv);
-    return d.vec4f(g.r, g.r, g.r, 1.0);
+    // g is now RGBA, just return it directly (already grayscale RGB + alpha 1)
+    return g;
   });
 
   const displayPipeline = root.createRenderPipeline({
