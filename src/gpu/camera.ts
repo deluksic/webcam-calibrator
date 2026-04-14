@@ -214,6 +214,28 @@ export function createCameraPipeline(
     std.textureStore(thresholdLayout.$.edgesTex, input.gid.xy, d.vec4f(edge, edge, edge, 1.0));
   });
 
+  // Histogram debug buffer
+  const histogramDebugLayout = tgpu.bindGroupLayout({
+    histogram: { storage: histogramSchema, access: 'mutable' },
+  });
+
+  // Debug kernel to copy first 10 histogram bins to debug buffer
+  const histogramDebugKernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [1, 1, 1],
+  })((input) => {
+    'use gpu';
+    if (input.gid.x > d.u32(9)) { return; }
+    const val = histogramLayout.$.histogram[input.gid.x];
+    histogramDebugLayout.$.histogram[input.gid.x] = val;
+  });
+  const histogramDebugPipeline = root.createComputePipeline({ compute: histogramDebugKernel });
+
+  // Bind group for debug kernel using same histogram buffer
+  const histogramDebugBindGroup = root.createBindGroup(histogramDebugLayout, {
+    histogram: histogramBuffer,
+  });
+
   const thresholdPipeline = root.createComputePipeline({ compute: thresholdKernel });
 
   // ── Pass 6: display ──────────────────────────────────────────────────────
@@ -304,6 +326,8 @@ export function createCameraPipeline(
     displayBindGroupSobel,
     displayBindGroupGray,
     displayBindGroupOriginal,
+    histogramDebugPipeline,
+    histogramDebugBindGroup,
     copyLayout,
     sampler,
     width,
