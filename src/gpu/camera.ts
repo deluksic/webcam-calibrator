@@ -55,9 +55,13 @@ export function createCameraPipeline(
   // Threshold uniform buffer
   const thresholdBuffer = root.createBuffer(d.f32, 0.0).$usage('uniform');
 
-  // Global histogram: array of atomic uint32 counters
-  const histogramSchema = d.arrayOf(HistogramBucket, HISTOGRAM_BINS);
-  const histogramBuffer = root.createBuffer(histogramSchema).$usage('storage');
+  // Global histogram: 256x1 r32uint texture for atomic operations
+  const histogramTex = root
+    .createTexture({ size: [HISTOGRAM_BINS, 1], format: 'r32uint', dimension: '2d' })
+    .$usage('storage', 'sampled');
+
+  // Readback buffer for CPU to read histogram data
+  const histogramReadback = root.createBuffer(d.array(d.u32, HISTOGRAM_BINS)).$usage('storage', 'copy-src');
 
   // ── Layouts ─────────────────────────────────────────────────────────────
   const copyLayout = tgpu.bindGroupLayout({
@@ -77,7 +81,7 @@ export function createCameraPipeline(
 
   const histogramLayout = tgpu.bindGroupLayout({
     sobelTex: { texture: d.texture2d(d.f32) },
-    histogram: { storage: histogramSchema },
+    histogram: { storageTexture: d.textureStorage2d('r32uint', 'read-write') },
   });
 
   const thresholdLayout = tgpu.bindGroupLayout({
@@ -89,6 +93,11 @@ export function createCameraPipeline(
   const displayLayout = tgpu.bindGroupLayout({
     outputTex: { texture: d.texture2d(d.f32) },
     sampler: { sampler: 'filtering' },
+  });
+
+  const histogramCopyLayout = tgpu.bindGroupLayout({
+    srcTex: { texture: d.texture2d(d.u32) },
+    dstBuf: { storage: d.array(d.u32, HISTOGRAM_BINS) },
   });
 
   // ── Pass 1: copy camera → rgba ──────────────────────────────────────────
@@ -166,8 +175,7 @@ export function createCameraPipeline(
     // First thread resets all histogram bins
     if (myBin === zero) {
       for (let resetBin = zero; resetBin < numBins; resetBin = resetBin + d.u32(1)) {
-        const bucket = histogramLayout.$.histogram[resetBin];
-        atomicStore(bucket.count, zero);
+        std.textureStore(histogramLayout.$.histogram, d.vec2i(resetBin, 0), d.vec4u(0, 0, 0, 0));
       }
     }
 
@@ -182,7 +190,7 @@ export function createCameraPipeline(
       const px = pixelIdx % imgWidth;
 
       if (pixelIdx < imgWidth * imgHeight) {
-        const mag = std.textureLoad(histogramLayout.$.sobelTex, d.vec2u(px, py), 0).r;
+        const mag = std.textureLoad(histogramLayout.$.sobelTex, d.vec2i(px, py), 0).r;
         const pixelBin = d.u32(mag * d.f32(HISTOGRAM_BINS));
         if (pixelBin === myBin) {
           localCount = localCount + d.u32(1);
@@ -192,8 +200,8 @@ export function createCameraPipeline(
 
     // Atomic add to global histogram bin
     if (localCount > zero) {
-      const bucket = histogramLayout.$.histogram[myBin];
-      atomicAdd(bucket.count, localCount);
+      const current = std.textureLoad(histogramLayout.$.histogram, d.vec2i(myBin, 0), 0).x;
+      std.textureStore(histogramLayout.$.histogram, d.vec2i(myBin, 0), d.vec4u(current + localCount, 0, 0, 0));
     }
   });
 
@@ -208,7 +216,8 @@ export function createCameraPipeline(
     if (input.gid.x >= d.u32(width) || input.gid.y >= d.u32(height)) { return; }
     const thresh = thresholdLayout.$.threshold;
     const mag = std.textureLoad(thresholdLayout.$.sobelTex, input.gid.xy, 0).r;
-    const edge = mag > thresh ? 1.0 : 0.0;
+    let edge = 0.0;
+    if (mag > thresh) { edge = 1.0; }
     std.textureStore(thresholdLayout.$.edgesTex, input.gid.xy, d.vec4f(edge, edge, edge, 1.0));
   });
 
@@ -230,7 +239,27 @@ export function createCameraPipeline(
     targets: { format: presentationFormat },
   });
 
-  // ── Bind groups ─────────────────────────────────────────────────────────
+  // ── Histogram copy pipeline: texture → buffer ───────────────────────────
+  const histogramCopyKernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [1, 1, 1],
+  })((input) => {
+    'use gpu';
+    const binIdx = input.gid.x;
+    if (binIdx >= d.u32(HISTOGRAM_BINS)) { return; }
+    const val = std.textureLoad(histogramCopyLayout.$.srcTex, d.vec2i(binIdx, 0), 0).x;
+    const buf = histogramCopyLayout.$.dstBuf[binIdx];
+    std.storageStore(buf, val);
+  });
+
+  const histogramCopyPipeline = root.createComputePipeline({ compute: histogramCopyKernel });
+
+  const histogramCopyBindGroup = root.createBindGroup(histogramCopyLayout, {
+    srcTex: histogramTex,
+    dstBuf: histogramReadback,
+  });
+
+  // ── Bind groups ──────���──────────────────────────────────────────────────
   const grayBindGroup = root.createBindGroup(grayLayout, {
     rgbaTex: rgbaTex,
     grayTex: grayTex,
@@ -243,7 +272,7 @@ export function createCameraPipeline(
 
   const histogramBindGroup = root.createBindGroup(histogramLayout, {
     sobelTex: sobelTex,
-    histogram: histogramBuffer,
+    histogram: histogramTex,
   });
 
   const thresholdBindGroup = root.createBindGroup(thresholdLayout, {
@@ -279,8 +308,11 @@ export function createCameraPipeline(
     grayTex,
     sobelTex,
     edgesTex,
-    histogramBuffer,
+    histogramTex,
+    histogramReadback,
     thresholdBuffer,
+    histogramCopyPipeline,
+    histogramCopyBindGroup,
     copyPipeline,
     grayPipeline,
     grayBindGroup,
@@ -394,8 +426,13 @@ export async function processFrameAsync(
     .with(pipeline.histogramBindGroup)
     .dispatchWorkgroups(HISTOGRAM_BINS);
 
+  // ── Copy histogram from texture to readback buffer ──────────────────────
+  pipeline.histogramCopyPipeline
+    .with(pipeline.histogramCopyBindGroup)
+    .dispatchWorkgroups(HISTOGRAM_BINS);
+
   // ── Read histogram and compute threshold ─────────────────────────────────
-  const histogramResult = await pipeline.histogramBuffer.read();
+  const histogramResult = await pipeline.histogramReadback.read();
   const threshold = computeThreshold(histogramResult, 0.85);
 
   // Update threshold uniform
