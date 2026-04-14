@@ -1,207 +1,143 @@
 // Camera pipeline — TypeGPU frame capture + grayscale
 // Pass 1: copy external camera texture → RGBA intermediate (render pass)
 // Pass 2: compute RGBA → r8unorm grayscale (compute pass)
+// Pass 3: render grayscale → canvas (render pass)
 
-import { tgpu } from 'typegpu';
-import type { TgpuTexture, TgpuBuffer, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler, TgpuComputePipeline } from 'typegpu';
-import { d } from 'typegpu';
-import { common } from 'typegpu';
-import { getRoot } from './init';
-import { textureSample } from 'typegpu/std';
+import { tgpu, d, common, std } from 'typegpu';
+import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler, TgpuComputePipeline } from 'typegpu';
 
 const WR = 0.2126;
 const WG = 0.7152;
 const WB = 0.0722;
 
-let rgbaTex: TgpuTexture | null = null;
-let grayTex: TgpuTexture | null = null;
-let texSizeBuffer: TgpuBuffer<d.Vec2u> | null = null;
-
-let copyPipeline: TgpuRenderPipeline | null = null;
-let copyLayout: TgpuBindGroupLayout | null = null;
-let copyBindGroup: TgpuBindGroup | null = null;
-let copySampler: TgpuSampler | null = null;
-
-let grayPipeline: TgpuComputePipeline | null = null;
-let grayLayout: TgpuBindGroupLayout | null = null;
-let grayBindGroup: TgpuBindGroup | null = null;
-
-let displayPipeline: TgpuRenderPipeline | null = null;
-let displayLayout: TgpuBindGroupLayout | null = null;
-let displayBindGroup: TgpuBindGroup | null = null;
-let displaySampler: TgpuSampler | null = null;
-let canvasCtx: GPUCanvasContext | null = null;
-
-let currentWidth = 0;
-let currentHeight = 0;
-
-export async function init(width: number, height: number, canvas: HTMLCanvasElement) {
-  const root = getRoot();
-  const ctx = canvas.getContext('webgpu') as GPUCanvasContext;
-  if (!ctx) throw new Error('Canvas not configured for WebGPU');
-  ctx.configure({
-    device: root.device,
-    format: navigator.gpu!.getPreferredCanvasFormat(),
-    alphaMode: 'opaque',
-  });
-  canvasCtx = ctx;
-  currentWidth = width;
-  currentHeight = height;
-
-  // ── RGBA intermediate texture ──────────────────────────────────────────
-  rgbaTex = root
+// ─── Pipeline factory (memoized per frame size) ────────────────────────────
+export function createGrayscalePipeline(
+  root: Awaited<ReturnType<typeof tgpu.init>>,
+  width: number,
+  height: number,
+  presentationFormat: GPUTextureFormat
+) {
+  // ── Textures ─────────────────────────────��──────────────────────────────
+  const rgbaTex = root
     .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
     .$usage('sampled', 'storage', 'render');
 
-  // ── Grayscale output texture ───────────────────────────────────────────
-  grayTex = root
+  const grayTex = root
     .createTexture({ size: [width, height], format: 'r8unorm', dimension: '2d' })
-    .$usage('storage');
+    .$usage('storage', 'sampled');
 
-  // ── Uniform for tex dimensions (per-frame writes) ───────────────────────
-  texSizeBuffer = root.createUniform(d.vec2u);
+  const sampler = root.createSampler({ minFilter: 'linear', magFilter: 'linear' });
 
-  // ── Sampler (created once, reused every frame) ─────────────────────────
-  copySampler = root.createSampler({ minFilter: 'linear', magFilter: 'linear' });
+  // ── Layouts ─────────────────────────────────────────────────────────────
+  const copyLayout = tgpu.bindGroupLayout({
+    cameraTex: { externalTexture: d.textureExternal() },
+    sampler: { sampler: 'filtering' },
+  });
 
-  // ══ Pass 1: copy camera → RGBA ════════════════════════════════════════════
+  const grayLayout = tgpu.bindGroupLayout({
+    rgbaTex: { texture: d.texture2d(d.f32) },
+    grayTex: { storageTexture: d.textureStorage2d('r8unorm', 'write-only') },
+  });
 
-  const copyFrag = tgpu.fragmentFn({ in: { uv: d.vec2f }, out: d.vec4f })((i) => {
+  const displayLayout = tgpu.bindGroupLayout({
+    grayTex: { texture: d.texture2d(d.f32) },
+    sampler: { sampler: 'filtering' },
+  });
+
+  // ── Copy pipeline (camera → rgba) ──────────────────────────────────────
+  const copyFrag = tgpu.fragmentFn({
+    in: { uv: d.location(0, d.vec2f) },
+    out: d.vec4f,
+  })((i) => {
     'use gpu';
-    return textureSample(i.cameraTex, i.samp, i.uv);
-  }).$uses({ cameraTex: d.textureExternal(), samp: d.sampler() });
+    return std.textureSampleBaseClampToEdge(copyLayout.$.cameraTex, copyLayout.$.sampler, i.uv);
+  });
 
-  copyPipeline = root.createRenderPipeline({
+  const copyPipeline = root.createRenderPipeline({
     vertex: common.fullScreenTriangle,
     fragment: copyFrag,
-    targets: [{ format: 'rgba8unorm' }],
+    targets: { format: 'rgba8unorm' },
   });
 
-  copyLayout = tgpu.bindGroupLayout({
-    cameraTex: { externalTexture: {} },
-    samp: { sampler: {} },
-  });
-
-  // Per-frame: bind group with camera external texture (raw GPUExternalTexture)
-  copyBindGroup = root.createBindGroup(copyLayout, {
-    cameraTex: null as any, // populated per-frame
-    samp: copySampler,
-  });
-
-  // ══ Pass 2: compute RGBA → grayscale ════════════════════════════════════
-
+  // ── Compute pipeline (rgba → grayscale) ────────────────────────────────
   const grayKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [16, 16, 1],
   })((input) => {
     'use gpu';
-    if (input.gid.x >= input.texSize.x || input.gid.y >= input.texSize.y) { return; }
-    const color = textureLoad(input.rgbaTex, input.gid.xy, 0);
+    if (input.gid.x >= d.u32(width) || input.gid.y >= d.u32(height)) { return; }
+    const color = std.textureLoad(grayLayout.$.rgbaTex, input.gid.xy, 0);
     const gray = color.r * WR + color.g * WG + color.b * WB;
-    input.grayTex.store(input.gid.xy, gray);
-  }).$uses({
-    rgbaTex: d.texture2d(d.f32),
-    grayTex: d.textureStorage2d('r8unorm', 'write-only'),
-    texSize: d.vec2u,
+    std.textureStore(grayLayout.$.grayTex, input.gid.xy, d.vec4f(gray, gray, gray, 1.0));
   });
 
-  grayPipeline = root.createComputePipeline(grayKernel);
+  const grayPipeline = root.createComputePipeline({ compute: grayKernel });
 
-  // ── Grayscale bind group (reused every frame — texture views are stable) ──
-  grayLayout = tgpu.bindGroupLayout({
-    rgbaTex: { texture: d.f32 },
-    grayTex: { storageTexture: 'r8unorm' },
-    texSize: { uniform: d.vec2u },
-  });
-
-  const rgbaView = rgbaTex.createView();
-  const grayView = grayTex.createView();
-
-  grayBindGroup = root.createBindGroup(grayLayout, {
-    rgbaTex: rgbaView,
-    grayTex: grayView,
-    texSize: texSizeBuffer,
-  });
-
-  // ══ Display pass: render grayscale to canvas texture ═══════════════════════
-  displaySampler = root.createSampler({ minFilter: 'linear', magFilter: 'linear' });
-
-  const displayFrag = tgpu.fragmentFn({ in: { uv: d.vec2f }, out: d.vec4f })((i) => {
+  // ── Display pipeline (grayscale → canvas) ───────────────────────────────
+  const displayFrag = tgpu.fragmentFn({
+    in: { uv: d.location(0, d.vec2f) },
+    out: d.vec4f,
+  })((i) => {
     'use gpu';
-    const g = textureSample(i.grayTex, i.samp, i.uv);
-    return vec4f(g.r, g.r, g.r, 1.0);
-  }).$uses({
-    grayTex: d.texture2d(d.f32),
-    samp: d.sampler(),
+    const g = std.textureSampleBaseClampToEdge(displayLayout.$.grayTex, displayLayout.$.sampler, i.uv);
+    return d.vec4f(g.r, g.r, g.r, 1.0);
   });
 
-  displayPipeline = root.createRenderPipeline({
+  const displayPipeline = root.createRenderPipeline({
     vertex: common.fullScreenTriangle,
     fragment: displayFrag,
-    targets: [{ format: 'bgra8unorm' }],
+    targets: { format: presentationFormat },
   });
 
-  displayLayout = tgpu.bindGroupLayout({
-    grayTex: { texture: d.f32 },
-    samp: { sampler: {} },
+  // ── Bind groups (static) ────────────────────────────────────────────────
+  const grayBindGroup = root.createBindGroup(grayLayout, {
+    rgbaTex: rgbaTex,
+    grayTex: grayTex,
   });
 
-  displayBindGroup = root.createBindGroup(displayLayout, {
-    grayTex: grayView,
-    samp: displaySampler,
+  const displayBindGroup = root.createBindGroup(displayLayout, {
+    grayTex: grayTex,
+    sampler: sampler,
   });
+
+  return {
+    rgbaTex,
+    grayTex,
+    copyPipeline,
+    grayPipeline,
+    grayBindGroup,
+    displayPipeline,
+    displayBindGroup,
+    copyLayout,
+    sampler,
+    width,
+    height,
+  };
 }
+
+export type GrayscalePipeline = ReturnType<typeof createGrayscalePipeline>;
 
 // ─── Per-frame processing ────────────────────────────────────────────────────
-export function processFrame(video: HTMLVideoElement) {
-  const root = getRoot();
-
-  if (!copyPipeline || !grayPipeline || !grayBindGroup || !copyBindGroup ||
-    !displayPipeline || !displayBindGroup) {
-    throw new Error('Pipeline not initialized');
-  }
-
-  // Update texSize uniform
-  texSizeBuffer!.write(d.vec2u(currentWidth, currentHeight));
-
-  // Import current video frame as external texture
-  const extTex = root.device.importExternalTexture({ source: video });
-
-  // Update external texture binding
-  (copyBindGroup as any)._resources.cameraTex = extTex;
-
-  const encoder = root.device.createCommandEncoder();
-
-  const rgbaView = rgbaTex!.createView('render');
+export function processFrame(
+  root: Awaited<ReturnType<typeof tgpu.init>>,
+  pipeline: GrayscalePipeline,
+  video: HTMLVideoElement,
+  context: GPUCanvasContext
+) {
+  // Create external texture bind group per-frame
+  const copyBindGroup = root.createBindGroup(pipeline.copyLayout, {
+    cameraTex: root.device.importExternalTexture({ source: video }),
+    sampler: pipeline.sampler,
+  });
 
   // ── Pass 1: render external → rgba ──────────────────────────────────────
-  copyPipeline
-    .with(encoder)
-    .withColorAttachment({ view: rgbaView, loadOp: 'clear', storeOp: 'store' })
-    .with(copyBindGroup)
-    .draw(3);
+  pipeline.copyPipeline.withColorAttachment({ view: pipeline.rgbaTex.createView() }).with(copyBindGroup).draw(3);
 
   // ── Pass 2: compute rgba → grayscale ────────────────────────────────────
-  const computePass = encoder.beginComputePass();
-  grayPipeline!
-    .with(computePass)
-    .with(grayBindGroup)
-    .dispatchWorkgroups(Math.ceil(currentWidth / 16), Math.ceil(currentHeight / 16));
-  computePass.end();
+  pipeline.grayPipeline
+    .with(pipeline.grayBindGroup)
+    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-  // ── Pass 3: display grayscale → canvas ───────────────────────────────────
-  const canvasTexture = canvasCtx!.getCurrentTexture();
-  const canvasView = canvasTexture.createView();
-  displayPipeline
-    .with(encoder)
-    .withColorAttachment({ view: canvasView, loadOp: 'clear', storeOp: 'store' })
-    .with(displayBindGroup)
-    .draw(3);
-
-  // Submit
-  root.device.queue.submit([encoder.finish()]);
+  // ── Pass 3: display grayscale → canvas ──────────────────────────────────
+  pipeline.displayPipeline.withColorAttachment({ view: context }).with(pipeline.displayBindGroup).draw(3);
 }
-
-export function getGrayscaleTexture() { return grayTex; }
-export function getRgbaTexture() { return rgbaTex; }
-export function getFrameSize() { return { width: currentWidth, height: currentHeight }; }

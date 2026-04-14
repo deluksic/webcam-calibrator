@@ -1,88 +1,116 @@
-import { createSignal, onCleanup, createRoot } from 'solid-js';
+import { createSignal, createMemo, isPending, Show, onCleanup } from 'solid-js';
 import { initGPU } from '../gpu/init';
-import * as grayscale from '../gpu/grayscale';
+import { createGrayscalePipeline, processFrame, type GrayscalePipeline } from '../gpu/grayscale';
 import styles from './CalibrationView.module.css';
 
 export default function CalibrationView() {
   let videoEl: HTMLVideoElement | undefined;
   let canvasEl: HTMLCanvasElement | undefined;
-  let animFrameId = 0;
 
-  const [error, setError] = createSignal('');
-  const [ready, setReady] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
   const [frameSize, setFrameSize] = createSignal({ w: 1280, h: 720 });
+  const [stream, setStream] = createSignal<MediaStream | null>(null);
 
-  createRoot(async (dispose) => {
+  // Initialize GPU
+  const gpuRoot = createMemo(() => {
+    const gpu = initGPU();
+    if (gpu instanceof Promise) {
+      gpu.catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    }
+    return gpu;
+  });
+
+  // Request camera stream
+  createMemo(async () => {
     try {
-      // Initialize GPU first
-      await initGPU();
-
-      // Request camera stream
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' },
         audio: false,
       });
+      setStream(mediaStream);
 
-      const track = stream.getVideoTracks()[0];
+      const track = mediaStream.getVideoTracks()[0];
       const settings = track.getSettings();
-      const w = (settings.width ?? 1280) as number;
-      const h = (settings.height ?? 720) as number;
-      setFrameSize({ w, h });
-
-      if (videoEl) {
-        videoEl.srcObject = stream;
-        await videoEl.play();
-      }
-
-      // Set canvas size to match camera resolution (must precede init)
-      if (canvasEl) {
-        canvasEl.width = w;
-        canvasEl.height = h;
-      }
-
-      await grayscale.init(w, h, canvasEl!);
-      setReady(true);
-
-      const loop = () => {
-        if (videoEl && videoEl.readyState >= 2) {
-          grayscale.processFrame(videoEl);
-        }
-        animFrameId = requestAnimationFrame(loop);
-      };
-      animFrameId = requestAnimationFrame(loop);
+      setFrameSize({
+        w: (settings.width ?? 1280) as number,
+        h: (settings.height ?? 720) as number,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+  });
 
-    onCleanup(() => {
-      cancelAnimationFrame(animFrameId);
-      if (videoEl && videoEl.srcObject) {
-        const tracks = (videoEl.srcObject as MediaStream).getTracks();
-        for (let i = 0; i < tracks.length; i++) tracks[i].stop();
+  // Create grayscale pipeline when GPU and frame size are ready
+  const pipeline = createMemo<GrayscalePipeline | null>(() => {
+    const root = gpuRoot();
+    const size = frameSize();
+    if (!root) return null;
+
+    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+    return createGrayscalePipeline(root, size.w, size.h, presentationFormat);
+  });
+
+  // Set canvas size and start render loop when pipeline is ready
+  createMemo(() => {
+    const p = pipeline();
+    if (!p || !videoEl || !canvasEl) return;
+
+    // Set canvas dimensions
+    canvasEl.width = p.width;
+    canvasEl.height = p.height;
+
+    // Attach video stream
+    videoEl.srcObject = stream();
+    videoEl.play().catch(() => {});
+
+    // Get WebGPU context
+    const context = canvasEl.getContext('webgpu');
+    if (!context) {
+      setError('Failed to get WebGPU context');
+      return;
+    }
+
+    // Animation loop
+    let animId: number;
+    const loop = () => {
+      if (videoEl && videoEl.readyState >= 2) {
+        processFrame(gpuRoot(), p, videoEl, context);
       }
-      dispose();
-    });
+      animId = requestAnimationFrame(loop);
+    };
+    animId = requestAnimationFrame(loop);
+
+    onCleanup(() => cancelAnimationFrame(animId));
+  });
+
+  // Cleanup stream on unmount
+  onCleanup(() => {
+    const s = stream();
+    if (s) {
+      s.getTracks().forEach((t) => t.stop());
+    }
   });
 
   return (
     <div class={styles.root}>
-      {error() !== '' ? (
+      <Show when={error()}>
         <p class={styles.error}>{error()}</p>
-      ) : (
-        <>
-          <div class={styles.feedRow}>
-            <div class={styles.feedPanel}>
-              <span class={styles.feedLabel}>Camera Feed — {frameSize().w}×{frameSize().h}</span>
-              <canvas
-                ref={canvasEl}
-                class={styles.feedCanvas}
-                style={{ width: '640px', height: '360px' }}
-              />
-            </div>
+      </Show>
+      <Show when={!error()}>
+        <div class={styles.feedRow}>
+          <div class={styles.feedPanel}>
+            <span class={styles.feedLabel}>Camera Feed — {frameSize().w}×{frameSize().h}</span>
+            <canvas
+              ref={canvasEl}
+              class={styles.feedCanvas}
+              style={{ width: '640px', height: '360px' }}
+            />
           </div>
-          {!ready() && <p class={styles.loading}>Loading...</p>}
-        </>
-      )}
+        </div>
+        <Show when={isPending(() => gpuRoot())}>
+          <p class={styles.loading}>Initializing GPU...</p>
+        </Show>
+      </Show>
     </div>
   );
 }

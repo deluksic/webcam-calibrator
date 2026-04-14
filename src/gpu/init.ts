@@ -1,10 +1,10 @@
 // TypeGPU initialization — singleton GPU root
 import { tgpu } from 'typegpu';
 
-let root: Awaited<ReturnType<typeof tgpu.init>> | null = null;
+let rootPromise: Promise<Awaited<ReturnType<typeof tgpu.init>>> | null = null;
 
-export async function initGPU() {
-  if (root) return root;
+export async function initGPU(): Promise<Awaited<ReturnType<typeof tgpu.init>>> {
+  if (rootPromise) return rootPromise;
 
   if (!navigator.gpu) {
     throw new Error(
@@ -13,11 +13,10 @@ export async function initGPU() {
     );
   }
 
-  root = await tgpu.init();
-  return root;
+  rootPromise = tgpu.init();
+  return rootPromise;
 }
 
 export function getRoot() {
-  if (!root) throw new Error('GPU not initialized — call initGPU() first');
-  return root;
+  throw new Error('getRoot is deprecated — use the root from initGPU instead');
 }
