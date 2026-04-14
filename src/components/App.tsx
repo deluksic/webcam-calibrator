@@ -13,22 +13,19 @@ export default function App() {
     <div class={styles.root}>
       <nav class={styles.nav}>
         <button
-          class={styles.navBtn}
-          classList={{ [styles.navBtnActive]: view() === 'target' }}
+          class={[styles.navBtn, view() === 'target' && styles.navBtnActive]}
           onClick={() => setView('target')}
         >
           Target
         </button>
         <button
-          class={styles.navBtn}
-          classList={{ [styles.navBtnActive]: view() === 'calibrate' }}
+          class={[styles.navBtn, view() === 'calibrate' && styles.navBtnActive]}
           onClick={() => setView('calibrate')}
         >
           Calibrate
         </button>
         <button
-          class={styles.navBtn}
-          classList={{ [styles.navBtnActive]: view() === 'results' }}
+          class={[styles.navBtn, view() === 'results' && styles.navBtnActive]}
           onClick={() => setView('results')}
         >
           Results

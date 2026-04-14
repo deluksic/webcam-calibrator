@@ -2,7 +2,7 @@
 // Pass 1: copy external camera texture → RGBA intermediate (render pass)
 // Pass 2: compute RGBA → r8unorm grayscale (compute pass)
 
-import * as tgpu from 'typegpu';
+import { tgpu } from 'typegpu';
 import { d } from 'typegpu';
 import { common } from 'typegpu';
 import { getRoot } from './init';

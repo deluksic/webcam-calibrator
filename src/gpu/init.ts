@@ -1,5 +1,5 @@
 // TypeGPU initialization — singleton GPU root
-import * as tgpu from 'typegpu';
+import { tgpu } from 'typegpu';
 
 let root: Awaited<ReturnType<typeof tgpu.init>> | null = null;
 

@@ -1,5 +1,5 @@
 // Calibration reactive store — Solid.js 2.0
-import { createStore } from 'solid-js/store';
+import { createStore } from 'solid-js';
 
 // ─── Types ───────────────────────────────────────
 export interface CameraIntrinsics {
@@ -24,20 +24,13 @@ export interface ObservedView {
 }
 
 export interface CalibrationState {
-  // Camera stream
   cameraReady: boolean;
   cameraWidth: number;
   cameraHeight: number;
-
-  // Detection
   detectedCornerCount: number;
   detectionOverlay: Array<{ x: number; y: number }>;
-
-  // Views collected
   views: ObservedView[];
   minViewsNeeded: number;
-
-  // Calibration result
   intrinsics: CameraIntrinsics | null;
   distortion: DistortionCoeffs | null;
   rmsError: number | null;
@@ -65,31 +58,35 @@ export { calibrationStore, setCalibrationStore };
 
 // ─── Actions ─────────────────────────────────────
 export function resetCalibration() {
-  setCalibrationStore({
-    views: [],
-    intrinsics: null,
-    distortion: null,
-    rmsError: null,
-    status: 'idle',
-    errorMessage: null,
-    detectedCornerCount: 0,
-    detectionOverlay: [],
+  setCalibrationStore(s => {
+    s.views = [];
+    s.intrinsics = null;
+    s.distortion = null;
+    s.rmsError = null;
+    s.status = 'idle';
+    s.errorMessage = null;
+    s.detectedCornerCount = 0;
+    s.detectionOverlay = [];
   });
 }
 
 export function addView(view: ObservedView) {
-  setCalibrationStore('views', (v) => [...v, view]);
+  setCalibrationStore(s => { s.views.push(view); });
 }
 
 export function setCameraReady(ready: boolean, width?: number, height?: number) {
-  setCalibrationStore('cameraReady', ready);
-  if (width !== undefined) setCalibrationStore('cameraWidth', width);
-  if (height !== undefined) setCalibrationStore('cameraHeight', height);
+  setCalibrationStore(s => {
+    s.cameraReady = ready;
+    if (width !== undefined) s.cameraWidth = width;
+    if (height !== undefined) s.cameraHeight = height;
+  });
 }
 
 export function setDetectionOverlay(corners: Array<{ x: number; y: number }>) {
-  setCalibrationStore('detectionOverlay', corners);
-  setCalibrationStore('detectedCornerCount', corners.length);
+  setCalibrationStore(s => {
+    s.detectionOverlay = corners;
+    s.detectedCornerCount = corners.length;
+  });
 }
 
 export function setCalibrationResult(
@@ -97,9 +94,17 @@ export function setCalibrationResult(
   distortion: DistortionCoeffs,
   rmsError: number
 ) {
-  setCalibrationStore({ intrinsics, distortion, rmsError, status: 'done' });
+  setCalibrationStore(s => {
+    s.intrinsics = intrinsics;
+    s.distortion = distortion;
+    s.rmsError = rmsError;
+    s.status = 'done';
+  });
 }
 
 export function setStatus(status: CalibrationState['status'], errorMessage?: string) {
-  setCalibrationStore({ status, errorMessage: errorMessage ?? null });
+  setCalibrationStore(s => {
+    s.status = status;
+    s.errorMessage = errorMessage ?? null;
+  });
 }
