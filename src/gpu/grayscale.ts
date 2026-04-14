@@ -3,32 +3,33 @@
 // Pass 2: compute RGBA → r8unorm grayscale (compute pass)
 
 import { tgpu } from 'typegpu';
+import type { TgpuTexture, TgpuBuffer, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler, TgpuComputePipeline } from 'typegpu';
 import { d } from 'typegpu';
 import { common } from 'typegpu';
 import { getRoot } from './init';
+import { textureSample } from 'typegpu/std';
 
 const WR = 0.2126;
 const WG = 0.7152;
 const WB = 0.0722;
 
-let rgbaTex: tgpu.TgpuTexture | null = null;
-let grayTex: tgpu.TgpuTexture | null = null;
-let texSizeBuffer: tgpu.TgpuBuffer | null = null;
+let rgbaTex: TgpuTexture | null = null;
+let grayTex: TgpuTexture | null = null;
+let texSizeBuffer: TgpuBuffer<d.Vec2u> | null = null;
 
-let copyPipeline: tgpu.TgpuRenderPipeline | null = null;
-let copyLayout: tgpu.TgpuBindGroupLayout | null = null;
-let copyBindGroup: tgpu.TgpuBindGroup | null = null;
-let copySampler: tgpu.TgpuSampler | null = null;
+let copyPipeline: TgpuRenderPipeline | null = null;
+let copyLayout: TgpuBindGroupLayout | null = null;
+let copyBindGroup: TgpuBindGroup | null = null;
+let copySampler: TgpuSampler | null = null;
 
-let grayPipeline: tgpu.TgpuComputePipeline | null = null;
-let grayLayout: tgpu.TgpuBindGroupLayout | null = null;
-let grayBindGroup: tgpu.TgpuBindGroup | null = null;
+let grayPipeline: TgpuComputePipeline | null = null;
+let grayLayout: TgpuBindGroupLayout | null = null;
+let grayBindGroup: TgpuBindGroup | null = null;
 
-let displayPipeline: tgpu.TgpuRenderPipeline | null = null;
-let displayLayout: tgpu.TgpuBindGroupLayout | null = null;
-let displayBindGroup: tgpu.TgpuBindGroup | null = null;
-let displaySampler: tgpu.TgpuSampler | null = null;
-
+let displayPipeline: TgpuRenderPipeline | null = null;
+let displayLayout: TgpuBindGroupLayout | null = null;
+let displayBindGroup: TgpuBindGroup | null = null;
+let displaySampler: TgpuSampler | null = null;
 let canvasCtx: GPUCanvasContext | null = null;
 
 let currentWidth = 0;
@@ -156,7 +157,7 @@ export function processFrame(video: HTMLVideoElement) {
   const root = getRoot();
 
   if (!copyPipeline || !grayPipeline || !grayBindGroup || !copyBindGroup ||
-      !displayPipeline || !displayBindGroup) {
+    !displayPipeline || !displayBindGroup) {
     throw new Error('Pipeline not initialized');
   }
 
