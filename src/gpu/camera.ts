@@ -8,7 +8,7 @@
 // Pass 7: render thresholded edges → canvas (render pass)
 
 import { tgpu, d, common, std } from 'typegpu';
-import { sqrt, atomicAdd } from 'typegpu/std';
+import { sqrt, atomicAdd, atomicStore } from 'typegpu/std';
 import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler, TgpuBuffer } from 'typegpu';
 
 const WR = 0.2126;
@@ -145,7 +145,7 @@ export function createCameraPipeline(
   const sobelPipeline = root.createComputePipeline({ compute: sobelKernel });
 
   // ── Pass 4: histogram reset kernel ─────────────────────────────────────
-  // First pass: reset all histogram bins to zero
+  // First pass: reset all histogram bins to zero using atomic store
   const histogramResetKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [1, 1, 1],
@@ -153,7 +153,8 @@ export function createCameraPipeline(
     'use gpu';
     const binIdx = input.gid.x;
     if (binIdx >= d.u32(HISTOGRAM_BINS)) { return; }
-    atomicAdd(histogramLayout.$.histogram[binIdx], d.u32(0));
+    // Reset to zero using atomic store operation
+    atomicStore(histogramLayout.$.histogram[binIdx], d.u32(0));
   });
 
   const histogramResetPipeline = root.createComputePipeline({ compute: histogramResetKernel });

@@ -60,9 +60,12 @@ export default function CalibrationView() {
 
           // Update UI with histogram data
           const bins = await p.histogramBuffer.read();
+          console.log('Histogram bins (first 10):', bins.slice(0, 10));
+          console.log('Histogram total:', bins.reduce((a, b) => a + b, 0));
           setHistogramData(bins);
 
           const thresh = computeThreshold(bins, 0.85);
+          console.log('Computed threshold:', thresh);
           setThreshold(thresh);
         }
         video.requestVideoFrameCallback(loop);
