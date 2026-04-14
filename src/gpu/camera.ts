@@ -174,7 +174,8 @@ export function createCameraPipeline(
         // Load magnitude and compute bin
         const mag = std.textureLoad(histogramLayout.$.sobelTex, d.vec2i(px, py), 0).r;
         const bin = d.u32(mag * d.f32(HISTOGRAM_BINS));
-        const clampedBin = bin < numBins ? bin : numBins - d.u32(1);
+        let clampedBin = bin;
+        if (bin >= numBins) { clampedBin = numBins - d.u32(1); }
 
         // Atomically increment the bin
         atomicAdd(histogramLayout.$.histogram[clampedBin], d.u32(1));
