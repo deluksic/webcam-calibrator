@@ -28,39 +28,38 @@ export default function CalibrationView() {
     });
   });
 
-  // Create grayscale pipeline when GPU and frame size are ready
+  // Create grayscale pipeline when GPU, canvas, and frame size are ready
   const pipeline = createMemo<GrayscalePipeline | null>(() => {
     const root = gpuRoot();
+    const canvas = canvasEl();
     const size = frameSize();
-    if (!root) return null;
+    if (!root || !canvas) return null;
 
     const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-    return createGrayscalePipeline(root, size.w, size.h, presentationFormat);
+    return createGrayscalePipeline(root, canvas, size.w, size.h, presentationFormat);
   });
 
   // Set canvas size and start render loop when pipeline is ready
   createMemo(() => {
     const p = pipeline();
     const video = videoEl();
-    const canvas = canvasEl();
-    if (!p || !video || !canvas) return;
+    if (!p || !video) return;
 
     // Set canvas dimensions
-    canvas.width = p.width;
-    canvas.height = p.height;
+    const canvas = canvasEl();
+    if (canvas) {
+      canvas.width = p.width;
+      canvas.height = p.height;
+    }
 
     // Attach video stream
     video.srcObject = stream();
     video.play().catch(() => {});
 
-    // Get WebGPU context
-    const context = canvas.getContext('webgpu');
-    if (!context) return;
-
     // Animation loop
     const loop = () => {
       if (video.readyState >= 2) {
-        processFrame(gpuRoot(), p, video, context);
+        processFrame(gpuRoot(), p, video);
       }
       requestAnimationFrame(loop);
     };

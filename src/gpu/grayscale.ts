@@ -1,23 +1,27 @@
 // Camera pipeline — TypeGPU frame capture + grayscale
 // Pass 1: copy external camera texture → RGBA intermediate (render pass)
-// Pass 2: compute RGBA → r8unorm grayscale (compute pass)
+// Pass 2: compute RGBA → rgba8unorm grayscale (compute pass)
 // Pass 3: render grayscale → canvas (render pass)
 
 import { tgpu, d, common, std } from 'typegpu';
-import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler, TgpuComputePipeline } from 'typegpu';
+import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler } from 'typegpu';
 
 const WR = 0.2126;
 const WG = 0.7152;
 const WB = 0.0722;
 
-// ─── Pipeline factory (memoized per frame size) ────────────────────────────
+// ─── Pipeline factory ────────────────────────────────────────────────────
 export function createGrayscalePipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
+  canvas: HTMLCanvasElement,
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat
 ) {
-  // ── Textures ─────────────────────────────��──────────────────────────────
+  // Configure context on the canvas
+  const context = root.configureContext({ canvas });
+
+  // ── Textures ──────────────────��──────────────────────────────────────────
   const rgbaTex = root
     .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
     .$usage('sampled', 'storage', 'render');
@@ -44,7 +48,7 @@ export function createGrayscalePipeline(
     sampler: { sampler: 'filtering' },
   });
 
-  // ── Copy pipeline (camera → rgba) ──────────────────────────────────────
+  // ── Copy pipeline (camera → rgba) ──────────────────────────────���───────
   const copyFrag = tgpu.fragmentFn({
     in: { uv: d.location(0, d.vec2f) },
     out: d.vec4f,
@@ -80,7 +84,6 @@ export function createGrayscalePipeline(
   })((i) => {
     'use gpu';
     const g = std.textureSampleBaseClampToEdge(displayLayout.$.grayTex, displayLayout.$.sampler, i.uv);
-    // g is now RGBA, just return it directly (already grayscale RGB + alpha 1)
     return g;
   });
 
@@ -102,6 +105,7 @@ export function createGrayscalePipeline(
   });
 
   return {
+    context,
     rgbaTex,
     grayTex,
     copyPipeline,
@@ -122,8 +126,7 @@ export type GrayscalePipeline = ReturnType<typeof createGrayscalePipeline>;
 export function processFrame(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: GrayscalePipeline,
-  video: HTMLVideoElement,
-  context: GPUCanvasContext
+  video: HTMLVideoElement
 ) {
   // Create external texture bind group per-frame
   const copyBindGroup = root.createBindGroup(pipeline.copyLayout, {
@@ -140,5 +143,5 @@ export function processFrame(
     .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
   // ── Pass 3: display grayscale → canvas ──────────────────────────────────
-  pipeline.displayPipeline.withColorAttachment({ view: context }).with(pipeline.displayBindGroup).draw(3);
+  pipeline.displayPipeline.withColorAttachment({ view: pipeline.context }).with(pipeline.displayBindGroup).draw(3);
 }
