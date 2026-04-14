@@ -145,50 +145,42 @@ export function createCameraPipeline(
 
   const sobelPipeline = root.createComputePipeline({ compute: sobelKernel });
 
-  // ── Pass 4: histogram with 256 parallel workgroups ───────────────────────
-  // Dispatch 256 workgroups (one per bin), each with 1 thread
-  // Each thread counts pixels for its own bin and writes directly
-  // No atomics needed since each workgroup owns a unique bin
+  // ── Pass 4: histogram with atomic operations ───────────────────────────
+  // Many workgroups, each thread processes pixels and atomically increments bins
+  // Uses atomicAdd to safely increment from multiple threads
   const histogramKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [1, 1, 1],
+    workgroupSize: [16, 16, 1],
   })((input) => {
     'use gpu';
-    const myBin = input.gid.x;
     const zero = d.u32(0);
+
+    // Get this thread's share of pixels
+    const tileWidth = d.u32(16);
+    const tileHeight = d.u32(16);
     const numBins = d.u32(HISTOGRAM_BINS);
-    const pixPerThread = d.u32(PIXELS_PER_THREAD);
 
-    if (myBin >= numBins) { return; }
+    // Process 16x16 tile of pixels
+    const startX = input.gid.x * tileWidth;
+    const startY = input.gid.y * tileHeight;
 
-    // First thread resets all histogram bins
-    if (myBin === zero) {
-      for (let resetBin = zero; resetBin < numBins; resetBin = resetBin + d.u32(1)) {
-        histogramLayout.$.histogram[resetBin] = zero;
-      }
-    }
+    for (let dy = zero; dy < tileHeight; dy = dy + d.u32(1)) {
+      for (let dx = zero; dx < tileWidth; dx = dx + d.u32(1)) {
+        const px = startX + dx;
+        const py = startY + dy;
 
-    // All threads scan their assigned pixels and count matches
-    let localCount = zero;
+        // Skip out-of-bounds
+        if (px >= d.u32(width) || py >= d.u32(height)) { continue; }
 
-    for (let i = zero; i < pixPerThread; i = i + d.u32(1)) {
-      const pixelIdx = myBin * pixPerThread + i;
-      const imgWidth = d.u32(width);
-      const imgHeight = d.u32(height);
-      const py = pixelIdx / imgWidth;
-      const px = pixelIdx % imgWidth;
-
-      if (pixelIdx < imgWidth * imgHeight) {
+        // Load magnitude and compute bin
         const mag = std.textureLoad(histogramLayout.$.sobelTex, d.vec2i(px, py), 0).r;
-        const pixelBin = d.u32(mag * d.f32(HISTOGRAM_BINS));
-        if (pixelBin === myBin) {
-          localCount = localCount + d.u32(1);
-        }
+        const bin = d.u32(mag * d.f32(HISTOGRAM_BINS));
+        const clampedBin = bin < numBins ? bin : numBins - d.u32(1);
+
+        // Atomically increment the bin
+        atomicAdd(histogramLayout.$.histogram[clampedBin], d.u32(1));
       }
     }
-
-    // Write count to this thread's bin (unique, no contention)
-    histogramLayout.$.histogram[myBin] = localCount;
   });
 
   const histogramPipeline = root.createComputePipeline({ compute: histogramKernel });
@@ -384,10 +376,10 @@ export async function processFrameAsync(
     .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
   // ── Pass 4: compute histogram ──────────────────────────────────────────
-  // 256 workgroups (one per bin), each with 1 thread
+  // Process all pixels with atomic increments
   pipeline.histogramPipeline
     .with(pipeline.histogramBindGroup)
-    .dispatchWorkgroups(HISTOGRAM_BINS);
+    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
   // ── Read histogram and compute threshold ─────────────────────────────────
   const histogramResult = await pipeline.histogramBuffer.read();
