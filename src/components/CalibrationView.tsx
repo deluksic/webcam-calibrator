@@ -79,10 +79,10 @@ export default function CalibrationView() {
           await processFrameAsync(root, p, video, displayMode());
 
           // Update UI with histogram data
-          const bins = await p.histogramReadback.read();
+          const bins = await p.histogramBuffer.read();
           setHistogramData(bins);
 
-          const thresh = computeThreshold(bins.map((c, i) => ({ count: c })), 0.85);
+          const thresh = computeThreshold(bins, 0.85);
           setThreshold(thresh);
 
           // Draw histogram on canvas

@@ -1,13 +1,14 @@
-// Camera pipeline — TypeGPU frame capture + grayscale + Sobel + Threshold
+// Camera pipeline — TypeGPU frame capture + grayscale + Sobel + Threshold + Histogram
 // Pass 1: copy external camera texture → RGBA intermediate (render pass)
 // Pass 2: compute RGBA → rgba8unorm grayscale (compute pass)
 // Pass 3: compute grayscale → Sobel gradient magnitude (compute pass)
 // Pass 4: compute histogram using 256 parallel workgroups (one per bin)
-// Pass 5: apply threshold (compute pass)
-// Pass 6: render thresholded edges → canvas (render pass)
+// Pass 5: read histogram back to CPU and compute threshold
+// Pass 6: apply threshold (compute pass)
+// Pass 7: render thresholded edges → canvas (render pass)
 
 import { tgpu, d, common, std } from 'typegpu';
-import { sqrt, atomicAdd, atomicStore } from 'typegpu/std';
+import { sqrt } from 'typegpu/std';
 import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler, TgpuBuffer } from 'typegpu';
 
 const WR = 0.2126;
@@ -15,11 +16,6 @@ const WG = 0.7152;
 const WB = 0.0722;
 const HISTOGRAM_BINS = 256;
 const PIXELS_PER_THREAD = 32;
-
-// ─── Histogram bucket with atomic counter ───────────────────────────────
-const HistogramBucket = d.struct({
-  count: d.atomic(d.u32),
-});
 
 // ─── Pipeline factory ────────────────────────────────────────────────────
 export function createCameraPipeline(
@@ -55,13 +51,10 @@ export function createCameraPipeline(
   // Threshold uniform buffer
   const thresholdBuffer = root.createBuffer(d.f32, 0.0).$usage('uniform');
 
-  // Global histogram: 256x1 r32uint texture for atomic operations
-  const histogramTex = root
-    .createTexture({ size: [HISTOGRAM_BINS, 1], format: 'r32uint', dimension: '2d' })
-    .$usage('storage', 'sampled');
-
-  // Readback buffer for CPU to read histogram data
-  const histogramReadback = root.createBuffer(d.array(d.u32, HISTOGRAM_BINS)).$usage('storage', 'copy-src');
+  // Histogram buffer: 256 atomic uint32 counters
+  // Each workgroup (0-255) owns its own bin, so no contention
+  const histogramSchema = d.arrayOf(d.u32, HISTOGRAM_BINS);
+  const histogramBuffer = root.createBuffer(histogramSchema).$usage('storage');
 
   // ── Layouts ─────────────────────────────────────────────────────────────
   const copyLayout = tgpu.bindGroupLayout({
@@ -81,7 +74,7 @@ export function createCameraPipeline(
 
   const histogramLayout = tgpu.bindGroupLayout({
     sobelTex: { texture: d.texture2d(d.f32) },
-    histogram: { storageTexture: d.textureStorage2d('r32uint', 'read-write') },
+    histogram: { storage: histogramSchema },
   });
 
   const thresholdLayout = tgpu.bindGroupLayout({
@@ -93,11 +86,6 @@ export function createCameraPipeline(
   const displayLayout = tgpu.bindGroupLayout({
     outputTex: { texture: d.texture2d(d.f32) },
     sampler: { sampler: 'filtering' },
-  });
-
-  const histogramCopyLayout = tgpu.bindGroupLayout({
-    srcTex: { texture: d.texture2d(d.u32) },
-    dstBuf: { storage: d.array(d.u32, HISTOGRAM_BINS) },
   });
 
   // ── Pass 1: copy camera → rgba ──────────────────────────────────────────
@@ -159,7 +147,8 @@ export function createCameraPipeline(
 
   // ── Pass 4: histogram with 256 parallel workgroups ───────────────────────
   // Dispatch 256 workgroups (one per bin), each with 1 thread
-  // Each thread scans pixels and increments its bin using atomic operations
+  // Each thread counts pixels for its own bin and writes directly
+  // No atomics needed since each workgroup owns a unique bin
   const histogramKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [1, 1, 1],
@@ -175,11 +164,11 @@ export function createCameraPipeline(
     // First thread resets all histogram bins
     if (myBin === zero) {
       for (let resetBin = zero; resetBin < numBins; resetBin = resetBin + d.u32(1)) {
-        std.textureStore(histogramLayout.$.histogram, d.vec2i(resetBin, 0), d.vec4u(0, 0, 0, 0));
+        histogramLayout.$.histogram[resetBin] = zero;
       }
     }
 
-    // All threads scan their assigned bin
+    // All threads scan their assigned pixels and count matches
     let localCount = zero;
 
     for (let i = zero; i < pixPerThread; i = i + d.u32(1)) {
@@ -198,11 +187,8 @@ export function createCameraPipeline(
       }
     }
 
-    // Atomic add to global histogram bin
-    if (localCount > zero) {
-      const current = std.textureLoad(histogramLayout.$.histogram, d.vec2i(myBin, 0), 0).x;
-      std.textureStore(histogramLayout.$.histogram, d.vec2i(myBin, 0), d.vec4u(current + localCount, 0, 0, 0));
-    }
+    // Write count to this thread's bin (unique, no contention)
+    histogramLayout.$.histogram[myBin] = localCount;
   });
 
   const histogramPipeline = root.createComputePipeline({ compute: histogramKernel });
@@ -239,27 +225,7 @@ export function createCameraPipeline(
     targets: { format: presentationFormat },
   });
 
-  // ── Histogram copy pipeline: texture → buffer ───────────────────────────
-  const histogramCopyKernel = tgpu.computeFn({
-    in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [1, 1, 1],
-  })((input) => {
-    'use gpu';
-    const binIdx = input.gid.x;
-    if (binIdx >= d.u32(HISTOGRAM_BINS)) { return; }
-    const val = std.textureLoad(histogramCopyLayout.$.srcTex, d.vec2i(binIdx, 0), 0).x;
-    const buf = histogramCopyLayout.$.dstBuf[binIdx];
-    std.storageStore(buf, val);
-  });
-
-  const histogramCopyPipeline = root.createComputePipeline({ compute: histogramCopyKernel });
-
-  const histogramCopyBindGroup = root.createBindGroup(histogramCopyLayout, {
-    srcTex: histogramTex,
-    dstBuf: histogramReadback,
-  });
-
-  // ── Bind groups ──────���──────────────────────────────────────────────────
+  // ── Bind groups ─────────────────────────────────────────────────────────
   const grayBindGroup = root.createBindGroup(grayLayout, {
     rgbaTex: rgbaTex,
     grayTex: grayTex,
@@ -272,7 +238,7 @@ export function createCameraPipeline(
 
   const histogramBindGroup = root.createBindGroup(histogramLayout, {
     sobelTex: sobelTex,
-    histogram: histogramTex,
+    histogram: histogramBuffer,
   });
 
   const thresholdBindGroup = root.createBindGroup(thresholdLayout, {
@@ -308,11 +274,8 @@ export function createCameraPipeline(
     grayTex,
     sobelTex,
     edgesTex,
-    histogramTex,
-    histogramReadback,
+    histogramBuffer,
     thresholdBuffer,
-    histogramCopyPipeline,
-    histogramCopyBindGroup,
     copyPipeline,
     grayPipeline,
     grayBindGroup,
@@ -340,13 +303,13 @@ export type CameraPipeline = ReturnType<typeof createCameraPipeline>;
 export type DisplayMode = 'edges' | 'sobel' | 'grayscale' | 'original';
 
 // ─── Compute adaptive threshold from histogram ──────────────────────────
-export function computeThreshold(histogramData: { count: number }[], percentile: number = 0.85): number {
-  const totalPixels = histogramData.reduce((a, b) => a + b.count, 0);
+export function computeThreshold(histogramData: number[], percentile: number = 0.85): number {
+  const totalPixels = histogramData.reduce((a, b) => a + b, 0);
   const targetCount = totalPixels * (1 - percentile);
 
   let cumulative = 0;
   for (let i = 0; i < histogramData.length; i++) {
-    cumulative += histogramData[i].count;
+    cumulative += histogramData[i];
     if (cumulative >= targetCount) {
       // Return normalized threshold (bin / 256)
       return i / 256.0;
@@ -426,13 +389,8 @@ export async function processFrameAsync(
     .with(pipeline.histogramBindGroup)
     .dispatchWorkgroups(HISTOGRAM_BINS);
 
-  // ── Copy histogram from texture to readback buffer ──────────────────────
-  pipeline.histogramCopyPipeline
-    .with(pipeline.histogramCopyBindGroup)
-    .dispatchWorkgroups(HISTOGRAM_BINS);
-
   // ── Read histogram and compute threshold ─────────────────────────────────
-  const histogramResult = await pipeline.histogramReadback.read();
+  const histogramResult = await pipeline.histogramBuffer.read();
   const threshold = computeThreshold(histogramResult, 0.85);
 
   // Update threshold uniform
