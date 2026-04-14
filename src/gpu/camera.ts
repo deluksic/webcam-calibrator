@@ -28,21 +28,21 @@ export function createCameraPipeline(
   // Configure context on the canvas
   const context = root.configureContext({ canvas });
 
-  // ── Textures ─────────────────────────────────────────────────────────────
+  // ── Textures (using float format for precision) ─────────────────────────
   const rgbaTex = root
     .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
     .$usage('sampled', 'storage', 'render');
 
   const grayTex = root
-    .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
+    .createTexture({ size: [width, height], format: 'r32float', dimension: '2d' })
     .$usage('storage', 'sampled');
 
   const sobelTex = root
-    .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
+    .createTexture({ size: [width, height], format: 'r32float', dimension: '2d' })
     .$usage('storage', 'sampled');
 
   const edgesTex = root
-    .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
+    .createTexture({ size: [width, height], format: 'r32float', dimension: '2d' })
     .$usage('storage', 'sampled');
 
   const sampler = root.createSampler({ minFilter: 'linear', magFilter: 'linear' });
@@ -63,12 +63,12 @@ export function createCameraPipeline(
 
   const grayLayout = tgpu.bindGroupLayout({
     rgbaTex: { texture: d.texture2d(d.f32) },
-    grayTex: { storageTexture: d.textureStorage2d('rgba8unorm', 'write-only') },
+    grayTex: { storageTexture: d.textureStorage2d('r32float', 'write-only') },
   });
 
   const sobelLayout = tgpu.bindGroupLayout({
     grayTex: { texture: d.texture2d(d.f32) },
-    sobelTex: { storageTexture: d.textureStorage2d('rgba8unorm', 'write-only') },
+    sobelTex: { storageTexture: d.textureStorage2d('r32float', 'write-only') },
   });
 
   const histogramLayout = tgpu.bindGroupLayout({
@@ -78,7 +78,7 @@ export function createCameraPipeline(
 
   const thresholdLayout = tgpu.bindGroupLayout({
     sobelTex: { texture: d.texture2d(d.f32) },
-    edgesTex: { storageTexture: d.textureStorage2d('rgba8unorm', 'write-only') },
+    edgesTex: { storageTexture: d.textureStorage2d('r32float', 'write-only') },
     threshold: { uniform: d.f32 },
   });
 
@@ -111,7 +111,7 @@ export function createCameraPipeline(
     if (input.gid.x >= d.u32(width) || input.gid.y >= d.u32(height)) { return; }
     const color = std.textureLoad(grayLayout.$.rgbaTex, input.gid.xy, 0);
     const gray = color.r * WR + color.g * WG + color.b * WB;
-    std.textureStore(grayLayout.$.grayTex, input.gid.xy, d.vec4f(gray, gray, gray, 1.0));
+    std.textureStore(grayLayout.$.grayTex, input.gid.xy, d.vec4f(gray, 0, 0, 1));
   });
 
   const grayPipeline = root.createComputePipeline({ compute: grayKernel });
