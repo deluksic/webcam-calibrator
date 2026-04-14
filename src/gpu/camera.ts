@@ -1,20 +1,25 @@
-// Camera pipeline — TypeGPU frame capture + grayscale + Sobel
+// Camera pipeline — TypeGPU frame capture + grayscale + Sobel + Threshold
 // Pass 1: copy external camera texture → RGBA intermediate (render pass)
 // Pass 2: compute RGBA → rgba8unorm grayscale (compute pass)
 // Pass 3: compute grayscale → Sobel gradient magnitude (compute pass)
-// Pass 4: render Sobel magnitude → canvas (render pass)
+// Pass 4: compute histogram using 256 parallel workgroups (one per bin)
+// Pass 5: apply threshold (compute pass)
+// Pass 6: render thresholded edges → canvas (render pass)
 
 import { tgpu, d, common, std } from 'typegpu';
-import { sqrt, atan2 } from 'typegpu/std';
-import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler } from 'typegpu';
+import { sqrt, atomicAdd, atomicStore } from 'typegpu/std';
+import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler, TgpuBuffer } from 'typegpu';
 
 const WR = 0.2126;
 const WG = 0.7152;
 const WB = 0.0722;
+const HISTOGRAM_BINS = 256;
+const PIXELS_PER_THREAD = 32;
 
-// Sobel kernels
-const SOBEL_X = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
-const SOBEL_Y = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
+// ─── Histogram bucket with atomic counter ───────────────────────────────
+const HistogramBucket = d.struct({
+  count: d.atomic(d.u32),
+});
 
 // ─── Pipeline factory ────────────────────────────────────────────────────
 export function createCameraPipeline(
@@ -40,7 +45,19 @@ export function createCameraPipeline(
     .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
     .$usage('storage', 'sampled');
 
+  const edgesTex = root
+    .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
+    .$usage('storage', 'sampled');
+
   const sampler = root.createSampler({ minFilter: 'linear', magFilter: 'linear' });
+
+  // ── Buffers ─────────────────────────────────────────────────────────────
+  // Threshold uniform buffer
+  const thresholdBuffer = root.createBuffer(d.f32, 0.0).$usage('uniform');
+
+  // Global histogram: array of atomic uint32 counters
+  const histogramSchema = d.arrayOf(HistogramBucket, HISTOGRAM_BINS);
+  const histogramBuffer = root.createBuffer(histogramSchema).$usage('storage');
 
   // ── Layouts ─────────────────────────────────────────────────────────────
   const copyLayout = tgpu.bindGroupLayout({
@@ -56,6 +73,17 @@ export function createCameraPipeline(
   const sobelLayout = tgpu.bindGroupLayout({
     grayTex: { texture: d.texture2d(d.f32) },
     sobelTex: { storageTexture: d.textureStorage2d('rgba8unorm', 'write-only') },
+  });
+
+  const histogramLayout = tgpu.bindGroupLayout({
+    sobelTex: { texture: d.texture2d(d.f32) },
+    histogram: { storage: histogramSchema },
+  });
+
+  const thresholdLayout = tgpu.bindGroupLayout({
+    sobelTex: { texture: d.texture2d(d.f32) },
+    edgesTex: { storageTexture: d.textureStorage2d('rgba8unorm', 'write-only') },
+    threshold: { uniform: d.f32 },
   });
 
   const displayLayout = tgpu.bindGroupLayout({
@@ -92,7 +120,7 @@ export function createCameraPipeline(
 
   const grayPipeline = root.createComputePipeline({ compute: grayKernel });
 
-  // ── Pass 3: grayscale → Sobel magnitude ────────────────────────────────
+  // ── Pass 3: grayscale → Sobel magnitude ─────────────────────────────────
   const sobelKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [16, 16, 1],
@@ -100,10 +128,7 @@ export function createCameraPipeline(
     'use gpu';
     if (input.gid.x >= d.u32(width) || input.gid.y >= d.u32(height)) { return; }
 
-    // Convert gid to vec2i for textureLoad offsets
     const pos = d.vec2i(input.gid.xy);
-
-    // Sobel with clamped coordinates
     const tl = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(-1, -1)), 0).r;
     const t  = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(0, -1)), 0).r;
     const tr = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(1, -1)), 0).r;
@@ -113,24 +138,83 @@ export function createCameraPipeline(
     const b  = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(0, 1)), 0).r;
     const br = std.textureLoad(sobelLayout.$.grayTex, pos.add(d.vec2i(1, 1)), 0).r;
 
-    // Sobel X: [-1, 0, 1; -2, 0, 2; -1, 0, 1]
     const gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
-    // Sobel Y: [-1, -2, -1; 0, 0, 0; 1, 2, 1]
     const gy = (bl + 2.0 * b  + br) - (tl + 2.0 * t  + tr);
-
-    // Magnitude
     const magnitude = sqrt(gx * gx + gy * gy);
-    // Normalize to 0-1 range
     const normalized = magnitude * (1.0 / 512.0);
 
-    // Store magnitude in R, direction in G (for debugging)
-    const angle = atan2(gy, gx);
-    std.textureStore(sobelLayout.$.sobelTex, input.gid.xy, d.vec4f(normalized, (angle + 3.14159) / 6.28318, 0, 1));
+    std.textureStore(sobelLayout.$.sobelTex, input.gid.xy, d.vec4f(normalized, 0, 0, 1));
   });
 
   const sobelPipeline = root.createComputePipeline({ compute: sobelKernel });
 
-  // ── Pass 4: display ────────────────────────────────────────────────────
+  // ── Pass 4: histogram with 256 parallel workgroups ───────────────────────
+  // Dispatch 256 workgroups (one per bin), each with 1 thread
+  // Each thread scans pixels and increments its bin using atomic operations
+  const histogramKernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [1, 1, 1],
+  })((input) => {
+    'use gpu';
+    const myBin = input.gid.x;
+    const zero = d.u32(0);
+    const numBins = d.u32(HISTOGRAM_BINS);
+    const pixPerThread = d.u32(PIXELS_PER_THREAD);
+
+    if (myBin >= numBins) { return; }
+
+    // First thread resets all histogram bins
+    if (myBin == zero) {
+      for (let resetBin = zero; resetBin < numBins; resetBin = resetBin + d.u32(1)) {
+        const bucket = histogramLayout.$.histogram[resetBin];
+        atomicStore(bucket.count, zero);
+      }
+    }
+
+    // All threads scan their assigned bin
+    let localCount = zero;
+
+    for (let i = zero; i < pixPerThread; i = i + d.u32(1)) {
+      const pixelIdx = myBin * pixPerThread + i;
+      const imgWidth = d.u32(width);
+      const imgHeight = d.u32(height);
+      const py = pixelIdx / imgWidth;
+      const px = pixelIdx % imgWidth;
+
+      if (pixelIdx < imgWidth * imgHeight) {
+        const mag = std.textureLoad(histogramLayout.$.sobelTex, d.vec2u(px, py), 0).r;
+        const pixelBin = d.u32(mag * d.f32(HISTOGRAM_BINS));
+        if (pixelBin == myBin) {
+          localCount = localCount + d.u32(1);
+        }
+      }
+    }
+
+    // Atomic add to global histogram bin
+    if (localCount > zero) {
+      const bucket = histogramLayout.$.histogram[myBin];
+      atomicAdd(bucket.count, localCount);
+    }
+  });
+
+  const histogramPipeline = root.createComputePipeline({ compute: histogramKernel });
+
+  // ── Pass 5: apply threshold ──────────────────────────────────────────────
+  const thresholdKernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [16, 16, 1],
+  })((input) => {
+    'use gpu';
+    if (input.gid.x >= d.u32(width) || input.gid.y >= d.u32(height)) { return; }
+    const thresh = thresholdLayout.$.threshold;
+    const mag = std.textureLoad(thresholdLayout.$.sobelTex, input.gid.xy, 0).r;
+    const edge = mag > thresh ? 1.0 : 0.0;
+    std.textureStore(thresholdLayout.$.edgesTex, input.gid.xy, d.vec4f(edge, edge, edge, 1.0));
+  });
+
+  const thresholdPipeline = root.createComputePipeline({ compute: thresholdKernel });
+
+  // ── Pass 6: display ──────────────────────────────────────────────────────
   const displayFrag = tgpu.fragmentFn({
     in: { uv: d.location(0, d.vec2f) },
     out: d.vec4f,
@@ -157,7 +241,23 @@ export function createCameraPipeline(
     sobelTex: sobelTex,
   });
 
-  // Display bind groups for each mode
+  const histogramBindGroup = root.createBindGroup(histogramLayout, {
+    sobelTex: sobelTex,
+    histogram: histogramBuffer,
+  });
+
+  const thresholdBindGroup = root.createBindGroup(thresholdLayout, {
+    sobelTex: sobelTex,
+    edgesTex: edgesTex,
+    threshold: thresholdBuffer,
+  });
+
+  // Display bind groups
+  const displayBindGroupEdges = root.createBindGroup(displayLayout, {
+    outputTex: edgesTex,
+    sampler: sampler,
+  });
+
   const displayBindGroupSobel = root.createBindGroup(displayLayout, {
     outputTex: sobelTex,
     sampler: sampler,
@@ -173,22 +273,25 @@ export function createCameraPipeline(
     sampler: sampler,
   });
 
-  const displayBindGroup = root.createBindGroup(displayLayout, {
-    outputTex: sobelTex,
-    sampler: sampler,
-  });
-
   return {
     context,
     rgbaTex,
     grayTex,
     sobelTex,
+    edgesTex,
+    histogramBuffer,
+    thresholdBuffer,
     copyPipeline,
     grayPipeline,
     grayBindGroup,
     sobelPipeline,
     sobelBindGroup,
+    histogramPipeline,
+    histogramBindGroup,
+    thresholdPipeline,
+    thresholdBindGroup,
     displayPipeline,
+    displayBindGroupEdges,
     displayBindGroupSobel,
     displayBindGroupGray,
     displayBindGroupOriginal,
@@ -202,14 +305,30 @@ export function createCameraPipeline(
 export type CameraPipeline = ReturnType<typeof createCameraPipeline>;
 
 // ─── Display modes ──────────────────────────────────────────────────────
-export type DisplayMode = 'sobel' | 'grayscale' | 'original';
+export type DisplayMode = 'edges' | 'sobel' | 'grayscale' | 'original';
 
-// ─── Per-frame processing ─────────────────────────────────────���──────────────
+// ─── Compute adaptive threshold from histogram ──────────────────────────
+function computeThreshold(histogramData: { count: number }[], percentile: number = 0.85): number {
+  const totalPixels = histogramData.reduce((a, b) => a + b.count, 0);
+  const targetCount = totalPixels * (1 - percentile);
+
+  let cumulative = 0;
+  for (let i = 0; i < histogramData.length; i++) {
+    cumulative += histogramData[i].count;
+    if (cumulative >= targetCount) {
+      // Return normalized threshold (bin / 256)
+      return i / 256.0;
+    }
+  }
+  return 0.5; // fallback
+}
+
+// ─── Per-frame processing ──────────────────────────────────────────────
 export function processFrame(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
   video: HTMLVideoElement,
-  displayMode: DisplayMode = 'sobel'
+  displayMode: DisplayMode = 'edges'
 ) {
   // Create external texture bind group per-frame
   const copyBindGroup = root.createBindGroup(pipeline.copyLayout, {
@@ -230,9 +349,67 @@ export function processFrame(
     .with(pipeline.sobelBindGroup)
     .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-  // ── Pass 4: display ─────────────────────────────────────────────────────
-  const displayBindGroup = displayMode === 'sobel' ? pipeline.displayBindGroupSobel :
-                          displayMode === 'grayscale' ? pipeline.displayBindGroupGray :
-                          pipeline.displayBindGroupOriginal;
+  // ── Pass 4: apply threshold ─────────────────────────────────────────────
+  pipeline.thresholdPipeline
+    .with(pipeline.thresholdBindGroup)
+    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+
+  // ── Pass 5: display ─────────────────────────────────────────────────────
+  const displayBindGroup = displayMode === 'edges' ? pipeline.displayBindGroupEdges :
+                           displayMode === 'sobel' ? pipeline.displayBindGroupSobel :
+                           displayMode === 'grayscale' ? pipeline.displayBindGroupGray :
+                           pipeline.displayBindGroupOriginal;
+  pipeline.displayPipeline.withColorAttachment({ view: pipeline.context }).with(displayBindGroup).draw(3);
+}
+
+// ─── Async version with histogram-based adaptive threshold ─────────────
+export async function processFrameAsync(
+  root: Awaited<ReturnType<typeof tgpu.init>>,
+  pipeline: CameraPipeline,
+  video: HTMLVideoElement,
+  displayMode: DisplayMode = 'edges'
+) {
+  // Create external texture bind group per-frame
+  const copyBindGroup = root.createBindGroup(pipeline.copyLayout, {
+    cameraTex: root.device.importExternalTexture({ source: video }),
+    sampler: pipeline.sampler,
+  });
+
+  // ── Pass 1: render external → rgba ──────────────────────────────────────
+  pipeline.copyPipeline.withColorAttachment({ view: pipeline.rgbaTex.createView() }).with(copyBindGroup).draw(3);
+
+  // ── Pass 2: rgba → grayscale ────────────────────────────────────────────
+  pipeline.grayPipeline
+    .with(pipeline.grayBindGroup)
+    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+
+  // ── Pass 3: grayscale → Sobel ───────────────────────────────────────────
+  pipeline.sobelPipeline
+    .with(pipeline.sobelBindGroup)
+    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+
+  // ── Pass 4: compute histogram ──────────────────────────────────────────
+  // 256 workgroups (one per bin), each with 1 thread
+  pipeline.histogramPipeline
+    .with(pipeline.histogramBindGroup)
+    .dispatchWorkgroups(HISTOGRAM_BINS);
+
+  // ── Read histogram and compute threshold ─────────────────────────────────
+  const histogramResult = await pipeline.histogramBuffer.read();
+  const threshold = computeThreshold(histogramResult, 0.85);
+
+  // Update threshold uniform
+  pipeline.thresholdBuffer.write(threshold);
+
+  // ── Pass 5: apply threshold ─────────────────────────────────────────────
+  pipeline.thresholdPipeline
+    .with(pipeline.thresholdBindGroup)
+    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+
+  // ── Pass 6: display ─────────────────────────────────────────────────────
+  const displayBindGroup = displayMode === 'edges' ? pipeline.displayBindGroupEdges :
+                           displayMode === 'sobel' ? pipeline.displayBindGroupSobel :
+                           displayMode === 'grayscale' ? pipeline.displayBindGroupGray :
+                           pipeline.displayBindGroupOriginal;
   pipeline.displayPipeline.withColorAttachment({ view: pipeline.context }).with(displayBindGroup).draw(3);
 }
