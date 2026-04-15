@@ -331,16 +331,15 @@ export function processFrame(
       .with(pipeline.labelInitBindGroup)
       .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-    // DEBUG: run propagate with hardcoded offset=1 after init
+    // DEBUG: run one propagate pass with offset=5 (user confirmed this works)
     if (displayMode === 'debug') {
-      // Just run one propagate pass with offset=1 to spread labels
-      pipeline.jfaOffsetBuffer.write(1);
+      pipeline.jfaOffsetBuffer.write(5);
       pipeline.jfaPropagatePipeline
         .with(computePass)
         .with(pipeline.jfaPingPongBindGroups[0])
         .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-      // Show propagate output (labelBuffer1)
+      // Show propagate output
       finalLabelBuffer = pipeline.labelBuffer1;
       computePass.end();
     } else {
