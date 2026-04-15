@@ -121,7 +121,7 @@ export function createJfaPropagatePipeline(
       const nLabel = jfaLayout.$.readBuffer[nIdx];
       const isValid = nLabel !== d.u32(COMPONENT_LABEL_INVALID);
       const isBetter = isValid && (bestLabel === d.u32(COMPONENT_LABEL_INVALID) || nLabel < bestLabel);
-      bestLabel = isBetter ? nLabel : bestLabel;
+      bestLabel = std.select(bestLabel, nLabel, isBetter);
     }
 
     jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = bestLabel;
