@@ -221,6 +221,10 @@ export function createCameraPipeline(
     grayRenderPipeline,
     grayRenderBindGroup,
     grayRenderLayout,
+    // Sobel render (debug)
+    sobelRenderPipeline,
+    sobelRenderBindGroup,
+    sobelRenderLayout,
     // JFA contour detection
     labelBuffer1,
     labelInitPipeline,
