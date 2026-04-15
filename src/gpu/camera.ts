@@ -153,7 +153,7 @@ export function createCameraPipeline(
     const gx = (tr + d.f32(2.0) * mr + br) - (tl + d.f32(2.0) * ml + bl);
     const gy = (bl + d.f32(2.0) * b  + br) - (tl + d.f32(2.0) * t  + tr);
     const magnitude = sqrt(gx * gx + gy * gy);
-    sobelLayout.$.sobelBuffer[y * w + x] = magnitude * d.f32(1.0 / 512.0);
+    sobelLayout.$.sobelBuffer[y * w + x] = magnitude;
   });
 
   const sobelPipeline = root.createComputePipeline({ compute: sobelKernel });
@@ -270,7 +270,7 @@ export function createCameraPipeline(
     const count = atomicLoad(histogramDisplayLayout.$.histogram[bin]);
 
     // Normalize bar height - will be updated via uniform buffer
-    const maxCount = d.f32(1.0); // Placeholder, actual value set via uniform
+    const maxCount = d.f32(50000); // Placeholder, actual value set via uniform
     const normalizedHeight = d.f32(count) / maxCount;
 
     // Clip bars above their height (make them empty/transparent)
