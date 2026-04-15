@@ -33,7 +33,7 @@ export function createCameraPipeline(
   // Intermediate RGBA texture for external → usable format
   const grayTex = root
     .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
-    .$usage('sampled', 'storage');
+    .$usage('storage', 'sampled');
 
   const sampler = root.createSampler({ minFilter: 'linear', magFilter: 'linear' });
 
@@ -124,14 +124,6 @@ export function createCameraPipeline(
   const grayPipeline = root.createComputePipeline({ compute: grayKernel });
 
   // ── Pass 3: compute Sobel from grayscale buffer ─────────────────────────
-  // Sobel load helper at module scope (TGSL requires functions at module level)
-  function sobelLoadGray(sobelLayout: any, px: number, py: number, w: number) {
-    'use gpu';
-    if (px >= w || py >= w) { return d.f32(0); }
-    const idx = py * w + px;
-    return sobelLayout.$.grayBuffer[idx];
-  }
-
   const sobelKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [16, 16, 1],
@@ -143,24 +135,20 @@ export function createCameraPipeline(
     const y = input.gid.y;
     const w = d.u32(width);
 
-    // Sobel kernels — inline loads with bounds checking via sobelLoadGray
-    const tl = sobelLoadGray(sobelLayout, x - d.u32(1), y - d.u32(1), w);
-    const t  = sobelLoadGray(sobelLayout, x, y - d.u32(1), w);
-    const tr = sobelLoadGray(sobelLayout, x + d.u32(1), y - d.u32(1), w);
-    const ml = sobelLoadGray(sobelLayout, x - d.u32(1), y, w);
-    const mr = sobelLoadGray(sobelLayout, x + d.u32(1), y, w);
-    const bl = sobelLoadGray(sobelLayout, x - d.u32(1), y + d.u32(1), w);
-    const b  = sobelLoadGray(sobelLayout, x, y + d.u32(1), w);
-    const br = sobelLoadGray(sobelLayout, x + d.u32(1), y + d.u32(1), w);
+    // Sobel kernels — fully inlined loads with bounds check
+    const tl = ((x - d.u32(1)) >= w || (y - d.u32(1)) >= w) ? d.f32(0) : sobelLayout.$.grayBuffer[(y - d.u32(1)) * w + (x - d.u32(1))];
+    const t  = (x >= w || (y - d.u32(1)) >= w) ? d.f32(0) : sobelLayout.$.grayBuffer[(y - d.u32(1)) * w + x];
+    const tr = ((x + d.u32(1)) >= w || (y - d.u32(1)) >= w) ? d.f32(0) : sobelLayout.$.grayBuffer[(y - d.u32(1)) * w + (x + d.u32(1))];
+    const ml = ((x - d.u32(1)) >= w || y >= w) ? d.f32(0) : sobelLayout.$.grayBuffer[y * w + (x - d.u32(1))];
+    const mr = ((x + d.u32(1)) >= w || y >= w) ? d.f32(0) : sobelLayout.$.grayBuffer[y * w + (x + d.u32(1))];
+    const bl = ((x - d.u32(1)) >= w || (y + d.u32(1)) >= w) ? d.f32(0) : sobelLayout.$.grayBuffer[(y + d.u32(1)) * w + (x - d.u32(1))];
+    const b  = (x >= w || (y + d.u32(1)) >= w) ? d.f32(0) : sobelLayout.$.grayBuffer[(y + d.u32(1)) * w + x];
+    const br = ((x + d.u32(1)) >= w || (y + d.u32(1)) >= w) ? d.f32(0) : sobelLayout.$.grayBuffer[(y + d.u32(1)) * w + (x + d.u32(1))];
 
     const gx = (tr + d.f32(2.0) * mr + br) - (tl + d.f32(2.0) * ml + bl);
     const gy = (bl + d.f32(2.0) * b  + br) - (tl + d.f32(2.0) * t  + tr);
     const magnitude = sqrt(gx * gx + gy * gy);
-    const normalized = magnitude * d.f32(1.0 / 512.0);
-
-    // Write to sobel buffer
-    const idx = y * w + x;
-    sobelLayout.$.sobelBuffer[idx] = normalized;
+    sobelLayout.$.sobelBuffer[y * w + x] = magnitude * d.f32(1.0 / 512.0);
   });
 
   const sobelPipeline = root.createComputePipeline({ compute: sobelKernel });
