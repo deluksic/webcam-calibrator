@@ -12,6 +12,7 @@ import { createEdgesPipeline } from './pipelines/edgesPipeline';
 import { createEdgeFilterPipeline } from './pipelines/edgeFilterPipeline';
 import { createHistogramRenderPipeline } from './pipelines/histogramRenderPipeline';
 import { createGrayRenderPipeline } from './pipelines/grayRenderPipeline';
+import { createSobelRenderPipeline } from './pipelines/sobelRenderPipeline';
 import { createLabelVizPipeline } from './pipelines/labelVizPipeline';
 import { createContourLayouts, createLabelInitPipeline, createJfaPropagatePipeline, detectQuads, type DetectedQuad } from './contour';
 
@@ -113,6 +114,7 @@ export function createCameraPipeline(
     edgeFilterLayout,
     labelVizLayout,
     grayRenderLayout,
+    sobelRenderLayout,
   } = createLayouts(root, histogramSchema);
 
   const copyPipeline = createCopyPipeline(root, copyLayout);
@@ -125,6 +127,7 @@ export function createCameraPipeline(
   const histogramDisplayPipeline = createHistogramRenderPipeline(root, histogramDisplayLayout, presentationFormat, width * height);
   const labelVizPipeline = createLabelVizPipeline(root, labelVizLayout, width, height, presentationFormat);
   const grayRenderPipeline = createGrayRenderPipeline(root, grayRenderLayout, width, height, presentationFormat);
+  const sobelRenderPipeline = createSobelRenderPipeline(root, sobelRenderLayout, width, height, presentationFormat);
 
   // ═══════════════════════════════════════════════════════════════════════
   // BIND GROUPS
@@ -169,6 +172,10 @@ export function createCameraPipeline(
 
   const grayRenderBindGroup = root.createBindGroup(grayRenderLayout, {
     grayBuffer: grayBuffer,
+  });
+
+  const sobelRenderBindGroup = root.createBindGroup(sobelRenderLayout, {
+    sobelBuffer: sobelBuffer,
   });
 
   const labelVizBindGroup = root.createBindGroup(labelVizLayout, {
@@ -329,11 +336,11 @@ export function processFrame(
       .with(labelVizBindGroup)
       .draw(3);
   } else if (displayMode === 'debug') {
-    // Debug: show raw sobel buffer instead of labels
-    pipeline.grayRenderPipeline
+    // Debug: show raw sobel buffer
+    pipeline.sobelRenderPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.context })
-      .with(pipeline.grayRenderBindGroup)
+      .with(pipeline.sobelRenderBindGroup)
       .draw(3);
   } else {
     pipeline.grayRenderPipeline

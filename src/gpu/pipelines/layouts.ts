@@ -60,6 +60,11 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
   });
 
+  // Sobel render layout
+  const sobelRenderLayout = tgpu.bindGroupLayout({
+    sobelBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+  });
+
   return {
     copyLayout,
     grayTexToBufferLayout,
@@ -71,5 +76,6 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     edgeFilterLayout,
     labelVizLayout,
     grayRenderLayout,
+    sobelRenderLayout,
   };
 }
