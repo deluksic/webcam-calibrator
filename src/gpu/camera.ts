@@ -79,10 +79,10 @@ export function createCameraPipeline(
   // JFA layouts and pipelines
   const { labelInitLayout, jfaLayout } = createContourLayouts(root);
   const labelInitPipeline = createLabelInitPipeline(root, labelInitLayout, width, height);
-  const { pipeline: jfaPropagatePipeline, offsetUniform: jfaOffsetUniform } =
-    createJfaPropagatePipeline(root, jfaLayout, width, height);
+  const jfaPropagatePipeline = createJfaPropagatePipeline(root, jfaLayout, width, height);
 
-  // JFA bind groups
+  // JFA bind groups (include offset uniform)
+  const jfaOffsetBuffer = root.createBuffer(d.i32).$usage('uniform');
   const labelInitBindGroup = root.createBindGroup(labelInitLayout, {
     edgeBuffer: filteredBuffer,
     labelBuffer: labelBuffer0,
@@ -92,10 +92,12 @@ export function createCameraPipeline(
     root.createBindGroup(jfaLayout, {
       readBuffer: labelBuffer0,
       writeBuffer: labelBuffer1,
+      offset: jfaOffsetBuffer,
     }),
     root.createBindGroup(jfaLayout, {
       readBuffer: labelBuffer1,
       writeBuffer: labelBuffer0,
+      offset: jfaOffsetBuffer,
     }),
   ];
 
@@ -230,7 +232,7 @@ export function createCameraPipeline(
     labelInitPipeline,
     labelInitBindGroup,
     jfaPropagatePipeline,
-    jfaOffsetUniform,
+    jfaOffsetBuffer,
     jfaPingPongBindGroups,
   };
 }
@@ -308,7 +310,7 @@ export function processFrame(
     let sourceIdx = 0;
 
     while (offset >= 1) {
-      pipeline.jfaOffsetUniform.write(offset);
+      pipeline.jfaOffsetBuffer.write(offset);
       pipeline.jfaPropagatePipeline
         .with(computePass)
         .with(pipeline.jfaPingPongBindGroups[sourceIdx])
@@ -382,7 +384,7 @@ export async function detectContours(
   let sourceIdx = 0;
 
   while (offset >= 1) {
-    pipeline.jfaOffsetUniform.write(offset);
+    pipeline.jfaOffsetBuffer.write(offset);
     pipeline.jfaPropagatePipeline
       .with(computePass)
       .with(pipeline.jfaPingPongBindGroups[sourceIdx])

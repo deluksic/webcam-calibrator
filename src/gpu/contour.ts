@@ -25,6 +25,7 @@ export function createContourLayouts(root: Awaited<ReturnType<typeof tgpu.init>>
   const jfaLayout = tgpu.bindGroupLayout({
     readBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
     writeBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
+    offset: { uniform: d.i32 },
   });
 
   return { labelInitLayout, jfaLayout };
@@ -76,8 +77,6 @@ export function createJfaPropagatePipeline(
   width: number,
   height: number,
 ) {
-  const offsetUniform = root.createUniform(d.i32);
-
   const propagateKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [16, 16, 1],
@@ -89,7 +88,7 @@ export function createJfaPropagatePipeline(
     const y = d.i32(input.gid.y);
     const w = d.i32(width);
     const h = d.i32(height);
-    const offset = offsetUniform.$;
+    const offset = jfaLayout.$.offset;
     const wU32 = d.u32(w);
 
     // Check 4 neighbors (up, down, left, right) - simpler for debugging
@@ -128,7 +127,7 @@ export function createJfaPropagatePipeline(
   });
 
   const pipeline = root.createComputePipeline({ compute: propagateKernel });
-  return { pipeline, offsetUniform };
+  return pipeline;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -160,8 +159,7 @@ export async function runJfa(
   let sourceIdx = 0;
 
   while (offset >= 1) {
-    jfaPropagate.offsetUniform.write(offset);
-    jfaPropagate.pipeline
+    jfaPropagate
       .with(computePass)
       .with(pingPongBindGroups[sourceIdx])
       .dispatchWorkgroups(Math.ceil(width / 16), Math.ceil(height / 16));
