@@ -123,8 +123,39 @@ export function createJfaPropagatePipeline(
       }
     }
 
-    // Debug: just copy read to write to verify pipeline works
-    jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x)];
+    let neighborCount = d.u32(0);
+
+    // Neighbor: up
+    if (y - offset >= d.i32(0)) {
+      const nLabel = jfaLayout.$.readBuffer[d.u32(y - offset) * wU32 + d.u32(x)];
+      if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
+        neighborCount = neighborCount + d.u32(1);
+      }
+    }
+    // Neighbor: down
+    if (y + offset < h) {
+      const nLabel = jfaLayout.$.readBuffer[d.u32(y + offset) * wU32 + d.u32(x)];
+      if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
+        neighborCount = neighborCount + d.u32(1);
+      }
+    }
+    // Neighbor: left
+    if (x - offset >= d.i32(0)) {
+      const nLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x - offset)];
+      if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
+        neighborCount = neighborCount + d.u32(1);
+      }
+    }
+    // Neighbor: right
+    if (x + offset < w) {
+      const nLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x + offset)];
+      if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
+        neighborCount = neighborCount + d.u32(1);
+      }
+    }
+
+    // Debug: write neighbor count as label (show in debug view)
+    jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = neighborCount;
   });
 
   const pipeline = root.createComputePipeline({ compute: propagateKernel });
