@@ -25,21 +25,10 @@ export function createLabelVizPipeline(
       return d.vec4f(d.f32(0.05), d.f32(0.05), d.f32(0.08), d.f32(1));
     }
 
-    // Hash-based pseudocolor for each unique label
-    // Use explicit f32 arithmetic to avoid implicit conversion warnings
-    const labelF = d.f32(label);
-    const r = (labelF / d.f32(7.0)) % d.f32(7.0) / d.f32(7.0);
-    const g = (labelF / d.f32(49.0)) % d.f32(7.0) / d.f32(7.0);
-    const b = (labelF / d.f32(343.0)) % d.f32(7.0) / d.f32(7.0);
-
-    // Boost saturation
-    const boost = d.f32(1.5);
-    return d.vec4f(
-      r * boost,
-      g * boost,
-      b * boost,
-      d.f32(0.8),
-    );
+    // Simple grayscale from label value (debug)
+    // INVALID labels show as dark background
+    const gray = d.f32(label) / d.f32(1000000.0);  // Normalize by max possible label
+    return d.vec4f(gray, gray, gray, d.f32(1));
   });
 
   return root.createRenderPipeline({
