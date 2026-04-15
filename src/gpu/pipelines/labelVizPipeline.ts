@@ -25,17 +25,15 @@ export function createLabelVizPipeline(
     const isInvalid = label === d.u32(0xFFFFFFFF);
     const isEdge = label === d.u32(1);
 
-    // Show: white = edge, dark = propagated label, gray = invalid
-    // Use label value directly (mod 256) for visible variation
+    // Debug colors: red=INVALID, white=edge(1), blue=ANY propagated
     if (isInvalid) {
-      return d.vec4f(d.f32(0.5), d.f32(0.5), d.f32(0.5), d.f32(1));
+      return d.vec4f(d.f32(1), d.f32(0), d.f32(0), d.f32(1)); // red
     }
     if (isEdge) {
-      return d.vec4f(d.f32(1), d.f32(1), d.f32(1), d.f32(1));
+      return d.vec4f(d.f32(1), d.f32(1), d.f32(1), d.f32(1)); // white
     }
-    // Propagated: show as dark gray scaled by label (labels 1-10 become 0.1-1.0)
-    const gray = d.f32(label) / d.f32(10.0);
-    return d.vec4f(gray, gray, gray, d.f32(1));
+    // Any other label = propagated
+    return d.vec4f(d.f32(0), d.f32(0), d.f32(1), d.f32(1)); // blue
   });
 
   return root.createRenderPipeline({
