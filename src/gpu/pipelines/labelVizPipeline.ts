@@ -20,18 +20,17 @@ export function createLabelVizPipeline(
     const idx = py * d.u32(width) + px;
     const label = labelVizLayout.$.labelBuffer[idx];
 
-    // INVALID label = transparent
+    // INVALID label = dark gray (visible background for non-edge pixels)
     if (label === d.u32(0xFFFFFFFF)) {
-      return d.vec4f(d.f32(0), d.f32(0), d.f32(0), d.f32(0));
+      return d.vec4f(d.f32(0.05), d.f32(0.05), d.f32(0.08), d.f32(1));
     }
 
     // Hash-based pseudocolor for each unique label
-    // Use lower bits of label to generate pseudo-random RGB
-    const hash = label;
-    const hashF = d.f32(hash);
-    const r = (hashF / d.f32(7.0)) % d.f32(7.0) / d.f32(7.0);
-    const g = (hashF / d.f32(49.0)) % d.f32(7.0) / d.f32(7.0);
-    const b = (hashF / d.f32(343.0)) % d.f32(7.0) / d.f32(7.0);
+    // Use bit operations for clean integer-based color assignment
+    const labelIdx = label / d.u32(7);
+    const r = d.f32(hash % d.u32(7)) / d.f32(7.0);
+    const g = d.f32(labelIdx % d.u32(7)) / d.f32(7.0);
+    const b = d.f32((hash / d.u32(49)) % d.u32(7)) / d.f32(7.0);
 
     // Boost saturation
     const boost = d.f32(1.5);

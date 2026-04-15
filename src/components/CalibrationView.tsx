@@ -12,7 +12,7 @@ export default function CalibrationView() {
   const [threshold, setThreshold] = createSignal<number>(0.0);
   const [histogramData, setHistogramData] = createSignal<number[]>(new Array(256).fill(0));
   const [gpuReady, setGpuReady] = createSignal(false);
-  const [displayMode, setDisplayMode] = createSignal<DisplayMode>('edges');
+  const [displayMode, setDisplayMode] = createSignal<DisplayMode>('labels');
 
   let pipeline: CameraPipeline | null = null;
   let videoCallbackId: number | null = null;
