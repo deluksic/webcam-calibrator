@@ -90,35 +90,35 @@ export function createJfaPropagatePipeline(
     const h = d.i32(height);
     const offset = offsetUniform.$;
     const wU32 = d.u32(w);
-    const idx = d.u32(y) * wU32 + d.u32(x);
 
     // Current pixel's label
-    let bestLabel = jfaLayout.$.readBuffer[idx];
+    let bestLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x)];
 
-    // Check 8 neighbors at current step distance
-    for (const dy of tgpu.unroll([-1, 0, 1])) {
-      for (const dx of tgpu.unroll([-1, 0, 1])) {
-        if (dx === 0 && dy === 0) { continue; }
+    // Helper to check neighbor and update best label
+    const checkNeighbor = (ox: number, oy: number) => {
+      const nx = x + ox * offset;
+      const ny = y + oy * offset;
+      // Clamp to bounds for safe read
+      const sx = nx < d.i32(0) ? d.i32(0) : (nx >= w ? w - d.i32(1) : nx);
+      const sy = ny < d.i32(0) ? d.i32(0) : (ny >= h ? h - d.i32(1) : ny);
+      const nIdx = d.u32(sy) * wU32 + d.u32(sx);
+      const nLabel = jfaLayout.$.readBuffer[nIdx];
+      const isValid = nLabel !== d.u32(COMPONENT_LABEL_INVALID);
+      const isBetter = isValid && (bestLabel === d.u32(COMPONENT_LABEL_INVALID) || nLabel < bestLabel);
+      bestLabel = isBetter ? nLabel : bestLabel;
+    };
 
-        const nx = x + dx * offset;
-        const ny = y + dy * offset;
+    // Check 8 neighbors (skip (0,0) by checking each explicitly)
+    checkNeighbor(d.i32(-1), d.i32(-1));
+    checkNeighbor(d.i32(0), d.i32(-1));
+    checkNeighbor(d.i32(1), d.i32(-1));
+    checkNeighbor(d.i32(-1), d.i32(0));
+    checkNeighbor(d.i32(1), d.i32(0));
+    checkNeighbor(d.i32(-1), d.i32(1));
+    checkNeighbor(d.i32(0), d.i32(1));
+    checkNeighbor(d.i32(1), d.i32(1));
 
-        // Bounds check
-        if (nx < d.i32(0) || nx >= w || ny < d.i32(0) || ny >= h) { continue; }
-
-        const nIdx = d.u32(ny) * wU32 + d.u32(nx);
-        const neighborLabel = jfaLayout.$.readBuffer[nIdx];
-
-        // Valid label? Keep minimum (approximates "nearest seed")
-        if (neighborLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
-          if (bestLabel === d.u32(COMPONENT_LABEL_INVALID) || neighborLabel < bestLabel) {
-            bestLabel = neighborLabel;
-          }
-        }
-      }
-    }
-
-    jfaLayout.$.writeBuffer[idx] = bestLabel;
+    jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = bestLabel;
   });
 
   const pipeline = root.createComputePipeline({ compute: propagateKernel });
