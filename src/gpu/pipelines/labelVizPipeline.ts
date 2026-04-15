@@ -1,5 +1,5 @@
 // Debug visualization pipeline: label buffer → colored overlay
-import { tgpu, d } from 'typegpu';
+import { tgpu, d, std } from 'typegpu';
 import { common } from 'typegpu';
 
 export function createLabelVizPipeline(
@@ -22,12 +22,8 @@ export function createLabelVizPipeline(
 
     // White for valid labels (edge pixels), dark for invalid
     const isValid = label !== d.u32(0xFFFFFFFF);
-    return d.vec4f(
-      isValid ? d.f32(1) : d.f32(0),
-      isValid ? d.f32(1) : d.f32(0),
-      isValid ? d.f32(1) : d.f32(0),
-      d.f32(1)
-    );
+    const color = std.select(d.f32(0), d.f32(1), isValid);
+    return d.vec4f(color, color, color, d.f32(1));
   });
 
   return root.createRenderPipeline({
