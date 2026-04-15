@@ -32,9 +32,47 @@
   gap: var(--space-2);
 }
 
+.feedHeader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .feedLabel {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
+}
+
+.modeButtons {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.modeButton {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  transition: all 0.15s;
+}
+
+.modeButton:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.modeButtonActive {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: white;
+  cursor: pointer;
+  font-size: var(--text-xs);
 }
 
 .feedCanvas {

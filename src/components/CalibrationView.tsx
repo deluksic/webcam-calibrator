@@ -1,6 +1,6 @@
 import { createSignal, createMemo, onCleanup } from 'solid-js';
 import { initGPU } from '../gpu/init';
-import { createCameraPipeline, computeThreshold, processFrame, type CameraPipeline } from '../gpu/camera';
+import { createCameraPipeline, computeThreshold, processFrame, type CameraPipeline, type DisplayMode } from '../gpu/camera';
 import styles from './CalibrationView.module.css';
 
 export default function CalibrationView() {
@@ -12,6 +12,7 @@ export default function CalibrationView() {
   const [threshold, setThreshold] = createSignal<number>(0.0);
   const [histogramData, setHistogramData] = createSignal<number[]>(new Array(256).fill(0));
   const [gpuReady, setGpuReady] = createSignal(false);
+  const [displayMode, setDisplayMode] = createSignal<DisplayMode>('edges');
 
   let pipeline: CameraPipeline | null = null;
   let videoCallbackId: number | null = null;
@@ -77,7 +78,7 @@ export default function CalibrationView() {
     const loop = async () => {
       if (video.readyState >= 2 && gpuRoot && pipeline) {
         // Process frame (all GPU work in single submit)
-        processFrame(gpuRoot, pipeline, video, threshold());
+        processFrame(gpuRoot, pipeline, video, threshold(), displayMode());
 
         // Wait for completion and read back histogram data
         const bins = await pipeline.histogramBuffer.read();
@@ -101,7 +102,29 @@ export default function CalibrationView() {
     <div class={styles.root}>
       <div class={styles.feedRow}>
         <div class={styles.feedPanel}>
-          <span class={styles.feedLabel}>Camera Feed — {frameSize().w}×{frameSize().h}</span>
+          <div class={styles.feedHeader}>
+            <span class={styles.feedLabel}>Camera Feed — {frameSize().w}×{frameSize().h}</span>
+            <div class={styles.modeButtons}>
+              <button
+                class={displayMode() === 'edges' ? styles.modeButtonActive : styles.modeButton}
+                onClick={() => setDisplayMode('edges')}
+              >
+                Edges
+              </button>
+              <button
+                class={displayMode() === 'labels' ? styles.modeButtonActive : styles.modeButton}
+                onClick={() => setDisplayMode('labels')}
+              >
+                Labels
+              </button>
+              <button
+                class={displayMode() === 'grayscale' ? styles.modeButtonActive : styles.modeButton}
+                onClick={() => setDisplayMode('grayscale')}
+              >
+                Gray
+              </button>
+            </div>
+          </div>
           <canvas
             ref={setCanvasEl}
             class={styles.feedCanvas}

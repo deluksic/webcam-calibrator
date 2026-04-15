@@ -55,6 +55,11 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
   });
 
+  // Grayscale render layout
+  const grayRenderLayout = tgpu.bindGroupLayout({
+    grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+  });
+
   return {
     copyLayout,
     grayTexToBufferLayout,
@@ -65,5 +70,6 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     histogramDisplayLayout,
     edgeFilterLayout,
     labelVizLayout,
+    grayRenderLayout,
   };
 }
