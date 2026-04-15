@@ -123,7 +123,8 @@ export function createJfaPropagatePipeline(
       }
     }
 
-    jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = bestLabel;
+    // Debug: just copy read to write to verify pipeline works
+    jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x)];
   });
 
   const pipeline = root.createComputePipeline({ compute: propagateKernel });

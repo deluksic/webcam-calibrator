@@ -77,6 +77,11 @@ export function createCameraPipeline(
     .createBuffer(d.arrayOf(d.u32, width * height))
     .$usage('storage');
 
+  // Debug: buffer to check propagation wrote something
+  const jfaDebugBuffer = root
+    .createBuffer(d.u32)
+    .$usage('storage');
+
   // JFA layouts and pipelines
   const { labelInitLayout, jfaLayout } = createContourLayouts(root);
   const labelInitPipeline = createLabelInitPipeline(root, labelInitLayout, width, height);
@@ -245,6 +250,7 @@ export function createCameraPipeline(
     jfaPropagatePipeline,
     jfaOffsetBuffer,
     jfaPingPongBindGroups,
+    jfaDebugBuffer,
   };
 }
 
