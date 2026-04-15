@@ -8,10 +8,12 @@ export function createSobelPipeline(
   width: number,
   height: number,
 ) {
-  function sobelLoad(px: number, py: number, w: number) {
+  function sobelLoad(px: number, py: number, w: number, h: number) {
     'use gpu';
-    if (px >= w || py >= w) { return d.f32(0); }
-    return sobelLayout.$.grayBuffer[py * w + px];
+    // Clamp to valid [0, w-1] x [0, h-1]
+    const clampedX = std.clamp(px, d.u32(0), w - d.u32(1));
+    const clampedY = std.clamp(py, d.u32(0), h - d.u32(1));
+    return sobelLayout.$.grayBuffer[clampedY * w + clampedX];
   }
 
   const sobelKernel = tgpu.computeFn({
@@ -24,15 +26,16 @@ export function createSobelPipeline(
     const x = input.gid.x;
     const y = input.gid.y;
     const w = d.u32(width);
+    const h = d.u32(height);
 
-    const tl = sobelLoad(x - d.u32(1), y - d.u32(1), w);
-    const t  = sobelLoad(x, y - d.u32(1), w);
-    const tr = sobelLoad(x + d.u32(1), y - d.u32(1), w);
-    const ml = sobelLoad(x - d.u32(1), y, w);
-    const mr = sobelLoad(x + d.u32(1), y, w);
-    const bl = sobelLoad(x - d.u32(1), y + d.u32(1), w);
-    const b  = sobelLoad(x, y + d.u32(1), w);
-    const br = sobelLoad(x + d.u32(1), y + d.u32(1), w);
+    const tl = sobelLoad(x - d.u32(1), y - d.u32(1), w, h);
+    const t  = sobelLoad(x, y - d.u32(1), w, h);
+    const tr = sobelLoad(x + d.u32(1), y - d.u32(1), w, h);
+    const ml = sobelLoad(x - d.u32(1), y, w, h);
+    const mr = sobelLoad(x + d.u32(1), y, w, h);
+    const bl = sobelLoad(x - d.u32(1), y + d.u32(1), w, h);
+    const b  = sobelLoad(x, y + d.u32(1), w, h);
+    const br = sobelLoad(x + d.u32(1), y + d.u32(1), w, h);
 
     const gx = (tr + d.f32(2.0) * mr + br) - (tl + d.f32(2.0) * ml + bl);
     const gy = (bl + d.f32(2.0) * b  + br) - (tl + d.f32(2.0) * t  + tr);
