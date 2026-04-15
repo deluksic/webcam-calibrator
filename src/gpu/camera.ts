@@ -342,18 +342,21 @@ export function processFrame(
     }
 
     // Set final buffer based on last sourceIdx
-    // In debug mode, skip propagate so sourceIdx=0, debugPipeline writes to labelBuffer1
-    finalLabelBuffer = (displayMode === 'debug' || sourceIdx === 1) ? pipeline.labelBuffer0 : pipeline.labelBuffer1;
+    // Set final buffer based on last sourceIdx
+    // In debug mode, debugPipeline writes to labelBuffer0 (use same bind group)
+    finalLabelBuffer = sourceIdx === 0 ? pipeline.labelBuffer0 : pipeline.labelBuffer1;
 
-    // DEBUG: run debug pipeline that counts neighbors
-    // Writes to labelBuffer1 (read=0, write=1 in ping-pong index 0)
+    // DEBUG: run debug pipeline that counts neighbors - writes to labelBuffer1
+    // Use bind group 0: readBuffer=labelBuffer0 (init data), writeBuffer=labelBuffer1
     pipeline.jfaDebugPipeline
       .with(computePass)
       .with(pipeline.jfaPingPongBindGroups[0])
       .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-    // In debug mode, data is in labelBuffer1 from debug pipeline
-    finalLabelBuffer = pipeline.labelBuffer1;
+    // In debug mode, debug pipeline wrote to labelBuffer1, show it
+    if (displayMode === 'debug') {
+      finalLabelBuffer = pipeline.labelBuffer1;
+    }
 
     computePass.end();
   }
@@ -375,9 +378,9 @@ export function processFrame(
       .with(labelVizBindGroup)
       .draw(3);
   } else if (displayMode === 'debug') {
-    // Debug: show result of jfaDebugPipeline (neighbor count) - data is in labelBuffer1
+    // Debug: show result of jfaDebugPipeline (neighbor count)
     const debugBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
-      labelBuffer: pipeline.labelBuffer1,
+      labelBuffer: finalLabelBuffer,
     });
     pipeline.labelVizPipeline
       .with(enc)
