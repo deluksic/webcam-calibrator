@@ -88,7 +88,7 @@ export function createCameraPipeline(
 
   // Histogram display layout
   const histogramDisplayLayout = tgpu.bindGroupLayout({
-    histogram: { storage: histogramSchema, access: 'readonly' },
+    histogram: { storage: histogramSchema, access: 'mutable' },
   });
 
   // ── Pass 1: copy external texture → grayTex ────────────────────────────
@@ -245,10 +245,14 @@ export function createCameraPipeline(
     const histH = d.f32(HIST_HEIGHT);
     const numBars = d.f32(HISTOGRAM_BINS);
     const barW = histW / numBars;
+
     const barPxX = (d.f32(i.instanceIndex) * barW) + (localU * barW);
-    const barPxY = localV * histH;
+    // Flip vertical: barPxY = 0 at bottom, histH at top
+    // localV = 0 → bottom of bar rectangle, localV = 1 → top of bar rectangle
+    const barPxY = (d.f32(1) - localV) * histH;
     const clipX = (barPxX / histW) * d.f32(2.0) - d.f32(1.0);
     const clipY = d.f32(1.0) - (barPxY / histH) * d.f32(2.0);
+    // UV.y: 0 at bottom (bar bottom), 1 at top (bar top)
 
     return {
       uv: d.vec2f(localU, localV),
@@ -379,39 +383,94 @@ export function processFrame(
     sampler: pipeline.sampler,
   });
 
-  // Dispatch all passes in single encoder
-  // 1. Copy external → grayTex
-  pipeline.copyPipeline
-    .withColorAttachment({ view: pipeline.grayTex.createView() })
-    .with(copyBindGroup)
-    .draw(3);
+  // Single command encoder for all passes
+  const enc = root.device.createCommandEncoder({ label: 'camera frame' });
 
-  // 2. Gray tex → buffer
-  pipeline.grayPipeline
-    .with(pipeline.grayTexToBufferBindGroup)
-    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+  // ── Compute passes ──────────────────────────────────────────────────────
+  {
+    const computePass = enc.beginComputePass({ label: 'gray + sobel + histogram' });
 
-  // 3. Sobel
-  pipeline.sobelPipeline
-    .with(pipeline.sobelBindGroup)
-    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+    // 1. Gray tex → buffer
+    pipeline.grayPipeline
+      .with(computePass)
+      .with(pipeline.grayTexToBufferBindGroup)
+      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-  // 4. Reset histogram
-  pipeline.histogramResetPipeline
-    .with(pipeline.histogramResetBindGroup)
-    .dispatchWorkgroups(HISTOGRAM_BINS);
+    // 2. Sobel
+    pipeline.sobelPipeline
+      .with(computePass)
+      .with(pipeline.sobelBindGroup)
+      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-  // 5. Compute histogram
-  pipeline.histogramPipeline
-    .with(pipeline.histogramComputeBindGroup)
-    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+    // 3. Reset histogram
+    pipeline.histogramResetPipeline
+      .with(computePass)
+      .with(pipeline.histogramResetBindGroup)
+      .dispatchWorkgroups(HISTOGRAM_BINS);
 
-  // 6. Render edges
-  pipeline.edgesPipeline.withColorAttachment({ view: pipeline.context }).with(pipeline.edgesBindGroup).draw(3);
+    // 4. Compute histogram
+    pipeline.histogramPipeline
+      .with(computePass)
+      .with(pipeline.histogramComputeBindGroup)
+      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-  // 7. Render histogram to separate canvas (256 instances × 6 vertices)
-  pipeline.histogramDisplayPipeline
-    .withColorAttachment({ view: pipeline.histContext })
-    .with(pipeline.histogramDisplayBindGroup)
-    .draw(6, HISTOGRAM_BINS);
+    computePass.end();
+  }
+
+  // ── Render passes ──────────────────────────────────────────────────────
+  {
+    const copyPass = enc.beginRenderPass({
+      colorAttachments: [{
+        view: pipeline.grayTex.createView(),
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+
+    // 1. Copy external → grayTex
+    pipeline.copyPipeline
+      .with(copyPass)
+      .with(copyBindGroup)
+      .draw(3);
+
+    copyPass.end();
+  }
+
+  {
+    const renderPass = enc.beginRenderPass({
+      colorAttachments: [{
+        view: pipeline.context,
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+
+    // 2. Render edges to canvas
+    pipeline.edgesPipeline
+      .with(renderPass)
+      .with(pipeline.edgesBindGroup)
+      .draw(3);
+
+    renderPass.end();
+  }
+
+  {
+    const histPass = enc.beginRenderPass({
+      colorAttachments: [{
+        view: pipeline.histContext,
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+
+    // 3. Render histogram bars (256 instances × 6 vertices)
+    pipeline.histogramDisplayPipeline
+      .with(histPass)
+      .with(pipeline.histogramDisplayBindGroup)
+      .draw(6, HISTOGRAM_BINS);
+
+    histPass.end();
+  }
+
+  root.device.queue.submit([enc.finish()]);
 }
