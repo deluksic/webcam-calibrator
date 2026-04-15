@@ -171,7 +171,7 @@ export function processFrame(
   });
 
   // Update threshold uniform
-  root.device.queue.writeBuffer(pipeline.thresholdBuffer as unknown as GPUBuffer, 0, new Float32Array([threshold]));
+  pipeline.thresholdBuffer.write(threshold);
 
   const enc = root.device.createCommandEncoder({ label: 'camera frame' });
 
