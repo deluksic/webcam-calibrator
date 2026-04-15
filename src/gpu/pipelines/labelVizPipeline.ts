@@ -28,16 +28,17 @@ export function createLabelVizPipeline(
     // Hash-based pseudocolor for each unique label
     // Use lower bits of label to generate pseudo-random RGB
     const hash = label;
-    const r = d.f32(hash % d.u32(7)) / d.f32(7.0);  // 0-6 mapped to 0-1
-    const g = d.f32((hash / d.u32(7)) % d.u32(7)) / d.f32(7.0);
-    const b = d.f32((hash / d.u32(49)) % d.u32(7)) / d.f32(7.0);
+    const hashF = d.f32(hash);
+    const r = (hashF / d.f32(7.0)) % d.f32(7.0) / d.f32(7.0);
+    const g = (hashF / d.f32(49.0)) % d.f32(7.0) / d.f32(7.0);
+    const b = (hashF / d.f32(343.0)) % d.f32(7.0) / d.f32(7.0);
 
     // Boost saturation
     const boost = d.f32(1.5);
     return d.vec4f(
-      d.f32(r * boost),
-      d.f32(g * boost),
-      d.f32(b * boost),
+      r * boost,
+      g * boost,
+      b * boost,
       d.f32(0.8),
     );
   });
