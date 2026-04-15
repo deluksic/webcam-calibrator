@@ -256,8 +256,13 @@ Webcam frame (VideoFrame / ImageBitmap)
 
 ### Phase 4 — AprilTag Detection
 - [x] Edge detection (Sobel + threshold)
-- [ ] Contour extraction (JFA)
-- [ ] Quad fitting
+- [x] Contour extraction (JFA) — see `docs/jfa.md` for TypeGPU implementation guide
+  - [x] Create labelInitPipeline (edge pixels get unique label)
+  - [x] Create jfaPropagatePipeline (propagate labels over N passes)
+  - [x] Create ping-pong label buffers
+  - [x] Integrate JFA into camera pipeline
+  - [x] CPU-side region extraction and quad fitting
+- [ ] Quad fitting refinement (RANSAC for better corners)
 - [ ] tag36h11 decode
 - [ ] Subpixel corner refinement
 

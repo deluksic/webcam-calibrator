@@ -11,6 +11,7 @@ import { createHistogramResetPipeline, createHistogramAccumulatePipeline } from 
 import { createEdgesPipeline } from './pipelines/edgesPipeline';
 import { createEdgeFilterPipeline } from './pipelines/edgeFilterPipeline';
 import { createHistogramRenderPipeline } from './pipelines/histogramRenderPipeline';
+import { createContourLayouts, createLabelInitPipeline, createJfaPropagatePipeline, detectQuads, type DetectedQuad } from './contour';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PIPELINE FACTORY
@@ -60,6 +61,38 @@ export function createCameraPipeline(
   const thresholdBinBuffer = root
     .createBuffer(d.u32)
     .$usage('uniform');
+
+  // JFA label buffers for contour detection (ping-pong)
+  const labelBuffer0 = root
+    .createBuffer(d.arrayOf(d.u32, width * height))
+    .$usage('storage');
+
+  const labelBuffer1 = root
+    .createBuffer(d.arrayOf(d.u32, width * height))
+    .$usage('storage');
+
+  // JFA layouts and pipelines
+  const { labelInitLayout, jfaLayout } = createContourLayouts(root);
+  const labelInitPipeline = createLabelInitPipeline(root, labelInitLayout, width, height);
+  const { pipeline: jfaPropagatePipeline, offsetUniform: jfaOffsetUniform } =
+    createJfaPropagatePipeline(root, jfaLayout, width, height);
+
+  // JFA bind groups
+  const labelInitBindGroup = root.createBindGroup(labelInitLayout, {
+    edgeBuffer: filteredBuffer,
+    labelBuffer: labelBuffer0,
+  });
+
+  const jfaPingPongBindGroups = [
+    root.createBindGroup(jfaLayout, {
+      readBuffer: labelBuffer0,
+      writeBuffer: labelBuffer1,
+    }),
+    root.createBindGroup(jfaLayout, {
+      readBuffer: labelBuffer1,
+      writeBuffer: labelBuffer0,
+    }),
+  ];
 
   // ═══════════════════════════════════════════════════════════════════════
   // LAYOUTS & PIPELINES
@@ -157,6 +190,14 @@ export function createCameraPipeline(
     height,
     histWidth: 512,
     histHeight: 120,
+    // JFA contour detection
+    labelBuffer0,
+    labelBuffer1,
+    labelInitPipeline,
+    labelInitBindGroup,
+    jfaPropagatePipeline,
+    jfaOffsetUniform,
+    jfaPingPongBindGroups,
   };
 }
 
@@ -242,6 +283,52 @@ export function processFrame(
     .draw(6, HISTOGRAM_BINS);
 
   root.device.queue.submit([enc.finish()]);
+}
+
+export async function detectContours(
+  root: Awaited<ReturnType<typeof tgpu.init>>,
+  pipeline: CameraPipeline,
+): Promise<{ quads: DetectedQuad[], labelData: Uint32Array }> {
+  const enc = root.device.createCommandEncoder({ label: 'jfa contour' });
+  const computePass = enc.beginComputePass({ label: 'jfa' });
+
+  // Initialize labels from edge mask
+  pipeline.labelInitPipeline
+    .with(computePass)
+    .with(pipeline.labelInitBindGroup)
+    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+
+  // JFA passes with decreasing step sizes
+  const maxRange = Math.floor(Math.max(pipeline.width, pipeline.height) / 2);
+  let offset = maxRange;
+  let sourceIdx = 0;
+
+  while (offset >= 1) {
+    pipeline.jfaOffsetUniform.write(offset);
+    pipeline.jfaPropagatePipeline
+      .with(computePass)
+      .with(pipeline.jfaPingPongBindGroups[sourceIdx])
+      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+    sourceIdx ^= 1;
+    offset = Math.floor(offset / 2);
+  }
+
+  computePass.end();
+  root.device.queue.submit([enc.finish()]);
+
+  // Read back labeled buffer
+  const finalBuffer = sourceIdx === 0 ? pipeline.labelBuffer0 : pipeline.labelBuffer1;
+  const labelData = new Uint32Array(await finalBuffer.read());
+
+  // Read edge buffer for region analysis
+  const edgeData = new Float32Array(await pipeline.filteredBuffer.read());
+
+  // CPU-side: extract regions and fit quads
+  const { extractRegions, validateAndFilterQuads } = await import('./contour');
+  const regions = extractRegions(labelData, pipeline.width, pipeline.height, edgeData);
+  const quads = validateAndFilterQuads(regions);
+
+  return { quads, labelData };
 }
 
 export { computeThreshold };
