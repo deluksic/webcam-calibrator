@@ -20,20 +20,15 @@ export function createLabelVizPipeline(
     const idx = py * d.u32(width) + px;
     const label = labelVizLayout.$.labelBuffer[idx];
 
-    // Debug: show actual label values
-    // label=1 (edge) should be white, INVALID=gray, propagated labels vary
-    const isValid = label !== d.u32(0xFFFFFFFF);
-    const isEdge = label === d.u32(1);
+    // Debug: show label value as grayscale
+    // 1 = edge (white), INVALID = mid-gray, propagated = scaled
+    const labelF = d.f32(label);
     const isInvalid = label === d.u32(0xFFFFFFFF);
-    const white = d.f32(1);
-    const midGray = d.f32(0.5);
-    const dark = d.f32(0.1);
-    return d.vec4f(
-      std.select(std.select(dark, midGray, isInvalid), white, isEdge),
-      std.select(std.select(dark, midGray, isInvalid), white, isEdge),
-      std.select(std.select(dark, midGray, isInvalid), white, isEdge),
-      d.f32(1)
-    );
+    const isEdge = label === d.u32(1);
+    const isOther = !isInvalid && !isEdge;
+    const normalized = labelF / d.f32(100.0);
+    const gray = std.select(std.select(normalized, d.f32(1), isEdge), d.f32(0.5), isInvalid);
+    return d.vec4f(gray, gray, gray, d.f32(1));
   });
 
   return root.createRenderPipeline({
