@@ -40,6 +40,7 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
   // Histogram display layout
   const histogramDisplayLayout = tgpu.bindGroupLayout({
     histogram: { storage: histogramSchema, access: 'mutable' },
+    thresholdBin: { uniform: d.u32 },
   });
 
   // Edge filter layout (compute: threshold filter)

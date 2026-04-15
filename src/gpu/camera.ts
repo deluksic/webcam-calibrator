@@ -57,6 +57,10 @@ export function createCameraPipeline(
   const histogramSchema = d.arrayOf(d.atomic(d.u32), HISTOGRAM_BINS);
   const histogramBuffer = root.createBuffer(histogramSchema).$usage('storage');
 
+  const thresholdBinBuffer = root
+    .createBuffer(d.u32)
+    .$usage('uniform');
+
   // ═══════════════════════════════════════════════════════════════════════
   // LAYOUTS & PIPELINES
   // ═══════════════════════════════════════════════════════════════════════
@@ -79,7 +83,7 @@ export function createCameraPipeline(
   const histogramPipeline = createHistogramAccumulatePipeline(root, histogramLayout, width, height);
   const edgesPipeline = createEdgesPipeline(root, edgesLayout, width, height, presentationFormat);
   const edgeFilterPipeline = createEdgeFilterPipeline(root, edgeFilterLayout, width, height);
-  const histogramDisplayPipeline = createHistogramRenderPipeline(root, histogramDisplayLayout, presentationFormat, width * height);
+  const histogramDisplayPipeline = createHistogramRenderPipeline(root, histogramDisplayLayout, presentationFormat, width * height, 0);
 
   // ═══════════════════════════════════════════════════════════════════════
   // BIND GROUPS
@@ -119,6 +123,7 @@ export function createCameraPipeline(
 
   const histogramDisplayBindGroup = root.createBindGroup(histogramDisplayLayout, {
     histogram: histogramBuffer,
+    thresholdBin: thresholdBinBuffer,
   });
 
   return {
@@ -129,6 +134,7 @@ export function createCameraPipeline(
     sobelBuffer,
     filteredBuffer,
     thresholdBuffer,
+    thresholdBinBuffer,
     histogramBuffer,
     copyPipeline,
     copyLayoutTemplate,
@@ -170,8 +176,10 @@ export function processFrame(
     sampler: pipeline.sampler,
   });
 
-  // Update threshold uniform
+  // Update uniforms
   pipeline.thresholdBuffer.write(threshold);
+  const thresholdBin = Math.round(threshold * 512);
+  pipeline.thresholdBinBuffer.write(thresholdBin);
 
   const enc = root.device.createCommandEncoder({ label: 'camera frame' });
 
