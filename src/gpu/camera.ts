@@ -324,29 +324,36 @@ export function processFrame(
       .with(pipeline.labelInitBindGroup)
       .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-    // JFA propagate passes
+    // JFA propagate passes (skip for debug to test init only)
     const maxRange = Math.floor(Math.max(pipeline.width, pipeline.height) / 2);
     let offset = maxRange;
     let sourceIdx = 0;
 
-    while (offset >= 1) {
-      pipeline.jfaOffsetBuffer.write(offset);
-      pipeline.jfaPropagatePipeline
-        .with(computePass)
-        .with(pipeline.jfaPingPongBindGroups[sourceIdx])
-        .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
-      sourceIdx ^= 1;
-      offset = Math.floor(offset / 2);
+    if (displayMode !== 'debug') {
+      while (offset >= 1) {
+        pipeline.jfaOffsetBuffer.write(offset);
+        pipeline.jfaPropagatePipeline
+          .with(computePass)
+          .with(pipeline.jfaPingPongBindGroups[sourceIdx])
+          .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+        sourceIdx ^= 1;
+        offset = Math.floor(offset / 2);
+      }
     }
 
     // Set final buffer based on last sourceIdx
-    finalLabelBuffer = sourceIdx === 0 ? pipeline.labelBuffer0 : pipeline.labelBuffer1;
+    // In debug mode, skip propagate so sourceIdx=0, debugPipeline writes to labelBuffer1
+    finalLabelBuffer = (displayMode === 'debug' || sourceIdx === 1) ? pipeline.labelBuffer0 : pipeline.labelBuffer1;
 
-    // DEBUG: run debug pipeline to test neighbor reads
+    // DEBUG: run debug pipeline that counts neighbors
+    // Writes to labelBuffer1 (read=0, write=1 in ping-pong index 0)
     pipeline.jfaDebugPipeline
       .with(computePass)
       .with(pipeline.jfaPingPongBindGroups[0])
       .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+
+    // In debug mode, data is in labelBuffer1 from debug pipeline
+    finalLabelBuffer = pipeline.labelBuffer1;
 
     computePass.end();
   }
@@ -368,9 +375,9 @@ export function processFrame(
       .with(labelVizBindGroup)
       .draw(3);
   } else if (displayMode === 'debug') {
-    // Debug: show result of jfaDebugPipeline (neighbor count)
+    // Debug: show result of jfaDebugPipeline (neighbor count) - data is in labelBuffer1
     const debugBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
-      labelBuffer: pipeline.labelBuffer0,
+      labelBuffer: pipeline.labelBuffer1,
     });
     pipeline.labelVizPipeline
       .with(enc)
