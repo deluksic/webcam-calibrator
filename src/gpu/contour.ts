@@ -107,22 +107,20 @@ export function createJfaPropagatePipeline(
       const oy = offsets[i][1];
       const nx = x + ox * offset;
       const ny = y + oy * offset;
-      // Clamp to bounds for safe read using std.select
-      const sx = std.select(
-        std.select(nx, d.i32(0), nx < d.i32(0)),
-        w - d.i32(1),
-        nx >= w
-      );
-      const sy = std.select(
-        std.select(ny, d.i32(0), ny < d.i32(0)),
-        h - d.i32(1),
-        ny >= h
-      );
+      // Clamp to bounds
+      let sx = nx;
+      if (nx < d.i32(0)) { sx = d.i32(0); }
+      if (nx >= w) { sx = w - d.i32(1); }
+      let sy = ny;
+      if (ny < d.i32(0)) { sy = d.i32(0); }
+      if (ny >= h) { sy = h - d.i32(1); }
       const nIdx = d.u32(sy) * wU32 + d.u32(sx);
       const nLabel = jfaLayout.$.readBuffer[nIdx];
-      const isValid = nLabel !== d.u32(COMPONENT_LABEL_INVALID);
-      const isBetter = isValid && (bestLabel === d.u32(COMPONENT_LABEL_INVALID) || nLabel < bestLabel);
-      bestLabel = std.select(bestLabel, nLabel, isBetter);
+      if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
+        if (bestLabel === d.u32(COMPONENT_LABEL_INVALID)) {
+          bestLabel = nLabel;
+        }
+      }
     }
 
     jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = bestLabel;
