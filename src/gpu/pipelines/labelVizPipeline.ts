@@ -22,12 +22,19 @@ export function createLabelVizPipeline(
 
     // Debug: show label value as grayscale
     // 1 = edge (white), INVALID = mid-gray, propagated = scaled
-    const labelF = d.f32(label);
     const isInvalid = label === d.u32(0xFFFFFFFF);
     const isEdge = label === d.u32(1);
-    const isOther = !isInvalid && !isEdge;
-    const normalized = labelF / d.f32(100.0);
-    const gray = std.select(std.select(normalized, d.f32(1), isEdge), d.f32(0.5), isInvalid);
+
+    // Show: white = edge, dark = propagated label, gray = invalid
+    // Use label value directly (mod 256) for visible variation
+    if (isInvalid) {
+      return d.vec4f(d.f32(0.5), d.f32(0.5), d.f32(0.5), d.f32(1));
+    }
+    if (isEdge) {
+      return d.vec4f(d.f32(1), d.f32(1), d.f32(1), d.f32(1));
+    }
+    // Propagated: show as dark gray scaled by label (labels 1-10 become 0.1-1.0)
+    const gray = d.f32(label) / d.f32(10.0);
     return d.vec4f(gray, gray, gray, d.f32(1));
   });
 
