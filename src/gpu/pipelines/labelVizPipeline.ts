@@ -20,20 +20,18 @@ export function createLabelVizPipeline(
     const idx = py * d.u32(width) + px;
     const label = labelVizLayout.$.labelBuffer[idx];
 
-    // Hash label to ~9 distinct color buckets
-    // Connected components will have labels from the same edge seed cluster
+    // Debug: show actual label values
+    // label=1 (edge) should be white, INVALID=gray, propagated labels vary
     const isValid = label !== d.u32(0xFFFFFFFF);
-    const labelHash = (label / d.u32(10000)) % d.u32(9);
-    const c0 = d.f32(0.2);
-    const c1 = d.f32(0.8);
-    // 3x3 color matrix for 9 buckets
-    const r = std.select(c0, c1, labelHash < d.u32(3));
-    const g = std.select(c0, c1, (labelHash / d.u32(3)) % d.u32(3) !== d.u32(0));
-    const b = std.select(c0, c1, labelHash % d.u32(3) !== d.u32(0));
+    const isEdge = label === d.u32(1);
+    const isInvalid = label === d.u32(0xFFFFFFFF);
+    const white = d.f32(1);
+    const midGray = d.f32(0.5);
+    const dark = d.f32(0.1);
     return d.vec4f(
-      std.select(d.f32(0.02), r, isValid),
-      std.select(d.f32(0.02), g, isValid),
-      std.select(d.f32(0.02), b, isValid),
+      std.select(std.select(dark, midGray, isInvalid), white, isEdge),
+      std.select(std.select(dark, midGray, isInvalid), white, isEdge),
+      std.select(std.select(dark, midGray, isInvalid), white, isEdge),
       d.f32(1)
     );
   });
