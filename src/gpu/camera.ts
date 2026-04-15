@@ -285,7 +285,13 @@ export function processFrame(
       .with(pipeline.edgeFilterBindGroup)
       .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-    // JFA passes for contour detection
+    // JFA: Initialize labels from edge mask
+    pipeline.labelInitPipeline
+      .with(computePass)
+      .with(pipeline.labelInitBindGroup)
+      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+
+    // JFA propagate passes
     const maxRange = Math.floor(Math.max(pipeline.width, pipeline.height) / 2);
     let offset = maxRange;
     let sourceIdx = 0;
