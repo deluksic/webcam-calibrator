@@ -11,6 +11,7 @@ import { createHistogramResetPipeline, createHistogramAccumulatePipeline } from 
 import { createEdgesPipeline } from './pipelines/edgesPipeline';
 import { createEdgeFilterPipeline } from './pipelines/edgeFilterPipeline';
 import { createHistogramRenderPipeline } from './pipelines/histogramRenderPipeline';
+import { createLabelVizPipeline } from './pipelines/labelVizPipeline';
 import { createContourLayouts, createLabelInitPipeline, createJfaPropagatePipeline, detectQuads, type DetectedQuad } from './contour';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -107,6 +108,7 @@ export function createCameraPipeline(
     edgesLayout,
     histogramDisplayLayout,
     edgeFilterLayout,
+    labelVizLayout,
   } = createLayouts(root, histogramSchema);
 
   const copyPipeline = createCopyPipeline(root, copyLayout);
@@ -117,6 +119,7 @@ export function createCameraPipeline(
   const edgesPipeline = createEdgesPipeline(root, edgesLayout, width, height, presentationFormat);
   const edgeFilterPipeline = createEdgeFilterPipeline(root, edgeFilterLayout, width, height);
   const histogramDisplayPipeline = createHistogramRenderPipeline(root, histogramDisplayLayout, presentationFormat, width * height);
+  const labelVizPipeline = createLabelVizPipeline(root, labelVizLayout, width, height, presentationFormat);
 
   // ═══════════════════════════════════════════════════════════════════════
   // BIND GROUPS
@@ -159,6 +162,10 @@ export function createCameraPipeline(
     thresholdBin: thresholdBinBuffer,
   });
 
+  const labelVizBindGroup = root.createBindGroup(labelVizLayout, {
+    labelBuffer: labelBuffer0,
+  });
+
   return {
     context,
     histContext,
@@ -185,13 +192,16 @@ export function createCameraPipeline(
     edgeFilterBindGroup,
     histogramDisplayPipeline,
     histogramDisplayBindGroup,
+    labelVizPipeline,
+    labelVizBindGroup,
+    labelBuffer0,
+    labelVizLayout,
     sampler,
     width,
     height,
     histWidth: 512,
     histHeight: 120,
     // JFA contour detection
-    labelBuffer0,
     labelBuffer1,
     labelInitPipeline,
     labelInitBindGroup,
@@ -224,18 +234,15 @@ export function processFrame(
 
   const enc = root.device.createCommandEncoder({ label: 'camera frame' });
 
-  // ═══════════════════════════════════════════════════════════════════════
   // RENDER: Copy external → grayTex (MUST happen before compute)
-  // ═══════════════════════════════════════════════════════════════════════
   pipeline.copyPipeline
     .with(enc)
     .withColorAttachment({ view: pipeline.grayTex.createView() })
     .with(copyBindGroup)
     .draw(3);
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // COMPUTE: Gray → Sobel → Histogram
-  // ═══════════════════════════════════════════════════════════════════════
+  // COMPUTE: Gray → Sobel → Histogram + JFA
+  let finalLabelBuffer = pipeline.labelBuffer0;
   {
     const computePass = enc.beginComputePass({ label: 'gray + sobel + histogram + filter' });
 
@@ -264,16 +271,36 @@ export function processFrame(
       .with(pipeline.edgeFilterBindGroup)
       .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
+    // JFA passes for contour detection
+    const maxRange = Math.floor(Math.max(pipeline.width, pipeline.height) / 2);
+    let offset = maxRange;
+    let sourceIdx = 0;
+
+    while (offset >= 1) {
+      pipeline.jfaOffsetUniform.write(offset);
+      pipeline.jfaPropagatePipeline
+        .with(computePass)
+        .with(pipeline.jfaPingPongBindGroups[sourceIdx])
+        .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+      sourceIdx ^= 1;
+      offset = Math.floor(offset / 2);
+    }
+
+    // Set final buffer based on last sourceIdx
+    finalLabelBuffer = sourceIdx === 0 ? pipeline.labelBuffer0 : pipeline.labelBuffer1;
+
     computePass.end();
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // RENDER: Edges + Histogram visualization
-  // ═══════════════════════════════════════════════════════════════════════
-  pipeline.edgesPipeline
+  // RENDER: Label visualization + Histogram
+  const labelVizBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
+    labelBuffer: finalLabelBuffer,
+  });
+
+  pipeline.labelVizPipeline
     .with(enc)
     .withColorAttachment({ view: pipeline.context })
-    .with(pipeline.edgesBindGroup)
+    .with(labelVizBindGroup)
     .draw(3);
 
   pipeline.histogramDisplayPipeline

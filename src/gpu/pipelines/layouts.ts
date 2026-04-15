@@ -50,6 +50,11 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     filteredBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
   });
 
+  // Label visualization layout
+  const labelVizLayout = tgpu.bindGroupLayout({
+    labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
+  });
+
   return {
     copyLayout,
     grayTexToBufferLayout,
@@ -59,5 +64,6 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     edgesLayout,
     histogramDisplayLayout,
     edgeFilterLayout,
+    labelVizLayout,
   };
 }
