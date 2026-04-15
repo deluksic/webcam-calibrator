@@ -178,7 +178,7 @@ export function processFrame(
 
   // Update uniforms
   pipeline.thresholdBuffer.write(threshold);
-  const thresholdBin = Math.round(threshold * 512);
+  const thresholdBin = Math.round(threshold * 256);
   pipeline.thresholdBinBuffer.write(thresholdBin);
 
   const enc = root.device.createCommandEncoder({ label: 'camera frame' });
