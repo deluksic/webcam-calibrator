@@ -117,7 +117,8 @@ export function createJfaPropagatePipeline(
       const nIdx = d.u32(sy) * wU32 + d.u32(sx);
       const nLabel = jfaLayout.$.readBuffer[nIdx];
       if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
-        if (bestLabel === d.u32(COMPONENT_LABEL_INVALID)) {
+        // Take the minimum label (nearest seed in JFA)
+        if (nLabel < bestLabel) {
           bestLabel = nLabel;
         }
       }
