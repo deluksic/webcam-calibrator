@@ -353,11 +353,14 @@ export function processFrame(
       .with(labelVizBindGroup)
       .draw(3);
   } else if (displayMode === 'debug') {
-    // Debug: show edge filter output (what JFA initializes from)
-    pipeline.filteredRenderPipeline
+    // Debug: show label buffer (what JFA produces)
+    const labelVizBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
+      labelBuffer: finalLabelBuffer,
+    });
+    pipeline.labelVizPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.context })
-      .with(pipeline.filteredRenderBindGroup)
+      .with(labelVizBindGroup)
       .draw(3);
   } else {
     pipeline.grayRenderPipeline
