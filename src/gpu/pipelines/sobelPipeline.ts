@@ -11,9 +11,11 @@ export function createSobelPipeline(
   function sobelLoad(px: d.i32, py: d.i32, w: d.u32, h: d.u32) {
     'use gpu';
     // Clamp to valid [0, w-1] x [0, h-1] for same-padding
-    const clampedX = select(px < d.i32(0), d.u32(0), select(px >= d.i32(w), w - d.u32(1), d.u32(px)));
-    const clampedY = select(py < d.i32(0), d.u32(0), select(py >= d.i32(h), h - d.u32(1), d.u32(py)));
-    return sobelLayout.$.grayBuffer[clampedY * w + clampedX];
+    const clampedX = select(d.u32(px), d.u32(0), px < d.i32(0));
+    const cx2 = select(w - d.u32(1), clampedX, px >= d.i32(w));
+    const clampedY = select(d.u32(py), d.u32(0), py < d.i32(0));
+    const cy2 = select(h - d.u32(1), clampedY, py >= d.i32(h));
+    return sobelLayout.$.grayBuffer[cy2 * w + cx2];
   }
 
   const sobelKernel = tgpu.computeFn({
