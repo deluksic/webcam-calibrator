@@ -324,41 +324,43 @@ export function processFrame(
       .with(pipeline.labelInitBindGroup)
       .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-    // JFA propagate passes (skip for debug to test init only)
+    // JFA propagate passes
     const maxRange = Math.floor(Math.max(pipeline.width, pipeline.height) / 2);
     let offset = maxRange;
     let sourceIdx = 0;
 
-    if (displayMode !== 'debug') {
-      while (offset >= 1) {
-        pipeline.jfaOffsetBuffer.write(offset);
-        pipeline.jfaPropagatePipeline
-          .with(computePass)
-          .with(pipeline.jfaPingPongBindGroups[sourceIdx])
-          .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
-        sourceIdx ^= 1;
-        offset = Math.floor(offset / 2);
-      }
+    while (offset >= 1) {
+      pipeline.jfaOffsetBuffer.write(offset);
+      pipeline.jfaPropagatePipeline
+        .with(computePass)
+        .with(pipeline.jfaPingPongBindGroups[sourceIdx])
+        .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+      sourceIdx ^= 1;
+      offset = Math.floor(offset / 2);
     }
 
     // Set final buffer based on last sourceIdx
-    // Set final buffer based on last sourceIdx
-    // In debug mode, debugPipeline writes to labelBuffer0 (use same bind group)
     finalLabelBuffer = sourceIdx === 0 ? pipeline.labelBuffer0 : pipeline.labelBuffer1;
 
-    // DEBUG: run debug pipeline that counts neighbors - writes to labelBuffer1
-    // Use bind group 0: readBuffer=labelBuffer0 (init data), writeBuffer=labelBuffer1
+    computePass.end();
+  }
+
+  // DEBUG: run debug pipeline in a separate pass
+  if (displayMode === 'debug') {
+    const debugEnc = root.device.createCommandEncoder({ label: 'debug' });
+    const debugPass = debugEnc.beginComputePass({ label: 'debug neighbor count' });
+
+    // Run debug pipeline on init data (read=labelBuffer0, write=labelBuffer1)
     pipeline.jfaDebugPipeline
-      .with(computePass)
+      .with(debugPass)
       .with(pipeline.jfaPingPongBindGroups[0])
       .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
-    // In debug mode, debug pipeline wrote to labelBuffer1, show it
-    if (displayMode === 'debug') {
-      finalLabelBuffer = pipeline.labelBuffer1;
-    }
+    debugPass.end();
+    root.device.queue.submit([debugEnc.finish()]);
 
-    computePass.end();
+    // Show labelBuffer1 (debug pipeline output)
+    finalLabelBuffer = pipeline.labelBuffer1;
   }
 
   // RENDER: Display mode selection + Histogram
