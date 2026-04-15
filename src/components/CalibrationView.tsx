@@ -106,6 +106,12 @@ export default function CalibrationView() {
             <span class={styles.feedLabel}>Camera Feed — {frameSize().w}×{frameSize().h}</span>
             <div class={styles.modeButtons}>
               <button
+                class={displayMode() === 'grayscale' ? styles.modeButtonActive : styles.modeButton}
+                onClick={() => setDisplayMode('grayscale')}
+              >
+                Gray
+              </button>
+              <button
                 class={displayMode() === 'edges' ? styles.modeButtonActive : styles.modeButton}
                 onClick={() => setDisplayMode('edges')}
               >
@@ -116,12 +122,6 @@ export default function CalibrationView() {
                 onClick={() => setDisplayMode('labels')}
               >
                 Labels
-              </button>
-              <button
-                class={displayMode() === 'grayscale' ? styles.modeButtonActive : styles.modeButton}
-                onClick={() => setDisplayMode('grayscale')}
-              >
-                Gray
               </button>
               <button
                 class={displayMode() === 'debug' ? styles.modeButtonActive : styles.modeButton}
