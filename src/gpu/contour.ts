@@ -88,7 +88,7 @@ export function createJfaPropagatePipeline(
     const y = d.i32(input.gid.y);
     const w = d.i32(width);
     const h = d.i32(height);
-    const offset = jfaLayout.$.offset;
+    const offset = d.i32(1); // DEBUG: hardcoded to test
     const wU32 = d.u32(w);
 
     // Check 4 neighbors (up, down, left, right) - simpler for debugging
