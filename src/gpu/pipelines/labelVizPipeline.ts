@@ -28,9 +28,9 @@ export function createLabelVizPipeline(
     // Hash-based pseudocolor for each unique label
     // Use bit operations for clean integer-based color assignment
     const labelIdx = label / d.u32(7);
-    const r = d.f32(hash % d.u32(7)) / d.f32(7.0);
+    const r = d.f32(label % d.u32(7)) / d.f32(7.0);
     const g = d.f32(labelIdx % d.u32(7)) / d.f32(7.0);
-    const b = d.f32((hash / d.u32(49)) % d.u32(7)) / d.f32(7.0);
+    const b = d.f32((label / d.u32(49)) % d.u32(7)) / d.f32(7.0);
 
     // Boost saturation
     const boost = d.f32(1.5);
