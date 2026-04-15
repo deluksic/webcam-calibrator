@@ -124,10 +124,10 @@ export function createCameraPipeline(
   const grayPipeline = root.createComputePipeline({ compute: grayKernel });
 
   // ── Pass 3: compute Sobel from grayscale buffer ─────────────────────────
-  function sobelLoad(src: typeof sobelLayout.$.grayBuffer, px: number, py: number, w: number) {
+  function sobelLoad(px: number, py: number, w: number) {
     'use gpu';
     if (px >= w || py >= w) { return d.f32(0); }
-    return src[py * w + px];
+    return sobelLayout.$.grayBuffer[py * w + px];
   }
 
   const sobelKernel = tgpu.computeFn({
@@ -141,14 +141,14 @@ export function createCameraPipeline(
     const y = input.gid.y;
     const w = d.u32(width);
 
-    const tl = sobelLoad(sobelLayout.$.grayBuffer, x - d.u32(1), y - d.u32(1), w);
-    const t  = sobelLoad(sobelLayout.$.grayBuffer, x, y - d.u32(1), w);
-    const tr = sobelLoad(sobelLayout.$.grayBuffer, x + d.u32(1), y - d.u32(1), w);
-    const ml = sobelLoad(sobelLayout.$.grayBuffer, x - d.u32(1), y, w);
-    const mr = sobelLoad(sobelLayout.$.grayBuffer, x + d.u32(1), y, w);
-    const bl = sobelLoad(sobelLayout.$.grayBuffer, x - d.u32(1), y + d.u32(1), w);
-    const b  = sobelLoad(sobelLayout.$.grayBuffer, x, y + d.u32(1), w);
-    const br = sobelLoad(sobelLayout.$.grayBuffer, x + d.u32(1), y + d.u32(1), w);
+    const tl = sobelLoad(x - d.u32(1), y - d.u32(1), w);
+    const t  = sobelLoad(x, y - d.u32(1), w);
+    const tr = sobelLoad(x + d.u32(1), y - d.u32(1), w);
+    const ml = sobelLoad(x - d.u32(1), y, w);
+    const mr = sobelLoad(x + d.u32(1), y, w);
+    const bl = sobelLoad(x - d.u32(1), y + d.u32(1), w);
+    const b  = sobelLoad(x, y + d.u32(1), w);
+    const br = sobelLoad(x + d.u32(1), y + d.u32(1), w);
 
     const gx = (tr + d.f32(2.0) * mr + br) - (tl + d.f32(2.0) * ml + bl);
     const gy = (bl + d.f32(2.0) * b  + br) - (tl + d.f32(2.0) * t  + tr);
