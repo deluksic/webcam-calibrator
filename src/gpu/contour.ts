@@ -52,10 +52,11 @@ export function createLabelInitPipeline(
     const idx = input.gid.y * d.u32(width) + input.gid.x;
     const edgeMag = labelInitLayout.$.edgeBuffer[idx];
 
-    // Edge pixel: use pixel index as label (unique seed)
+    // Edge pixel: use a common label (1) for all edge pixels
+    // JFA will propagate this label to connected neighbors
     // Non-edge: INVALID marker
     if (edgeMag > d.f32(0)) {
-      labelInitLayout.$.labelBuffer[idx] = idx;
+      labelInitLayout.$.labelBuffer[idx] = d.u32(1);
     } else {
       labelInitLayout.$.labelBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID);
     }

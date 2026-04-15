@@ -20,13 +20,22 @@ export function createLabelVizPipeline(
     const idx = py * d.u32(width) + px;
     const label = labelVizLayout.$.labelBuffer[idx];
 
-    // Pseudocolor based on label (shows connected components)
+    // Hash label to ~9 distinct color buckets
+    // Connected components will have labels from the same edge seed cluster
     const isValid = label !== d.u32(0xFFFFFFFF);
-    const labelF = d.f32(label);
-    const r = std.select(d.f32(0), (labelF / d.f32(7.0)) % d.f32(7.0) / d.f32(7.0), isValid);
-    const g = std.select(d.f32(0), (labelF / d.f32(49.0)) % d.f32(7.0) / d.f32(7.0), isValid);
-    const b = std.select(d.f32(0), (labelF / d.f32(343.0)) % d.f32(7.0) / d.f32(7.0), isValid);
-    return d.vec4f(r, g, b, d.f32(1));
+    const labelHash = (label / d.u32(10000)) % d.u32(9);
+    const c0 = d.f32(0.2);
+    const c1 = d.f32(0.8);
+    // 3x3 color matrix for 9 buckets
+    const r = std.select(c0, c1, labelHash < d.u32(3));
+    const g = std.select(c0, c1, (labelHash / d.u32(3)) % d.u32(3) !== d.u32(0));
+    const b = std.select(c0, c1, labelHash % d.u32(3) !== d.u32(0));
+    return d.vec4f(
+      std.select(d.f32(0.02), r, isValid),
+      std.select(d.f32(0.02), g, isValid),
+      std.select(d.f32(0.02), b, isValid),
+      d.f32(1)
+    );
   });
 
   return root.createRenderPipeline({
