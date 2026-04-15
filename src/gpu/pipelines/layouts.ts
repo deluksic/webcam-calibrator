@@ -34,12 +34,19 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
 
   // Display layout (edges)
   const edgesLayout = tgpu.bindGroupLayout({
-    sobelBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    filteredBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
   });
 
   // Histogram display layout
   const histogramDisplayLayout = tgpu.bindGroupLayout({
     histogram: { storage: histogramSchema, access: 'mutable' },
+  });
+
+  // Edge filter layout (compute: threshold filter)
+  const edgeFilterLayout = tgpu.bindGroupLayout({
+    sobelBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    threshold: { uniform: d.f32 },
+    filteredBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
   });
 
   return {
@@ -50,5 +57,6 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     histogramResetLayout,
     edgesLayout,
     histogramDisplayLayout,
+    edgeFilterLayout,
   };
 }

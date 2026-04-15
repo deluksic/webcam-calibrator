@@ -1,4 +1,4 @@
-// Edges pipeline: sobelBuffer → edges canvas
+// Edge render pipeline: filteredBuffer → edges canvas
 import { tgpu, d } from 'typegpu';
 import { common } from 'typegpu';
 
@@ -18,7 +18,7 @@ export function createEdgesPipeline(
     const px = d.u32(i.uv.x * d.f32(width));
     const py = d.u32(i.uv.y * d.f32(height));
     const idx = py * d.u32(width) + px;
-    const mag = edgesLayout.$.sobelBuffer[idx];
+    const mag = edgesLayout.$.filteredBuffer[idx];
     return d.vec4f(mag, mag, mag, d.f32(1));
   });
 

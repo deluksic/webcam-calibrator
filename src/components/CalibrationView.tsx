@@ -77,7 +77,7 @@ export default function CalibrationView() {
     const loop = async () => {
       if (video.readyState >= 2 && gpuRoot && pipeline) {
         // Process frame (all GPU work in single submit)
-        processFrame(gpuRoot, pipeline, video);
+        processFrame(gpuRoot, pipeline, video, threshold());
 
         // Wait for completion and read back histogram data
         const bins = await pipeline.histogramBuffer.read();

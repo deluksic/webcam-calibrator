@@ -9,6 +9,7 @@ import { createGrayPipeline } from './pipelines/grayPipeline';
 import { createSobelPipeline } from './pipelines/sobelPipeline';
 import { createHistogramResetPipeline, createHistogramAccumulatePipeline } from './pipelines/histogramPipelines';
 import { createEdgesPipeline } from './pipelines/edgesPipeline';
+import { createEdgeFilterPipeline } from './pipelines/edgeFilterPipeline';
 import { createHistogramRenderPipeline } from './pipelines/histogramRenderPipeline';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -45,6 +46,14 @@ export function createCameraPipeline(
     .createBuffer(d.arrayOf(d.f32, width * height))
     .$usage('storage');
 
+  const filteredBuffer = root
+    .createBuffer(d.arrayOf(d.f32, width * height))
+    .$usage('storage');
+
+  const thresholdBuffer = root
+    .createBuffer(d.f32)
+    .$usage('uniform');
+
   const histogramSchema = d.arrayOf(d.atomic(d.u32), HISTOGRAM_BINS);
   const histogramBuffer = root.createBuffer(histogramSchema).$usage('storage');
 
@@ -60,6 +69,7 @@ export function createCameraPipeline(
     histogramResetLayout,
     edgesLayout,
     histogramDisplayLayout,
+    edgeFilterLayout,
   } = createLayouts(root, histogramSchema);
 
   const copyPipeline = createCopyPipeline(root, copyLayout);
@@ -68,6 +78,7 @@ export function createCameraPipeline(
   const histogramResetPipeline = createHistogramResetPipeline(root, histogramResetLayout);
   const histogramPipeline = createHistogramAccumulatePipeline(root, histogramLayout, width, height);
   const edgesPipeline = createEdgesPipeline(root, edgesLayout, width, height, presentationFormat);
+  const edgeFilterPipeline = createEdgeFilterPipeline(root, edgeFilterLayout, width, height);
   const histogramDisplayPipeline = createHistogramRenderPipeline(root, histogramDisplayLayout, presentationFormat, width * height);
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -97,7 +108,13 @@ export function createCameraPipeline(
   });
 
   const edgesBindGroup = root.createBindGroup(edgesLayout, {
+    filteredBuffer: filteredBuffer,
+  });
+
+  const edgeFilterBindGroup = root.createBindGroup(edgeFilterLayout, {
     sobelBuffer: sobelBuffer,
+    threshold: thresholdBuffer,
+    filteredBuffer: filteredBuffer,
   });
 
   const histogramDisplayBindGroup = root.createBindGroup(histogramDisplayLayout, {
@@ -110,6 +127,8 @@ export function createCameraPipeline(
     grayTex,
     grayBuffer,
     sobelBuffer,
+    filteredBuffer,
+    thresholdBuffer,
     histogramBuffer,
     copyPipeline,
     copyLayoutTemplate,
@@ -123,6 +142,8 @@ export function createCameraPipeline(
     histogramComputeBindGroup,
     edgesPipeline,
     edgesBindGroup,
+    edgeFilterPipeline,
+    edgeFilterBindGroup,
     histogramDisplayPipeline,
     histogramDisplayBindGroup,
     sampler,
@@ -141,12 +162,16 @@ export type CameraPipeline = ReturnType<typeof createCameraPipeline>;
 export function processFrame(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
-  video: HTMLVideoElement
+  video: HTMLVideoElement,
+  threshold: number
 ) {
   const copyBindGroup = root.createBindGroup(pipeline.copyLayoutTemplate, {
     cameraTex: root.device.importExternalTexture({ source: video }),
     sampler: pipeline.sampler,
   });
+
+  // Update threshold uniform
+  root.device.queue.writeBuffer(pipeline.thresholdBuffer as unknown as GPUBuffer, 0, new Float32Array([threshold]));
 
   const enc = root.device.createCommandEncoder({ label: 'camera frame' });
 
@@ -163,7 +188,7 @@ export function processFrame(
   // COMPUTE: Gray → Sobel → Histogram
   // ═══════════════════════════════════════════════════════════════════════
   {
-    const computePass = enc.beginComputePass({ label: 'gray + sobel + histogram' });
+    const computePass = enc.beginComputePass({ label: 'gray + sobel + histogram + filter' });
 
     pipeline.grayPipeline
       .with(computePass)
@@ -183,6 +208,11 @@ export function processFrame(
     pipeline.histogramPipeline
       .with(computePass)
       .with(pipeline.histogramComputeBindGroup)
+      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+
+    pipeline.edgeFilterPipeline
+      .with(computePass)
+      .with(pipeline.edgeFilterBindGroup)
       .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
 
     computePass.end();
