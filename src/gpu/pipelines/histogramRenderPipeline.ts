@@ -8,7 +8,6 @@ export function createHistogramRenderPipeline(
   histogramDisplayLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   presentationFormat: GPUTextureFormat,
   totalPixels: number,
-  thresholdBin: number,
 ) {
   // Log-scale histogram with max referring to fraction of total pixels
   // Pre-compute the divisor: log2(maxCount + 1)
@@ -59,10 +58,6 @@ export function createHistogramRenderPipeline(
     };
   });
 
-  // Pre-bake the divisor into the shader (no runtime log2 needed)
-  const fragLogMax = d.f32(logMaxDivisor);
-  const fragThresholdBin = d.u32(thresholdBin);
-
   const histogramFrag = tgpu.fragmentFn({
     in: { uv: d.location(0, d.vec2f), barIndex: d.location(1, d.f32) },
     out: d.vec4f,
@@ -71,14 +66,14 @@ export function createHistogramRenderPipeline(
     const bin = d.u32(i.barIndex);
     const countU32 = atomicLoad(histogramDisplayLayout.$.histogram[bin]);
 
-    // Log-scale normalization with explicit u32→f32 conversion
-    // log2(count + 1) / logMax where count is u32
+    // Log-scale normalization
     const countF = d.f32(countU32);
     const logCountPlus1 = log2(countF + d.f32(1.0));
-    const normalizedHeight = logCountPlus1 / fragLogMax;
+    const logMax = log2(d.f32(maxCount) + d.f32(1.0));
+    const normalizedHeight = logCountPlus1 / logMax;
 
     // Mark threshold bar red
-    const isThreshold = bin >= fragThresholdBin;
+    const isThreshold = bin >= histogramDisplayLayout.$.thresholdBin;
 
     // Clip bars above their height (make them empty/transparent)
     if (i.uv.y > normalizedHeight) {

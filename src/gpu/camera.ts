@@ -83,7 +83,7 @@ export function createCameraPipeline(
   const histogramPipeline = createHistogramAccumulatePipeline(root, histogramLayout, width, height);
   const edgesPipeline = createEdgesPipeline(root, edgesLayout, width, height, presentationFormat);
   const edgeFilterPipeline = createEdgeFilterPipeline(root, edgeFilterLayout, width, height);
-  const histogramDisplayPipeline = createHistogramRenderPipeline(root, histogramDisplayLayout, presentationFormat, width * height, 0);
+  const histogramDisplayPipeline = createHistogramRenderPipeline(root, histogramDisplayLayout, presentationFormat, width * height);
 
   // ═══════════════════════════════════════════════════════════════════════
   // BIND GROUPS
