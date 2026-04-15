@@ -20,10 +20,12 @@ export function createLabelVizPipeline(
     const idx = py * d.u32(width) + px;
     const label = labelVizLayout.$.labelBuffer[idx];
 
-    // White for valid labels (edge pixels), dark for invalid
-    const isValid = label !== d.u32(0xFFFFFFFF);
-    const color = std.select(d.f32(0), d.f32(1), isValid);
-    return d.vec4f(color, color, color, d.f32(1));
+    // Pseudocolor based on label (shows connected components)
+    const labelF = d.f32(label);
+    const r = std.select(d.f32(0), (labelF / d.f32(7.0)) % d.f32(7.0) / d.f32(7.0), isValid);
+    const g = std.select(d.f32(0), (labelF / d.f32(49.0)) % d.f32(7.0) / d.f32(7.0), isValid);
+    const b = std.select(d.f32(0), (labelF / d.f32(343.0)) % d.f32(7.0) / d.f32(7.0), isValid);
+    return d.vec4f(r, g, b, d.f32(1));
   });
 
   return root.createRenderPipeline({
