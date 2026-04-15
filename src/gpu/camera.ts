@@ -386,7 +386,14 @@ export function processFrame(
   // Single command encoder for all passes
   const enc = root.device.createCommandEncoder({ label: 'camera frame' });
 
-  // ── Compute passes ──────────────────────────────────────────────────────
+  // ── Render pass: Copy external → grayTex (must happen FIRST before compute reads) ──
+  pipeline.copyPipeline
+    .with(enc)
+    .withColorAttachment({ view: pipeline.grayTex.createView() })
+    .with(copyBindGroup)
+    .draw(3);
+
+  // ── Compute passes ───────────────────────────────────────���──────────────
   {
     const computePass = enc.beginComputePass({ label: 'gray + sobel + histogram' });
 
@@ -417,14 +424,7 @@ export function processFrame(
     computePass.end();
   }
 
-  // ── Render passes (using .with(encoder).withColorAttachment pattern) ────
-
-  // 1. Copy external → grayTex
-  pipeline.copyPipeline
-    .with(enc)
-    .withColorAttachment({ view: pipeline.grayTex.createView() })
-    .with(copyBindGroup)
-    .draw(3);
+  // ── Render passes ────────────────────────────────────────────────────────
 
   // 2. Render edges to canvas
   pipeline.edgesPipeline
