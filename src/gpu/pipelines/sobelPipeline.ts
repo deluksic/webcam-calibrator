@@ -8,13 +8,12 @@ export function createSobelPipeline(
   width: number,
   height: number,
 ) {
-  function sobelLoad(px: number, py: number, cx: number, cy: number, w: number, h: number) {
+  function sobelLoad(px: d.i32, py: d.i32, w: d.u32, h: d.u32) {
     'use gpu';
-    // Replicate edge pixels: return center pixel for any out-of-bounds access
-    if (px < 0 || px >= w || py < 0 || py >= h) {
-      return sobelLayout.$.grayBuffer[cy * w + cx];
-    }
-    return sobelLayout.$.grayBuffer[py * w + px];
+    // Clamp to valid [0, w-1] x [0, h-1] for same-padding
+    const clampedX = px < d.i32(0) ? d.u32(0) : (px >= d.i32(w) ? w - d.u32(1) : d.u32(px));
+    const clampedY = py < d.i32(0) ? d.u32(0) : (py >= d.i32(h) ? h - d.u32(1) : d.u32(py));
+    return sobelLayout.$.grayBuffer[clampedY * w + clampedX];
   }
 
   const sobelKernel = tgpu.computeFn({
@@ -29,14 +28,17 @@ export function createSobelPipeline(
     const w = d.u32(width);
     const h = d.u32(height);
 
-    const tl = sobelLoad(x - d.u32(1), y - d.u32(1), x, y, w, h);
-    const t  = sobelLoad(x, y - d.u32(1), x, y, w, h);
-    const tr = sobelLoad(x + d.u32(1), y - d.u32(1), x, y, w, h);
-    const ml = sobelLoad(x - d.u32(1), y, x, y, w, h);
-    const mr = sobelLoad(x + d.u32(1), y, x, y, w, h);
-    const bl = sobelLoad(x - d.u32(1), y + d.u32(1), x, y, w, h);
-    const b  = sobelLoad(x, y + d.u32(1), x, y, w, h);
-    const br = sobelLoad(x + d.u32(1), y + d.u32(1), x, y, w, h);
+    const ix = d.i32(x);
+    const iy = d.i32(y);
+
+    const tl = sobelLoad(ix - d.i32(1), iy - d.i32(1), w, h);
+    const t  = sobelLoad(ix, iy - d.i32(1), w, h);
+    const tr = sobelLoad(ix + d.i32(1), iy - d.i32(1), w, h);
+    const ml = sobelLoad(ix - d.i32(1), iy, w, h);
+    const mr = sobelLoad(ix + d.i32(1), iy, w, h);
+    const bl = sobelLoad(ix - d.i32(1), iy + d.i32(1), w, h);
+    const b  = sobelLoad(ix, iy + d.i32(1), w, h);
+    const br = sobelLoad(ix + d.i32(1), iy + d.i32(1), w, h);
 
     const gx = (tr + d.f32(2.0) * mr + br) - (tl + d.f32(2.0) * ml + bl);
     const gy = (bl + d.f32(2.0) * b  + br) - (tl + d.f32(2.0) * t  + tr);
