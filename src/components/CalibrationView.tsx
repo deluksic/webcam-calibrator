@@ -1,90 +1,100 @@
-import { createSignal, createMemo, For } from 'solid-js';
+import { createSignal, createMemo, onCleanup } from 'solid-js';
 import { initGPU } from '../gpu/init';
-import { processFrameAsync, type CameraPipeline, DisplayMode } from '../gpu/camera';
+import { createCameraPipeline, computeThreshold, processFrame, type CameraPipeline } from '../gpu/camera';
 import styles from './CalibrationView.module.css';
 
 export default function CalibrationView() {
   const [videoEl, setVideoEl] = createSignal<HTMLVideoElement | undefined>(undefined);
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement | undefined>(undefined);
+  const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement | undefined>(undefined);
   const [frameSize, setFrameSize] = createSignal({ w: 1280, h: 720 });
   const [stream, setStream] = createSignal<MediaStream | null>(null);
-  const [displayMode, setDisplayMode] = createSignal<DisplayMode>('edges');
   const [threshold, setThreshold] = createSignal<number>(0.0);
   const [histogramData, setHistogramData] = createSignal<number[]>(new Array(256).fill(0));
+  const [gpuReady, setGpuReady] = createSignal(false);
+
+  let pipeline: CameraPipeline | null = null;
+  let videoCallbackId: number | null = null;
 
   // Initialize GPU
-  const gpuRoot = createMemo(() => initGPU());
+  const root = createMemo(async () => {
+    try {
+      const gpu = await initGPU();
+      setGpuReady(true);
+      return gpu;
+    } catch (e) {
+      console.error('GPU init failed:', e);
+      return null;
+    }
+  });
 
   // Request camera stream
   createMemo(async () => {
-    const mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' },
-      audio: false,
-    });
-    setStream(mediaStream);
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' },
+        audio: false,
+      });
+      setStream(mediaStream);
 
-    const track = mediaStream.getVideoTracks()[0];
-    const settings = track.getSettings();
-    setFrameSize({
-      w: (settings.width ?? 1280) as number,
-      h: (settings.height ?? 720) as number,
-    });
+      const track = mediaStream.getVideoTracks()[0];
+      const settings = track.getSettings();
+      setFrameSize({
+        w: (settings.width ?? 1280) as number,
+        h: (settings.height ?? 720) as number,
+      });
+    } catch (e) {
+      console.error('Camera access failed:', e);
+    }
   });
 
-  // Set canvas size and start render loop when ready
-  createMemo(() => {
-    const root = gpuRoot();
+  // Set up pipeline and render loop when all elements are ready
+  createMemo(async () => {
     const video = videoEl();
     const canvas = canvasEl();
-    if (!root || !video || !canvas) return;
+    const histCanvas = histCanvasEl();
+    const gpuRoot = root();
+
+    if (!gpuRoot || !video || !canvas || !histCanvas) return;
 
     const size = frameSize();
     const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
 
-    // Dynamically import pipeline factory
-    import('../gpu/camera').then(async ({ createCameraPipeline, computeThreshold }) => {
-      const p = createCameraPipeline(root, canvas, size.w, size.h, presentationFormat);
+    // Create pipeline with separate histogram canvas
+    pipeline = createCameraPipeline(gpuRoot, canvas, histCanvas, size.w, size.h, presentationFormat);
 
-      // Set canvas dimensions
-      canvas.width = p.width;
-      canvas.height = p.height;
+    // Set canvas dimensions
+    canvas.width = pipeline.width;
+    canvas.height = pipeline.height;
+    histCanvas.width = pipeline.histWidth;
+    histCanvas.height = pipeline.histHeight;
 
-      // Attach video stream
-      video.srcObject = stream();
-      await video.play().catch(() => {});
+    // Attach video stream
+    video.srcObject = stream();
+    await video.play().catch(() => {});
 
-      // Render loop using requestVideoFrameCallback
-      const loop = async () => {
-        if (video.readyState >= 2) {
-          await processFrameAsync(root, p, video, displayMode());
+    // Render loop using requestVideoFrameCallback
+    const loop = async () => {
+      if (video.readyState >= 2 && gpuRoot && pipeline) {
+        // Process frame (all GPU work in single submit)
+        processFrame(gpuRoot, pipeline, video);
 
-          // Update UI with histogram data
-          const bins = await p.histogramBuffer.read();
-          console.log('Histogram:', bins.slice(0, 20));
-          console.log('Non-zero bins:', bins.filter(x => x > 0).length);
-          console.log('Total:', bins.reduce((a, b) => a + b, 0));
-          console.log('Bin 0:', bins[0], 'Bin 1:', bins[1], 'Bin 2:', bins[2], 'Bin 3:', bins[3], 'Bin 4:', bins[4]);
-
-          const thresh = computeThreshold(bins, 0.85);
-          console.log('Threshold:', thresh);
-          setHistogramData(bins);
-          setThreshold(thresh);
-        }
-        video.requestVideoFrameCallback(loop);
-      };
-      video.requestVideoFrameCallback(loop);
-    });
+        // Wait for completion and read back histogram data
+        const bins = await pipeline.histogramBuffer.read();
+        const thresh = computeThreshold(bins, 0.85);
+        setHistogramData(bins);
+        setThreshold(thresh);
+      }
+      videoCallbackId = video.requestVideoFrameCallback(loop);
+    };
+    videoCallbackId = video.requestVideoFrameCallback(loop);
   });
 
-  // Create array of 256 indices for rendering histogram bars
-  const histogramBars = createMemo(() => {
-    const bins = histogramData();
-    const maxCount = Math.max(...bins, 1);
-    return bins.map((count, i) => ({
-      index: i,
-      height: Math.round((count / maxCount) * 100),
-      isThreshold: Math.abs(i / 256 - threshold()) < 0.005,
-    }));
+  onCleanup(() => {
+    if (videoCallbackId !== null) {
+      // Note: requestVideoFrameCallback can't be cancelled directly
+      // The cleanup happens automatically when the video element is removed
+    }
   });
 
   return (
@@ -97,40 +107,23 @@ export default function CalibrationView() {
             class={styles.feedCanvas}
             style={{ width: '640px', height: '360px' }}
           />
-          <div class={styles.histogramContainer}>
-            <div class={styles.thresholdLabel}>Threshold (85th percentile)</div>
-            <div class={styles.thresholdValue}>
+        </div>
+        <div class={styles.feedPanel}>
+          <span class={styles.feedLabel}>Edge Detection</span>
+          <canvas
+            ref={setHistCanvasEl}
+            class={styles.histogramCanvas}
+            style={{ width: '512px', height: '120px' }}
+          />
+          <div class={styles.histogramInfo}>
+            <span class={styles.thresholdLabel}>85th Percentile Threshold</span>
+            <span class={styles.thresholdValue}>
               {(threshold() * 255).toFixed(1)} / 255 <span>({(threshold() * 100).toFixed(1)}%)</span>
-            </div>
+            </span>
           </div>
-          <div class={styles.feedCanvas} style={{
-            'width': '512px',
-            'height': '120px',
-            'align-items': 'flex-end',
-            background: '#1a1a2e',
-            'padding-top': '8px',
-            gap: '0',
-          }}>
-            <For each={histogramBars()}>
-              {(bar) => (
-                <div style={{
-                  width: '2px',
-                  'height': `${bar().height}%`,
-                  'background-color': bar().isThreshold ? '#ff4a4a' : '#4a9eff',
-                  'min-height': bar().height > 0 ? '1px' : '0',
-                }} />
-              )}
-            </For>
-          </div>
-          <video ref={setVideoEl} style={{ display: 'none' }} />
         </div>
       </div>
-      <div class={styles.controls}>
-        <button onClick={() => setDisplayMode('edges')} class={displayMode() === 'edges' ? styles.active : ''}>Edges</button>
-        <button onClick={() => setDisplayMode('sobel')} class={displayMode() === 'sobel' ? styles.active : ''}>Sobel</button>
-        <button onClick={() => setDisplayMode('grayscale')} class={displayMode() === 'grayscale' ? styles.active : ''}>Grayscale</button>
-        <button onClick={() => setDisplayMode('original')} class={displayMode() === 'original' ? styles.active : ''}>Original</button>
-      </div>
+      <video ref={setVideoEl} style={{ display: 'none' }} />
     </div>
   );
 }
