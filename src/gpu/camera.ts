@@ -417,60 +417,28 @@ export function processFrame(
     computePass.end();
   }
 
-  // ── Render passes ──────────────────────────────────────────────────────
-  {
-    const copyPass = enc.beginRenderPass({
-      colorAttachments: [{
-        view: pipeline.grayTex.createView(),
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
+  // ── Render passes (using .with(encoder).withColorAttachment pattern) ────
 
-    // 1. Copy external → grayTex
-    pipeline.copyPipeline
-      .with(copyPass)
-      .with(copyBindGroup)
-      .draw(3);
+  // 1. Copy external → grayTex
+  pipeline.copyPipeline
+    .with(enc)
+    .withColorAttachment({ view: pipeline.grayTex.createView() })
+    .with(copyBindGroup)
+    .draw(3);
 
-    copyPass.end();
-  }
+  // 2. Render edges to canvas
+  pipeline.edgesPipeline
+    .with(enc)
+    .withColorAttachment({ view: pipeline.context })
+    .with(pipeline.edgesBindGroup)
+    .draw(3);
 
-  {
-    const renderPass = enc.beginRenderPass({
-      colorAttachments: [{
-        view: pipeline.context,
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
-
-    // 2. Render edges to canvas
-    pipeline.edgesPipeline
-      .with(renderPass)
-      .with(pipeline.edgesBindGroup)
-      .draw(3);
-
-    renderPass.end();
-  }
-
-  {
-    const histPass = enc.beginRenderPass({
-      colorAttachments: [{
-        view: pipeline.histContext,
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
-
-    // 3. Render histogram bars (256 instances × 6 vertices)
-    pipeline.histogramDisplayPipeline
-      .with(histPass)
-      .with(pipeline.histogramDisplayBindGroup)
-      .draw(6, HISTOGRAM_BINS);
-
-    histPass.end();
-  }
+  // 3. Render histogram bars (256 instances × 6 vertices)
+  pipeline.histogramDisplayPipeline
+    .with(enc)
+    .withColorAttachment({ view: pipeline.histContext })
+    .with(pipeline.histogramDisplayBindGroup)
+    .draw(6, HISTOGRAM_BINS);
 
   root.device.queue.submit([enc.finish()]);
 }
