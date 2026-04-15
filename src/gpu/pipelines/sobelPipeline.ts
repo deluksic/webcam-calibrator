@@ -15,7 +15,6 @@ export function createSobelPipeline(
     const cy2 = clamp(d.i32(py), d.i32(0), d.i32(h) - 1);
     return sobelLayout.$.grayBuffer[cy2 * w + cx2];
   }
-  }
 
   const sobelKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
