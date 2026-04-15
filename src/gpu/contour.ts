@@ -92,35 +92,35 @@ export function createJfaPropagatePipeline(
     const offset = offsetUniform.$;
     const wU32 = d.u32(w);
 
-    // Current pixel's label
+    // Check 4 neighbors (up, down, left, right) - simpler for debugging
     let bestLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x)];
 
-    // Check 8 neighbors (inlined to avoid nested function)
-    const offsets = [
-      [-1, -1], [0, -1], [1, -1],
-      [-1, 0],           [1, 0],
-      [-1, 1],  [0, 1],  [1, 1],
-    ];
-
-    for (let i = 0; i < 8; i++) {
-      const ox = offsets[i][0];
-      const oy = offsets[i][1];
-      const nx = x + ox * offset;
-      const ny = y + oy * offset;
-      // Clamp to bounds
-      let sx = nx;
-      if (nx < d.i32(0)) { sx = d.i32(0); }
-      if (nx >= w) { sx = w - d.i32(1); }
-      let sy = ny;
-      if (ny < d.i32(0)) { sy = d.i32(0); }
-      if (ny >= h) { sy = h - d.i32(1); }
-      const nIdx = d.u32(sy) * wU32 + d.u32(sx);
-      const nLabel = jfaLayout.$.readBuffer[nIdx];
-      if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
-        // Take the minimum label (nearest seed in JFA)
-        if (nLabel < bestLabel) {
-          bestLabel = nLabel;
-        }
+    // Neighbor: up
+    if (y - offset >= d.i32(0)) {
+      const nLabel = jfaLayout.$.readBuffer[d.u32(y - offset) * wU32 + d.u32(x)];
+      if (nLabel !== d.u32(COMPONENT_LABEL_INVALID) && nLabel < bestLabel) {
+        bestLabel = nLabel;
+      }
+    }
+    // Neighbor: down
+    if (y + offset < h) {
+      const nLabel = jfaLayout.$.readBuffer[d.u32(y + offset) * wU32 + d.u32(x)];
+      if (nLabel !== d.u32(COMPONENT_LABEL_INVALID) && nLabel < bestLabel) {
+        bestLabel = nLabel;
+      }
+    }
+    // Neighbor: left
+    if (x - offset >= d.i32(0)) {
+      const nLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x - offset)];
+      if (nLabel !== d.u32(COMPONENT_LABEL_INVALID) && nLabel < bestLabel) {
+        bestLabel = nLabel;
+      }
+    }
+    // Neighbor: right
+    if (x + offset < w) {
+      const nLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x + offset)];
+      if (nLabel !== d.u32(COMPONENT_LABEL_INVALID) && nLabel < bestLabel) {
+        bestLabel = nLabel;
       }
     }
 
