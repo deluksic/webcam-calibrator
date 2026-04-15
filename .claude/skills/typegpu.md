@@ -119,6 +119,48 @@ std.textureLoad(layout.$.texture, coords, 0);
 std.textureStore(layout.$.storageTex, coords, value);
 ```
 
+## DSL Types in Shaders
+
+Inside `computeFn`, use DSL types: `d.i32()`, `d.f32()`, `d.u32()`, etc. to wrap values.
+
+Outside `computeFn` (at call sites, parameter types), always use `number`:
+```typescript
+// Inside computeFn body
+const x = d.i32(input.gid.x);
+
+// At call sites, parameters typed as number
+const checkNeighbor = (ox: number, oy: number) => {
+  // ...
+};
+checkNeighbor(-1, -1);
+```
+
+**Never use `d.i32` for TypeScript parameter types** — it only exists in the shader DSL context.
+
+## No Nested Functions
+
+TypeGPU's shader sublanguage does not support nested function declarations. If you need repeated logic, call the same function multiple times or unroll manually:
+
+```typescript
+// ✗ Nested functions NOT allowed
+const kernel = tgpu.computeFn(...)((input) => {
+  'use gpu';
+  const helper = (a) => { ... };  // ERROR
+});
+
+// ✓ Use explicit repeated calls or tgpu.unroll with no continue
+checkNeighbor(-1, -1);
+checkNeighbor(0, -1);
+checkNeighbor(1, -1);
+// ... repeat for all needed neighbors
+```
+
+## tgpu.unroll Limitations
+
+- `tgpu.unroll` requires known compile-time bounds
+- **Cannot contain `continue` statements** — the WebGPU shader compiler will refuse to unroll
+- If you need conditional logic with `continue`, rewrite with explicit iterations or separate calls
+
 ## Key Differences from v0.10
 
 1. Named export `{ tgpu }` instead of `import * as tgpu`

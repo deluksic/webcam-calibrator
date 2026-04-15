@@ -94,11 +94,18 @@ export function createJfaPropagatePipeline(
     // Current pixel's label
     let bestLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x)];
 
-    // Helper to check neighbor and update best label
-    const checkNeighbor = (ox: number, oy: number) => {
+    // Check 8 neighbors (inlined to avoid nested function)
+    const offsets = [
+      [-1, -1], [0, -1], [1, -1],
+      [-1, 0],           [1, 0],
+      [-1, 1],  [0, 1],  [1, 1],
+    ];
+
+    for (let i = 0; i < 8; i++) {
+      const ox = offsets[i][0];
+      const oy = offsets[i][1];
       const nx = x + ox * offset;
       const ny = y + oy * offset;
-      // Clamp to bounds for safe read
       const sx = nx < d.i32(0) ? d.i32(0) : (nx >= w ? w - d.i32(1) : nx);
       const sy = ny < d.i32(0) ? d.i32(0) : (ny >= h ? h - d.i32(1) : ny);
       const nIdx = d.u32(sy) * wU32 + d.u32(sx);
@@ -106,17 +113,7 @@ export function createJfaPropagatePipeline(
       const isValid = nLabel !== d.u32(COMPONENT_LABEL_INVALID);
       const isBetter = isValid && (bestLabel === d.u32(COMPONENT_LABEL_INVALID) || nLabel < bestLabel);
       bestLabel = isBetter ? nLabel : bestLabel;
-    };
-
-    // Check 8 neighbors (skip (0,0) by checking each explicitly)
-    checkNeighbor(d.i32(-1), d.i32(-1));
-    checkNeighbor(d.i32(0), d.i32(-1));
-    checkNeighbor(d.i32(1), d.i32(-1));
-    checkNeighbor(d.i32(-1), d.i32(0));
-    checkNeighbor(d.i32(1), d.i32(0));
-    checkNeighbor(d.i32(-1), d.i32(1));
-    checkNeighbor(d.i32(0), d.i32(1));
-    checkNeighbor(d.i32(1), d.i32(1));
+    }
 
     jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = bestLabel;
   });
