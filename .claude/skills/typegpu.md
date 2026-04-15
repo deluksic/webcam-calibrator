@@ -137,9 +137,9 @@ checkNeighbor(-1, -1);
 
 **Never use `d.i32` for TypeScript parameter types** — it only exists in the shader DSL context.
 
-## No Nested Functions
+## No Nested Functions in Shaders
 
-TypeGPU's shader sublanguage does not support nested function declarations. If you need repeated logic, call the same function multiple times or unroll manually:
+TypeGPU's shader sublanguage does not support nested function declarations inside `computeFn`. If you need repeated logic:
 
 ```typescript
 // ✗ Nested functions NOT allowed
@@ -148,11 +148,11 @@ const kernel = tgpu.computeFn(...)((input) => {
   const helper = (a) => { ... };  // ERROR
 });
 
-// ✓ Use explicit repeated calls or tgpu.unroll with no continue
-checkNeighbor(-1, -1);
-checkNeighbor(0, -1);
-checkNeighbor(1, -1);
-// ... repeat for all needed neighbors
+// ✓ Use a for loop over an offset array (no continue)
+const offsets = [[-1,-1], [0,-1], [1,-1], [-1,0], [1,0], [-1,1], [0,1], [1,1]];
+for (let i = 0; i < 8; i++) {
+  // inline logic here
+}
 ```
 
 ## tgpu.unroll Limitations
