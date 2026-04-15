@@ -28,25 +28,16 @@ export function createHistogramRenderPipeline(
     'use gpu';
     // Vertices: 0,1,2 (first triangle) + 3,4,5 (second triangle)
     // Mapping to quad: (0,0), (1,0), (1,1), (0,0), (1,1), (0,1)
-    // Pattern tables indexed by vertexIndex
     const idx = i.vertexIndex;
-    const two = d.u32(2);
-    const six = d.u32(6);
 
-    // localU pattern: [0, 1, 1, 0, 1, 0] for idx 0,1,2,3,4,5
-    // Simpler: U = 0 for idx=0,3; U = 1 for idx=1,2,4; U = anything for idx=5
-    // Actually: idx=0->0, idx=1->1, idx=2->1, idx=3->0, idx=4->1, idx=5->0
-    // This is: U = (idx < 3) ? (idx % 2 == 0 ? 0 : 1) : (idx == 3 ? 0 : (idx == 4 ? 1 : 0))
-    // Simpler: U = 1 - (idx % 2), then fix idx=4,5
-    // Let's just use explicit checks
     let localU = d.f32(0.0);
     let localV = d.f32(0.0);
 
-    if (idx == d.u32(0)) { localU = d.f32(0.0); localV = d.f32(0.0); }
-    else if (idx == d.u32(1)) { localU = d.f32(1.0); localV = d.f32(0.0); }
-    else if (idx == d.u32(2)) { localU = d.f32(1.0); localV = d.f32(1.0); }
-    else if (idx == d.u32(3)) { localU = d.f32(0.0); localV = d.f32(0.0); }
-    else if (idx == d.u32(4)) { localU = d.f32(1.0); localV = d.f32(1.0); }
+    if (idx === d.u32(0)) { localU = d.f32(0.0); localV = d.f32(0.0); }
+    else if (idx === d.u32(1)) { localU = d.f32(1.0); localV = d.f32(0.0); }
+    else if (idx === d.u32(2)) { localU = d.f32(1.0); localV = d.f32(1.0); }
+    else if (idx === d.u32(3)) { localU = d.f32(0.0); localV = d.f32(0.0); }
+    else if (idx === d.u32(4)) { localU = d.f32(1.0); localV = d.f32(1.0); }
     else { localU = d.f32(0.0); localV = d.f32(1.0); }
 
     const histW = d.f32(HIST_WIDTH);
@@ -57,7 +48,8 @@ export function createHistogramRenderPipeline(
     const barPxX = (d.f32(i.instanceIndex) * barW) + (localU * barW);
     const barPxY = localV * histH;
     const clipX = (barPxX / histW) * d.f32(2.0) - d.f32(1.0);
-    const clipY = d.f32(1.0) - (barPxY / histH) * d.f32(2.0);
+    // Clip space: -1 (bottom) to 1 (top)
+    const clipY = (barPxY / histH) * d.f32(2.0) - d.f32(1.0);
 
     return {
       uv: d.vec2f(localU, localV),
