@@ -33,7 +33,7 @@ export function createCameraPipeline(
   // Intermediate RGBA texture for external → usable format
   const grayTex = root
     .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
-    .$usage('storage', 'sampled');
+    .$usage('storage', 'sampled', 'render');
 
   const sampler = root.createSampler({ minFilter: 'linear', magFilter: 'linear' });
 
@@ -61,18 +61,18 @@ export function createCameraPipeline(
   // Gray tex → buffer layout
   const grayTexToBufferLayout = tgpu.bindGroupLayout({
     grayTex: { texture: d.texture2d(d.f32), access: 'readonly' },
-    grayBuffer: { storage: d.arrayOf(d.f32, width * height), access: 'mutable' },
+    grayBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
   });
 
   // Sobel layout (compute: buffer → buffer)
   const sobelLayout = tgpu.bindGroupLayout({
-    grayBuffer: { storage: d.arrayOf(d.f32, width * height), access: 'readonly' },
-    sobelBuffer: { storage: d.arrayOf(d.f32, width * height), access: 'mutable' },
+    grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    sobelBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
   });
 
   // Histogram layout (compute: buffer → atomic buffer)
   const histogramLayout = tgpu.bindGroupLayout({
-    sobelBuffer: { storage: d.arrayOf(d.f32, width * height), access: 'readonly' },
+    sobelBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
     histogram: { storage: histogramSchema, access: 'mutable' },
   });
 
@@ -83,7 +83,7 @@ export function createCameraPipeline(
 
   // Display layout (edges)
   const edgesLayout = tgpu.bindGroupLayout({
-    sobelBuffer: { storage: d.arrayOf(d.f32, width * height), access: 'readonly' },
+    sobelBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
   });
 
   // Histogram display layout
@@ -233,19 +233,27 @@ export function createCameraPipeline(
     out: {
       uv: d.vec2f,
       barIndex: d.location(1, d.f32),
+      position: d.builtin.position,
     },
   })((i) => {
     'use gpu';
-    // 6 vertices per bar (2 triangles forming a quad)
     const vertInBar = i.vertexIndex % d.u32(6);
-
-    // UV coordinates for this vertex within the bar quad
     const localU = d.f32(vertInBar % d.u32(2));
     const localV = d.f32(vertInBar / d.u32(2));
+
+    const histW = d.f32(HIST_WIDTH);
+    const histH = d.f32(HIST_HEIGHT);
+    const numBars = d.f32(HISTOGRAM_BINS);
+    const barW = histW / numBars;
+    const barPxX = (d.f32(i.instanceIndex) * barW) + (localU * barW);
+    const barPxY = localV * histH;
+    const clipX = (barPxX / histW) * d.f32(2.0) - d.f32(1.0);
+    const clipY = d.f32(1.0) - (barPxY / histH) * d.f32(2.0);
 
     return {
       uv: d.vec2f(localU, localV),
       barIndex: d.f32(i.instanceIndex),
+      position: d.vec4f(clipX, clipY, d.f32(0), d.f32(1)),
     };
   });
 
