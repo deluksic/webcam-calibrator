@@ -77,15 +77,15 @@ export function createCameraPipeline(
     .createBuffer(d.arrayOf(d.u32, width * height))
     .$usage('storage');
 
-  // Debug: buffer to check propagation wrote something
-  const jfaDebugBuffer = root
-    .createBuffer(d.u32)
+  // Debug: separate buffer for neighbor count (no ping-pong)
+  const debugBuffer = root
+    .createBuffer(d.arrayOf(d.u32, width * height))
     .$usage('storage');
 
   // JFA layouts and pipelines
-  const { labelInitLayout, jfaLayout } = createContourLayouts(root);
+  const { labelInitLayout, jfaLayout, debugLayout } = createContourLayouts(root);
   const labelInitPipeline = createLabelInitPipeline(root, labelInitLayout, width, height);
-  const jfaResult = createJfaPropagatePipeline(root, jfaLayout, width, height);
+  const jfaResult = createJfaPropagatePipeline(root, jfaLayout, debugLayout, width, height);
   const jfaPropagatePipeline = jfaResult.pipeline;
   const jfaDebugPipeline = jfaResult.debugPipeline;
 
@@ -108,6 +108,12 @@ export function createCameraPipeline(
       offset: jfaOffsetBuffer,
     }),
   ];
+
+  // Debug bind group: reads init data, writes to debug buffer
+  const debugBindGroup = root.createBindGroup(debugLayout, {
+    readBuffer: labelBuffer0,
+    debugBuffer: debugBuffer,
+  });
 
   // ═══════════════════════════════════════════════════════════════════════
   // LAYOUTS & PIPELINES
@@ -253,7 +259,8 @@ export function createCameraPipeline(
     jfaDebugPipeline,
     jfaOffsetBuffer,
     jfaPingPongBindGroups,
-    jfaDebugBuffer,
+    debugBuffer,
+    debugBindGroup,
   };
 }
 
@@ -328,10 +335,10 @@ export function processFrame(
     if (displayMode === 'debug') {
       pipeline.jfaDebugPipeline
         .with(computePass)
-        .with(pipeline.jfaPingPongBindGroups[0])
+        .with(pipeline.debugBindGroup)
         .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
-      // Show debug output (neighbor count in labelBuffer1)
-      finalLabelBuffer = pipeline.labelBuffer1;
+      // Show debug output
+      finalLabelBuffer = pipeline.debugBuffer;
       computePass.end();
     } else {
       // JFA propagate passes

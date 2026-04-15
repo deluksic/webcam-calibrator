@@ -28,7 +28,13 @@ export function createContourLayouts(root: Awaited<ReturnType<typeof tgpu.init>>
     offset: { uniform: d.i32 },
   });
 
-  return { labelInitLayout, jfaLayout };
+  // Debug layout: reads init data, writes to separate debug buffer
+  const debugLayout = tgpu.bindGroupLayout({
+    readBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
+    debugBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
+  });
+
+  return { labelInitLayout, jfaLayout, debugLayout };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,6 +80,7 @@ export function createLabelInitPipeline(
 export function createJfaPropagatePipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   jfaLayout: ReturnType<typeof tgpu.bindGroupLayout>,
+  debugLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
 ) {
@@ -144,43 +151,43 @@ export function createJfaPropagatePipeline(
     const offset = d.i32(1);
     const wU32 = d.u32(w);
 
-    // Read current label
-    const myLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x)];
+    // Read current label from init buffer
+    const myLabel = debugLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x)];
 
     // Count valid neighbors (this tests if reads are working)
     let neighborCount = d.u32(0);
 
     // Neighbor: up
     if (y - offset >= d.i32(0)) {
-      const nLabel = jfaLayout.$.readBuffer[d.u32(y - offset) * wU32 + d.u32(x)];
+      const nLabel = debugLayout.$.readBuffer[d.u32(y - offset) * wU32 + d.u32(x)];
       if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
         neighborCount = neighborCount + d.u32(1);
       }
     }
     // Neighbor: down
     if (y + offset < h) {
-      const nLabel = jfaLayout.$.readBuffer[d.u32(y + offset) * wU32 + d.u32(x)];
+      const nLabel = debugLayout.$.readBuffer[d.u32(y + offset) * wU32 + d.u32(x)];
       if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
         neighborCount = neighborCount + d.u32(1);
       }
     }
     // Neighbor: left
     if (x - offset >= d.i32(0)) {
-      const nLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x - offset)];
+      const nLabel = debugLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x - offset)];
       if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
         neighborCount = neighborCount + d.u32(1);
       }
     }
     // Neighbor: right
     if (x + offset < w) {
-      const nLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x + offset)];
+      const nLabel = debugLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x + offset)];
       if (nLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
         neighborCount = neighborCount + d.u32(1);
       }
     }
 
-    // Write count to debug output buffer
-    jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = neighborCount;
+    // Write count to debug buffer
+    debugLayout.$.debugBuffer[d.u32(y) * wU32 + d.u32(x)] = neighborCount;
   });
 
   const debugPipeline = root.createComputePipeline({ compute: debugKernel });
