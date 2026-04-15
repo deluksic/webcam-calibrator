@@ -1,6 +1,6 @@
 // Sobel pipeline: grayBuffer → sobelBuffer
 import { tgpu, d } from 'typegpu';
-import { sqrt } from 'typegpu/std';
+import { sqrt, select } from 'typegpu/std';
 
 export function createSobelPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -11,8 +11,8 @@ export function createSobelPipeline(
   function sobelLoad(px: d.i32, py: d.i32, w: d.u32, h: d.u32) {
     'use gpu';
     // Clamp to valid [0, w-1] x [0, h-1] for same-padding
-    const clampedX = px < d.i32(0) ? d.u32(0) : (px >= d.i32(w) ? w - d.u32(1) : d.u32(px));
-    const clampedY = py < d.i32(0) ? d.u32(0) : (py >= d.i32(h) ? h - d.u32(1) : d.u32(py));
+    const clampedX = select(px < d.i32(0), d.u32(0), select(px >= d.i32(w), w - d.u32(1), d.u32(px)));
+    const clampedY = select(py < d.i32(0), d.u32(0), select(py >= d.i32(h), h - d.u32(1), d.u32(py)));
     return sobelLayout.$.grayBuffer[clampedY * w + clampedX];
   }
 
