@@ -21,6 +21,7 @@ export function createLabelVizPipeline(
     const label = labelVizLayout.$.labelBuffer[idx];
 
     // Pseudocolor based on label (shows connected components)
+    const isValid = label !== d.u32(0xFFFFFFFF);
     const labelF = d.f32(label);
     const r = std.select(d.f32(0), (labelF / d.f32(7.0)) % d.f32(7.0) / d.f32(7.0), isValid);
     const g = std.select(d.f32(0), (labelF / d.f32(49.0)) % d.f32(7.0) / d.f32(7.0), isValid);
