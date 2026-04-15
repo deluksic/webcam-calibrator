@@ -12,7 +12,7 @@ export default function CalibrationView() {
   const [threshold, setThreshold] = createSignal<number>(0.0);
   const [histogramData, setHistogramData] = createSignal<number[]>(new Array(256).fill(0));
   const [gpuReady, setGpuReady] = createSignal(false);
-  const [displayMode, setDisplayMode] = createSignal<DisplayMode>('labels');
+  const [displayMode, setDisplayMode] = createSignal<DisplayMode>('debug');
 
   let pipeline: CameraPipeline | null = null;
   let videoCallbackId: number | null = null;
@@ -122,6 +122,12 @@ export default function CalibrationView() {
                 onClick={() => setDisplayMode('grayscale')}
               >
                 Gray
+              </button>
+              <button
+                class={displayMode() === 'debug' ? styles.modeButtonActive : styles.modeButton}
+                onClick={() => setDisplayMode('debug')}
+              >
+                Debug
               </button>
             </div>
           </div>

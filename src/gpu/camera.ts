@@ -15,7 +15,7 @@ import { createGrayRenderPipeline } from './pipelines/grayRenderPipeline';
 import { createLabelVizPipeline } from './pipelines/labelVizPipeline';
 import { createContourLayouts, createLabelInitPipeline, createJfaPropagatePipeline, detectQuads, type DetectedQuad } from './contour';
 
-export type DisplayMode = 'edges' | 'labels' | 'grayscale';
+export type DisplayMode = 'edges' | 'labels' | 'grayscale' | 'debug';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PIPELINE FACTORY
@@ -327,6 +327,13 @@ export function processFrame(
       .with(enc)
       .withColorAttachment({ view: pipeline.context })
       .with(labelVizBindGroup)
+      .draw(3);
+  } else if (displayMode === 'debug') {
+    // Debug: show raw sobel buffer instead of labels
+    pipeline.grayRenderPipeline
+      .with(enc)
+      .withColorAttachment({ view: pipeline.context })
+      .with(pipeline.grayRenderBindGroup)
       .draw(3);
   } else {
     pipeline.grayRenderPipeline
