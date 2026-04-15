@@ -47,7 +47,9 @@ export function createHistogramAccumulatePipeline(
         if (px >= d.u32(width) || py >= d.u32(height)) { continue; }
 
         const idx = py * d.u32(width) + px;
-        const mag = histogramLayout.$.sobelBuffer[idx];
+        // Clamp magnitude to [0, 1] to prevent overflow into last bucket
+        let mag = histogramLayout.$.sobelBuffer[idx];
+        if (mag > d.f32(1.0)) { mag = d.f32(1.0); }
         const bin = d.u32(mag * d.f32(HISTOGRAM_BINS));
         let clampedBin = bin;
         if (bin >= numBins) { clampedBin = numBins - d.u32(1); }

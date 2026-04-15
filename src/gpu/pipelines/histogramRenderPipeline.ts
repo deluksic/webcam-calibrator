@@ -1,6 +1,6 @@
 // Histogram render pipeline: histogramBuffer → histogram bars
 import { tgpu, d } from 'typegpu';
-import { atomicLoad } from 'typegpu/std';
+import { atomicLoad, log2 } from 'typegpu/std';
 import { HISTOGRAM_BINS, HIST_WIDTH, HIST_HEIGHT } from './constants';
 
 export function createHistogramRenderPipeline(
@@ -10,8 +10,9 @@ export function createHistogramRenderPipeline(
   totalPixels: number,
 ) {
   // Log-scale histogram with max referring to fraction of total pixels
+  // Pre-compute the divisor: log2(maxCount + 1)
   const maxCount = Math.floor(totalPixels * 0.1);
-  const logMax = Math.log2(maxCount + 1);
+  const logMaxDivisor = Math.log2(maxCount + 1);
 
   // ── Pass: render histogram bars using instanceIndex ───────────────────
   // 256 instances, each bar renders as a vertical rectangle
@@ -49,16 +50,22 @@ export function createHistogramRenderPipeline(
     };
   });
 
+  // Pre-bake the divisor into the shader (no runtime log2 needed)
+  const fragLogMax = d.f32(logMaxDivisor);
+
   const histogramFrag = tgpu.fragmentFn({
     in: { uv: d.location(0, d.vec2f), barIndex: d.location(1, d.f32) },
     out: d.vec4f,
   })((i) => {
     'use gpu';
     const bin = d.u32(i.barIndex);
-    const count = atomicLoad(histogramDisplayLayout.$.histogram[bin]);
+    const countU32 = atomicLoad(histogramDisplayLayout.$.histogram[bin]);
 
-    // Log-scale normalization
-    const normalizedHeight = d.f32(Math.log2(count + 1)) / d.f32(logMax);
+    // Log-scale normalization with explicit u32→f32 conversion
+    // log2(count + 1) / logMax where count is u32
+    const countF = d.f32(countU32);
+    const logCountPlus1 = log2(countF + d.f32(1.0));
+    const normalizedHeight = logCountPlus1 / fragLogMax;
 
     // Clip bars above their height (make them empty/transparent)
     if (i.uv.y > normalizedHeight) {
