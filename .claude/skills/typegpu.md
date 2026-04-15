@@ -161,6 +161,29 @@ for (let i = 0; i < 8; i++) {
 - **Cannot contain `continue` statements** — the WebGPU shader compiler will refuse to unroll
 - If you need conditional logic with `continue`, rewrite with explicit iterations or separate calls
 
+## Resolution Rules
+
+### Ternary Only for Comptime Checks
+
+Ternary operators (`a ? b : c`) only work when the condition is compile-time known. For runtime checks:
+
+```typescript
+// ✗ Runtime ternary fails
+const clamped = x < d.i32(0) ? d.i32(0) : (x >= w ? w - d.i32(1) : x);
+
+// ✓ Use std.select for runtime
+const ltZero = nx < d.i32(0);
+const geW = nx >= w;
+const sx = std.select(std.select(nx, d.i32(0), ltZero), w - d.i32(1), geW);
+
+// ✓ Or use if/else statements
+const sx = (() => {
+  if (nx < d.i32(0)) return d.i32(0);
+  if (nx >= w) return w - d.i32(1);
+  return nx;
+})();
+```
+
 ## Key Differences from v0.10
 
 1. Named export `{ tgpu }` instead of `import * as tgpu`

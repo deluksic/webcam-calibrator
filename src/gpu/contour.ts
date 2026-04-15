@@ -1,5 +1,5 @@
 // Contour detection: JFA connected components + quad fitting on CPU
-import { tgpu, d } from 'typegpu';
+import { tgpu, d, std } from 'typegpu';
 
 export const COMPONENT_LABEL_INVALID = 0xFFFFFFFF;
 
@@ -106,8 +106,17 @@ export function createJfaPropagatePipeline(
       const oy = offsets[i][1];
       const nx = x + ox * offset;
       const ny = y + oy * offset;
-      const sx = nx < d.i32(0) ? d.i32(0) : (nx >= w ? w - d.i32(1) : nx);
-      const sy = ny < d.i32(0) ? d.i32(0) : (ny >= h ? h - d.i32(1) : ny);
+      // Clamp to bounds for safe read using std.select
+      const sx = std.select(
+        std.select(nx, d.i32(0), nx < d.i32(0)),
+        w - d.i32(1),
+        nx >= w
+      );
+      const sy = std.select(
+        std.select(ny, d.i32(0), ny < d.i32(0)),
+        h - d.i32(1),
+        ny >= h
+      );
       const nIdx = d.u32(sy) * wU32 + d.u32(sx);
       const nLabel = jfaLayout.$.readBuffer[nIdx];
       const isValid = nLabel !== d.u32(COMPONENT_LABEL_INVALID);
