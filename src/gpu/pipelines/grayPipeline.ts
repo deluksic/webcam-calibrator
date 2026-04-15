@@ -13,12 +13,12 @@ export function createGrayPipeline(
     workgroupSize: [16, 16, 1],
   })((input) => {
     'use gpu';
-    if (input.gid.x >= d.u32(width) || input.gid.y >= d.u32(height)) { return; }
+    if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) { return; }
 
     const color = std.textureLoad(grayTexToBufferLayout.$.grayTex, input.gid.xy, 0);
     const gray = color.r * d.f32(WR) + color.g * d.f32(WG) + color.b * d.f32(WB);
 
-    const idx = input.gid.y * d.u32(width) + input.gid.x;
+    const idx = d.u32(d.i32(input.gid.y) * d.i32(width) + d.i32(input.gid.x));
     grayTexToBufferLayout.$.grayBuffer[idx] = gray;
   });
 

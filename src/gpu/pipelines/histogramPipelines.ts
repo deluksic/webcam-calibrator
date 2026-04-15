@@ -1,6 +1,6 @@
 // Histogram pipelines: reset and accumulate
 import { tgpu, d } from 'typegpu';
-import { atomicAdd, atomicStore } from 'typegpu/std';
+import { atomicAdd, atomicStore, length } from 'typegpu/std';
 import { HISTOGRAM_BINS } from './constants';
 
 export function createHistogramResetPipeline(
@@ -13,7 +13,7 @@ export function createHistogramResetPipeline(
   })((input) => {
     'use gpu';
     const binIdx = input.gid.x;
-    if (binIdx >= d.u32(HISTOGRAM_BINS)) { return; }
+    if (d.i32(binIdx) >= d.i32(HISTOGRAM_BINS)) { return; }
     atomicStore(histogramResetLayout.$.histogram[binIdx], d.u32(0));
   });
 
@@ -34,7 +34,7 @@ export function createHistogramAccumulatePipeline(
     const zero = d.u32(0);
     const tileWidth = d.u32(16);
     const tileHeight = d.u32(16);
-    const numBins = d.u32(HISTOGRAM_BINS);
+    const numBinsI = d.i32(HISTOGRAM_BINS);
 
     const startX = input.gid.x * tileWidth;
     const startY = input.gid.y * tileHeight;
@@ -44,15 +44,15 @@ export function createHistogramAccumulatePipeline(
         const px = startX + dx;
         const py = startY + dy;
 
-        if (px >= d.u32(width) || py >= d.u32(height)) { continue; }
+        if (d.i32(px) >= d.i32(width) || d.i32(py) >= d.i32(height)) { continue; }
 
-        const idx = py * d.u32(width) + px;
+        const idx = d.u32(d.i32(py) * d.i32(width) + d.i32(px));
         // Clamp magnitude to [0, 1] to prevent overflow into last bucket
-        let mag = histogramLayout.$.sobelBuffer[idx];
+        let mag = length(histogramLayout.$.sobelBuffer[idx]);
         if (mag > d.f32(1.0)) { mag = d.f32(1.0); }
         const bin = d.u32(mag * d.f32(HISTOGRAM_BINS));
         let clampedBin = bin;
-        if (bin >= numBins) { clampedBin = numBins - d.u32(1); }
+        if (d.i32(bin) >= numBinsI) { clampedBin = d.u32(numBinsI - d.i32(1)); }
 
         atomicAdd(histogramLayout.$.histogram[clampedBin], d.u32(1));
       }

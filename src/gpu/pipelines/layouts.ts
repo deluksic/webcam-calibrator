@@ -15,15 +15,15 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     grayBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
   });
 
-  // Sobel layout (compute: buffer → buffer)
+  // Sobel layout (compute: buffer → buffer) — stores (gx, gy) per pixel; magnitude = length(vec2).
   const sobelLayout = tgpu.bindGroupLayout({
     grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
-    sobelBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
+    sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'mutable' },
   });
 
   // Histogram layout (compute: buffer → atomic buffer)
   const histogramLayout = tgpu.bindGroupLayout({
-    sobelBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     histogram: { storage: histogramSchema, access: 'mutable' },
   });
 
@@ -45,9 +45,16 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
 
   // Edge filter layout (compute: threshold filter)
   const edgeFilterLayout = tgpu.bindGroupLayout({
-    sobelBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     threshold: { uniform: d.f32 },
     filteredBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
+  });
+
+  // Tangent-only max merge: bridges gaps along the edge without thickening normal to the gradient.
+  const edgeDilateLayout = tgpu.bindGroupLayout({
+    src: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    grad: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+    dst: { storage: d.arrayOf(d.f32), access: 'mutable' },
   });
 
   // Label visualization layout
@@ -62,7 +69,7 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
 
   // Sobel render layout
   const sobelRenderLayout = tgpu.bindGroupLayout({
-    sobelBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
   });
 
   // Filtered render layout (debug: show edge filter output)
@@ -79,6 +86,7 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     edgesLayout,
     histogramDisplayLayout,
     edgeFilterLayout,
+    edgeDilateLayout,
     labelVizLayout,
     grayRenderLayout,
     sobelRenderLayout,

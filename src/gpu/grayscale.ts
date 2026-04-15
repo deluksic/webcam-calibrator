@@ -5,6 +5,7 @@
 
 import { tgpu, d, common, std } from 'typegpu';
 import type { TgpuTexture, TgpuRenderPipeline, TgpuBindGroupLayout, TgpuBindGroup, TgpuSampler } from 'typegpu';
+import { computeDispatch2d } from './pipelines/constants';
 
 const WR = 0.2126;
 const WG = 0.7152;
@@ -69,7 +70,7 @@ export function createGrayscalePipeline(
     workgroupSize: [16, 16, 1],
   })((input) => {
     'use gpu';
-    if (input.gid.x >= d.u32(width) || input.gid.y >= d.u32(height)) { return; }
+    if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) { return; }
     const color = std.textureLoad(grayLayout.$.rgbaTex, input.gid.xy, 0);
     const gray = color.r * WR + color.g * WG + color.b * WB;
     std.textureStore(grayLayout.$.grayTex, input.gid.xy, d.vec4f(gray, gray, gray, 1.0));
@@ -138,9 +139,10 @@ export function processFrame(
   pipeline.copyPipeline.withColorAttachment({ view: pipeline.rgbaTex.createView() }).with(copyBindGroup).draw(3);
 
   // ── Pass 2: compute rgba → grayscale ────────────────────────────────────
+  const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height);
   pipeline.grayPipeline
     .with(pipeline.grayBindGroup)
-    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+    .dispatchWorkgroups(wgX, wgY);
 
   // ── Pass 3: display grayscale → canvas ──────────────────────────────────
   pipeline.displayPipeline.withColorAttachment({ view: pipeline.context }).with(pipeline.displayBindGroup).draw(3);

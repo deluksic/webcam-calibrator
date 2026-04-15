@@ -2,7 +2,13 @@
 import { tgpu, d, std } from 'typegpu';
 import { sqrt, atomicAdd, atomicStore, atomicLoad } from 'typegpu/std';
 
-import { HISTOGRAM_BINS, computeThreshold } from './pipelines/constants';
+import {
+  EDGES_VIEW_BINARY_MASK,
+  HISTOGRAM_BINS,
+  POINTER_JUMP_ITERATIONS,
+  computeDispatch2d,
+  computeThreshold,
+} from './pipelines/constants';
 import { createLayouts } from './pipelines/layouts';
 import { createCopyPipeline } from './pipelines/copyPipeline';
 import { createGrayPipeline } from './pipelines/grayPipeline';
@@ -15,9 +21,18 @@ import { createGrayRenderPipeline } from './pipelines/grayRenderPipeline';
 import { createSobelRenderPipeline } from './pipelines/sobelRenderPipeline';
 import { createFilteredRenderPipeline } from './pipelines/filteredRenderPipeline';
 import { createLabelVizPipeline } from './pipelines/labelVizPipeline';
-import { createContourLayouts, createLabelInitPipeline, createJfaPropagatePipeline, detectQuads, type DetectedQuad } from './contour';
+import { createEdgeDilatePipeline } from './pipelines/edgeDilatePipeline';
+import {
+  createPointerJumpLayouts,
+  createPointerJumpInitPipeline,
+  createPointerJumpStepPipeline,
+  createPointerJumpLabelsToAtomicPipeline,
+  createPointerJumpParentTightenPipeline,
+  createPointerJumpAtomicToLabelsPipeline,
+} from './pipelines/pointerJumpPipeline';
+import type { DetectedQuad } from './contour';
 
-export type DisplayMode = 'edges' | 'labels' | 'grayscale' | 'debug';
+export type DisplayMode = 'edges' | 'edgesDilated' | 'labels' | 'grayscale' | 'debug';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PIPELINE FACTORY
@@ -50,10 +65,14 @@ export function createCameraPipeline(
     .$usage('storage');
 
   const sobelBuffer = root
-    .createBuffer(d.arrayOf(d.f32, width * height))
+    .createBuffer(d.arrayOf(d.vec2f, width * height))
     .$usage('storage');
 
   const filteredBuffer = root
+    .createBuffer(d.arrayOf(d.f32, width * height))
+    .$usage('storage');
+
+  const dilatedEdgeBuffer = root
     .createBuffer(d.arrayOf(d.f32, width * height))
     .$usage('storage');
 
@@ -68,52 +87,105 @@ export function createCameraPipeline(
     .createBuffer(d.u32)
     .$usage('uniform');
 
-  // JFA label buffers for contour detection (ping-pong)
-  const labelBuffer0 = root
+  const pointerJumpBuffer0 = root
+    .createBuffer(d.arrayOf(d.u32, width * height))
+    .$usage('storage');
+  const pointerJumpBuffer1 = root
     .createBuffer(d.arrayOf(d.u32, width * height))
     .$usage('storage');
 
-  const labelBuffer1 = root
-    .createBuffer(d.arrayOf(d.u32, width * height))
+  const pointerJumpAtomicBuffer = root
+    .createBuffer(d.arrayOf(d.atomic(d.u32), width * height))
     .$usage('storage');
 
-  // Debug: separate buffer for neighbor count (no ping-pong)
-  const debugBuffer = root
-    .createBuffer(d.arrayOf(d.u32, width * height))
-    .$usage('storage');
+  const {
+    initLayout: pointerJumpInitLayout,
+    stepLayout: pointerJumpStepLayout,
+    labelsToAtomicLayout: pointerJumpLabelsToAtomicLayout,
+    parentTightenLayout: pointerJumpParentTightenLayout,
+    atomicToLabelsLayout: pointerJumpAtomicToLabelsLayout,
+  } = createPointerJumpLayouts(root);
+  const pointerJumpInitPipeline = createPointerJumpInitPipeline(
+    root,
+    pointerJumpInitLayout,
+    width,
+    height,
+  );
+  const pointerJumpStepPipeline = createPointerJumpStepPipeline(
+    root,
+    pointerJumpStepLayout,
+    width,
+    height,
+  );
+  const pointerJumpLabelsToAtomicPipeline = createPointerJumpLabelsToAtomicPipeline(
+    root,
+    pointerJumpLabelsToAtomicLayout,
+    width,
+    height,
+  );
+  const pointerJumpParentTightenPipeline = createPointerJumpParentTightenPipeline(
+    root,
+    pointerJumpParentTightenLayout,
+    width,
+    height,
+  );
+  const pointerJumpAtomicToLabelsPipeline = createPointerJumpAtomicToLabelsPipeline(
+    root,
+    pointerJumpAtomicToLabelsLayout,
+    width,
+    height,
+  );
 
-  // JFA layouts and pipelines
-  const { labelInitLayout, jfaLayout, debugLayout } = createContourLayouts(root);
-  const labelInitPipeline = createLabelInitPipeline(root, labelInitLayout, width, height);
-  const jfaResult = createJfaPropagatePipeline(root, jfaLayout, debugLayout, width, height);
-  const jfaPropagatePipeline = jfaResult.pipeline;
-  const jfaDebugPipeline = jfaResult.debugPipeline;
-
-  // JFA bind groups (include offset uniform)
-  const jfaOffsetBuffer = root.createBuffer(d.i32).$usage('uniform');
-  const labelInitBindGroup = root.createBindGroup(labelInitLayout, {
-    edgeBuffer: filteredBuffer,
-    labelBuffer: labelBuffer0,
+  const pointerJumpInitBindGroup = root.createBindGroup(pointerJumpInitLayout, {
+    edgeBuffer: dilatedEdgeBuffer,
+    labelBuffer: pointerJumpBuffer0,
   });
 
-  const jfaPingPongBindGroups = [
-    root.createBindGroup(jfaLayout, {
-      readBuffer: labelBuffer0,
-      writeBuffer: labelBuffer1,
-      offset: jfaOffsetBuffer,
+  const pointerJumpPingPongBindGroups = [
+    root.createBindGroup(pointerJumpStepLayout, {
+      edgeBuffer: dilatedEdgeBuffer,
+      readBuffer: pointerJumpBuffer0,
+      writeBuffer: pointerJumpBuffer1,
     }),
-    root.createBindGroup(jfaLayout, {
-      readBuffer: labelBuffer1,
-      writeBuffer: labelBuffer0,
-      offset: jfaOffsetBuffer,
+    root.createBindGroup(pointerJumpStepLayout, {
+      edgeBuffer: dilatedEdgeBuffer,
+      readBuffer: pointerJumpBuffer1,
+      writeBuffer: pointerJumpBuffer0,
     }),
   ];
 
-  // Debug bind group: reads init data, writes to debug buffer
-  const debugBindGroup = root.createBindGroup(debugLayout, {
-    readBuffer: labelBuffer0,
-    debugBuffer: debugBuffer,
-  });
+  const pointerJumpLabelsToAtomicBindGroups = [
+    root.createBindGroup(pointerJumpLabelsToAtomicLayout, {
+      source: pointerJumpBuffer0,
+      atomicLabels: pointerJumpAtomicBuffer,
+    }),
+    root.createBindGroup(pointerJumpLabelsToAtomicLayout, {
+      source: pointerJumpBuffer1,
+      atomicLabels: pointerJumpAtomicBuffer,
+    }),
+  ];
+  const pointerJumpParentTightenBindGroups = [
+    root.createBindGroup(pointerJumpParentTightenLayout, {
+      edgeBuffer: dilatedEdgeBuffer,
+      labelRead: pointerJumpBuffer0,
+      atomicLabels: pointerJumpAtomicBuffer,
+    }),
+    root.createBindGroup(pointerJumpParentTightenLayout, {
+      edgeBuffer: dilatedEdgeBuffer,
+      labelRead: pointerJumpBuffer1,
+      atomicLabels: pointerJumpAtomicBuffer,
+    }),
+  ];
+  const pointerJumpAtomicToLabelsBindGroups = [
+    root.createBindGroup(pointerJumpAtomicToLabelsLayout, {
+      atomicLabels: pointerJumpAtomicBuffer,
+      dest: pointerJumpBuffer0,
+    }),
+    root.createBindGroup(pointerJumpAtomicToLabelsLayout, {
+      atomicLabels: pointerJumpAtomicBuffer,
+      dest: pointerJumpBuffer1,
+    }),
+  ];
 
   // ═══════════════════════════════════════════════════════════════════════
   // LAYOUTS & PIPELINES
@@ -128,6 +200,7 @@ export function createCameraPipeline(
     edgesLayout,
     histogramDisplayLayout,
     edgeFilterLayout,
+    edgeDilateLayout,
     labelVizLayout,
     grayRenderLayout,
     sobelRenderLayout,
@@ -139,8 +212,16 @@ export function createCameraPipeline(
   const sobelPipeline = createSobelPipeline(root, sobelLayout, width, height);
   const histogramResetPipeline = createHistogramResetPipeline(root, histogramResetLayout);
   const histogramPipeline = createHistogramAccumulatePipeline(root, histogramLayout, width, height);
-  const edgesPipeline = createEdgesPipeline(root, edgesLayout, width, height, presentationFormat);
+  const edgesPipeline = createEdgesPipeline(
+    root,
+    edgesLayout,
+    width,
+    height,
+    presentationFormat,
+    EDGES_VIEW_BINARY_MASK,
+  );
   const edgeFilterPipeline = createEdgeFilterPipeline(root, edgeFilterLayout, width, height);
+  const edgeDilatePipeline = createEdgeDilatePipeline(root, edgeDilateLayout, width, height);
   const histogramDisplayPipeline = createHistogramRenderPipeline(root, histogramDisplayLayout, presentationFormat, width * height);
   const labelVizPipeline = createLabelVizPipeline(root, labelVizLayout, width, height, presentationFormat);
   const grayRenderPipeline = createGrayRenderPipeline(root, grayRenderLayout, width, height, presentationFormat);
@@ -177,10 +258,20 @@ export function createCameraPipeline(
     filteredBuffer: filteredBuffer,
   });
 
+  const edgesDilatedBindGroup = root.createBindGroup(edgesLayout, {
+    filteredBuffer: dilatedEdgeBuffer,
+  });
+
   const edgeFilterBindGroup = root.createBindGroup(edgeFilterLayout, {
     sobelBuffer: sobelBuffer,
     threshold: thresholdBuffer,
     filteredBuffer: filteredBuffer,
+  });
+
+  const edgeDilateBindGroup = root.createBindGroup(edgeDilateLayout, {
+    src: filteredBuffer,
+    grad: sobelBuffer,
+    dst: dilatedEdgeBuffer,
   });
 
   const histogramDisplayBindGroup = root.createBindGroup(histogramDisplayLayout, {
@@ -201,7 +292,7 @@ export function createCameraPipeline(
   });
 
   const labelVizBindGroup = root.createBindGroup(labelVizLayout, {
-    labelBuffer: labelBuffer0,
+    labelBuffer: pointerJumpBuffer0,
   });
 
   return {
@@ -211,6 +302,7 @@ export function createCameraPipeline(
     grayBuffer,
     sobelBuffer,
     filteredBuffer,
+    dilatedEdgeBuffer,
     thresholdBuffer,
     thresholdBinBuffer,
     histogramBuffer,
@@ -226,13 +318,15 @@ export function createCameraPipeline(
     histogramComputeBindGroup,
     edgesPipeline,
     edgesBindGroup,
+    edgesDilatedBindGroup,
     edgeFilterPipeline,
     edgeFilterBindGroup,
+    edgeDilatePipeline,
+    edgeDilateBindGroup,
     histogramDisplayPipeline,
     histogramDisplayBindGroup,
     labelVizPipeline,
     labelVizBindGroup,
-    labelBuffer0,
     labelVizLayout,
     sampler,
     width,
@@ -243,24 +337,25 @@ export function createCameraPipeline(
     grayRenderPipeline,
     grayRenderBindGroup,
     grayRenderLayout,
-    // Sobel render (debug)
     sobelRenderPipeline,
     sobelRenderBindGroup,
     sobelRenderLayout,
-    // Filtered render (debug: edge filter output)
     filteredRenderPipeline,
     filteredRenderBindGroup,
     filteredRenderLayout,
-    // JFA contour detection
-    labelBuffer1,
-    labelInitPipeline,
-    labelInitBindGroup,
-    jfaPropagatePipeline,
-    jfaDebugPipeline,
-    jfaOffsetBuffer,
-    jfaPingPongBindGroups,
-    debugBuffer,
-    debugBindGroup,
+    pointerJumpBuffer0,
+    pointerJumpBuffer1,
+    pointerJumpAtomicBuffer,
+    pointerJumpInitPipeline,
+    pointerJumpInitBindGroup,
+    pointerJumpStepPipeline,
+    pointerJumpPingPongBindGroups,
+    pointerJumpLabelsToAtomicPipeline,
+    pointerJumpLabelsToAtomicBindGroups,
+    pointerJumpParentTightenPipeline,
+    pointerJumpParentTightenBindGroups,
+    pointerJumpAtomicToLabelsPipeline,
+    pointerJumpAtomicToLabelsBindGroups,
   };
 }
 
@@ -295,20 +390,21 @@ export function processFrame(
     .with(copyBindGroup)
     .draw(3);
 
-  // COMPUTE: Gray → Sobel → Histogram + JFA
-  let finalLabelBuffer = pipeline.labelBuffer0;
+  // COMPUTE: Gray → Sobel → Histogram + pointer-jump labeling (when Labels/Debug)
+  let finalLabelBuffer = pipeline.pointerJumpBuffer0;
   {
     const computePass = enc.beginComputePass({ label: 'gray + sobel + histogram + filter' });
+    const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height);
 
     pipeline.grayPipeline
       .with(computePass)
       .with(pipeline.grayTexToBufferBindGroup)
-      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+      .dispatchWorkgroups(wgX, wgY);
 
     pipeline.sobelPipeline
       .with(computePass)
       .with(pipeline.sobelBindGroup)
-      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+      .dispatchWorkgroups(wgX, wgY);
 
     pipeline.histogramResetPipeline
       .with(computePass)
@@ -318,50 +414,53 @@ export function processFrame(
     pipeline.histogramPipeline
       .with(computePass)
       .with(pipeline.histogramComputeBindGroup)
-      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+      .dispatchWorkgroups(wgX, wgY);
 
     pipeline.edgeFilterPipeline
       .with(computePass)
       .with(pipeline.edgeFilterBindGroup)
-      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+      .dispatchWorkgroups(wgX, wgY);
 
-    // JFA: Initialize labels from edge mask
-    pipeline.labelInitPipeline
+    pipeline.edgeDilatePipeline
       .with(computePass)
-      .with(pipeline.labelInitBindGroup)
-      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+      .with(pipeline.edgeDilateBindGroup)
+      .dispatchWorkgroups(wgX, wgY);
 
-    // DEBUG: run one propagate pass with offset=5 (user confirmed this works)
-    if (displayMode === 'debug') {
-      pipeline.jfaOffsetBuffer.write(5);
-      pipeline.jfaPropagatePipeline
+    const wantComponentViz = displayMode === 'labels' || displayMode === 'debug';
+
+    const runPointerJump = () => {
+      pipeline.pointerJumpInitPipeline
         .with(computePass)
-        .with(pipeline.jfaPingPongBindGroups[0])
-        .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
-
-      // Show propagate output
-      finalLabelBuffer = pipeline.labelBuffer1;
-      computePass.end();
-    } else {
-      // JFA propagate passes
-      const maxRange = Math.floor(Math.max(pipeline.width, pipeline.height) / 2);
-      let offset = maxRange;
-      let sourceIdx = 0;
-
-      while (offset >= 1) {
-        pipeline.jfaOffsetBuffer.write(offset);
-        pipeline.jfaPropagatePipeline
+        .with(pipeline.pointerJumpInitBindGroup)
+        .dispatchWorkgroups(wgX, wgY);
+      let pj = 0;
+      for (let s = 0; s < POINTER_JUMP_ITERATIONS; s++) {
+        pipeline.pointerJumpStepPipeline
           .with(computePass)
-          .with(pipeline.jfaPingPongBindGroups[sourceIdx])
-          .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
-        sourceIdx ^= 1;
-        offset = Math.floor(offset / 2);
+          .with(pipeline.pointerJumpPingPongBindGroups[pj])
+          .dispatchWorkgroups(wgX, wgY);
+        pj ^= 1;
+        pipeline.pointerJumpLabelsToAtomicPipeline
+          .with(computePass)
+          .with(pipeline.pointerJumpLabelsToAtomicBindGroups[pj])
+          .dispatchWorkgroups(wgX, wgY);
+        pipeline.pointerJumpParentTightenPipeline
+          .with(computePass)
+          .with(pipeline.pointerJumpParentTightenBindGroups[pj])
+          .dispatchWorkgroups(wgX, wgY);
+        pipeline.pointerJumpAtomicToLabelsPipeline
+          .with(computePass)
+          .with(pipeline.pointerJumpAtomicToLabelsBindGroups[pj])
+          .dispatchWorkgroups(wgX, wgY);
       }
+      finalLabelBuffer = pj === 0 ? pipeline.pointerJumpBuffer0 : pipeline.pointerJumpBuffer1;
+    };
 
-      // Set final buffer based on last sourceIdx
-      finalLabelBuffer = sourceIdx === 0 ? pipeline.labelBuffer0 : pipeline.labelBuffer1;
-      computePass.end();
+    if (wantComponentViz) {
+      runPointerJump();
     }
+
+    computePass.end();
   }
 
   // RENDER: Display mode selection + Histogram
@@ -370,6 +469,12 @@ export function processFrame(
       .with(enc)
       .withColorAttachment({ view: pipeline.context })
       .with(pipeline.edgesBindGroup)
+      .draw(3);
+  } else if (displayMode === 'edgesDilated') {
+    pipeline.edgesPipeline
+      .with(enc)
+      .withColorAttachment({ view: pipeline.context })
+      .with(pipeline.edgesDilatedBindGroup)
       .draw(3);
   } else if (displayMode === 'labels') {
     const labelVizBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
@@ -381,14 +486,13 @@ export function processFrame(
       .with(labelVizBindGroup)
       .draw(3);
   } else if (displayMode === 'debug') {
-    // Debug: show result of jfaDebugPipeline (neighbor count)
-    const debugBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
+    const labelVizBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
       labelBuffer: finalLabelBuffer,
     });
     pipeline.labelVizPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.context })
-      .with(debugBindGroup)
+      .with(labelVizBindGroup)
       .draw(3);
   } else {
     pipeline.grayRenderPipeline
@@ -411,39 +515,45 @@ export async function detectContours(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
 ): Promise<{ quads: DetectedQuad[], labelData: Uint32Array }> {
-  const enc = root.device.createCommandEncoder({ label: 'jfa contour' });
-  const computePass = enc.beginComputePass({ label: 'jfa' });
+  const enc = root.device.createCommandEncoder({ label: 'contour labels' });
+  const computePass = enc.beginComputePass({ label: 'labeling' });
+  const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height);
 
-  // Initialize labels from edge mask
-  pipeline.labelInitPipeline
+  let finalBuffer: typeof pipeline.pointerJumpBuffer0;
+
+  pipeline.pointerJumpInitPipeline
     .with(computePass)
-    .with(pipeline.labelInitBindGroup)
-    .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
-
-  // JFA passes with decreasing step sizes
-  const maxRange = Math.floor(Math.max(pipeline.width, pipeline.height) / 2);
-  let offset = maxRange;
-  let sourceIdx = 0;
-
-  while (offset >= 1) {
-    pipeline.jfaOffsetBuffer.write(offset);
-    pipeline.jfaPropagatePipeline
+    .with(pipeline.pointerJumpInitBindGroup)
+    .dispatchWorkgroups(wgX, wgY);
+  let pj = 0;
+  for (let s = 0; s < POINTER_JUMP_ITERATIONS; s++) {
+    pipeline.pointerJumpStepPipeline
       .with(computePass)
-      .with(pipeline.jfaPingPongBindGroups[sourceIdx])
-      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
-    sourceIdx ^= 1;
-    offset = Math.floor(offset / 2);
+      .with(pipeline.pointerJumpPingPongBindGroups[pj])
+      .dispatchWorkgroups(wgX, wgY);
+    pj ^= 1;
+    pipeline.pointerJumpLabelsToAtomicPipeline
+      .with(computePass)
+      .with(pipeline.pointerJumpLabelsToAtomicBindGroups[pj])
+      .dispatchWorkgroups(wgX, wgY);
+    pipeline.pointerJumpParentTightenPipeline
+      .with(computePass)
+      .with(pipeline.pointerJumpParentTightenBindGroups[pj])
+      .dispatchWorkgroups(wgX, wgY);
+    pipeline.pointerJumpAtomicToLabelsPipeline
+      .with(computePass)
+      .with(pipeline.pointerJumpAtomicToLabelsBindGroups[pj])
+      .dispatchWorkgroups(wgX, wgY);
   }
+  finalBuffer = pj === 0 ? pipeline.pointerJumpBuffer0 : pipeline.pointerJumpBuffer1;
 
   computePass.end();
   root.device.queue.submit([enc.finish()]);
 
-  // Read back labeled buffer
-  const finalBuffer = sourceIdx === 0 ? pipeline.labelBuffer0 : pipeline.labelBuffer1;
   const labelData = new Uint32Array(await finalBuffer.read());
 
   // Read edge buffer for region analysis
-  const edgeData = new Float32Array(await pipeline.filteredBuffer.read());
+  const edgeData = new Float32Array(await pipeline.dilatedEdgeBuffer.read());
 
   // CPU-side: extract regions and fit quads
   const { extractRegions, validateAndFilterQuads } = await import('./contour');

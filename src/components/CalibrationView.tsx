@@ -7,7 +7,7 @@ export default function CalibrationView() {
   const [videoEl, setVideoEl] = createSignal<HTMLVideoElement | undefined>(undefined);
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement | undefined>(undefined);
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement | undefined>(undefined);
-  const [frameSize, setFrameSize] = createSignal({ w: 1280, h: 720 });
+  const [frameSize, setFrameSize] = createSignal({ w: 1920, h: 1080 });
   const [stream, setStream] = createSignal<MediaStream | null>(null);
   const [threshold, setThreshold] = createSignal<number>(0.0);
   const [histogramData, setHistogramData] = createSignal<number[]>(new Array(256).fill(0));
@@ -29,20 +29,54 @@ export default function CalibrationView() {
     }
   });
 
-  // Request camera stream
+  // Request camera stream at the highest resolution the device reports (capabilities max, when available).
   createMemo(async () => {
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' },
-        audio: false,
-      });
-      setStream(mediaStream);
+      let mediaStream: MediaStream;
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 7680 },
+            height: { ideal: 4320 },
+          },
+          audio: false,
+        });
+      } catch {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false,
+        });
+      }
 
       const track = mediaStream.getVideoTracks()[0];
+      const caps = track.getCapabilities?.() as MediaTrackCapabilities | undefined;
+      const wCap = caps?.width;
+      const hCap = caps?.height;
+      if (
+        wCap &&
+        typeof wCap === 'object' &&
+        'max' in wCap &&
+        hCap &&
+        typeof hCap === 'object' &&
+        'max' in hCap
+      ) {
+        try {
+          await track.applyConstraints({
+            width: { ideal: wCap.max as number },
+            height: { ideal: hCap.max as number },
+          });
+        } catch {
+          // Keep whatever getUserMedia negotiated.
+        }
+      }
+
+      setStream(mediaStream);
+
       const settings = track.getSettings();
       setFrameSize({
-        w: (settings.width ?? 1280) as number,
-        h: (settings.height ?? 720) as number,
+        w: (settings.width ?? 1920) as number,
+        h: (settings.height ?? 1080) as number,
       });
     } catch (e) {
       console.error('Camera access failed:', e);
@@ -82,7 +116,7 @@ export default function CalibrationView() {
 
         // Wait for completion and read back histogram data
         const bins = await pipeline.histogramBuffer.read();
-        const thresh = computeThreshold(bins, 0.85);
+        const thresh = computeThreshold(bins, 0.9);
         setHistogramData(bins);
         setThreshold(thresh);
       }
@@ -101,7 +135,7 @@ export default function CalibrationView() {
   return (
     <div class={styles.root}>
       <div class={styles.feedRow}>
-        <div class={styles.feedPanel}>
+        <div class={`${styles.feedPanel} ${styles.feedPanelMain}`}>
           <div class={styles.feedHeader}>
             <span class={styles.feedLabel}>Camera Feed — {frameSize().w}×{frameSize().h}</span>
             <div class={styles.modeButtons}>
@@ -118,6 +152,12 @@ export default function CalibrationView() {
                 Edges
               </button>
               <button
+                class={displayMode() === 'edgesDilated' ? styles.modeButtonActive : styles.modeButton}
+                onClick={() => setDisplayMode('edgesDilated')}
+              >
+                Dilated
+              </button>
+              <button
                 class={displayMode() === 'labels' ? styles.modeButtonActive : styles.modeButton}
                 onClick={() => setDisplayMode('labels')}
               >
@@ -131,13 +171,9 @@ export default function CalibrationView() {
               </button>
             </div>
           </div>
-          <canvas
-            ref={setCanvasEl}
-            class={styles.feedCanvas}
-            style={{ width: '640px', height: '360px' }}
-          />
+          <canvas ref={setCanvasEl} class={styles.feedCanvas} />
         </div>
-        <div class={styles.feedPanel}>
+        <div class={`${styles.feedPanel} ${styles.feedPanelSide}`}>
           <span class={styles.feedLabel}>Edge Detection</span>
           <canvas
             ref={setHistCanvasEl}

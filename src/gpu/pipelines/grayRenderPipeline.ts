@@ -1,6 +1,7 @@
 // Grayscale render pipeline: grayBuffer → canvas
 import { tgpu, d } from 'typegpu';
 import { common } from 'typegpu';
+import { clamp, floor } from 'typegpu/std';
 
 export function createGrayRenderPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -14,9 +15,13 @@ export function createGrayRenderPipeline(
     out: d.vec4f,
   })((i) => {
     'use gpu';
-    const px = d.u32(i.uv.x * d.f32(width));
-    const py = d.u32(i.uv.y * d.f32(height));
-    const idx = py * d.u32(width) + px;
+    const wi = d.i32(width);
+    const hi = d.i32(height);
+    const maxPx = d.f32(wi - d.i32(1));
+    const maxPy = d.f32(hi - d.i32(1));
+    const px = d.u32(floor(clamp(i.uv.x * d.f32(wi), d.f32(0), maxPx)));
+    const py = d.u32(floor(clamp(i.uv.y * d.f32(hi), d.f32(0), maxPy)));
+    const idx = py * d.u32(wi) + px;
     const gray = grayLayout.$.grayBuffer[idx];
     return d.vec4f(gray, gray, gray, d.f32(1));
   });

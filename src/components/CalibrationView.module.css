@@ -6,6 +6,9 @@
   justify-content: center;
   gap: var(--space-6);
   padding: var(--space-8);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .error {
@@ -21,8 +24,11 @@
 
 .feedRow {
   display: flex;
-  gap: var(--space-4);
-  align-items: center;
+  flex-direction: column;
+  gap: var(--space-6);
+  align-items: stretch;
+  width: 100%;
+  max-width: 100%;
 }
 
 .feedPanel {
@@ -30,6 +36,15 @@
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
+}
+
+.feedPanelMain {
+  width: 100%;
+  min-width: 0;
+}
+
+.feedPanelSide {
+  width: 100%;
 }
 
 .feedHeader {
@@ -76,6 +91,11 @@
 }
 
 .feedCanvas {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 50vh;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);

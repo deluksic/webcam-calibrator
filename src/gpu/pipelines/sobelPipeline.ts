@@ -1,6 +1,6 @@
 // Sobel pipeline: grayBuffer → sobelBuffer
 import { tgpu, d } from 'typegpu';
-import { sqrt, clamp } from 'typegpu/std';
+import { clamp } from 'typegpu/std';
 
 export function createSobelPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -10,10 +10,13 @@ export function createSobelPipeline(
 ) {
   function sobelLoad(px: number, py: number, w: number, h: number) {
     'use gpu';
-    // Clamp to valid [0, w-1] x [0, h-1] for same-padding
-    const cx2 = clamp(px, 0, w - 1);
-    const cy2 = clamp(py, 0, h - 1);
-    return sobelLayout.$.grayBuffer[cy2 * w + cx2];
+    const wi = d.i32(w);
+    const hi = d.i32(h);
+    const pxi = d.i32(px);
+    const pyi = d.i32(py);
+    const cx2 = clamp(pxi, d.i32(0), wi - d.i32(1));
+    const cy2 = clamp(pyi, d.i32(0), hi - d.i32(1));
+    return sobelLayout.$.grayBuffer[d.u32(cy2 * wi + cx2)];
   }
 
   const sobelKernel = tgpu.computeFn({
@@ -21,7 +24,7 @@ export function createSobelPipeline(
     workgroupSize: [16, 16, 1],
   })((input) => {
     'use gpu';
-    if (input.gid.x >= d.u32(width) || input.gid.y >= d.u32(height)) { return; }
+    if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) { return; }
 
     const x = d.i32(input.gid.x);
     const y = d.i32(input.gid.y);
@@ -39,8 +42,7 @@ export function createSobelPipeline(
 
     const gx = (tr + 2 * mr + br) - (tl + 2 * ml + bl);
     const gy = (bl + 2 * b + br) - (tl + 2 * t + tr);
-    const magnitude = sqrt(gx * gx + gy * gy);
-    sobelLayout.$.sobelBuffer[y * width + x] = magnitude;
+    sobelLayout.$.sobelBuffer[d.u32(y * w + x)] = d.vec2f(gx, gy);
   });
 
   return root.createComputePipeline({ compute: sobelKernel });
