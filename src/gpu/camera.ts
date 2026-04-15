@@ -13,6 +13,7 @@ import { createEdgeFilterPipeline } from './pipelines/edgeFilterPipeline';
 import { createHistogramRenderPipeline } from './pipelines/histogramRenderPipeline';
 import { createGrayRenderPipeline } from './pipelines/grayRenderPipeline';
 import { createSobelRenderPipeline } from './pipelines/sobelRenderPipeline';
+import { createFilteredRenderPipeline } from './pipelines/filteredRenderPipeline';
 import { createLabelVizPipeline } from './pipelines/labelVizPipeline';
 import { createContourLayouts, createLabelInitPipeline, createJfaPropagatePipeline, detectQuads, type DetectedQuad } from './contour';
 
@@ -117,6 +118,7 @@ export function createCameraPipeline(
     labelVizLayout,
     grayRenderLayout,
     sobelRenderLayout,
+    filteredRenderLayout,
   } = createLayouts(root, histogramSchema);
 
   const copyPipeline = createCopyPipeline(root, copyLayout);
@@ -130,6 +132,7 @@ export function createCameraPipeline(
   const labelVizPipeline = createLabelVizPipeline(root, labelVizLayout, width, height, presentationFormat);
   const grayRenderPipeline = createGrayRenderPipeline(root, grayRenderLayout, width, height, presentationFormat);
   const sobelRenderPipeline = createSobelRenderPipeline(root, sobelRenderLayout, width, height, presentationFormat);
+  const filteredRenderPipeline = createFilteredRenderPipeline(root, filteredRenderLayout, width, height, presentationFormat);
 
   // ═══════════════════════════════════════════════════════════════════════
   // BIND GROUPS
@@ -180,6 +183,10 @@ export function createCameraPipeline(
     sobelBuffer: sobelBuffer,
   });
 
+  const filteredRenderBindGroup = root.createBindGroup(filteredRenderLayout, {
+    filteredBuffer: filteredBuffer,
+  });
+
   const labelVizBindGroup = root.createBindGroup(labelVizLayout, {
     labelBuffer: labelBuffer0,
   });
@@ -227,6 +234,10 @@ export function createCameraPipeline(
     sobelRenderPipeline,
     sobelRenderBindGroup,
     sobelRenderLayout,
+    // Filtered render (debug: edge filter output)
+    filteredRenderPipeline,
+    filteredRenderBindGroup,
+    filteredRenderLayout,
     // JFA contour detection
     labelBuffer1,
     labelInitPipeline,
@@ -342,11 +353,11 @@ export function processFrame(
       .with(labelVizBindGroup)
       .draw(3);
   } else if (displayMode === 'debug') {
-    // Debug: show raw sobel buffer
-    pipeline.sobelRenderPipeline
+    // Debug: show edge filter output (what JFA initializes from)
+    pipeline.filteredRenderPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.context })
-      .with(pipeline.sobelRenderBindGroup)
+      .with(pipeline.filteredRenderBindGroup)
       .draw(3);
   } else {
     pipeline.grayRenderPipeline

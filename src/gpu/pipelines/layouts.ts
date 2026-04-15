@@ -65,6 +65,11 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     sobelBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
   });
 
+  // Filtered render layout (debug: show edge filter output)
+  const filteredRenderLayout = tgpu.bindGroupLayout({
+    filteredBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+  });
+
   return {
     copyLayout,
     grayTexToBufferLayout,
@@ -77,5 +82,6 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     labelVizLayout,
     grayRenderLayout,
     sobelRenderLayout,
+    filteredRenderLayout,
   };
 }
