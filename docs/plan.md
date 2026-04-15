@@ -55,22 +55,24 @@ A browser-based camera calibration tool. Everything runs client-side in the brow
 
 All detection runs on the GPU via TypeGPU compute shaders.
 
-**Stage 2.2.1 — Grayscale Conversion**
-- Convert from camera format (RGBA) to grayscale (r8unorm)
-- One compute dispatch per frame
+**Stage 2.2.1 — Camera Copy**
+- Copy from `importExternalTexture` to intermediate RGBA texture
 
-**Stage 2.2.2 — Lighting Normalization (CLAHE)**
-- Contrast-Limited Adaptive Histogram Equalization on 8×8 tiles
-- Prevents over-enhancement in uniform regions
-- Handles extreme lighting conditions
+**Stage 2.2.2 — Grayscale Conversion**
+- Convert from camera format (RGBA) to grayscale float buffer
+- One compute dispatch per frame
 
 **Stage 2.2.3 — Edge Detection**
 - Sobel gradient (X + Y) in one pass
-- Gradient magnitude + direction
-- Adaptive threshold + non-maximum suppression + hysteresis
-- Output: binary edge map
+- Gradient magnitude via `sqrt(gx² + gy²)`
+- Same-padding to avoid edge artifacts
 
-**Stage 2.2.4 — Contour Extraction**
+**Stage 2.2.4 — Histogram + Adaptive Threshold**
+- 256-bin histogram of edge magnitudes
+- Threshold computed at Nth percentile (strongest edges)
+- Filter: zero out edges below threshold
+
+**Stage 2.2.5 — Contour Extraction**
 - Jump Flood Algorithm (JFA) for connected component labeling (TypeGPU has a JFA example)
 - Fit connected edge chains to quadrilaterals
 - RANSAC-based quad validation
@@ -169,9 +171,18 @@ src/
 │   └── tag36h11.ts           — tag36h11 dictionary (4096 codes + decode)
 │   │
 ├── gpu/
-│   ├── grayscale.ts          — RGBA → grayscale compute shader
+│   ├── camera.ts             — Pipeline factory + per-frame processing
+│   ├── pipelines/
+│   │   ├── copyPipeline.ts   — Copy external texture to usable format
+│   │   ├── grayPipeline.ts   — RGBA → grayscale float buffer
+│   │   ├── sobelPipeline.ts  — Sobel edge detection
+│   │   ├── histogramPipelines.ts — Histogram reset + accumulate
+│   │   ├── histogramRenderPipeline.ts — Histogram visualization
+│   │   ├── edgeFilterPipeline.ts — Threshold-based edge filtering
+│   │   ├── edgesPipeline.ts   — Edge render to canvas
+│   │   ├── layouts.ts        — All bind group layouts
+│   │   └── constants.ts      — Shared constants + threshold computation
 │   ├── clahe.ts              — Contrast-Limited Adaptive Histogram Eq.
-│   ├── edges.ts               — Sobel + NMS + hysteresis threshold
 │   ├── contour.ts            — JFA connected components + quad fit
 │   ├── decode.ts             — Homography decode + tag validation
 │   ├── subpixel.ts           — Parabolic surface corner refinement
@@ -205,13 +216,14 @@ src/
 
 ```
 Webcam frame (VideoFrame / ImageBitmap)
-  �� TypeGPU importExternalTexture
+  → TypeGPU importExternalTexture
+  → Copy to intermediate RGBA texture
   → Grayscale conversion (GPU compute)
-  → CLAHE normalization (GPU compute)
-  → Edge detection (GPU compute)
-  → Contour extraction via JFA (GPU compute)
-  → Quad fitting + tag decode (GPU compute)
-  → Subpixel refinement (GPU compute)
+  → Sobel edge detection (GPU compute)
+  → Histogram + adaptive threshold (GPU compute)
+  → Edge filtering (GPU compute)
+  → Display filtered edges
+  → [Future: JFA + quad fit + tag decode]
   → Read back corner positions (CPU)
   → EPnP + RANSAC pose (CPU)
   → If good view → add to observation set
@@ -226,8 +238,7 @@ Webcam frame (VideoFrame / ImageBitmap)
 ### Phase 1 — Infrastructure (current)
 - [x] Vite + Solid.js 2.0 + TypeGPU project setup
 - [x] CSS design system (variables + modules)
-- [ ] Apache SSL configuration
-- [ ] Plan documentation
+- [x] Plan documentation
 
 ### Phase 2 — UI Shell
 - [ ] App.tsx with view switching (target / calibrate / results)
@@ -235,13 +246,16 @@ Webcam frame (VideoFrame / ImageBitmap)
 - [ ] CSS layout for all three views
 
 ### Phase 3 — Camera + Grayscale
-- [ ] Camera access and live video display
-- [ ] TypeGPU initialization
-- [ ] Grayscale conversion compute shader
-- [ ] Display grayscale output to verify pipeline
+- [x] Camera access and live video display
+- [x] TypeGPU initialization
+- [x] Grayscale conversion compute shader
+- [x] Display grayscale output to verify pipeline
+- [x] Sobel edge detection with same-padding
+- [x] Histogram-based adaptive threshold
+- [x] Edge filtering with dynamic threshold
 
 ### Phase 4 — AprilTag Detection
-- [ ] Edge detection (Sobel + threshold)
+- [x] Edge detection (Sobel + threshold)
 - [ ] Contour extraction (JFA)
 - [ ] Quad fitting
 - [ ] tag36h11 decode
