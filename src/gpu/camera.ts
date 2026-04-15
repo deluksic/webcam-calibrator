@@ -85,7 +85,9 @@ export function createCameraPipeline(
   // JFA layouts and pipelines
   const { labelInitLayout, jfaLayout } = createContourLayouts(root);
   const labelInitPipeline = createLabelInitPipeline(root, labelInitLayout, width, height);
-  const jfaPropagatePipeline = createJfaPropagatePipeline(root, jfaLayout, width, height);
+  const jfaResult = createJfaPropagatePipeline(root, jfaLayout, width, height);
+  const jfaPropagatePipeline = jfaResult.pipeline;
+  const jfaDebugPipeline = jfaResult.debugPipeline;
 
   // JFA bind groups (include offset uniform)
   const jfaOffsetBuffer = root.createBuffer(d.i32).$usage('uniform');
@@ -248,6 +250,7 @@ export function createCameraPipeline(
     labelInitPipeline,
     labelInitBindGroup,
     jfaPropagatePipeline,
+    jfaDebugPipeline,
     jfaOffsetBuffer,
     jfaPingPongBindGroups,
     jfaDebugBuffer,
@@ -339,6 +342,12 @@ export function processFrame(
     // Set final buffer based on last sourceIdx
     finalLabelBuffer = sourceIdx === 0 ? pipeline.labelBuffer0 : pipeline.labelBuffer1;
 
+    // DEBUG: run debug pipeline to test neighbor reads
+    pipeline.jfaDebugPipeline
+      .with(computePass)
+      .with(pipeline.jfaPingPongBindGroups[0])
+      .dispatchWorkgroups(Math.ceil(pipeline.width / 16), Math.ceil(pipeline.height / 16));
+
     computePass.end();
   }
 
@@ -359,14 +368,14 @@ export function processFrame(
       .with(labelVizBindGroup)
       .draw(3);
   } else if (displayMode === 'debug') {
-    // Debug: show label buffer (what JFA produces)
-    const labelVizBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
-      labelBuffer: finalLabelBuffer,
+    // Debug: show result of jfaDebugPipeline (neighbor count)
+    const debugBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
+      labelBuffer: pipeline.labelBuffer0,
     });
     pipeline.labelVizPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.context })
-      .with(labelVizBindGroup)
+      .with(debugBindGroup)
       .draw(3);
   } else {
     pipeline.grayRenderPipeline

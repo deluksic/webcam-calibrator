@@ -123,6 +123,31 @@ export function createJfaPropagatePipeline(
       }
     }
 
+    // Proper label propagation
+    jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = bestLabel;
+  });
+
+  const pipeline = root.createComputePipeline({ compute: propagateKernel });
+
+  // Debug kernel: writes neighbor count to a separate buffer
+  const debugKernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [16, 16, 1],
+  })((input) => {
+    'use gpu';
+    if (input.gid.x >= d.u32(width) || input.gid.y >= d.u32(height)) { return; }
+
+    const x = d.i32(input.gid.x);
+    const y = d.i32(input.gid.y);
+    const w = d.i32(width);
+    const h = d.i32(height);
+    const offset = d.i32(1);
+    const wU32 = d.u32(w);
+
+    // Read current label
+    const myLabel = jfaLayout.$.readBuffer[d.u32(y) * wU32 + d.u32(x)];
+
+    // Count valid neighbors (this tests if reads are working)
     let neighborCount = d.u32(0);
 
     // Neighbor: up
@@ -154,12 +179,13 @@ export function createJfaPropagatePipeline(
       }
     }
 
-    // Debug: write neighbor count as label (show in debug view)
+    // Write count to debug output buffer
     jfaLayout.$.writeBuffer[d.u32(y) * wU32 + d.u32(x)] = neighborCount;
   });
 
-  const pipeline = root.createComputePipeline({ compute: propagateKernel });
-  return pipeline;
+  const debugPipeline = root.createComputePipeline({ compute: debugKernel });
+
+  return { pipeline, debugPipeline };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,7 +217,7 @@ export async function runJfa(
   let sourceIdx = 0;
 
   while (offset >= 1) {
-    jfaPropagate
+    jfaPropagate.pipeline
       .with(computePass)
       .with(pingPongBindGroups[sourceIdx])
       .dispatchWorkgroups(Math.ceil(width / 16), Math.ceil(height / 16));
