@@ -1,4 +1,4 @@
-import { For, createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, createMemo, createSignal, onCleanup, createEffect } from 'solid-js';
 import { initGPU } from '../gpu/init';
 import {
   createCameraPipeline,
@@ -46,6 +46,24 @@ function CalibrationView() {
 
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>();
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement>();
+  const [renderedW, setRenderedW] = createSignal(1280);
+  const [renderedH, setRenderedH] = createSignal(720);
+
+  const canvasRefCallback = (el: HTMLCanvasElement | undefined) => {
+    setCanvasEl(el);
+    if (el) {
+      setRenderedW(el.clientWidth || 1280);
+      setRenderedH(el.clientHeight || 720);
+      const ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          setRenderedW(entry.contentRect.width);
+          setRenderedH(entry.contentRect.height);
+        }
+      });
+      ro.observe(el);
+      onCleanup(() => ro.disconnect());
+    }
+  };
 
   const [threshold, setThreshold] = createSignal(0);
   const [displayMode, setDisplayMode] = createSignal<DisplayMode>('debug');
@@ -340,12 +358,14 @@ function CalibrationView() {
             </div>
           </div>
           <div style={{ position: 'relative' }}>
-            <canvas ref={setCanvasEl} class={styles.feedCanvas} />
+            <canvas ref={canvasRefCallback} class={styles.feedCanvas} />
             {displayMode() === 'debug' && (() => {
               const el = canvasEl();
               const size = frameSize();
-              const sx = el && size.w > 0 ? el.getBoundingClientRect().width / size.w : 1;
-              const sy = el && size.h > 0 ? el.getBoundingClientRect().height / size.h : 1;
+              const rw = renderedW();
+              const rh = renderedH();
+              const sx = (el && rw > 0 && size.w > 0) ? rw / size.w : 1;
+              const sy = (el && rh > 0 && size.h > 0) ? rh / size.h : 1;
               return (
                 <For each={bboxes().filter((b) => b.area > 100)}>
                   {(b) => (
