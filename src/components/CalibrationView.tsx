@@ -36,13 +36,13 @@ interface Bbox { minX: number; minY: number; maxX: number; maxY: number; area: n
 
 function BboxOverlay(props: {
   bboxes: () => Bbox[];
-  sx: () => number;
-  sy: () => number;
-  fw: () => number;
-  fh: () => number;
+  sx: number;
+  sy: number;
+  fw: number;
+  fh: number;
 }) {
   const visible = createMemo(() => {
-    const half = (props.fw() * props.fh()) / 2;
+    const half = (props.fw * props.fh) / 2;
     return props.bboxes().filter((b) => b.area > 100 && b.area < half);
   });
   return (
@@ -51,10 +51,10 @@ function BboxOverlay(props: {
         <div
           class={styles.bbox}
           style={{
-            '--bbox-x': `${box().minX * props.sx()}px`,
-            '--bbox-y': `${box().minY * props.sy()}px`,
-            '--bbox-w': `${(box().maxX - box().minX) * props.sx()}px`,
-            '--bbox-h': `${(box().maxY - box().minY) * props.sy()}px`,
+            '--bbox-x': `${box().minX * props.sx}px`,
+            '--bbox-y': `${box().minY * props.sy}px`,
+            '--bbox-w': `${(box().maxX - box().minX) * props.sx}px`,
+            '--bbox-h': `${(box().maxY - box().minY) * props.sy}px`,
           }}
         />
       )}
@@ -280,38 +280,28 @@ function CalibrationView() {
           const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins);
           setThreshold(computeThreshold([...data], 0.85));
         });
-        // Trigger extent readback every 10 frames — reads latest available data
-        if (frameCount % 10 === 0) {
+        // Trigger extent readback every frame
+        {
           const thisFrame = frameCount;
           pip.extentBuffer.read(new Uint32Array(MAX_COMPONENTS * EXTENT_FIELDS)).then((raw) => {
             if (disposed) return;
-            if (frameCount - thisFrame > 5) return; // stale result
+            if (frameCount - thisFrame > 1) return;
             const safeRaw = raw instanceof Uint32Array ? raw : new Uint32Array(raw);
             const boxes: Bbox[] = [];
-            let skippedInvalid = 0, skippedSentinel = 0, skippedSmall = 0, skippedNeg = 0;
             for (let i = 0; i < MAX_COMPONENTS; i++) {
               const minX = safeRaw[i * EXTENT_FIELDS + 0];
               const minY = safeRaw[i * EXTENT_FIELDS + 1];
               const maxX = safeRaw[i * EXTENT_FIELDS + 2];
               const maxY = safeRaw[i * EXTENT_FIELDS + 3];
-              if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) { skippedInvalid++; continue; }
-              if (minX === 0xFFFFFFFF) { skippedSentinel++; continue; }
+              if (!Number.isFinite(minX)) { continue; }
+              if (minX === 0xFFFFFFFF) { continue; }
               const w = maxX - minX;
               const h = maxY - minY;
-              if (minX > maxX) { skippedNeg++; continue; }
-              if (w <= 0 || h <= 0) { skippedSmall++; continue; }
+              if (minX > maxX || w <= 0 || h <= 0) { continue; }
               boxes.push({ minX, minY, maxX, maxY, area: w * h });
             }
             boxes.sort((a, b) => b.area - a.area);
-            const top5 = boxes.slice(0, 5);
-            console.log('EXTENT raw[0-4]:', Array.from({ length: 5 }, (_, i) => {
-              const b = top5[i];
-              return b ? `[${b.minX},${b.minY},${b.maxX},${b.maxY}] area=${b.area}` : 'invalid';
-            }));
-            console.log('EXTENT setBboxes:', top5.map(b => `${b.area}@(${b.minX},${b.minY})-(${b.maxX},${b.maxY})`));
-            setBboxes(boxes.slice(0, 50));
-            const top3 = boxes.slice(0, 3).map(b => `${b.area}`).join(', ') || 'none';
-            log(`Extents: found=${boxes.length} top3=${top3} skip{inv=${skippedInvalid}, sen=${skippedSentinel}, neg=${skippedNeg}, small=${skippedSmall}}`);
+            setBboxes(boxes.slice(0, 128));
           });
         }
         rafHandle = cameraVideo.requestVideoFrameCallback(loop);
@@ -403,8 +393,8 @@ function CalibrationView() {
                 bboxes={bboxes}
                 fw={frameSize().w}
                 fh={frameSize().h}
-                sx={scaleX}
-                sy={scaleY}
+                sx={scaleX()}
+                sy={scaleY()}
               />
             </Show>
           </div>
