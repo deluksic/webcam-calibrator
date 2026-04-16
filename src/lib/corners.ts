@@ -310,5 +310,11 @@ export function findCornersFromEdges(
   const sortedIndices = orderPixelsAlongContour(pixels);
   const rawCorners = detectCorners(pixels, sortedIndices, angleThreshold);
   const clustered = clusterCorners(rawCorners, pixels, clusterDist);
-  return selectBestQuadCorners(clustered, pixels);
+  console.log(`[findCorners] pixels=${pixels.length / 4} raw=${rawCorners.length} clustered=${clustered.length}`);
+  const result = selectBestQuadCorners(clustered, pixels);
+  console.log(`[findCorners] bestQuad=${result.length}`);
+  if (result.length > 0) {
+    console.log(`[findCorners] corners: ${result.map(ci => `(${pixels[ci * 4]},${pixels[ci * 4 + 1]})`).join(' ')}`);
+  }
+  return result;
 }

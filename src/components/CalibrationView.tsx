@@ -3,10 +3,13 @@ import { initGPU } from '../gpu/init';
 import {
   createCameraPipeline,
   processFrame,
+  updateQuadCornersBuffer,
+  detectContours,
   type CameraPipeline,
   type DisplayMode,
 } from '../gpu/camera';
-import { computeThreshold } from '../gpu/pipelines/constants';
+import type { DetectedQuad } from '../gpu/contour';
+import { computeThreshold, THRESHOLD_PERCENTILE } from '../gpu/pipelines/constants';
 import styles from './CalibrationView.module.css';
 
 function deviceScore(d: MediaDeviceInfo): number {
@@ -34,19 +37,48 @@ type GpuRoot = Awaited<ReturnType<typeof initGPU>>;
 
 interface Bbox { minX: number; minY: number; maxX: number; maxY: number; area: number }
 
-function BboxOverlay(props: {
-  bboxes: () => Bbox[];
+function QuadCandidateOverlay(props: {
+  bboxes: Bbox[];
   sx: number;
   sy: number;
   fw: number;
   fh: number;
 }) {
-  const visible = createMemo(() => {
-    const half = (props.fw * props.fh) / 2;
-    return props.bboxes().filter((b) => b.area > 100 && b.area < half);
+  const candidates = createMemo(() => {
+    const MIN_AREA = 400;
+    const MAX_AREA = 200000;
+    const MIN_AR = 0.6;
+    const MAX_AR = 1.7;
+    let okAreaAR = 0, okContained = 0, dropped = 0;
+    const passing = props.bboxes.filter((b) => {
+      const w = b.maxX - b.minX;
+      const h = b.maxY - b.minY;
+      if (w <= 0 || h <= 0) { dropped++; return false; }
+      const area = w * h;
+      if (area < MIN_AREA || area > MAX_AREA) { dropped++; return false; }
+      const ar = w / h;
+      if (ar < MIN_AR || ar > MAX_AR) { dropped++; return false; }
+      okAreaAR++;
+      return true;
+    });
+    const result = passing.filter((candidate) => {
+      for (const other of passing) {
+        if (other === candidate) continue;
+        // Discard candidate if it is fully contained inside another box
+        if (other.minX <= candidate.minX && other.maxX >= candidate.maxX &&
+            other.minY <= candidate.minY && other.maxY >= candidate.maxY) {
+          okContained++;
+          return false;
+        }
+      }
+      return true;
+    });
+    console.log(`[overlay] bboxes=${props.bboxes.length} okAreaAR=${okAreaAR} okContained=${okContained} dropped=${dropped} shown=${result.length}`);
+    return result;
   });
+
   return (
-    <For each={visible()} keyed={false}>
+    <For each={candidates()} keyed={false}>
       {(box) => (
         <div
           class={styles.bbox}
@@ -68,6 +100,7 @@ function CalibrationView() {
   cameraVideo.playsInline = true;
 
   onCleanup(() => {
+    console.log('[CalibrationView] onCleanup fired - pausing cameraVideo');
     cameraVideo.pause();
     cameraVideo.srcObject = null;
   });
@@ -100,6 +133,7 @@ function CalibrationView() {
   const [displayMode, setDisplayMode] = createSignal<DisplayMode>('debug');
   const [bboxes, setBboxes] = createSignal<Bbox[]>([]);
   const [logs, setLogs] = createSignal<string[]>([]);
+  const [quadCandidateCount, setQuadCandidateCount] = createSignal(0);
 
   const log = (msg: string) => {
     setLogs(prev => [...prev.slice(-8), `${new Date().toISOString().slice(11, 19)} ${msg}`]);
@@ -145,6 +179,7 @@ function CalibrationView() {
     let active: MediaStream | undefined = undefined;
     let disposed = false;
     onCleanup(() => {
+      console.log('[mediaStream] onCleanup fired');
       disposed = true;
       active?.getTracks().forEach((t) => t.stop());
       active = undefined;
@@ -227,6 +262,7 @@ function CalibrationView() {
       let disposed = false;
 
       onCleanup(() => {
+        console.log('[cameraPipeline] onCleanup fired');
         disposed = true;
         if (primeHandle) video.cancelVideoFrameCallback(primeHandle);
         if (rafHandle) video.cancelVideoFrameCallback(rafHandle);
@@ -267,6 +303,32 @@ function CalibrationView() {
       const MAX_COMPONENTS = 65536;
 
       let frameCount = 0;
+      let quadDetectionPending = false;
+
+      // Kick off first quad detection immediately after loop starts
+      const scheduleQuadDetection = () => {
+        if (quadDetectionPending || disposed) return;
+        if (displayMode() !== 'grid') { quadDetectionPending = false; return; }
+        quadDetectionPending = true;
+        const gForQuad = gpu();
+        if (!gForQuad) { quadDetectionPending = false; return; }
+        detectContours(gForQuad, pip).then(({ quads }) => {
+          if (disposed) return;
+          quadDetectionPending = false;
+          const cornerQuads = quads.filter(q => q.hasCorners);
+          const bboxQuads = quads.filter(q => !q.hasCorners);
+          updateQuadCornersBuffer(pip, quads);
+          setQuadCandidateCount(bboxQuads.length);
+          if (quads.length > 0) log(`Quads: ${cornerQuads.length} corner, ${bboxQuads.length} bbox → ${cornerQuads.length} shown`);
+        }).catch((e) => {
+          if (disposed) return;
+          quadDetectionPending = false;
+          log(`detectContours error: ${e}`);
+        });
+      };
+
+      scheduleQuadDetection();
+
       const loop = () => {
         if (disposed) return;
         const gpuNow = gpu();
@@ -274,14 +336,16 @@ function CalibrationView() {
         frameCount++;
         const dm = displayMode();
         processFrame(gpuNow, pip, cameraVideo, threshold(), dm);
-        if (frameCount % 30 === 0) log(`frame ${frameCount} mode=${dm}`);
+        if (frameCount % 30 === 0) {
+          log(`frame ${frameCount} mode=${dm}`);
+          scheduleQuadDetection();
+        }
         void pip.histogramBuffer.read().then((bins) => {
           if (disposed) return;
           const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins);
-          setThreshold(computeThreshold([...data], 0.85));
+          setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE));
         });
-        // Trigger extent readback every other frame
-        if (frameCount % 2 === 0) {
+        if (frameCount % 2 === 0 && displayMode() === 'debug') {
           const thisFrame = frameCount;
           pip.extentBuffer.read().then((raw) => {
             if (disposed) return;
@@ -387,6 +451,15 @@ function CalibrationView() {
               <button
                 type="button"
                 class={
+                  displayMode() === 'grid' ? styles.modeButtonActive : styles.modeButton
+                }
+                onClick={() => setDisplayMode('grid')}
+              >
+                Grid
+              </button>
+              <button
+                type="button"
+                class={
                   displayMode() === 'debug' ? styles.modeButtonActive : styles.modeButton
                 }
                 onClick={() => setDisplayMode('debug')}
@@ -398,8 +471,8 @@ function CalibrationView() {
           <div style={{ position: 'relative' }}>
             <canvas ref={canvasRefCallback} class={styles.feedCanvas} />
             <Show when={displayMode() === 'debug'}>
-              <BboxOverlay
-                bboxes={bboxes}
+              <QuadCandidateOverlay
+                bboxes={bboxes()}
                 fw={frameSize().w}
                 fh={frameSize().h}
                 sx={scaleX()}
@@ -416,7 +489,7 @@ function CalibrationView() {
             style={{ width: '512px', height: '120px' }}
           />
           <div class={styles.histogramInfo}>
-            <span class={styles.thresholdLabel}>85th Percentile Threshold</span>
+            <span class={styles.thresholdLabel}>{(THRESHOLD_PERCENTILE * 100).toFixed(0)}th Percentile Threshold</span>
             <span class={styles.thresholdValue}>
               {(threshold() * 255).toFixed(1)} / 255{' '}
               <span>({(threshold() * 100).toFixed(1)}%)</span>

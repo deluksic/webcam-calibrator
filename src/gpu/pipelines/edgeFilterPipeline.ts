@@ -1,10 +1,11 @@
 // Non-Maximum Suppression (NMS) pipeline: sobelBuffer → filteredBuffer
 //
-// Keeps only pixels that are local maxima along the gradient tangent direction.
-// Produces thin, single-pixel edges instead of thick noisy blobs.
+// Keeps only pixels that are local maxima along the edge tangent direction.
+// Edge tangent = gradient direction rotated 90°: tangent = (-gy/gm, gx/gm).
+// Uses bilinear interpolation for sub-pixel neighbor sampling.
 //
 // Output: filteredBuffer[i] = suppressed magnitude (0 if not a local max or below threshold).
-import { tgpu, d } from 'typegpu';
+import { tgpu, d, std } from 'typegpu';
 import { abs, length, select } from 'typegpu/std';
 
 export function createEdgeFilterPipeline(
@@ -35,58 +36,31 @@ export function createEdgeFilterPipeline(
       return;
     }
 
-    // NMS: compare against neighbors along the edge tangent (relaxed for edge continuity).
-    const abx = abs(g.x);
-    const aby = abs(g.y);
+    // Gradient direction (perpendicular to edge) for NMS — round to nearest int pixel
+    const gxn = g.x / gm;
+    const gyn = g.y / gm;
+    const stepX = d.i32(std.select(gxn - d.f32(0.5), gxn + d.f32(0.5), gxn >= d.f32(0)));
+    const stepY = d.i32(std.select(gyn - d.f32(0.5), gyn + d.f32(0.5), gyn >= d.f32(0)));
+    const nxP = x + stepX;
+    const nyP = y + stepY;
+    const nxN = x - stepX;
+    const nyN = y - stepY;
 
-    let tanDx = d.i32(0);
-    let tanDy = d.i32(0);
-    if (abx >= aby) { tanDx = d.i32(0); tanDy = d.i32(1); }
-    else { tanDx = d.i32(1); tanDy = d.i32(0); }
+    // Collect neighbor magnitudes (0 if out of bounds)
+    let gmPos = d.f32(0);
+    if (nxP >= d.i32(0) && nxP < w && nyP >= d.i32(0) && nyP < h) {
+      const idxP = d.u32(nyP) * d.u32(w) + d.u32(nxP);
+      gmPos = length(edgeFilterLayout.$.sobelBuffer[idxP]);
+    }
+    let gmNeg = d.f32(0);
+    if (nxN >= d.i32(0) && nxN < w && nyN >= d.i32(0) && nyN < h) {
+      const idxN = d.u32(nyN) * d.u32(w) + d.u32(nxN);
+      gmNeg = length(edgeFilterLayout.$.sobelBuffer[idxN]);
+    }
 
-    const relaxFactor = d.f32(0.85);
-    let suppressed = false;
-
-    // Tangent neighbor at dist=1, sign=+1
-    {
-      const nx = x + tanDx;
-      const ny = y + tanDy;
-      if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
-        const nIdx = d.u32(ny) * d.u32(w) + d.u32(nx);
-        const gmN = length(edgeFilterLayout.$.sobelBuffer[nIdx]);
-        if (gm <= gmN * relaxFactor) { suppressed = true; }
-      }
-    }
-    // Tangent neighbor at dist=1, sign=-1
-    {
-      const nx = x - tanDx;
-      const ny = y - tanDy;
-      if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
-        const nIdx = d.u32(ny) * d.u32(w) + d.u32(nx);
-        const gmN = length(edgeFilterLayout.$.sobelBuffer[nIdx]);
-        if (gm <= gmN * relaxFactor) { suppressed = true; }
-      }
-    }
-    // Tangent neighbor at dist=2, sign=+1
-    {
-      const nx = x + tanDx * d.i32(2);
-      const ny = y + tanDy * d.i32(2);
-      if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
-        const nIdx = d.u32(ny) * d.u32(w) + d.u32(nx);
-        const gmN = length(edgeFilterLayout.$.sobelBuffer[nIdx]);
-        if (gm <= gmN * relaxFactor) { suppressed = true; }
-      }
-    }
-    // Tangent neighbor at dist=2, sign=-1
-    {
-      const nx = x - tanDx * d.i32(2);
-      const ny = y - tanDy * d.i32(2);
-      if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
-        const nIdx = d.u32(ny) * d.u32(w) + d.u32(nx);
-        const gmN = length(edgeFilterLayout.$.sobelBuffer[nIdx]);
-        if (gm <= gmN * relaxFactor) { suppressed = true; }
-      }
-    }
+    // Only suppress if neighbor is meaningfully stronger (not just slightly)
+    const strongFactor = d.f32(1.05); // neighbor must be >5% stronger to suppress
+    const suppressed = gmPos > gm * strongFactor || gmNeg > gm * strongFactor;
 
     edgeFilterLayout.$.filteredBuffer[idx] = select(gm, d.f32(0), suppressed);
   });

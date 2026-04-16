@@ -53,6 +53,7 @@ export function createPointerJumpInitPipeline(
 
     const idx = d.u32(y * w + x);
     const ei = initLayout.$.edgeBuffer[idx];
+    // Only initialize labels for EDGE pixels (non-zero edges)
     if (ei <= d.f32(0)) {
       initLayout.$.labelBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID);
       return;

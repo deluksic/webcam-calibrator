@@ -41,7 +41,7 @@ export function createEdgesPipeline(
     let hue = angle + d.f32(0.5);
     if (hue >= d.f32(1)) { hue = hue - d.f32(1); }
 
-    const sat = d.f32(0.85);
+    const sat = d.f32(0.90);
     const val = max(mag, d.f32(0.2));
     const h = hue * d.f32(6);
     const sector = floor(h);

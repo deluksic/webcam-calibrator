@@ -1,7 +1,8 @@
 # webcam-calibrator skills
 
 ## Ship
-`pnpm ship` — builds and copies `dist/*` to Apache docroot. No need to build separately.
+`pnpm ship` — builds and copies `dist/*` to Apache docroot.
+⚠️ Do NOT run `pnpm build` before ship — ship includes its own build.
 
 ## SolidJS 2.0
 

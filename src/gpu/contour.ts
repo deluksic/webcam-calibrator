@@ -14,6 +14,7 @@ export interface DetectedQuad {
   aspectRatio: number;
   gridCells: ReturnType<typeof buildTagGrid> | null;
   pattern: TagPattern | null;
+  hasCorners: boolean; // true if detected via corner finding, false if fallback bbox
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -22,6 +23,7 @@ export interface DetectedQuad {
 
 export interface RegionData {
   label: number;
+  rootLabel: number;
   count: number;
   minX: number;
   minY: number;
@@ -35,7 +37,7 @@ export function extractRegions(
   width: number,
   height: number,
   _edgeData: Float32Array,
-): Map<number, RegionData> {
+): RegionData[] {
   const regions = new Map<number, RegionData>();
 
   for (let y = 0; y < height; y++) {
@@ -113,19 +115,23 @@ export function validateAndFilterQuads(
 ): DetectedQuad[] {
   const quads: DetectedQuad[] = [];
 
+  let okAreaAR = 0, okEdgeDensity = 0, okCorners = 0, okBbox = 0, okFailed = 0;
+
   for (const [, region] of regions) {
     const w = region.maxX - region.minX;
     const h = region.maxY - region.minY;
     const area = w * h;
 
-    if (area < minArea || area > maxArea) continue;
+    if (area < minArea || area > maxArea) { okFailed++; continue; }
 
     const aspectRatio = w / h;
-    if (aspectRatio < 0.6 || aspectRatio > 1.7) continue;
+    if (aspectRatio < 0.6 || aspectRatio > 1.7) { okFailed++; continue; }
+    okAreaAR++;
 
     const perimeter = 2 * (w + h);
     const edgeDensity = region.count / perimeter;
-    if (edgeDensity < 0.5 || edgeDensity > 5) continue;
+    if (edgeDensity < 0.5 || edgeDensity > 5) { okFailed++; continue; }
+    okEdgeDensity++;
 
     // Extract edge pixels from bbox and detect corners via tangent turns
     const edgePixels = extractEdgePixelsFromBbox(
@@ -141,7 +147,7 @@ export function validateAndFilterQuads(
     if (cornerIndices.length < 4) {
       // Fallback to bounding box corners
       const corners = fitQuadToRegion(region);
-      if (!corners) continue;
+      if (!corners) { okFailed++; continue; }
 
       const tagGrid = buildTagGrid([
         { x: corners[0][0], y: corners[0][1] },
@@ -157,12 +163,50 @@ export function validateAndFilterQuads(
         aspectRatio,
         gridCells: tagGrid,
         pattern: null,
+        hasCorners: false, // fallback - bbox only
       });
+      okBbox++;
       continue;
     }
+    okCorners++;
 
     // Convert corner indices to points
     const corners = cornerIndices.map(ci => getCornerPoint(ci, edgePixels));
+
+    // Check if corners are suspiciously far from the region's extent bounds.
+    // If corner detection picked noise points, the quad will be far from the bbox.
+    // Fall back to bbox corners in that case.
+    const bboxMinX = region.minX, bboxMinY = region.minY;
+    const bboxMaxX = region.maxX, bboxMaxY = region.maxY;
+    const cx = corners.reduce((s, c) => s + c.x, 0) / 4;
+    const cy = corners.reduce((s, c) => s + c.y, 0) / 4;
+    const bboxCx = (bboxMinX + bboxMaxX) / 2;
+    const bboxCy = (bboxMinY + bboxMaxY) / 2;
+    const dist = Math.hypot(cx - bboxCx, cy - bboxCy);
+    const bboxHalfW = (bboxMaxX - bboxMinX) / 2;
+    const bboxHalfH = (bboxMaxY - bboxMinY) / 2;
+    const bboxRadius = Math.hypot(bboxHalfW, bboxHalfH);
+    if (dist > bboxRadius * 0.5) {
+      console.log(`[validateQuads] corners centroid (${cx.toFixed(0)},${cy.toFixed(0)}) too far from bbox centroid (${bboxCx.toFixed(0)},${bboxCy.toFixed(0)}) — using bbox fallback`);
+      const bboxCorners: [Point, Point, Point, Point] = [
+        { x: bboxMinX, y: bboxMinY },
+        { x: bboxMaxX, y: bboxMinY },
+        { x: bboxMaxX, y: bboxMaxY },
+        { x: bboxMinX, y: bboxMaxY },
+      ];
+      const tagGrid = buildTagGrid(bboxCorners);
+      quads.push({
+        corners: bboxCorners,
+        label: region.label,
+        count: region.count,
+        aspectRatio,
+        gridCells: tagGrid,
+        pattern: null,
+        hasCorners: false,
+      });
+      okBbox++;
+      continue;
+    }
 
     // Build perspective-correct grid and decode pattern
     const grid = buildTagGrid(corners as [Point, Point, Point, Point]);
@@ -175,8 +219,11 @@ export function validateAndFilterQuads(
       aspectRatio,
       gridCells: grid,
       pattern,
+      hasCorners: true, // detected via corner finding
     });
   }
+
+  console.log(`[validateQuads] regions=${regions.size} okAreaAR=${okAreaAR} okEdgeDensity=${okEdgeDensity} okCorners=${okCorners} okBbox=${okBbox} failed=${okFailed}`);
 
   return quads;
 }
