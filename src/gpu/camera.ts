@@ -45,7 +45,7 @@ import {
 } from './pipelines/compactLabelPipeline';
 import type { DetectedQuad } from './contour';
 
-export type DisplayMode = 'edgesRaw' | 'edges' | 'edgesDilated' | 'labels' | 'grayscale' | 'debug';
+export type DisplayMode = 'edges' | 'nms' | 'edgesDilated' | 'labels' | 'grayscale' | 'debug';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PIPELINE FACTORY
@@ -612,13 +612,13 @@ export function processFrame(
   }
 
   // RENDER: Display mode selection + Histogram
-  if (displayMode === 'edgesRaw') {
+  if (displayMode === 'edges') {
     pipeline.sobelRenderPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.context })
       .with(pipeline.sobelRenderBindGroup)
       .draw(3);
-  } else if (displayMode === 'edges') {
+  } else if (displayMode === 'nms') {
     pipeline.edgesPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.context })

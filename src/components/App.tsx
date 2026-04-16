@@ -7,7 +7,7 @@ import styles from './App.module.css';
 export type View = 'target' | 'calibrate' | 'results';
 
 export default function App() {
-  const [view, setView] = createSignal<View>('calibrate');
+  const [view, setView] = createSignal<View>('target');
 
   return (
     <div class={styles.root}>

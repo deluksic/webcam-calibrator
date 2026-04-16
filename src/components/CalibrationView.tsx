@@ -351,16 +351,16 @@ function CalibrationView() {
                 class={
                   displayMode() === 'edges' ? styles.modeButtonActive : styles.modeButton
                 }
-                onClick={() => setDisplayMode('edgesRaw')}
+                onClick={() => setDisplayMode('edges')}
               >
                 Edges
               </button>
               <button
                 type="button"
                 class={
-                  displayMode() === 'edges' ? styles.modeButtonActive : styles.modeButton
+                  displayMode() === 'nms' ? styles.modeButtonActive : styles.modeButton
                 }
-                onClick={() => setDisplayMode('edges')}
+                onClick={() => setDisplayMode('nms')}
               >
                 NMS
               </button>

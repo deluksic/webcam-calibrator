@@ -3,6 +3,7 @@
 import { buildTagGrid, decodeTagPattern } from '../lib/grid';
 import { extractEdgePixelsFromBbox, findCornersFromEdges, getCornerPoint } from '../lib/corners';
 import { Point } from '../lib/geometry';
+import type { TagPattern } from '../lib/tag36h11';
 
 export const COMPONENT_LABEL_INVALID = 0xFFFFFFFF;
 
@@ -12,7 +13,7 @@ export interface DetectedQuad {
   count: number;
   aspectRatio: number;
   gridCells: ReturnType<typeof buildTagGrid> | null;
-  pattern: (0 | 1)[] | null;
+  pattern: TagPattern | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

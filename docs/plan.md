@@ -122,11 +122,6 @@ src/
 ### Phase 4.3 — Subpixel Refinement
 - [ ] Parabolic surface fit on gradient magnitude in 5×5 window
 - [ ] Solve analytically for subpixel corner position
-- [ ] Iterative refinement for accuracy
-
-### Phase 4.3 — Subpixel Refinement
-- [ ] Parabolic surface fit on gradient magnitude in 5×5 window
-- [ ] Solve analytically for subpixel corner position
 
 ### Phase 5 — Pose + Solver
 - [ ] EPnP implementation

@@ -2,59 +2,94 @@ import { describe, it, expect } from 'vitest';
 import {
   hammingDistance,
   patternToCode,
+  codeToPattern,
   decodeTag36h11,
   rotatePattern,
   decodeTag36h11AnyRotation,
   TAG36H11_COUNT,
+  TAG36H11_CODES,
 } from './tag36h11';
 
 describe('tag36h11', () => {
   describe('hammingDistance', () => {
     it('returns 0 for identical codes', () => {
-      expect(hammingDistance(0x12345, 0x12345)).toBe(0);
+      expect(hammingDistance(0x12345n, 0x12345n)).toBe(0);
     });
 
     it('returns 1 for single bit difference', () => {
-      expect(hammingDistance(0x00001, 0x00000)).toBe(1);
+      expect(hammingDistance(1n, 0n)).toBe(1);
     });
 
     it('counts multiple bit differences', () => {
-      expect(hammingDistance(0x11111, 0x00000)).toBe(5);
+      expect(hammingDistance(0b11111n, 0n)).toBe(5);
     });
   });
 
   describe('patternToCode', () => {
-    it('converts all-white pattern to 0', () => {
+    it('handles single-bit patterns (MSB-first)', () => {
+      // pattern[0] = row=0, col=0 → bit_x[0]=1, bit_y[0]=1 → bit 35 of code
       const pattern = new Array(36).fill(0) as (0 | 1)[];
-      expect(patternToCode(pattern)).toBe(0);
+      pattern[0] = 1;
+      expect(patternToCode(pattern)).toBe(1n << 35n);
     });
 
-    it('handles single-bit patterns', () => {
+    it('handles mixed patterns using LUT mapping', () => {
+      // pattern[0] = row=0, col=0 → BIT_X[0]=1, BIT_Y[0]=1 → bit 0 of code → code bit 35
+      // pattern[6] = row=1, col=0 → BIT_X[7]=4, BIT_Y[7]=2 → bit 7 of code → code bit 28
       const pattern = new Array(36).fill(0) as (0 | 1)[];
-      pattern[0] = 1; // only bit 0 set
-      expect(patternToCode(pattern)).toBe(1);
-    });
-
-    it('handles mixed patterns', () => {
-      const pattern = new Array(36).fill(0) as (0 | 1)[];
-      pattern[0] = 1; // bit 0
-      pattern[6] = 1; // bit 6
-      expect(patternToCode(pattern)).toBe(0x41); // bits 0 + 6
+      pattern[0] = 1;   // bit 0 → code bit 35
+      pattern[6] = 1;   // bit 6 → code bit 29 (index 6 → BIT_X[6]=3, BIT_Y[6]=2 → row=1,col=2)
+      const code = patternToCode(pattern);
+      // Verify by decoding back
+      const decoded = codeToPattern(code);
+      expect(decoded[0]).toBe(1);
+      expect(decoded[6]).toBe(1);
     });
 
     it('rejects wrong-length patterns', () => {
       expect(patternToCode([1, 0, 1] as unknown as (0 | 1 | -1)[])).toBe(-1);
+    });
+
+    it('encodes valid tag patterns correctly', () => {
+      // Build a valid pattern: border=0, some interior cells=1
+      const pattern = new Array(36).fill(0) as (0 | 1)[];
+      pattern[7] = 1;   // row=1, col=1 (interior)
+      pattern[13] = 1;  // row=2, col=1 (interior)
+      const code = patternToCode(pattern);
+      // Verify round-trip
+      const decoded = codeToPattern(code);
+      expect(decoded[7]).toBe(1);
+      expect(decoded[13]).toBe(1);
+    });
+  });
+
+  describe('codeToPattern', () => {
+    it('produces valid patterns for reference codes', () => {
+      // Every reference code should decode to a pattern that round-trips
+      for (const code of [TAG36H11_CODES[0], TAG36H11_CODES[100], TAG36H11_CODES[300], TAG36H11_CODES[586]]) {
+        const pattern = codeToPattern(code);
+        expect(pattern).toHaveLength(36);
+        // Decode should find a matching tag in the dictionary
+        const decoded = decodeTag36h11(pattern, 5);
+        expect(decoded).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('round-trips reference codes (encode→decode→encode)', () => {
+      for (const code of [TAG36H11_CODES[0], TAG36H11_CODES[100], TAG36H11_CODES[586]]) {
+        const pattern = codeToPattern(code);
+        const reconstructed = patternToCode(pattern);
+        expect(reconstructed).toBe(code);
+      }
     });
   });
 
   describe('rotatePattern', () => {
     it('rotates 90 degrees clockwise', () => {
       const pattern = new Array(36).fill(0) as (0 | 1 | -1)[];
-      pattern[0] = 1; // bit at row 0, col 0
+      pattern[0] = 1; // row=0, col=0
       const rotated = rotatePattern(pattern);
-      // After 90° clockwise: (row, col) → (col, 5-row)
-      // Original (0,0) → (0, 5) = index 5
-      expect(rotated[5]).toBe(1);
+      expect(rotated[5]).toBe(1); // (0,0) → (0,5)
     });
 
     it('four rotations return to original', () => {
@@ -67,9 +102,7 @@ describe('tag36h11', () => {
         0, 1, 0, 1, 0, 1,
       ] as (0 | 1 | -1)[];
       let current = pattern;
-      for (let i = 0; i < 4; i++) {
-        current = rotatePattern(current);
-      }
+      for (let i = 0; i < 4; i++) current = rotatePattern(current);
       expect(current).toEqual(pattern);
     });
   });
@@ -83,8 +116,16 @@ describe('tag36h11', () => {
       expect(decodeTag36h11([1, 0, 1] as unknown as (0 | 1 | -1)[])).toBe(-1);
     });
 
-    it('has dictionary with entries', () => {
-      expect(TAG36H11_COUNT).toBeGreaterThan(0);
+    it('has dictionary with 587 entries', () => {
+      expect(TAG36H11_COUNT).toBe(587);
+    });
+
+    it('decodes all reference codes correctly', () => {
+      for (let i = 0; i < TAG36H11_COUNT; i++) {
+        const pattern = codeToPattern(TAG36H11_CODES[i]);
+        const decoded = decodeTag36h11(pattern, 5);
+        expect(decoded).toBe(i);
+      }
     });
   });
 

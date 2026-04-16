@@ -1,13 +1,38 @@
 // AprilTag grid generator for calibration targets
 // Generates SVG with configurable NxM tag grid, spacing, and checkerboard
+// Uses real tag36h11 dictionary from AprilRobotics/apriltag
+
+import { codeToPattern, TAG36H11_CODES, TAG36H11_COUNT } from './tag36h11';
 
 export interface TagGridOptions {
   cols: number;      // Number of tags horizontally
   rows: number;      // Number of tags vertically
   tagSize: number;   // Tag side length in mm (or any unit)
   spacing: number;   // Spacing between tags, as multiple of tagSize (e.g., 1.5)
-  checkerboard: boolean; // Include black checkerboard squares between tags
+  checkerboard: boolean; // Include checkerboard squares between tags
   margin: number;    // Margin around grid, as multiple of tagSize
+  /** Array of tag IDs to display (one per grid cell). If not provided, uses indices. */
+  tagIds?: number[];
+}
+
+/** Select N unique random tag IDs from the dictionary. */
+export function selectRandomTags(count: number, seed?: number): number[] {
+  // Simple deterministic shuffle using seed
+  const rng = seed !== undefined ? seededRng(seed) : Math.random;
+  const indices = Array.from({ length: TAG36H11_COUNT }, (_, i) => i);
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  return indices.slice(0, count);
+}
+
+function seededRng(seed: number) {
+  let s = seed;
+  return () => {
+    s = (s * 1664525 + 1013904223) & 0xffffffff;
+    return (s >>> 0) / 0xffffffff;
+  };
 }
 
 const DEFAULT_OPTIONS: TagGridOptions = {
@@ -21,27 +46,22 @@ const DEFAULT_OPTIONS: TagGridOptions = {
 
 /**
  * Generate a single AprilTag cell pattern as 6x6 SVG rects.
- * Border cells (row 0/5, col 0/5) are always black.
- * Interior alternates based on cell parity.
+ * Uses real tag36h11 dictionary encoding via codeToPattern.
+ * White background with black tag cells.
  */
-function generateTagPattern(tagSize: number, offsetX: number, offsetY: number): string {
+function generateTagSVG(tagSize: number, offsetX: number, offsetY: number, pattern: (0 | 1 | -1)[]): string {
   const cellSize = tagSize / 6;
   let svg = '';
 
   for (let row = 0; row < 6; row++) {
     for (let col = 0; col < 6; col++) {
-      // Border is always black
-      if (row === 0 || row === 5 || col === 0 || col === 5) {
-        // Black cell - no need to draw, background is black
-        continue;
-      }
-
-      // Interior: alternate based on cell parity
-      const isWhite = (row + col) % 2 === 1;
-      if (isWhite) {
-        const x = offsetX + col * cellSize;
-        const y = offsetY + row * cellSize;
-        svg += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="white"/>\n`;
+      const value = pattern[row * 6 + col];
+      const x = offsetX + col * cellSize;
+      const y = offsetY + row * cellSize;
+      // Border cells (row 0, 5 or col 0, 5) are always black
+      // Interior cells use pattern value: 1 = black, 0 = white (drawn on white bg)
+      if (row === 0 || row === 5 || col === 0 || col === 5 || value === 1) {
+        svg += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="black"/>\n`;
       }
     }
   }
@@ -50,8 +70,9 @@ function generateTagPattern(tagSize: number, offsetX: number, offsetY: number): 
 }
 
 /**
- * Generate checkerboard pattern between tags.
- * Black squares in alternating positions.
+ * Generate checkerboard squares at intersections of 4 tags.
+ * Only draws squares at points where both a horizontal gap AND vertical gap exist.
+ * For NxM tags: (N-1) × (M-1) squares at the intersections.
  */
 function generateCheckerboard(
   tagSize: number,
@@ -61,32 +82,19 @@ function generateCheckerboard(
   startX: number,
   startY: number,
 ): string {
-  const cellSize = tagSize / 6;
-  const boardCellSize = cellSize; // Same as tag cell for visual consistency
-  const boardWidth = (spacing - 1) * tagSize;
-  const boardHeight = (spacing - 1) * tagSize;
+  const gapSize = (spacing - 1) * tagSize;
   const cols_1 = cols - 1;
   const rows_1 = rows - 1;
 
   let svg = '';
 
-  // Horizontal boards (between rows of tags)
+  // Squares only at intersections of horizontal and vertical gaps
   for (let r = 0; r < rows_1; r++) {
-    const y = startY + (r + 1) * tagSize + r * boardHeight;
-    for (let c = 0; c < cols; c++) {
-      const x = startX + c * tagSize;
-      // Draw board - all black
-      svg += `  <rect x="${x}" y="${y}" width="${tagSize * cols}" height="${boardHeight}" fill="black"/>\n`;
-    }
-  }
-
-  // Vertical boards (between columns of tags)
-  // Only between columns, not between rows (already covered)
-  for (let r = 0; r < rows; r++) {
-    const y = startY + r * (tagSize + boardHeight) + (r > 0 ? boardHeight : 0);
     for (let c = 0; c < cols_1; c++) {
-      const x = startX + (c + 1) * tagSize + c * boardWidth;
-      svg += `  <rect x="${x}" y="${y}" width="${boardWidth}" height="${tagSize}" fill="black"/>\n`;
+      // Intersection of horizontal gap (row r) and vertical gap (col c)
+      const x = startX + (c + 1) * tagSize + c * gapSize;
+      const y = startY + (r + 1) * tagSize + r * gapSize;
+      svg += `  <rect x="${x}" y="${y}" width="${gapSize}" height="${gapSize}" fill="black"/>\n`;
     }
   }
 
@@ -98,9 +106,8 @@ function generateCheckerboard(
  */
 export function generateTagGridSVG(options: Partial<TagGridOptions> = {}): string {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const { cols, rows, tagSize, spacing, checkerboard, margin } = opts;
+  const { cols, rows, tagSize, spacing, checkerboard, margin, tagIds } = opts;
 
-  const cellSize = tagSize / 6;
   const boardSize = (spacing - 1) * tagSize;
 
   const gridWidth = cols * tagSize + (cols - 1) * boardSize;
@@ -110,8 +117,9 @@ export function generateTagGridSVG(options: Partial<TagGridOptions> = {}): strin
   const svgWidth = gridWidth + 2 * marginSize;
   const svgHeight = gridHeight + 2 * marginSize;
 
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}">\n`;
-  svg += `  <rect width="100%" height="100%" fill="black"/>\n`;
+  // White background with crispEdges to prevent sub-pixel gaps
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}" shape-rendering="crispEdges">\n`;
+  svg += `  <rect width="100%" height="100%" fill="white"/>\n`;
 
   const startX = marginSize;
   const startY = marginSize;
@@ -119,9 +127,12 @@ export function generateTagGridSVG(options: Partial<TagGridOptions> = {}): strin
   // Generate tags
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
+      const idx = r * cols + c;
+      const tagId = tagIds && tagIds[idx] !== undefined ? tagIds[idx] : idx % TAG36H11_COUNT;
+      const pattern = codeToPattern(TAG36H11_CODES[tagId]);
       const tagX = startX + c * (tagSize + boardSize);
       const tagY = startY + r * (tagSize + boardSize);
-      svg += generateTagPattern(tagSize, tagX, tagY);
+      svg += generateTagSVG(tagSize, tagX, tagY, pattern);
     }
   }
 
@@ -137,18 +148,18 @@ export function generateTagGridSVG(options: Partial<TagGridOptions> = {}): strin
 /**
  * Generate a single AprilTag for standalone use.
  */
-export function generateSingleTagSVG(tagSize: number): string {
+export function generateSingleTagSVG(tagSize: number, tagId: number = 0): string {
   const cellSize = tagSize / 6;
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${tagSize}" height="${tagSize}" viewBox="0 0 ${tagSize} ${tagSize}">\n`;
-  svg += `  <rect width="100%" height="100%" fill="black"/>\n`;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${tagSize}" height="${tagSize}" viewBox="0 0 ${tagSize} ${tagSize}" shape-rendering="crispEdges">\n`;
+  svg += `  <rect width="100%" height="100%" fill="white"/>\n`;
 
+  const pattern = codeToPattern(TAG36H11_CODES[tagId % TAG36H11_COUNT]);
   for (let row = 0; row < 6; row++) {
     for (let col = 0; col < 6; col++) {
-      if (row === 0 || row === 5 || col === 0 || col === 5) continue;
-      if ((row + col) % 2 === 1) {
+      if (pattern[row * 6 + col] === 1) {
         const x = col * cellSize;
         const y = row * cellSize;
-        svg += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="white"/>\n`;
+        svg += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="black"/>\n`;
       }
     }
   }

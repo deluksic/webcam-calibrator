@@ -1,56 +1,84 @@
 import { createSignal, createMemo } from 'solid-js';
-import { generateTagGridSVG } from '../lib/april-tag-gen';
+import { TAG36H11_CODES, codeToPattern } from '../lib/tag36h11';
+import { selectRandomTags } from '../lib/april-tag-gen';
 import styles from './TargetView.module.css';
 
 export default function TargetView() {
   const [cols, setCols] = createSignal(4);
   const [rows, setRows] = createSignal(3);
-  const [tagSize, setTagSize] = createSignal(40);
   const [spacing, setSpacing] = createSignal(1.5);
   const [checkerboard, setCheckerboard] = createSignal(true);
-  const [isFullscreen, setIsFullscreen] = createSignal(false);
+  const [randomSeed, setRandomSeed] = createSignal(Date.now());
 
-  const svg = createMemo(() =>
-    generateTagGridSVG({
-      cols: cols(),
-      rows: rows(),
-      tagSize: tagSize(),
-      spacing: spacing(),
-      checkerboard: checkerboard(),
-      margin: 1,
-    })
-  );
+  const tagSize = 40;
 
-  const handleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen();
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen();
-      setIsFullscreen(false);
+  const totalTags = createMemo(() => cols() * rows());
+  const tagIds = createMemo(() => selectRandomTags(totalTags(), randomSeed()));
+
+  const boardSize = createMemo(() => (spacing() - 1) * tagSize);
+  const marginSize = createMemo(() => tagSize);
+  const gridWidth = createMemo(() => cols() * tagSize + (cols() - 1) * boardSize());
+  const gridHeight = createMemo(() => rows() * tagSize + (rows() - 1) * boardSize());
+  const svgWidth = createMemo(() => gridWidth() + 2 * marginSize());
+  const svgHeight = createMemo(() => gridHeight() + 2 * marginSize());
+  const cellSize = createMemo(() => tagSize / 6);
+
+  const tagPositions = createMemo(() => {
+    const positions: { x: number; y: number; tagId: number }[] = [];
+    for (let r = 0; r < rows(); r++) {
+      for (let c = 0; c < cols(); c++) {
+        const idx = r * cols() + c;
+        const tagId = tagIds()[idx] ?? idx % TAG36H11_CODES.length;
+        const x = marginSize() + c * (tagSize + boardSize());
+        const y = marginSize() + r * (tagSize + boardSize());
+        positions.push({ x, y, tagId });
+      }
     }
-  };
+    return positions;
+  });
 
-  // Listen for fullscreen change
-  if (typeof document !== 'undefined') {
-    document.addEventListener('fullscreenchange', () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    });
-  }
+  const checkerPositions = createMemo(() => {
+    if (!checkerboard() || cols() < 2 || rows() < 2) return [] as { x: number; y: number }[];
+    const positions: { x: number; y: number }[] = [];
+    for (let r = 0; r < rows() - 1; r++) {
+      for (let c = 0; c < cols() - 1; c++) {
+        const x = marginSize() + (c + 1) * tagSize + c * boardSize();
+        const y = marginSize() + (r + 1) * tagSize + r * boardSize();
+        positions.push({ x, y });
+      }
+    }
+    return positions;
+  });
+
+  const svgContent = createMemo(() => {
+    const w = svgWidth();
+    const h = svgHeight();
+    let content = `<rect width="${w}" height="${h}" fill="white"/>`;
+
+    for (const tag of tagPositions()) {
+      const pattern = codeToPattern(TAG36H11_CODES[tag.tagId]);
+      for (let row = 0; row < 6; row++) {
+        for (let col = 0; col < 6; col++) {
+          const isBorder = row === 0 || row === 5 || col === 0 || col === 5;
+          const value = pattern[row * 6 + col];
+          if (!isBorder && value !== 1) continue;
+          const px = tag.x + col * cellSize();
+          const py = tag.y + row * cellSize();
+          content += `<rect x="${px}" y="${py}" width="${cellSize()}" height="${cellSize()}" fill="black"/>`;
+        }
+      }
+    }
+
+    for (const pos of checkerPositions()) {
+      content += `<rect x="${pos.x}" y="${pos.y}" width="${boardSize()}" height="${boardSize()}" fill="black"/>`;
+    }
+
+    return content;
+  });
 
   return (
     <div class={styles.root}>
-      <div class={styles.display}>
-        <div
-          class={styles.svgContainer}
-          innerHTML={svg()}
-          onClick={handleFullscreen}
-          title="Click to toggle fullscreen"
-        />
-        <button class={styles.fullscreenBtn} onClick={handleFullscreen}>
-          {isFullscreen() ? 'Exit Fullscreen' : 'Fullscreen'}
-        </button>
-      </div>
+      <div class={styles.display} innerHTML={`<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth()}" height="${svgHeight()}" viewBox="0 0 ${svgWidth()} ${svgHeight()}" style="width:100%;height:100%;shape-rendering:crispEdges">${svgContent()}</svg>`} />
 
       <aside class={styles.controls}>
         <h2 class={styles.title}>Target Settings</h2>
@@ -85,28 +113,16 @@ export default function TargetView() {
         </div>
 
         <div class={styles.field}>
-          <label class={styles.label}>Tag Size (mm)</label>
-          <input
-            type="number"
-            class={styles.input}
-            value={String(tagSize())}
-            min={10}
-            max={200}
-            onChange={(e) => setTagSize(parseInt(e.currentTarget.value) || 40)}
-          />
-        </div>
-
-        <div class={styles.field}>
           <label class={styles.label}>Spacing</label>
           <select
             class={styles.select}
             value={String(spacing())}
             onChange={(e) => setSpacing(parseFloat(e.currentTarget.value))}
           >
-            <option value="1">1× tag size</option>
-            <option value="1.25">1.25× tag size</option>
-            <option value="1.5">1.5× tag size</option>
-            <option value="2">2× tag size</option>
+            <option value="1">1x tag size</option>
+            <option value="1.25">1.25x tag size</option>
+            <option value="1.5">1.5x tag size</option>
+            <option value="2">2x tag size</option>
           </select>
         </div>
 
@@ -121,8 +137,15 @@ export default function TargetView() {
           </label>
         </div>
 
+        <button
+          type="button"
+          class={styles.randomizeBtn}
+          onClick={() => setRandomSeed(Date.now())}
+        >
+          Randomize Tags
+        </button>
+
         <div class={styles.info}>
-          <p>Click the target to toggle fullscreen mode.</p>
           <p>Print at 100% scale for accurate sizing.</p>
         </div>
       </aside>

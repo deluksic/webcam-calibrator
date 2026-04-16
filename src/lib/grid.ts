@@ -2,6 +2,7 @@
 // Uses line intersection + proportional subdivision (no bilinear interpolation)
 
 import { Point, lineFromPoints, lineIntersection, subdivideSegment } from './geometry';
+import type { TagPattern } from './tag36h11';
 
 export interface GridCell {
   row: number;
@@ -261,8 +262,8 @@ export function decodeTagPattern(
   sobelData: Float32Array,
   imageWidth: number,
   edgeMask?: Uint8Array,
-): (0 | 1)[] | null {
-  const pattern: (0 | 1)[] = [];
+): TagPattern | null {
+  const pattern: TagPattern = [] as unknown as TagPattern;
 
   // Decode each cell
   for (const cell of grid.cells) {
@@ -270,8 +271,8 @@ export function decodeTagPattern(
     const cellValue = decodeCell(samples);
 
     if (cellValue === -1) {
-      // Uncertain - try to infer from neighbors or skip
-      pattern.push(0); // assume white
+      // Uncertain - keep as unknown
+      pattern.push(-1);
     } else {
       pattern.push(cellValue as 0 | 1);
     }

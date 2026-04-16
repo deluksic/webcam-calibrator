@@ -5,6 +5,8 @@
     "moduleResolution": "bundler",
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
     "noEmit": true,
     "strict": true,
     "jsx": "preserve",
