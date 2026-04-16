@@ -7,138 +7,164 @@ export default function CalibrationView() {
   const [videoEl, setVideoEl] = createSignal<HTMLVideoElement | undefined>(undefined);
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement | undefined>(undefined);
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement | undefined>(undefined);
-  const [frameSize, setFrameSize] = createSignal({ w: 1920, h: 1080 });
-  const [stream, setStream] = createSignal<MediaStream | null>(null);
   const [threshold, setThreshold] = createSignal<number>(0.0);
-  const [histogramData, setHistogramData] = createSignal<number[]>(new Array(256).fill(0));
-  const [gpuReady, setGpuReady] = createSignal(false);
   const [displayMode, setDisplayMode] = createSignal<DisplayMode>('debug');
 
-  let pipeline: CameraPipeline | null = null;
-  let videoCallbackId: number | null = null;
+  // ── User-facing state ──────────────────────────────────────────────────
+  const [selectedCameraId, setSelectedCameraId] = createSignal<string>('');
+  const [availableCameraDevices, setAvailableCameraDevices] = createSignal<MediaDeviceInfo[]>([]);
 
-  // Initialize GPU
-  const root = createMemo(async () => {
+  // ── One-time pipeline reference (set once, read forever) ───────────────
+  const [pipeline, setPipeline] = createSignal<CameraPipeline | undefined>(undefined);
+
+  // ── Computed ──────────────────────────────────────────────────────────
+
+  const gpuRoot = createMemo(async () => {
     try {
-      const gpu = await initGPU();
-      setGpuReady(true);
-      return gpu;
+      return await initGPU();
     } catch (e) {
       console.error('GPU init failed:', e);
       return null;
     }
   });
 
-  // Request camera stream at the highest resolution the device reports (capabilities max, when available).
-  createMemo(async () => {
-    try {
-      let mediaStream: MediaStream;
-      try {
-        mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: 'environment',
-            width: { ideal: 7680 },
-            height: { ideal: 4320 },
-          },
-          audio: false,
-        });
-      } catch {
-        mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-          audio: false,
-        });
-      }
-
-      const track = mediaStream.getVideoTracks()[0];
-      const caps = track.getCapabilities?.() as MediaTrackCapabilities | undefined;
-      const wCap = caps?.width;
-      const hCap = caps?.height;
-      if (
-        wCap &&
-        typeof wCap === 'object' &&
-        'max' in wCap &&
-        hCap &&
-        typeof hCap === 'object' &&
-        'max' in hCap
-      ) {
-        try {
-          await track.applyConstraints({
-            width: { ideal: wCap.max as number },
-            height: { ideal: hCap.max as number },
-          });
-        } catch {
-          // Keep whatever getUserMedia negotiated.
-        }
-      }
-
-      setStream(mediaStream);
-
-      const settings = track.getSettings();
-      setFrameSize({
-        w: (settings.width ?? 1920) as number,
-        h: (settings.height ?? 1080) as number,
-      });
-    } catch (e) {
-      console.error('Camera access failed:', e);
-    }
+  const selectedCameraDevice = createMemo(() => {
+    const id = selectedCameraId();
+    if (!id) return availableCameraDevices()[0] ?? null;
+    return availableCameraDevices().find((d) => d.deviceId === id) ?? null;
   });
 
-  // Set up pipeline and render loop when all elements are ready
+  // ── Camera stream (reopens when selectedCameraDevice changes) ────────
+
+  const stream = createMemo(async () => {
+    const device = selectedCameraDevice();
+    if (!device) return null;
+
+    const mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        deviceId: { exact: device.deviceId },
+        facingMode: 'environment',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    });
+    return mediaStream;
+  });
+
+  const frameSize = createMemo(() => {
+    const s = stream();
+    if (!s) return { w: 1920, h: 1080 };
+    const settings = s.getVideoTracks()[0]?.getSettings();
+    return {
+      w: (settings?.width ?? 1920) as number,
+      h: (settings?.height ?? 1080) as number,
+    };
+  });
+
+  // ── Pipeline setup (runs once when stream starts) ────────────────────
+
   createMemo(async () => {
+    const gpu = gpuRoot();
     const video = videoEl();
     const canvas = canvasEl();
     const histCanvas = histCanvasEl();
-    const gpuRoot = root();
-
-    if (!gpuRoot || !video || !canvas || !histCanvas) return;
+    const s = stream();
+    if (!gpu || !video || !canvas || !histCanvas || !s) return;
 
     const size = frameSize();
-    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+    canvas.width = size.w;
+    canvas.height = size.h;
+    histCanvas.width = 512;
+    histCanvas.height = 120;
 
-    // Create pipeline with separate histogram canvas
-    pipeline = createCameraPipeline(gpuRoot, canvas, histCanvas, size.w, size.h, presentationFormat);
+    const pip = createCameraPipeline(
+      gpu,
+      canvas,
+      histCanvas,
+      size.w,
+      size.h,
+      navigator.gpu.getPreferredCanvasFormat(),
+    );
+    setPipeline(pip);
 
-    // Set canvas dimensions
-    canvas.width = pipeline.width;
-    canvas.height = pipeline.height;
-    histCanvas.width = pipeline.histWidth;
-    histCanvas.height = pipeline.histHeight;
-
-    // Attach video stream
-    video.srcObject = stream();
+    video.srcObject = s;
     await video.play().catch(() => {});
 
-    // Render loop using requestVideoFrameCallback
     const loop = async () => {
-      if (video.readyState >= 2 && gpuRoot && pipeline) {
-        // Process frame (all GPU work in single submit)
-        processFrame(gpuRoot, pipeline, video, threshold(), displayMode());
-
-        // Wait for completion and read back histogram data
-        const bins = await pipeline.histogramBuffer.read();
-        const thresh = computeThreshold(bins, 0.9);
-        setHistogramData(bins);
-        setThreshold(thresh);
-      }
-      videoCallbackId = video.requestVideoFrameCallback(loop);
+      const vid = videoEl();
+      const g = gpuRoot();
+      const pip = pipeline();
+      if (!vid || !g || !pip) return;
+      processFrame(g, pip, vid, threshold(), displayMode());
+      const bins = await pip.histogramBuffer.read();
+      setThreshold(computeThreshold(bins, 0.9));
+      vid.requestVideoFrameCallback(loop);
     };
-    videoCallbackId = video.requestVideoFrameCallback(loop);
+    video.requestVideoFrameCallback(loop);
   });
+
+  // ── Initial device enumeration ────────────────────────────────────────
+
+  async function initCameraDevices() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const sorted = devices
+      .filter((d) => d.kind === 'videoinput')
+      .sort((a, b) => deviceScore(b) - deviceScore(a));
+    setAvailableCameraDevices(sorted);
+    if (!selectedCameraId() && sorted[0]) {
+      setSelectedCameraId(sorted[0].deviceId);
+    }
+  }
+  initCameraDevices();
+
+  // ── Cleanup ──────────────────────────────────────────────────────────
 
   onCleanup(() => {
-    if (videoCallbackId !== null) {
-      // Note: requestVideoFrameCallback can't be cancelled directly
-      // The cleanup happens automatically when the video element is removed
+    const vid = videoEl();
+    if (vid) {
+      vid.pause();
+      vid.srcObject = null;
     }
+    const s = stream();
+    s?.getVideoTracks().forEach((t) => t.stop());
   });
+
+  // ── Helpers ───────────────────────────────────────────────────────────
+
+  function deviceScore(d: MediaDeviceInfo): number {
+    const name = (d.label || '').toLowerCase();
+    let s = 0;
+    if (name.includes('back') || name.includes('rear')) s += 10;
+    if (name.includes('front')) s -= 5;
+    if (name.includes('ultra') || (name.includes('wide') && name.includes('0'))) s -= 8;
+    if (name.includes('telephoto') || name.includes('macro') || name.includes('aux')) s -= 3;
+    if (name.includes('0.5') || name.includes('0x')) s -= 8;
+    return s;
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────
 
   return (
     <div class={styles.root}>
       <div class={styles.feedRow}>
         <div class={`${styles.feedPanel} ${styles.feedPanelMain}`}>
           <div class={styles.feedHeader}>
-            <span class={styles.feedLabel}>Camera Feed — {frameSize().w}×{frameSize().h}</span>
+            <span class={styles.feedLabel}>
+              Camera Feed — {frameSize().w}×{frameSize().h}
+            </span>
             <div class={styles.modeButtons}>
+              <select
+                class={styles.cameraSelect}
+                value={selectedCameraId()}
+                onChange={(e) => setSelectedCameraId(e.currentTarget.value)}
+              >
+                {availableCameraDevices().map((cam) => (
+                  <option value={cam.deviceId}>
+                    {cam.label || `Camera ${cam.deviceId.slice(0, 8)}`}
+                  </option>
+                ))}
+              </select>
               <button
                 class={displayMode() === 'grayscale' ? styles.modeButtonActive : styles.modeButton}
                 onClick={() => setDisplayMode('grayscale')}
@@ -183,7 +209,8 @@ export default function CalibrationView() {
           <div class={styles.histogramInfo}>
             <span class={styles.thresholdLabel}>85th Percentile Threshold</span>
             <span class={styles.thresholdValue}>
-              {(threshold() * 255).toFixed(1)} / 255 <span>({(threshold() * 100).toFixed(1)}%)</span>
+              {(threshold() * 255).toFixed(1)} / 255{' '}
+              <span>({(threshold() * 100).toFixed(1)}%)</span>
             </span>
           </div>
         </div>
