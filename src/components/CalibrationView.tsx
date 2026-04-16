@@ -263,14 +263,19 @@ function CalibrationView() {
         }
         void pip.extentBuffer.read(new Uint32Array(MAX_COMPONENTS * EXTENT_FIELDS)).then((raw) => {
           if (disposed) return;
+          const safeRaw = raw instanceof Uint32Array ? raw : new Uint32Array(raw);
           const boxes: Bbox[] = [];
           for (let i = 0; i < MAX_COMPONENTS; i++) {
-            const minX = raw[i * EXTENT_FIELDS + 0];
-            const minY = raw[i * EXTENT_FIELDS + 1];
-            const maxX = raw[i * EXTENT_FIELDS + 2];
-            const maxY = raw[i * EXTENT_FIELDS + 3];
-            if (minX > maxX || minX === 0xFFFFFFFF) continue;
-            boxes.push({ minX, minY, maxX, maxY, area: (maxX - minX) * (maxY - minY) });
+            const minX = safeRaw[i * EXTENT_FIELDS + 0];
+            const minY = safeRaw[i * EXTENT_FIELDS + 1];
+            const maxX = safeRaw[i * EXTENT_FIELDS + 2];
+            const maxY = safeRaw[i * EXTENT_FIELDS + 3];
+            // Filter: invalid sentinel (0xFFFFFFFF), min > max, area too small, or NaN (for NaN, all comparisons return false)
+            const w = maxX - minX;
+            const h = maxY - minY;
+            if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) continue;
+            if (minX === 0xFFFFFFFF || minX > maxX || w <= 0 || h <= 0) continue;
+            boxes.push({ minX, minY, maxX, maxY, area: w * h });
           }
           boxes.sort((a, b) => b.area - a.area);
           setBboxes(boxes.slice(0, 50));
