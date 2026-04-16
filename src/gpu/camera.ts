@@ -722,10 +722,18 @@ export async function detectContours(
   // Read edge buffer for region analysis
   const edgeData = new Float32Array(await pipeline.dilatedEdgeBuffer.read());
 
-  // CPU-side: extract regions and fit quads
+  // Read sobel data for gradient directions (corner detection)
+  const sobelRaw = await pipeline.sobelBuffer.read();
+  const sobelData = new Float32Array(sobelRaw.length * 2);
+  for (let i = 0; i < sobelRaw.length; i++) {
+    sobelData[i * 2] = sobelRaw[i].x;
+    sobelData[i * 2 + 1] = sobelRaw[i].y;
+  }
+
+  // CPU-side: extract regions and fit quads with perspective-correct grid
   const { extractRegions, validateAndFilterQuads } = await import('./contour');
   const regions = extractRegions(labelData, pipeline.width, pipeline.height, edgeData);
-  const quads = validateAndFilterQuads(regions);
+  const quads = validateAndFilterQuads(regions, sobelData, pipeline.width);
 
   return { quads, labelData, extentData };
 }
