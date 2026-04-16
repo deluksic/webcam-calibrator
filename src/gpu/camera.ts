@@ -708,68 +708,26 @@ export async function readExtentBuffer(
 export async function detectContours(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
-): Promise<{ quads: DetectedQuad[], extentData: ExtentRow[] }> {
-  const enc = root.device.createCommandEncoder({ label: 'contour labels' });
-  const computePass = enc.beginComputePass({ label: 'labeling' });
-  const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height);
+): Promise<{ quads: DetectedQuad[], extentData: ExtentRow[], edgeData: Uint8Array, labelData: Uint32Array }> {
+  // processFrame already ran pointer-jump + compact labeling.
+  // We just read the results — no GPU re-run needed.
+  const [labelRaw, edgeRaw, sobelRaw] = await Promise.all([
+    pipeline.compactLabelBuffer.read(),
+    pipeline.dilatedEdgeBuffer.read(),
+    pipeline.sobelBuffer.read(),
+  ]);
 
-  let finalBuffer: typeof pipeline.pointerJumpBuffer0;
-
-  pipeline.pointerJumpInitPipeline
-    .with(computePass)
-    .with(pipeline.pointerJumpInitBindGroup)
-    .dispatchWorkgroups(wgX, wgY);
-  let pj = 0;
-  for (let s = 0; s < POINTER_JUMP_ITERATIONS; s++) {
-    pipeline.pointerJumpStepPipeline
-      .with(computePass)
-      .with(pipeline.pointerJumpPingPongBindGroups[pj])
-      .dispatchWorkgroups(wgX, wgY);
-    pj ^= 1;
-    pipeline.pointerJumpLabelsToAtomicPipeline
-      .with(computePass)
-      .with(pipeline.pointerJumpLabelsToAtomicBindGroups[pj])
-      .dispatchWorkgroups(wgX, wgY);
-    pipeline.pointerJumpParentTightenPipeline
-      .with(computePass)
-      .with(pipeline.pointerJumpParentTightenBindGroups[pj])
-      .dispatchWorkgroups(wgX, wgY);
-    pipeline.pointerJumpAtomicToLabelsPipeline
-      .with(computePass)
-      .with(pipeline.pointerJumpAtomicToLabelsBindGroups[pj])
-      .dispatchWorkgroups(wgX, wgY);
+  // Convert struct arrays to flat typed arrays for CPU processing
+  const labelData = new Uint32Array(labelRaw.length);
+  for (let i = 0; i < labelRaw.length; i++) {
+    labelData[i] = labelRaw[i];
   }
-  finalBuffer = pj === 0 ? pipeline.pointerJumpBuffer0 : pipeline.pointerJumpBuffer1;
 
-  // Also run extent tracking on the same labels
-  pipeline.extentResetPipeline
-    .with(computePass)
-    .with(pipeline.extentResetBindGroup)
-    .dispatchWorkgroups(Math.ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE));
-  pipeline.extentTrackPipeline
-    .with(computePass)
-    .with(pipeline.extentTrackBindGroup)
-    .dispatchWorkgroups(wgX, wgY);
-
-  computePass.end();
-  root.device.queue.submit([enc.finish()]);
-
-  // Read label buffer for region extraction
-  const labelData = new Uint32Array(await finalBuffer.read());
-
-  // Count unique labels and edge pixels for diagnostics
-  const rootSet = new Set<number>();
-  let nonZeroCount = 0;
-  for (let i = 0; i < labelData.length; i++) {
-    if (labelData[i] !== 0xFFFFFFFF) {
-      nonZeroCount++;
-      rootSet.add(labelData[i]);
-    }
+  const edgeData = new Uint8Array(edgeRaw.length);
+  for (let i = 0; i < edgeRaw.length; i++) {
+    edgeData[i] = edgeRaw[i];
   }
-  console.log(`[detectContours] edge pixels: ${nonZeroCount}, unique roots: ${rootSet.size}`);
 
-  // Read sobel data for corner detection
-  const sobelRaw = await pipeline.sobelBuffer.read();
   const sobelData = new Float32Array(sobelRaw.length * 2);
   for (let i = 0; i < sobelRaw.length; i++) {
     sobelData[i * 2] = sobelRaw[i].x;
@@ -784,7 +742,7 @@ export async function detectContours(
   // Read extent buffer
   const extentData: ExtentRow[] = await pipeline.extentBuffer.read();
 
-  return { quads, extentData };
+  return { quads, extentData, edgeData, labelData };
 }
 
 /**
