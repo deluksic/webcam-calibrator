@@ -96,9 +96,30 @@ src/
 - [x] Edge dilation (tangent-only)
 - [x] Connected components (pointer-jump)
 - [x] Compact labeling (atomic counter)
-- [ ] Quad fitting refinement
-- [ ] tag36h11 decode
-- [ ] Subpixel corner refinement
+
+### Phase 4.1 — Quad Fitting
+- [ ] Sort components by area (descending), largest = tag boundary
+- [ ] Extract contour pixels with edge directions (Sobel tangent)
+- [ ] Detect 4 corners (sharp turns in tangent, weighted by magnitude)
+- [ ] Validate corners via projective geometry before proceeding
+
+**Grid Construction (perspective-correct):**
+- Use line intersection + proportional subdivision
+- Assume square tag with equal sides
+- Divide each edge into 6 equal segments (1/6, 2/6, ..., 5/6)
+- Connect corresponding division points on opposite edges → grid lines
+- At each cell corner, sample multiple pixels for decode
+
+### Phase 4.2 — Tag Decode
+- [ ] Group samples by cell, use gradient direction consensus for black/white
+- [ ] Validate using projective checks (cell sizes, grid regularity in (u,v) space)
+- [ ] Match 6×6 pattern against tag36h11 dictionary
+- [ ] Reject invalid patterns
+- [ ] Accept successful decode
+
+### Phase 4.3 — Subpixel Refinement
+- [ ] Parabolic surface fit on gradient magnitude in 5×5 window
+- [ ] Solve analytically for subpixel corner position
 
 ### Phase 5 — Pose + Solver
 - [ ] EPnP implementation
