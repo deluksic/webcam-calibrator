@@ -494,7 +494,7 @@ export function createCameraPipeline(
 
 export const MAX_EXTENT_COMPONENTS = 16384;
 export const MAX_COMPONENTS = 16384; // alias for CalibrationView readback
-export const EXTENT_FIELDS = 5; // 5 fields per extent entry: minX, minY, maxX, maxY, originalLabel
+export const EXTENT_FIELDS = 4; // 4 fields per extent entry: minX, minY, maxX, maxY
 
 export const MAX_U32 = 0xFFFFFFFF;
 
@@ -702,13 +702,12 @@ export async function readExtentBuffer(
 ): Promise<Uint32Array> {
   type ExtentRow = d.Infer<typeof ExtentEntry>;
   const raw: ExtentRow[] = await pipeline.extentBuffer.read();
-  const flat = new Uint32Array(raw.length * 5);
+  const flat = new Uint32Array(raw.length * 4);
   for (let i = 0; i < raw.length; i++) {
-    flat[i * 5 + 0] = raw[i].minX;
-    flat[i * 5 + 1] = raw[i].minY;
-    flat[i * 5 + 2] = raw[i].maxX;
-    flat[i * 5 + 3] = raw[i].maxY;
-    flat[i * 5 + 4] = raw[i].originalLabel;
+    flat[i * 4 + 0] = raw[i].minX;
+    flat[i * 4 + 1] = raw[i].minY;
+    flat[i * 4 + 2] = raw[i].maxX;
+    flat[i * 4 + 3] = raw[i].maxY;
   }
   return flat;
 }
@@ -789,16 +788,15 @@ export async function detectContours(
   const regions = extractRegions(labelData, pipeline.width, pipeline.height, sobelData);
   const quads = validateAndFilterQuads(regions, sobelData, pipeline.width);
 
-  // Read extent buffer (5 fields per entry: minX, minY, maxX, maxY, originalLabel)
+  // Read extent buffer (4 fields per entry: minX, minY, maxX, maxY)
   type ExtentRow = d.Infer<typeof ExtentEntry>;
   const raw: ExtentRow[] = await pipeline.extentBuffer.read();
-  const extentData = new Uint32Array(raw.length * 5);
+  const extentData = new Uint32Array(raw.length * 4);
   for (let i = 0; i < raw.length; i++) {
-    extentData[i * 5 + 0] = raw[i].minX;
-    extentData[i * 5 + 1] = raw[i].minY;
-    extentData[i * 5 + 2] = raw[i].maxX;
-    extentData[i * 5 + 3] = raw[i].maxY;
-    extentData[i * 5 + 4] = raw[i].originalLabel;
+    extentData[i * 4 + 0] = raw[i].minX;
+    extentData[i * 4 + 1] = raw[i].minY;
+    extentData[i * 4 + 2] = raw[i].maxX;
+    extentData[i * 4 + 3] = raw[i].maxY;
   }
 
   return { quads, extentData };

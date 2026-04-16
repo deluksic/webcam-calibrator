@@ -6,15 +6,14 @@ import { COMPUTE_WORKGROUP_SIZE } from './constants';
 import { COMPONENT_LABEL_INVALID } from '../contour';
 
 export const MAX_U32 = 0xFFFFFFFF;
-export const EXTENT_FIELDS = 5 as const;
+export const EXTENT_FIELDS = 4 as const;
 
 /** Extent entry stored in the extent buffer. */
 export const ExtentEntry = d.struct({
-  minX: d.atomic(d.u32),         // or MAX_U32 if uninitialized
-  minY: d.atomic(d.u32),         // or MAX_U32 if uninitialized
-  maxX: d.atomic(d.u32),         // or 0 if uninitialized
-  maxY: d.atomic(d.u32),         // or 0 if uninitialized
-  originalLabel: d.atomic(d.u32), // root pixel index
+  minX: d.atomic(d.u32), // or MAX_U32 if uninitialized
+  minY: d.atomic(d.u32), // or MAX_U32 if uninitialized
+  maxX: d.atomic(d.u32), // or 0 if uninitialized
+  maxY: d.atomic(d.u32), // or 0 if uninitialized
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -53,7 +52,6 @@ export function createExtentResetPipeline(
     atomicStore(entry.minY, d.u32(MAX_U32));
     atomicStore(entry.maxX, d.u32(0));
     atomicStore(entry.maxY, d.u32(0));
-    atomicStore(entry.originalLabel, d.u32(COMPONENT_LABEL_INVALID));
   });
   return root.createComputePipeline({ compute: kernel });
 }
@@ -92,7 +90,6 @@ export function createExtentTrackPipeline(
     atomicMin(entry.minY, d.u32(y));
     atomicMax(entry.maxX, d.u32(x));
     atomicMax(entry.maxY, d.u32(y));
-    atomicStore(entry.originalLabel, label);
   });
   return root.createComputePipeline({ compute: kernel });
 }

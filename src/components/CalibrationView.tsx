@@ -318,9 +318,7 @@ function CalibrationView() {
             const minY = extentData[i * EXTENT_FIELDS + 1];
             const maxX = extentData[i * EXTENT_FIELDS + 2];
             const maxY = extentData[i * EXTENT_FIELDS + 3];
-            const originalLabel = extentData[i * EXTENT_FIELDS + 4];
-            if (minX === 0xFFFFFFFF) continue;
-            if (originalLabel === 0xFFFFFFFF) continue;
+            if (minX === 0xFFFFFFFF) continue; // uninitialized
             const w = maxX - minX;
             const h = maxY - minY;
             if (w <= 0 || h <= 0) continue;
