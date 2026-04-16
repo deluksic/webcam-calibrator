@@ -26,8 +26,13 @@ export const POINTER_JUMP_ITERATIONS = 10;
  */
 export const GRADIENT_COS_THRESHOLD = -0.8;
 
-/** Edge dilation threshold: minimum gradient alignment to consider for dilation. */
-export const EDGE_DILATE_THRESHOLD = 0.9;
+/**
+ * Edge tangent-only dilation: closes small gaps along the edge.
+ * Only dilates to neighbors that are NOT strongly gradient-aligned.
+ * Lower values = more restrictive, thinner dilation.
+ * 0.3 allows 3x3 dilation but blocks strongly gradient-aligned neighbors.
+ */
+export const EDGE_DILATE_THRESHOLD = 0.3;
 
 /**
  * Edges display mode: true = binary white/black (threshold footprint only); false = grayscale magnitude (looks thicker).

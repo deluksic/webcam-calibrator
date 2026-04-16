@@ -44,7 +44,12 @@ export function createEdgeDilatePipeline(
       for (const ix of tgpu.unroll(std.range(3))) {
         const dx = d.i32(ix) - d.i32(1);
         const dy = d.i32(iy) - d.i32(1);
-        if (dx !== d.i32(0) || dy !== d.i32(0)) {
+        const isCenter = dx === d.i32(0) && dy === d.i32(0);
+        const isDiagonal = abs(d.f32(dx)) === d.f32(1) && abs(d.f32(dy)) === d.f32(1);
+        const isFar = abs(d.f32(dx)) > d.f32(2) || abs(d.f32(dy)) > d.f32(2);
+        const skip = isCenter || isDiagonal || isFar;
+
+        if (!skip) {
           const nx2 = x + dx;
           const ny2 = y + dy;
           if (nx2 >= d.i32(0) && nx2 < w && ny2 >= d.i32(0) && ny2 < h) {
