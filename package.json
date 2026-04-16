@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173 --host 0.0.0.0",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "ship": "pnpm build && rm -rf /var/www/webcam-calibration.clodhost.com/public/* && cp -r dist/* /var/www/webcam-calibration.clodhost.com/public/"
   },
   "dependencies": {
     "@solidjs/web": "2.0.0-beta.6",

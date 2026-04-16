@@ -32,8 +32,9 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     histogram: { storage: histogramSchema, access: 'mutable' },
   });
 
-  // Display layout (edges)
+  // Display layout (edges) — HSV colorized by gradient direction
   const edgesLayout = tgpu.bindGroupLayout({
+    sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     filteredBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
   });
 

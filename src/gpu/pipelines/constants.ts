@@ -16,7 +16,17 @@ export const COMPUTE_WORKGROUP_SIZE = 16;
 /** Pointer-doubling passes: L'[i]=L[L[i]] after init (see pointerJumpPipeline). */
 export const POINTER_JUMP_ITERATIONS = 10;
 
-/** Edge dilation threshold: minimum gradient magnitude to consider for dilation. */
+/**
+ * Gradient dot-product threshold for edge connectivity.
+ * Neighbors with dot(g_i, g_j) / (|g_i||g_j|) < this value are NOT connected.
+ * -1 = all neighbors connect (old behavior)
+ *  0 = perpendicular is OK, opposite is blocked
+ *  cos(140°) ≈ -0.766 — blocks gradients > 140° apart
+ *  cos(160°) ≈ -0.94  — aggressive, only near-parallel connects
+ */
+export const GRADIENT_COS_THRESHOLD = -0.8;
+
+/** Edge dilation threshold: minimum gradient alignment to consider for dilation. */
 export const EDGE_DILATE_THRESHOLD = 0.9;
 
 /**

@@ -45,7 +45,7 @@ import {
 } from './pipelines/compactLabelPipeline';
 import type { DetectedQuad } from './contour';
 
-export type DisplayMode = 'edges' | 'edgesDilated' | 'labels' | 'grayscale' | 'debug';
+export type DisplayMode = 'edgesRaw' | 'edges' | 'edgesDilated' | 'labels' | 'grayscale' | 'debug';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PIPELINE FACTORY
@@ -215,6 +215,10 @@ export function createCameraPipeline(
     .createBuffer(d.arrayOf(d.u32, area))
     .$usage('storage');
 
+  const compactCounterBuffer = root
+    .createBuffer(d.atomic(d.u32))
+    .$usage('storage');
+
   const { trackLayout: extentTrackLayout } = createExtentTrackingLayouts(root);
 
   const extentResetLayout = tgpu.bindGroupLayout({
@@ -264,10 +268,12 @@ export function createCameraPipeline(
 
   // compactCounter: single u32 atomic counter for next compact ID
   const compactResetBindGroup = root.createBindGroup(resetLayout, {
+    compactCounter: compactCounterBuffer,
     canonicalRoot: canonicalRootBuffer,
   });
   const compactClaimBindGroup = root.createBindGroup(claimLayout, {
     labelBuffer: pointerJumpBuffer0,
+    compactCounter: compactCounterBuffer,
     canonicalRoot: canonicalRootBuffer,
   });
   const compactRemapBindGroup = root.createBindGroup(remapLayout, {
@@ -309,7 +315,6 @@ export function createCameraPipeline(
     width,
     height,
     presentationFormat,
-    EDGES_VIEW_BINARY_MASK,
   );
   const edgeFilterPipeline = createEdgeFilterPipeline(root, edgeFilterLayout, width, height);
   const edgeDilatePipeline = createEdgeDilatePipeline(root, edgeDilateLayout, width, height);
@@ -346,10 +351,12 @@ export function createCameraPipeline(
   });
 
   const edgesBindGroup = root.createBindGroup(edgesLayout, {
+    sobelBuffer: sobelBuffer,
     filteredBuffer: filteredBuffer,
   });
 
   const edgesDilatedBindGroup = root.createBindGroup(edgesLayout, {
+    sobelBuffer: sobelBuffer,
     filteredBuffer: dilatedEdgeBuffer,
   });
 
@@ -467,7 +474,6 @@ export const MAX_EXTENT_COMPONENTS = 65536;
 export const MAX_COMPONENTS = 65536; // alias for CalibrationView readback
 
 export const MAX_U32 = 0xFFFFFFFF;
-export const EXTENT_FIELDS = 4;
 
 export type CameraPipeline = ReturnType<typeof createCameraPipeline>;
 
@@ -606,7 +612,13 @@ export function processFrame(
   }
 
   // RENDER: Display mode selection + Histogram
-  if (displayMode === 'edges') {
+  if (displayMode === 'edgesRaw') {
+    pipeline.sobelRenderPipeline
+      .with(enc)
+      .withColorAttachment({ view: pipeline.context })
+      .with(pipeline.sobelRenderBindGroup)
+      .draw(3);
+  } else if (displayMode === 'edges') {
     pipeline.edgesPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.context })
@@ -656,7 +668,7 @@ export function processFrame(
 export async function detectContours(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
-): Promise<{ quads: DetectedQuad[], labelData: Uint32Array }> {
+): Promise<{ quads: DetectedQuad[], labelData: Uint32Array, extentData: Uint32Array }> {
   const enc = root.device.createCommandEncoder({ label: 'contour labels' });
   const computePass = enc.beginComputePass({ label: 'labeling' });
   const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height);
@@ -705,9 +717,7 @@ export async function detectContours(
   const labelData = new Uint32Array(await finalBuffer.read());
 
   // Read back extent buffer — CPU picks top N components by bounding box area
-  const extentData = new Uint32Array(
-    await pipeline.extentBuffer.read(new Uint32Array(MAX_COMPONENTS * EXTENT_FIELDS)),
-  );
+  const extentData = new Uint32Array(await pipeline.extentBuffer.read());
 
   // Read edge buffer for region analysis
   const edgeData = new Float32Array(await pipeline.dilatedEdgeBuffer.read());

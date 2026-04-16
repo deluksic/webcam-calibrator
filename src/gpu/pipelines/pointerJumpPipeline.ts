@@ -1,8 +1,11 @@
 // Pointer doubling on edge graph: init L[i] → min linear index among 3×3 edge neighbors; then L'[i] = L[L[i]].
 // After each doubling step, parent tightening: for edge i with p=L[i], atomicMin(L[p], min_neighbor L[j]) so shared parents update laterally.
+//
+// Gradient compatibility: neighbors with strongly opposing gradient directions (dot(g_i, g_j) < cosThreshold)
+// are NOT connected — this prevents corners from spanning across edge discontinuities.
 import { tgpu, d, std } from 'typegpu';
-import { atomicLoad, atomicMin, atomicStore } from 'typegpu/std';
-import { COMPUTE_WORKGROUP_SIZE } from './constants';
+import { atomicLoad, atomicMin, atomicStore, length, sqrt } from 'typegpu/std';
+import { COMPUTE_WORKGROUP_SIZE, GRADIENT_COS_THRESHOLD } from './constants';
 import { COMPONENT_LABEL_INVALID } from '../contour';
 
 export function createPointerJumpLayouts(root: Awaited<ReturnType<typeof tgpu.init>>) {

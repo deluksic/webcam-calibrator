@@ -280,10 +280,10 @@ function CalibrationView() {
           const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins);
           setThreshold(computeThreshold([...data], 0.85));
         });
-        // Trigger extent readback every frame
-        {
+        // Trigger extent readback every other frame
+        if (frameCount % 2 === 0) {
           const thisFrame = frameCount;
-          pip.extentBuffer.read(new Uint32Array(MAX_COMPONENTS * EXTENT_FIELDS)).then((raw) => {
+          pip.extentBuffer.read().then((raw) => {
             if (disposed) return;
             if (frameCount - thisFrame > 1) return;
             const safeRaw = raw instanceof Uint32Array ? raw : new Uint32Array(raw);
@@ -351,9 +351,18 @@ function CalibrationView() {
                 class={
                   displayMode() === 'edges' ? styles.modeButtonActive : styles.modeButton
                 }
-                onClick={() => setDisplayMode('edges')}
+                onClick={() => setDisplayMode('edgesRaw')}
               >
                 Edges
+              </button>
+              <button
+                type="button"
+                class={
+                  displayMode() === 'edges' ? styles.modeButtonActive : styles.modeButton
+                }
+                onClick={() => setDisplayMode('edges')}
+              >
+                NMS
               </button>
               <button
                 type="button"
@@ -413,7 +422,7 @@ function CalibrationView() {
               <span>({(threshold() * 100).toFixed(1)}%)</span>
             </span>
           </div>
-          <div style={{ font: '9px monospace', color: '#4f8', marginTop: 4 }}>
+          <div style={{ font: '9px monospace', color: '#4f8', 'margin-top': '4px' }}>
             {logs().map(l => <div>{l}</div>)}
           </div>
         </div>

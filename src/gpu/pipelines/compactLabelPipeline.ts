@@ -13,16 +13,18 @@
 //
 // Root index IS the compact ID — this is deterministic, no counter race.
 import { tgpu, d } from 'typegpu';
-import { atomicLoad, atomicStore } from 'typegpu/std';
+import { atomicLoad, atomicStore, atomicAdd } from 'typegpu/std';
 import { COMPUTE_WORKGROUP_SIZE } from './constants';
 import { COMPONENT_LABEL_INVALID } from '../contour';
 
 export function createCompactLabelLayouts(root: Awaited<ReturnType<typeof tgpu.init>>) {
   const resetLayout = tgpu.bindGroupLayout({
+    compactCounter: { storage: d.atomic(d.u32), access: 'mutable' },
     canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
   });
   const claimLayout = tgpu.bindGroupLayout({
     labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
+    compactCounter: { storage: d.atomic(d.u32), access: 'mutable' },
     canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
   });
   const remapLayout = tgpu.bindGroupLayout({
@@ -38,7 +40,7 @@ export function createCompactLabelLayouts(root: Awaited<ReturnType<typeof tgpu.i
 
 export function createCanonicalResetPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
-  resetLayout: ReturnType<ReturnType<typeof createCompactLabelLayouts>['resetLayout']>,
+  resetLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   area: number,
 ) {
   const kernel = tgpu.computeFn({
@@ -49,13 +51,16 @@ export function createCanonicalResetPipeline(
     const slot = d.u32(input.gid.x);
     if (slot >= d.u32(area)) { return; }
     atomicStore(resetLayout.$.canonicalRoot[slot], d.u32(COMPONENT_LABEL_INVALID));
+    if (slot === d.u32(0)) {
+      atomicStore(resetLayout.$.compactCounter, d.u32(0));
+    }
   });
   return root.createComputePipeline({ compute: kernel });
 }
 
 export function createCanonicalClaimPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
-  claimLayout: ReturnType<ReturnType<typeof createCompactLabelLayouts>['claimLayout']>,
+  claimLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
   maxComponents: number,
@@ -78,18 +83,21 @@ export function createCanonicalClaimPipeline(
     // Only roots (minimal pixel in component) claim a compact ID.
     // A pixel is a root iff label == idx (pointer-jump sets this).
     if (label !== idx) { return; }
-    // Only roots with index < maxComponents get a compact ID.
-    if (label >= d.u32(maxComponents)) { return; }
+    // Only claim if root pixel index fits in canonicalRoot buffer.
+    const area = d.u32(width * height);
+    if (label >= area) { return; }
 
-    // Root index IS the compact ID — deterministic, no counter race.
-    atomicStore(claimLayout.$.canonicalRoot[label], label);
+    // Atomically claim next compact ID — sequential regardless of root pixel index.
+    const compactId = atomicAdd(claimLayout.$.compactCounter, d.u32(1));
+    if (compactId >= d.u32(maxComponents)) { return; }
+    atomicStore(claimLayout.$.canonicalRoot[label], compactId);
   });
   return root.createComputePipeline({ compute: kernel });
 }
 
 export function createRemapLabelPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
-  remapLayout: ReturnType<ReturnType<typeof createCompactLabelLayouts>['remapLayout']>,
+  remapLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
 ) {

@@ -1,7 +1,8 @@
-// Edge render pipeline: filteredBuffer → edges canvas
+// Edge render pipeline: filteredBuffer + sobelBuffer → edges canvas
+// Colorizes edges by gradient direction using continuous HSV coloring.
 import { tgpu, d } from 'typegpu';
 import { common } from 'typegpu';
-import { clamp, floor, select } from 'typegpu/std';
+import { atan2, clamp, floor, length, max } from 'typegpu/std';
 
 export function createEdgesPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -9,9 +10,8 @@ export function createEdgesPipeline(
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
-  binaryMask: boolean,
 ) {
-  const edgesFrag = tgpu.fragmentFn({
+  const frag = tgpu.fragmentFn({
     in: { uv: d.location(0, d.vec2f) },
     out: d.vec4f,
   })((i) => {
@@ -23,16 +23,50 @@ export function createEdgesPipeline(
     const px = d.u32(floor(clamp(i.uv.x * d.f32(wi), d.f32(0), maxPx)));
     const py = d.u32(floor(clamp(i.uv.y * d.f32(hi), d.f32(0), maxPy)));
     const idx = py * d.u32(wi) + px;
+
     const mag = edgesLayout.$.filteredBuffer[idx];
-    const v = binaryMask
-      ? select(d.f32(0), d.f32(1), mag > d.f32(0))
-      : mag;
-    return d.vec4f(v, v, v, d.f32(1));
+    if (mag <= d.f32(0)) {
+      return d.vec4f(d.f32(0.08), d.f32(0.08), d.f32(0.12), d.f32(1));
+    }
+
+    const g = edgesLayout.$.sobelBuffer[idx];
+    const gm = length(g);
+    const gxn = g.x / gm;
+    const gyn = g.y / gm;
+
+    let angle = atan2(gyn, gxn) / d.f32(6.28318530718) + d.f32(0.5);
+    if (angle < d.f32(0)) { angle = angle + d.f32(1); }
+    if (angle >= d.f32(1)) { angle = angle - d.f32(1); }
+
+    let hue = angle + d.f32(0.5);
+    if (hue >= d.f32(1)) { hue = hue - d.f32(1); }
+
+    const sat = d.f32(0.85);
+    const val = max(mag, d.f32(0.2));
+    const h = hue * d.f32(6);
+    const sector = floor(h);
+    const f = h - sector;
+    const p = val * (d.f32(1) - sat);
+    const q = val * (d.f32(1) - f * sat);
+    const t = val * (d.f32(1) - (d.f32(1) - f) * sat);
+
+    const s = sector;
+    let r = d.f32(0);
+    let gV = d.f32(0);
+    let b = d.f32(0);
+    if (s === d.f32(0)) { r = val; gV = t; b = p; }
+    else if (s === d.f32(1)) { r = q; gV = val; b = p; }
+    else if (s === d.f32(2)) { r = p; gV = val; b = t; }
+    else if (s === d.f32(3)) { r = p; gV = q; b = val; }
+    else if (s === d.f32(4)) { r = t; gV = p; b = val; }
+    else { r = val; gV = p; b = q; }
+
+    return d.vec4f(r, gV, b, d.f32(1));
   });
 
   return root.createRenderPipeline({
     vertex: common.fullScreenTriangle,
-    fragment: edgesFrag,
+    fragment: frag,
     targets: { format: presentationFormat },
   });
 }
