@@ -7,6 +7,8 @@ import {
   detectContours,
   type CameraPipeline,
   type DisplayMode,
+  EXTENT_FIELDS,
+  MAX_COMPONENTS,
 } from '../gpu/camera';
 import type { DetectedQuad } from '../gpu/contour';
 import { computeThreshold, THRESHOLD_PERCENTILE } from '../gpu/pipelines/constants';
@@ -299,22 +301,38 @@ function CalibrationView() {
       if (disposed) return undefined;
       log('First frame presented');
 
-      const EXTENT_FIELDS = 4;
-      const MAX_COMPONENTS = 65536;
-
       let frameCount = 0;
       let quadDetectionPending = false;
 
       // Kick off first quad detection immediately after loop starts
       const scheduleQuadDetection = () => {
         if (quadDetectionPending || disposed) return;
-        if (displayMode() !== 'grid') { quadDetectionPending = false; return; }
         quadDetectionPending = true;
         const gForQuad = gpu();
         if (!gForQuad) { quadDetectionPending = false; return; }
-        detectContours(gForQuad, pip).then(({ quads }) => {
+        detectContours(gForQuad, pip).then(({ quads, extentData }) => {
           if (disposed) return;
           quadDetectionPending = false;
+
+          // Use extent data for debug overlay
+          const boxes: Bbox[] = [];
+          for (let i = 0; i < MAX_COMPONENTS; i++) {
+            const minX = extentData[i * EXTENT_FIELDS + 0];
+            const minY = extentData[i * EXTENT_FIELDS + 1];
+            const maxX = extentData[i * EXTENT_FIELDS + 2];
+            const maxY = extentData[i * EXTENT_FIELDS + 3];
+            const originalLabel = extentData[i * EXTENT_FIELDS + 4];
+            if (minX === 0xFFFFFFFF) continue;
+            if (originalLabel === 0xFFFFFFFF) continue;
+            const w = maxX - minX;
+            const h = maxY - minY;
+            if (w <= 0 || h <= 0) continue;
+            boxes.push({ minX, minY, maxX, maxY, area: w * h });
+          }
+          boxes.sort((a, b) => b.area - a.area);
+          setBboxes(boxes.slice(0, 128));
+
+          // Update grid overlay with detected quads
           const cornerQuads = quads.filter(q => q.hasCorners);
           const bboxQuads = quads.filter(q => !q.hasCorners);
           updateQuadCornersBuffer(pip, quads);
@@ -345,29 +363,6 @@ function CalibrationView() {
           const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins);
           setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE));
         });
-        if (frameCount % 2 === 0 && displayMode() === 'debug') {
-          const thisFrame = frameCount;
-          pip.extentBuffer.read().then((raw) => {
-            if (disposed) return;
-            if (frameCount - thisFrame > 1) return;
-            const safeRaw = raw instanceof Uint32Array ? raw : new Uint32Array(raw);
-            const boxes: Bbox[] = [];
-            for (let i = 0; i < MAX_COMPONENTS; i++) {
-              const minX = safeRaw[i * EXTENT_FIELDS + 0];
-              const minY = safeRaw[i * EXTENT_FIELDS + 1];
-              const maxX = safeRaw[i * EXTENT_FIELDS + 2];
-              const maxY = safeRaw[i * EXTENT_FIELDS + 3];
-              if (!Number.isFinite(minX)) { continue; }
-              if (minX === 0xFFFFFFFF) { continue; }
-              const w = maxX - minX;
-              const h = maxY - minY;
-              if (minX > maxX || w <= 0 || h <= 0) { continue; }
-              boxes.push({ minX, minY, maxX, maxY, area: w * h });
-            }
-            boxes.sort((a, b) => b.area - a.area);
-            setBboxes(boxes.slice(0, 128));
-          });
-        }
         rafHandle = cameraVideo.requestVideoFrameCallback(loop);
       };
       rafHandle = cameraVideo.requestVideoFrameCallback(loop);

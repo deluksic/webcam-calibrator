@@ -35,7 +35,6 @@ import {
   createExtentTrackingLayouts,
   createExtentResetPipeline,
   createExtentTrackPipeline,
-  EXTENT_FIELDS,
 } from './pipelines/extentTrackingPipeline';
 import { createCompactLabelLayouts, createCanonicalResetPipeline, createCanonicalClaimPipeline, createRemapLabelPipeline } from './pipelines/compactLabelPipeline';
 import { createGridVizPipeline, createGridVizLayouts, MAX_DETECTED_TAGS } from './pipelines/gridVizPipeline';
@@ -235,13 +234,14 @@ export function createCameraPipeline(
     extentTrackLayout,
     width,
     height,
+    MAX_EXTENT_COMPONENTS,
   );
 
   const extentResetBindGroup = root.createBindGroup(extentResetLayout, {
     extentBuffer,
   });
   const extentTrackBindGroup = root.createBindGroup(extentTrackLayout, {
-    labelBuffer: compactLabelBuffer,
+    labelBuffer: pointerJumpBuffer0, // key by originalLabel (root pixel index)
     extentBuffer,
   });
 
@@ -492,6 +492,7 @@ export function createCameraPipeline(
 
 export const MAX_EXTENT_COMPONENTS = 65536;
 export const MAX_COMPONENTS = 65536; // alias for CalibrationView readback
+export const EXTENT_FIELDS = 5; // 5 fields per extent entry: minX, minY, maxX, maxY, originalLabel
 
 export const MAX_U32 = 0xFFFFFFFF;
 
@@ -701,7 +702,7 @@ export function processFrame(
 export async function detectContours(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
-): Promise<{ quads: DetectedQuad[], labelData: Uint32Array }> {
+): Promise<{ quads: DetectedQuad[], extentData: Uint32Array }> {
   const enc = root.device.createCommandEncoder({ label: 'contour labels' });
   const computePass = enc.beginComputePass({ label: 'labeling' });
   const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height);
@@ -734,9 +735,20 @@ export async function detectContours(
   }
   finalBuffer = pj === 0 ? pipeline.pointerJumpBuffer0 : pipeline.pointerJumpBuffer1;
 
+  // Also run extent tracking on the same labels
+  pipeline.extentResetPipeline
+    .with(computePass)
+    .with(pipeline.extentResetBindGroup)
+    .dispatchWorkgroups(Math.ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE));
+  pipeline.extentTrackPipeline
+    .with(computePass)
+    .with(pipeline.extentTrackBindGroup)
+    .dispatchWorkgroups(wgX, wgY);
+
   computePass.end();
   root.device.queue.submit([enc.finish()]);
 
+  // Read label buffer for region extraction
   const labelData = new Uint32Array(await finalBuffer.read());
 
   // Count unique labels and edge pixels for diagnostics
@@ -750,8 +762,7 @@ export async function detectContours(
   }
   console.log(`[detectContours] edge pixels: ${nonZeroCount}, unique roots: ${rootSet.size}`);
 
-  // Read edge buffer and sobel data for region analysis
-  const edgeData = new Float32Array(await pipeline.dilatedEdgeBuffer.read());
+  // Read sobel data for corner detection
   const sobelRaw = await pipeline.sobelBuffer.read();
   const sobelData = new Float32Array(sobelRaw.length * 2);
   for (let i = 0; i < sobelRaw.length; i++) {
@@ -761,10 +772,13 @@ export async function detectContours(
 
   // CPU-side: extract regions and fit quads
   const { extractRegions, validateAndFilterQuads } = await import('./contour');
-  const regions = extractRegions(labelData, pipeline.width, pipeline.height, edgeData);
+  const regions = extractRegions(labelData, pipeline.width, pipeline.height, sobelData);
   const quads = validateAndFilterQuads(regions, sobelData, pipeline.width);
 
-  return { quads, labelData };
+  // Read extent buffer (5 fields per entry: minX, minY, maxX, maxY, originalLabel)
+  const extentData = new Uint32Array(await pipeline.extentBuffer.read());
+
+  return { quads, extentData };
 }
 
 /**

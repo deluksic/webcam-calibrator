@@ -50,6 +50,7 @@ export function extractRegions(
       if (!regions.has(label)) {
         regions.set(label, {
           label,
+          rootLabel: label, // raw pixel-index label IS the root
           count: 0,
           minX: x,
           minY: y,
@@ -72,7 +73,7 @@ export function extractRegions(
     }
   }
 
-  return regions;
+  return [...regions.values()];
 }
 
 export function fitQuadToRegion(region: RegionData): [number, number][] | null {
@@ -107,7 +108,7 @@ export function fitQuadToRegion(region: RegionData): [number, number][] | null {
 }
 
 export function validateAndFilterQuads(
-  regions: Map<number, RegionData>,
+  regions: RegionData[],
   sobelData: Float32Array,
   width: number,
   minArea: number = 400,
@@ -117,7 +118,7 @@ export function validateAndFilterQuads(
 
   let okAreaAR = 0, okEdgeDensity = 0, okCorners = 0, okBbox = 0, okFailed = 0;
 
-  for (const [, region] of regions) {
+  for (const region of regions) {
     const w = region.maxX - region.minX;
     const h = region.maxY - region.minY;
     const area = w * h;
@@ -223,7 +224,7 @@ export function validateAndFilterQuads(
     });
   }
 
-  console.log(`[validateQuads] regions=${regions.size} okAreaAR=${okAreaAR} okEdgeDensity=${okEdgeDensity} okCorners=${okCorners} okBbox=${okBbox} failed=${okFailed}`);
+  console.log(`[validateQuads] regions=${regions.length} okAreaAR=${okAreaAR} okEdgeDensity=${okEdgeDensity} okCorners=${okCorners} okBbox=${okBbox} failed=${okFailed}`);
 
   return quads;
 }
