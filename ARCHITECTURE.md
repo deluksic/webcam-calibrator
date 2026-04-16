@@ -69,14 +69,13 @@ Only two readback operations exist, both initiated from the JS render loop:
 
 The extent buffer stores bounding boxes for each labeled component. Components are keyed by their root pixel index (label value). The buffer must be large enough to hold all components.
 
-**Format** (5× u32 per entry):
+**Format** (4× u32 per entry):
 
 ```
-entry[i*5 + 0] = minX (or 0xFFFFFFFF if uninitialized)
-entry[i*5 + 1] = minY
-entry[i*5 + 2] = maxX
-entry[i*5 + 3] = maxY
-entry[i*5 + 4] = originalLabel (root pixel index)
+entry[i*4 + 0] = minX (or 0xFFFFFFFF if uninitialized)
+entry[i*4 + 1] = minY
+entry[i*4 + 2] = maxX
+entry[i*4 + 3] = maxY
 ```
 
 Unused entries: `minX = 0xFFFF`

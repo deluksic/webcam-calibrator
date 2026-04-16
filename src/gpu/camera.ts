@@ -697,25 +697,18 @@ export function processFrame(
 /**
  * Read the extent buffer. Call periodically (not every frame) to get bounding boxes.
  */
+export type ExtentRow = d.Infer<typeof ExtentEntry>;
+
 export async function readExtentBuffer(
   pipeline: CameraPipeline,
-): Promise<Uint32Array> {
-  type ExtentRow = d.Infer<typeof ExtentEntry>;
-  const raw: ExtentRow[] = await pipeline.extentBuffer.read();
-  const flat = new Uint32Array(raw.length * 4);
-  for (let i = 0; i < raw.length; i++) {
-    flat[i * 4 + 0] = raw[i].minX;
-    flat[i * 4 + 1] = raw[i].minY;
-    flat[i * 4 + 2] = raw[i].maxX;
-    flat[i * 4 + 3] = raw[i].maxY;
-  }
-  return flat;
+): Promise<ExtentRow[]> {
+  return pipeline.extentBuffer.read();
 }
 
 export async function detectContours(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
-): Promise<{ quads: DetectedQuad[], extentData: Uint32Array }> {
+): Promise<{ quads: DetectedQuad[], extentData: ExtentRow[] }> {
   const enc = root.device.createCommandEncoder({ label: 'contour labels' });
   const computePass = enc.beginComputePass({ label: 'labeling' });
   const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height);
@@ -788,16 +781,8 @@ export async function detectContours(
   const regions = extractRegions(labelData, pipeline.width, pipeline.height, sobelData);
   const quads = validateAndFilterQuads(regions, sobelData, pipeline.width);
 
-  // Read extent buffer (4 fields per entry: minX, minY, maxX, maxY)
-  type ExtentRow = d.Infer<typeof ExtentEntry>;
-  const raw: ExtentRow[] = await pipeline.extentBuffer.read();
-  const extentData = new Uint32Array(raw.length * 4);
-  for (let i = 0; i < raw.length; i++) {
-    extentData[i * 4 + 0] = raw[i].minX;
-    extentData[i * 4 + 1] = raw[i].minY;
-    extentData[i * 4 + 2] = raw[i].maxX;
-    extentData[i * 4 + 3] = raw[i].maxY;
-  }
+  // Read extent buffer
+  const extentData: ExtentRow[] = await pipeline.extentBuffer.read();
 
   return { quads, extentData };
 }

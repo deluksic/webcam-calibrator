@@ -8,8 +8,9 @@ import {
   readExtentBuffer,
   type CameraPipeline,
   type DisplayMode,
-  EXTENT_FIELDS,
+  type ExtentRow,
   MAX_COMPONENTS,
+  MAX_U32,
 } from '../gpu/camera';
 import type { DetectedQuad } from '../gpu/contour';
 import { computeThreshold, THRESHOLD_PERCENTILE } from '../gpu/pipelines/constants';
@@ -309,20 +310,16 @@ function CalibrationView() {
       const scheduleExtentRead = () => {
         if (extentReadPending || disposed) return;
         extentReadPending = true;
-        readExtentBuffer(pip).then((extentData) => {
+        readExtentBuffer(pip).then((extentData: ExtentRow[]) => {
           if (disposed) return;
           extentReadPending = false;
           const boxes: Bbox[] = [];
-          for (let i = 0; i < MAX_COMPONENTS; i++) {
-            const minX = extentData[i * EXTENT_FIELDS + 0];
-            const minY = extentData[i * EXTENT_FIELDS + 1];
-            const maxX = extentData[i * EXTENT_FIELDS + 2];
-            const maxY = extentData[i * EXTENT_FIELDS + 3];
-            if (minX === 0xFFFFFFFF) continue; // uninitialized
-            const w = maxX - minX;
-            const h = maxY - minY;
+          for (const entry of extentData) {
+            if (entry.minX === MAX_U32) continue; // uninitialized
+            const w = entry.maxX - entry.minX;
+            const h = entry.maxY - entry.minY;
             if (w <= 0 || h <= 0) continue;
-            boxes.push({ minX, minY, maxX, maxY, area: w * h });
+            boxes.push({ minX: entry.minX, minY: entry.minY, maxX: entry.maxX, maxY: entry.maxY, area: w * h });
           }
           boxes.sort((a, b) => b.area - a.area);
           setBboxes(boxes.slice(0, 128));
