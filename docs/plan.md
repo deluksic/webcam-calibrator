@@ -140,10 +140,12 @@ src/
 - [ ] View collection + BA trigger
 - [ ] Results display + export
 
-### Phase 7 — Target Display
-- [ ] SVG AprilTag grid generation
-- [ ] Size/spacing controls
-- [ ] Print/export
+### Phase 7 — Target Display ✅
+- [x] SVG AprilTag grid generation
+- [x] Configurable NxM layout
+- [x] Spacing control (as ratio of tag size)
+- [x] Optional checkerboard between tags
+- [x] Fullscreen mode
 
 ### Phase 8 — Polish
 - [ ] Motion blur feedback
