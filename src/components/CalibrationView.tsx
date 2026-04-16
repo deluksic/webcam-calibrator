@@ -38,24 +38,26 @@ function BboxOverlay(props: {
   bboxes: () => Bbox[];
   sx: () => number;
   sy: () => number;
+  fw: () => number;
+  fh: () => number;
 }) {
-  const visible = createMemo(() => props.bboxes().filter((b) => b.area > 100));
+  const visible = createMemo(() => {
+    const half = (props.fw() * props.fh()) / 2;
+    return props.bboxes().filter((b) => b.area > 100 && b.area < half);
+  });
   return (
     <For each={visible()} keyed={false}>
-      {(box) => {
-        const b = box();
-        return (
-          <div
-            class={styles.bbox}
-            style={{
-              '--bbox-x': `${b.minX * props.sx()}px`,
-              '--bbox-y': `${b.minY * props.sy()}px`,
-              '--bbox-w': `${(b.maxX - b.minX) * props.sx()}px`,
-              '--bbox-h': `${(b.maxY - b.minY) * props.sy()}px`,
-            }}
-          />
-        );
-      }}
+      {(box) => (
+        <div
+          class={styles.bbox}
+          style={{
+            '--bbox-x': `${box().minX * props.sx()}px`,
+            '--bbox-y': `${box().minY * props.sy()}px`,
+            '--bbox-w': `${(box().maxX - box().minX) * props.sx()}px`,
+            '--bbox-h': `${(box().maxY - box().minY) * props.sy()}px`,
+          }}
+        />
+      )}
     </For>
   );
 }
@@ -396,6 +398,8 @@ function CalibrationView() {
             <Show when={displayMode() === 'debug'}>
               <BboxOverlay
                 bboxes={bboxes}
+                fw={() => frameSize().w}
+                fh={() => frameSize().h}
                 sx={() => (canvasEl() && renderedW() > 0 && frameSize().w > 0) ? renderedW() / frameSize().w : 1}
                 sy={() => (canvasEl() && renderedH() > 0 && frameSize().h > 0) ? renderedH() / frameSize().h : 1}
               />
