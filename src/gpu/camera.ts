@@ -206,7 +206,6 @@ export function createCameraPipeline(
   // compactLabelBuffer: remapped labels after compact pass.
   // extentBuffer: sized for MAX_EXTENT_COMPONENTS entries (compact IDs < MAX_EXTENT_COMPONENTS).
   const area = width * height;
-  const MAX_EXTENT_COMPONENTS = 4096;
 
   const canonicalRootBuffer = root
     .createBuffer(d.arrayOf(d.atomic(d.u32), area))
@@ -595,7 +594,7 @@ export function processFrame(
       pipeline.extentResetPipeline
         .with(computePass)
         .with(pipeline.extentResetBindGroup)
-        .dispatchWorkgroups(Math.ceil(area / COMPUTE_WORKGROUP_SIZE));
+        .dispatchWorkgroups(Math.ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE));
       // Track extents for every labeled pixel
       pipeline.extentTrackPipeline
         .with(computePass)
