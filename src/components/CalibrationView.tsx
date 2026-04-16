@@ -1,4 +1,4 @@
-import { For, createMemo, createSignal, onCleanup, createEffect } from 'solid-js';
+import { For, Show, createMemo, createSignal, onCleanup, createEffect } from 'solid-js';
 import { initGPU } from '../gpu/init';
 import {
   createCameraPipeline,
@@ -73,6 +73,12 @@ function CalibrationView() {
   const filteredBboxes = createMemo(() =>
     bboxes().filter((b) => b.area > 100)
   );
+
+  // Debug: track bboxes signal changes
+  createEffect(() => {
+    const boxes = bboxes();
+    console.log('EFFECT bboxes changed:', boxes.length, boxes[0] ? `top=${boxes[0].area}@(${boxes[0].minX},${boxes[0].minY})` : 'none');
+  });
 
   const log = (msg: string) => {
     setLogs(prev => [...prev.slice(-8), `${new Date().toISOString().slice(11, 19)} ${msg}`]);
@@ -276,6 +282,12 @@ function CalibrationView() {
               boxes.push({ minX, minY, maxX, maxY, area: w * h });
             }
             boxes.sort((a, b) => b.area - a.area);
+            const top5 = boxes.slice(0, 5);
+            console.log('EXTENT raw[0-4]:', Array.from({ length: 5 }, (_, i) => {
+              const b = top5[i];
+              return b ? `[${b.minX},${b.minY},${b.maxX},${b.maxY}] area=${b.area}` : 'invalid';
+            }));
+            console.log('EXTENT setBboxes:', top5.map(b => `${b.area}@(${b.minX},${b.minY})-(${b.maxX},${b.maxY})`));
             setBboxes(boxes.slice(0, 50));
             const top3 = boxes.slice(0, 3).map(b => `${b.area}`).join(', ') || 'none';
             log(`Extents: found=${boxes.length} top3=${top3} skip{inv=${skippedInvalid}, sen=${skippedSentinel}, neg=${skippedNeg}, small=${skippedSmall}}`);
@@ -365,36 +377,34 @@ function CalibrationView() {
           </div>
           <div style={{ position: 'relative' }}>
             <canvas ref={canvasRefCallback} class={styles.feedCanvas} />
-            {displayMode() === 'debug' && (() => {
-              const el = canvasEl();
-              const size = frameSize();
-              const rw = renderedW();
-              const rh = renderedH();
-              const sx = (el && rw > 0 && size.w > 0) ? rw / size.w : 1;
-              const sy = (el && rh > 0 && size.h > 0) ? rh / size.h : 1;
-              return (
-                <For each={filteredBboxes()} keyed={false}>
-                  {(box) => {
-                    const b = box();
-                    const x = b.minX * sx;
-                    const y = b.minY * sy;
-                    const w = (b.maxX - b.minX) * sx;
-                    const h = (b.maxY - b.minY) * sy;
-                    return (
-                      <div
-                        class={styles.bbox}
-                        style={{
-                          '--bbox-x': `${x}px`,
-                          '--bbox-y': `${y}px`,
-                          '--bbox-w': `${w}px`,
-                          '--bbox-h': `${h}px`,
-                        }}
-                      />
-                    );
-                  }}
-                </For>
-              );
-            })()}
+            <Show when={displayMode() === 'debug'}>
+              {(() => {
+                const sx = () => (canvasEl() && renderedW() > 0 && frameSize().w > 0) ? renderedW() / frameSize().w : 1;
+                const sy = () => (canvasEl() && renderedH() > 0 && frameSize().h > 0) ? renderedH() / frameSize().h : 1;
+                return (
+                  <For each={filteredBboxes()} keyed={false}>
+                    {(box) => {
+                      const b = box();
+                      const x = b.minX * sx();
+                      const y = b.minY * sy();
+                      const w = (b.maxX - b.minX) * sx();
+                      const h = (b.maxY - b.minY) * sy();
+                      return (
+                        <div
+                          class={styles.bbox}
+                          style={{
+                            '--bbox-x': `${x}px`,
+                            '--bbox-y': `${y}px`,
+                            '--bbox-w': `${w}px`,
+                            '--bbox-h': `${h}px`,
+                          }}
+                        />
+                      );
+                    }}
+                  </For>
+                );
+              })()}
+            </Show>
           </div>
         </div>
         <div class={`${styles.feedPanel} ${styles.feedPanelSide}`}>
