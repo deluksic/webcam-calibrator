@@ -35,6 +35,7 @@ import {
   createExtentTrackingLayouts,
   createExtentResetPipeline,
   createExtentTrackPipeline,
+  ExtentEntry,
 } from './pipelines/extentTrackingPipeline';
 import { createCompactLabelLayouts, createCanonicalResetPipeline, createCanonicalClaimPipeline, createRemapLabelPipeline } from './pipelines/compactLabelPipeline';
 import { createGridVizPipeline, createGridVizLayouts, MAX_DETECTED_TAGS } from './pipelines/gridVizPipeline';
@@ -217,11 +218,11 @@ export function createCameraPipeline(
   const { trackLayout: extentTrackLayout } = createExtentTrackingLayouts(root);
 
   const extentResetLayout = tgpu.bindGroupLayout({
-    extentBuffer: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
+    extentBuffer: { storage: d.arrayOf(ExtentEntry), access: 'mutable' },
   });
 
   const extentBuffer = root
-    .createBuffer(d.arrayOf(d.atomic(d.u32), MAX_EXTENT_COMPONENTS * EXTENT_FIELDS))
+    .createBuffer(d.arrayOf(ExtentEntry, MAX_EXTENT_COMPONENTS))
     .$usage('storage');
 
   const extentResetPipeline = createExtentResetPipeline(
@@ -240,8 +241,9 @@ export function createCameraPipeline(
   const extentResetBindGroup = root.createBindGroup(extentResetLayout, {
     extentBuffer,
   });
+  // Extent tracking on compact labels
   const extentTrackBindGroup = root.createBindGroup(extentTrackLayout, {
-    labelBuffer: pointerJumpBuffer0, // key by originalLabel (root pixel index)
+    labelBuffer: compactLabelBuffer,
     extentBuffer,
   });
 
@@ -490,8 +492,8 @@ export function createCameraPipeline(
   };
 }
 
-export const MAX_EXTENT_COMPONENTS = 65536;
-export const MAX_COMPONENTS = 65536; // alias for CalibrationView readback
+export const MAX_EXTENT_COMPONENTS = 16384;
+export const MAX_COMPONENTS = 16384; // alias for CalibrationView readback
 export const EXTENT_FIELDS = 5; // 5 fields per extent entry: minX, minY, maxX, maxY, originalLabel
 
 export const MAX_U32 = 0xFFFFFFFF;
@@ -564,70 +566,63 @@ export function processFrame(
       .with(pipeline.edgeDilateBindGroup)
       .dispatchWorkgroups(wgX, wgY);
 
-    const wantComponentViz = displayMode === 'debug';
-    const wantLabelViz = displayMode === 'labels' || displayMode === 'debug';
-
-    const runPointerJump = () => {
-      pipeline.pointerJumpInitPipeline
+    // Pointer-jump connected component labeling
+    pipeline.pointerJumpInitPipeline
+      .with(computePass)
+      .with(pipeline.pointerJumpInitBindGroup)
+      .dispatchWorkgroups(wgX, wgY);
+    let pj = 0;
+    for (let s = 0; s < POINTER_JUMP_ITERATIONS; s++) {
+      pipeline.pointerJumpStepPipeline
         .with(computePass)
-        .with(pipeline.pointerJumpInitBindGroup)
+        .with(pipeline.pointerJumpPingPongBindGroups[pj])
         .dispatchWorkgroups(wgX, wgY);
-      let pj = 0;
-      for (let s = 0; s < POINTER_JUMP_ITERATIONS; s++) {
-        pipeline.pointerJumpStepPipeline
-          .with(computePass)
-          .with(pipeline.pointerJumpPingPongBindGroups[pj])
-          .dispatchWorkgroups(wgX, wgY);
-        pj ^= 1;
-        pipeline.pointerJumpLabelsToAtomicPipeline
-          .with(computePass)
-          .with(pipeline.pointerJumpLabelsToAtomicBindGroups[pj])
-          .dispatchWorkgroups(wgX, wgY);
-        pipeline.pointerJumpParentTightenPipeline
-          .with(computePass)
-          .with(pipeline.pointerJumpParentTightenBindGroups[pj])
-          .dispatchWorkgroups(wgX, wgY);
-        pipeline.pointerJumpAtomicToLabelsPipeline
-          .with(computePass)
-          .with(pipeline.pointerJumpAtomicToLabelsBindGroups[pj])
-          .dispatchWorkgroups(wgX, wgY);
-      }
-      finalLabelBuffer = pj === 0 ? pipeline.pointerJumpBuffer0 : pipeline.pointerJumpBuffer1;
-    };
-
-    if (wantLabelViz) {
-      runPointerJump();
-
-      // Compact labeling: 3-pass remap of pixel-index labels to compact IDs.
-      // 1. Reset canonicalRoot to INVALID
-      pipeline.compactResetPipeline
+      pj ^= 1;
+      pipeline.pointerJumpLabelsToAtomicPipeline
         .with(computePass)
-        .with(pipeline.compactResetBindGroup)
-        .dispatchWorkgroups(Math.ceil(area / COMPUTE_WORKGROUP_SIZE));
-      // 2. Claim: each root (label == pixel idx) stores its own index as compact ID
-      pipeline.compactClaimPipeline
-        .with(computePass)
-        .with(pipeline.compactClaimBindGroup)
+        .with(pipeline.pointerJumpLabelsToAtomicBindGroups[pj])
         .dispatchWorkgroups(wgX, wgY);
-      // 3. Remap: L[i] = canonicalRoot[label] (compact ID, fits in extent buffer)
-      pipeline.compactRemapPipeline
+      pipeline.pointerJumpParentTightenPipeline
         .with(computePass)
-        .with(pipeline.compactRemapBindGroup)
+        .with(pipeline.pointerJumpParentTightenBindGroups[pj])
+        .dispatchWorkgroups(wgX, wgY);
+      pipeline.pointerJumpAtomicToLabelsPipeline
+        .with(computePass)
+        .with(pipeline.pointerJumpAtomicToLabelsBindGroups[pj])
         .dispatchWorkgroups(wgX, wgY);
     }
+    finalLabelBuffer = pj === 0 ? pipeline.pointerJumpBuffer0 : pipeline.pointerJumpBuffer1;
 
-    if (wantComponentViz) {
-      // Reset extent buffer with sentinel values
-      pipeline.extentResetPipeline
-        .with(computePass)
-        .with(pipeline.extentResetBindGroup)
-        .dispatchWorkgroups(Math.ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE));
-      // Track extents for every labeled pixel
-      pipeline.extentTrackPipeline
-        .with(computePass)
-        .with(pipeline.extentTrackBindGroup)
-        .dispatchWorkgroups(wgX, wgY);
-    }
+    // Compact labeling: 3-pass remap of pixel-index labels to compact IDs (0..N-1).
+    // Always runs — needed for extent tracking to work (labels must fit in extent buffer).
+    // 1. Reset canonicalRoot to INVALID
+    pipeline.compactResetPipeline
+      .with(computePass)
+      .with(pipeline.compactResetBindGroup)
+      .dispatchWorkgroups(Math.ceil(area / COMPUTE_WORKGROUP_SIZE));
+    // 2. Claim: each root (label == pixel idx) stores its own index as compact ID
+    pipeline.compactClaimPipeline
+      .with(computePass)
+      .with(pipeline.compactClaimBindGroup)
+      .dispatchWorkgroups(wgX, wgY);
+    // 3. Remap: L[i] = canonicalRoot[label] (compact ID, fits in extent buffer)
+    pipeline.compactRemapPipeline
+      .with(computePass)
+      .with(pipeline.compactRemapBindGroup)
+      .dispatchWorkgroups(wgX, wgY);
+
+    // Use compact labels everywhere downstream
+    finalLabelBuffer = pipeline.compactLabelBuffer;
+
+    // Track extents on compact labels
+    pipeline.extentResetPipeline
+      .with(computePass)
+      .with(pipeline.extentResetBindGroup)
+      .dispatchWorkgroups(Math.ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE));
+    pipeline.extentTrackPipeline
+      .with(computePass)
+      .with(pipeline.extentTrackBindGroup)
+      .dispatchWorkgroups(wgX, wgY);
 
     computePass.end();
   }
@@ -697,6 +692,25 @@ export function processFrame(
     .draw(6, HISTOGRAM_BINS);
 
   root.device.queue.submit([enc.finish()]);
+}
+
+/**
+ * Read the extent buffer. Call periodically (not every frame) to get bounding boxes.
+ */
+export async function readExtentBuffer(
+  pipeline: CameraPipeline,
+): Promise<Uint32Array> {
+  type ExtentRow = d.Infer<typeof ExtentEntry>;
+  const raw: ExtentRow[] = await pipeline.extentBuffer.read();
+  const flat = new Uint32Array(raw.length * 5);
+  for (let i = 0; i < raw.length; i++) {
+    flat[i * 5 + 0] = raw[i].minX;
+    flat[i * 5 + 1] = raw[i].minY;
+    flat[i * 5 + 2] = raw[i].maxX;
+    flat[i * 5 + 3] = raw[i].maxY;
+    flat[i * 5 + 4] = raw[i].originalLabel;
+  }
+  return flat;
 }
 
 export async function detectContours(
@@ -776,7 +790,16 @@ export async function detectContours(
   const quads = validateAndFilterQuads(regions, sobelData, pipeline.width);
 
   // Read extent buffer (5 fields per entry: minX, minY, maxX, maxY, originalLabel)
-  const extentData = new Uint32Array(await pipeline.extentBuffer.read());
+  type ExtentRow = d.Infer<typeof ExtentEntry>;
+  const raw: ExtentRow[] = await pipeline.extentBuffer.read();
+  const extentData = new Uint32Array(raw.length * 5);
+  for (let i = 0; i < raw.length; i++) {
+    extentData[i * 5 + 0] = raw[i].minX;
+    extentData[i * 5 + 1] = raw[i].minY;
+    extentData[i * 5 + 2] = raw[i].maxX;
+    extentData[i * 5 + 3] = raw[i].maxY;
+    extentData[i * 5 + 4] = raw[i].originalLabel;
+  }
 
   return { quads, extentData };
 }

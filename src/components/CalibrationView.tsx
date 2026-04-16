@@ -5,6 +5,7 @@ import {
   processFrame,
   updateQuadCornersBuffer,
   detectContours,
+  readExtentBuffer,
   type CameraPipeline,
   type DisplayMode,
   EXTENT_FIELDS,
@@ -302,19 +303,15 @@ function CalibrationView() {
       log('First frame presented');
 
       let frameCount = 0;
+      let extentReadPending = false;
       let quadDetectionPending = false;
 
-      // Kick off first quad detection immediately after loop starts
-      const scheduleQuadDetection = () => {
-        if (quadDetectionPending || disposed) return;
-        quadDetectionPending = true;
-        const gForQuad = gpu();
-        if (!gForQuad) { quadDetectionPending = false; return; }
-        detectContours(gForQuad, pip).then(({ quads, extentData }) => {
+      const scheduleExtentRead = () => {
+        if (extentReadPending || disposed) return;
+        extentReadPending = true;
+        readExtentBuffer(pip).then((extentData) => {
           if (disposed) return;
-          quadDetectionPending = false;
-
-          // Use extent data for debug overlay
+          extentReadPending = false;
           const boxes: Bbox[] = [];
           for (let i = 0; i < MAX_COMPONENTS; i++) {
             const minX = extentData[i * EXTENT_FIELDS + 0];
@@ -331,11 +328,24 @@ function CalibrationView() {
           }
           boxes.sort((a, b) => b.area - a.area);
           setBboxes(boxes.slice(0, 128));
+        }).catch((e) => {
+          if (disposed) return;
+          extentReadPending = false;
+          console.log(`[extentRead] error: ${e}`);
+        });
+      };
 
-          // Update grid overlay with detected quads
+      const scheduleQuadDetection = () => {
+        if (quadDetectionPending || disposed) return;
+        quadDetectionPending = true;
+        const gForQuad = gpu();
+        if (!gForQuad) { quadDetectionPending = false; return; }
+        detectContours(gForQuad, pip).then(({ quads }) => {
+          if (disposed) return;
+          quadDetectionPending = false;
+          updateQuadCornersBuffer(pip, quads);
           const cornerQuads = quads.filter(q => q.hasCorners);
           const bboxQuads = quads.filter(q => !q.hasCorners);
-          updateQuadCornersBuffer(pip, quads);
           setQuadCandidateCount(bboxQuads.length);
           if (quads.length > 0) log(`Quads: ${cornerQuads.length} corner, ${bboxQuads.length} bbox → ${cornerQuads.length} shown`);
         }).catch((e) => {
@@ -345,8 +355,6 @@ function CalibrationView() {
         });
       };
 
-      scheduleQuadDetection();
-
       const loop = () => {
         if (disposed) return;
         const gpuNow = gpu();
@@ -354,11 +362,12 @@ function CalibrationView() {
         frameCount++;
         const dm = displayMode();
         processFrame(gpuNow, pip, cameraVideo, threshold(), dm);
-        if (frameCount % 30 === 0) {
+        if (dm === 'debug') scheduleExtentRead();
+        if (dm === 'grid' && frameCount % 30 === 0) {
           log(`frame ${frameCount} mode=${dm}`);
           scheduleQuadDetection();
         }
-        void pip.histogramBuffer.read().then((bins) => {
+        void pip.histogramBuffer.read().then((bins: Uint32Array | number[]) => {
           if (disposed) return;
           const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins);
           setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE));
