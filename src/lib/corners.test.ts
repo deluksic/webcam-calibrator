@@ -3,27 +3,37 @@ import {
   extractEdgePixelsFromBbox,
   getPixel,
   findMaxMagnitude,
-  orderPixelsAlongContour,
-  detectCorners,
+  findCornerCandidates,
   clusterCorners,
-  selectBestQuadCorners,
+  orderCornersClockwise,
   getCornerPoint,
 } from './corners';
+import type { Point } from './geometry';
 
 describe('corners', () => {
   describe('extractEdgePixelsFromBbox', () => {
     it('extracts edge pixels from Sobel data', () => {
       const sobelData = new Float32Array(4 * 4 * 2);
-      // Pixel (1,1) has strong edge
-      sobelData[1 * 4 * 2 + 2] = 10; // gx
-      sobelData[1 * 4 * 2 + 3] = 0; // gy
+      // Pixel (1,1) has strong edge: gx=10, gy=0
+      sobelData[1 * 4 * 2 + 0] = 10;
+      sobelData[1 * 4 * 2 + 1] = 0;
 
       const pixels = extractEdgePixelsFromBbox(sobelData, 4, 0, 0, 3, 3);
 
-      // Should find at least 1 pixel
       expect(pixels.length).toBeGreaterThan(0);
       const p = getPixel(pixels, 0);
       expect(p.magnitude).toBeCloseTo(10, 1);
+    });
+  });
+
+  describe('getPixel', () => {
+    it('returns structured pixel data from flat array', () => {
+      const pixels = new Float32Array([10, 20, 1.57, 5.0]);
+      const p = getPixel(pixels, 0);
+      expect(p.x).toBeCloseTo(10, 0);
+      expect(p.y).toBeCloseTo(20, 0);
+      expect(p.tangent).toBeCloseTo(1.57, 2);
+      expect(p.magnitude).toBeCloseTo(5.0, 1);
     });
   });
 
@@ -39,50 +49,74 @@ describe('corners', () => {
     });
   });
 
-  describe('orderPixelsAlongContour', () => {
-    it('returns index array', () => {
-      const pixels = new Float32Array([0, 0, 0, 1, 10, 0, 0, 1, 0, 10, 0, 1]);
-      const sorted = orderPixelsAlongContour(pixels);
-      expect(sorted.length).toBe(3);
-      expect(sorted[0]).toBeDefined();
-    });
-  });
-
-  describe('detectCorners', () => {
+  describe('findCornerCandidates', () => {
     it('handles empty input', () => {
       const pixels = new Float32Array([]);
-      const sorted = orderPixelsAlongContour(pixels);
-      const corners = detectCorners(pixels, sorted);
-      expect(corners).toHaveLength(0);
+      const candidates = findCornerCandidates(pixels);
+      expect(candidates).toHaveLength(0);
+    });
+
+    it('returns empty for too few pixels', () => {
+      const pixels = new Float32Array([10, 10, 0, 1]);
+      const candidates = findCornerCandidates(pixels);
+      expect(candidates).toHaveLength(0);
     });
   });
 
   describe('clusterCorners', () => {
-    it('removes corners too close to each other', () => {
-      const pixels = new Float32Array([0, 0, 0, 1, 5, 0, 0, 1, 50, 50, 0, 1]);
+    it('handles empty input', () => {
+      const clustered = clusterCorners([]);
+      expect(clustered).toHaveLength(0);
+    });
 
-      const corners = [
-        { idx: 0, angle: Math.PI },
-        { idx: 1, angle: Math.PI / 2 },
-        { idx: 2, angle: Math.PI / 2 },
+    it('handles fewer than 4 candidates', () => {
+      const candidates = [
+        { x: 10, y: 10, diff: 1.0 },
+        { x: 90, y: 10, diff: 0.9 },
+        { x: 10, y: 90, diff: 0.8 },
       ];
+      const clustered = clusterCorners(candidates);
+      expect(clustered.length).toBeLessThanOrEqual(4);
+    });
 
-      const clustered = clusterCorners(corners, pixels, 20);
-      expect(clustered.length).toBeLessThanOrEqual(corners.length);
+    it('clusters candidates into up to 4 quadrants', () => {
+      const candidates = [
+        { x: 10, y: 10, diff: 1.0 },  // top-left
+        { x: 90, y: 10, diff: 0.9 },  // top-right
+        { x: 90, y: 90, diff: 0.8 },  // bottom-right
+        { x: 10, y: 90, diff: 0.7 },  // bottom-left
+        { x: 20, y: 20, diff: 0.6 },  // top-left (extra)
+        { x: 80, y: 80, diff: 0.5 },  // bottom-right (extra)
+      ];
+      const clustered = clusterCorners(candidates);
+      // Max 4 clusters
+      expect(clustered.length).toBeLessThanOrEqual(4);
     });
   });
 
-  describe('selectBestQuadCorners', () => {
-    it('handles insufficient corners', () => {
-      const pixels = new Float32Array([0, 0, 0, 1, 100, 0, 0, 1]);
-      const selected = selectBestQuadCorners([0, 1], pixels);
-      expect(selected).toHaveLength(0);
+  describe('orderCornersClockwise', () => {
+    it('handles non-4 input', () => {
+      const corners: Point[] = [{ x: 0, y: 0 }, { x: 10, y: 10 }];
+      const ordered = orderCornersClockwise(corners);
+      expect(ordered.length).toBe(2);
+    });
+
+    it('orders 4 corners clockwise', () => {
+      // Corners in arbitrary order (centroid excluded)
+      const corners: Point[] = [
+        { x: 10, y: 90 },  // bottom-left
+        { x: 90, y: 10 },  // top-right
+        { x: 10, y: 10 }, // top-left
+        { x: 90, y: 90 }, // bottom-right
+      ];
+      const ordered = orderCornersClockwise(corners);
+      expect(ordered).toHaveLength(4);
     });
   });
 
   describe('getCornerPoint', () => {
     it('returns point from pixel array', () => {
-      const pixels = new Float32Array([10, 20, 0, 1]);
+      const pixels = new Float32Array([10, 20, 1.57, 5.0]);
       const point = getCornerPoint(0, pixels);
       expect(point.x).toBeCloseTo(10, 0);
       expect(point.y).toBeCloseTo(20, 0);

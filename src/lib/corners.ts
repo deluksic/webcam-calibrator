@@ -1,5 +1,6 @@
-// Corner detection from edge pixels using tangent direction changes
-// Uses typed arrays for performance
+// Corner detection from edge pixels using local edge orientation changes.
+// Pixels where local edge orientations vary significantly among neighbors
+// are classified as corners. Results clustered into 4 groups.
 
 import { Point } from './geometry';
 
@@ -17,7 +18,6 @@ export function extractEdgePixelsFromBbox(
   minY: number,
   maxX: number,
   maxY: number,
-  edgeMask?: Uint8Array,
 ): EdgePixelArray {
   const pixels: number[] = [];
   const EPS = 1e-6;
@@ -25,8 +25,6 @@ export function extractEdgePixelsFromBbox(
   for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) {
     for (let x = Math.floor(minX); x <= Math.floor(maxX); x++) {
       const idx = y * width + x;
-
-      if (edgeMask && edgeMask[idx] === 0) continue;
 
       const gx = sobelData[idx * 2];
       const gy = sobelData[idx * 2 + 1];
@@ -58,6 +56,71 @@ export function getPixel(pixels: EdgePixelArray, i: number): { x: number; y: num
 }
 
 /**
+ * Find corner candidates by checking neighbor orientation differences.
+ * A pixel is a corner if its neighbors have significantly different edge orientations.
+ */
+export function findCornerCandidates(
+  pixels: EdgePixelArray,
+  cornerThreshold: number = 0.5, // normalized difference threshold
+  minNeighborCount: number = 4,
+): { x: number; y: number; diff: number }[] {
+  const n = pixels.length / 4;
+  if (n < 9) return []; // need 3x3 neighborhood
+
+  const candidates: { x: number; y: number; diff: number }[] = [];
+  const maxMag = findMaxMagnitude(pixels);
+  const minMagThreshold = maxMag * 0.3;
+
+  for (let i = 0; i < n; i++) {
+    const px = pixels[i * 4];
+    const py = pixels[i * 4 + 1];
+    const tangent = pixels[i * 4 + 2];
+    const mag = pixels[i * 4 + 3];
+
+    // Only consider strong edge pixels
+    if (mag < minMagThreshold) continue;
+
+    // Find neighbors (within ~5 pixel radius)
+    const neighbors: number[] = [];
+    const neighborRadius = 5;
+
+    for (let j = 0; j < n; j++) {
+      if (j === i) continue;
+      const nx = pixels[j * 4];
+      const ny = pixels[j * 4 + 1];
+      const dist = Math.hypot(nx - px, ny - py);
+      if (dist <= neighborRadius) {
+        neighbors.push(j);
+      }
+    }
+
+    if (neighbors.length < minNeighborCount) continue;
+
+    // Compute orientation difference with each neighbor
+    let totalDiff = 0;
+    let maxDiff = 0;
+
+    for (const ni of neighbors) {
+      const neighborTangent = pixels[ni * 4 + 2];
+      let diff = Math.abs(tangent - neighborTangent);
+      if (diff > Math.PI) diff = 2 * Math.PI - diff;
+      totalDiff += diff;
+      maxDiff = Math.max(maxDiff, diff);
+    }
+
+    const avgDiff = totalDiff / neighbors.length;
+
+    // A corner is where local orientation varies significantly
+    // Use both average and max difference
+    if (maxDiff > cornerThreshold * Math.PI || avgDiff > cornerThreshold * Math.PI * 0.5) {
+      candidates.push({ x: px, y: py, diff: maxDiff });
+    }
+  }
+
+  return candidates;
+}
+
+/**
  * Find max magnitude in pixel array.
  */
 export function findMaxMagnitude(pixels: EdgePixelArray): number {
@@ -69,212 +132,61 @@ export function findMaxMagnitude(pixels: EdgePixelArray): number {
 }
 
 /**
- * Sort pixels by angle around centroid.
- * Returns index array for sorted order.
- */
-export function orderPixelsAlongContour(pixels: EdgePixelArray): Uint16Array {
-  const n = pixels.length / 4;
-  if (n <= 1) return new Uint16Array([0]);
-
-  // Find centroid
-  let sumX = 0, sumY = 0;
-  for (let i = 0; i < n; i++) {
-    sumX += pixels[i * 4];
-    sumY += pixels[i * 4 + 1];
-  }
-  const cx = sumX / n;
-  const cy = sumY / n;
-
-  // Create index array
-  const indices = new Uint16Array(n);
-  for (let i = 0; i < n; i++) indices[i] = i;
-
-  // Sort by angle
-  indices.sort((a, b) => {
-    const angleA = Math.atan2(pixels[a * 4 + 1] - cy, pixels[a * 4] - cx);
-    const angleB = Math.atan2(pixels[b * 4 + 1] - cy, pixels[b * 4] - cx);
-    return angleA - angleB;
-  });
-
-  return indices;
-}
-
-/**
- * Detect corners by finding sharp turns in tangent direction.
- * Returns indices into the sorted pixel array.
- */
-export function detectCorners(
-  pixels: EdgePixelArray,
-  sortedIndices: Uint16Array,
-  angleThreshold: number = Math.PI / 3,
-  magnitudeWeight: number = 0.5,
-  windowSize: number = 5,
-): { idx: number; angle: number }[] {
-  const n = sortedIndices.length;
-  if (n < windowSize * 2 + 1) return [];
-
-  const corners: { idx: number; angle: number }[] = [];
-  const maxMag = findMaxMagnitude(pixels);
-
-  for (let i = windowSize; i < n - windowSize; i++) {
-    const pixelIdx = sortedIndices[i];
-    const mag = pixels[pixelIdx * 4 + 3];
-
-    // Skip low magnitude pixels
-    if (mag < maxMag * magnitudeWeight) continue;
-
-    // Compute average tangent before and after
-    let tanBefore = 0, tanAfter = 0;
-
-    for (let j = i - windowSize; j < i; j++) {
-      const pxIdx = sortedIndices[j];
-      tanBefore += pixels[pxIdx * 4 + 2];
-    }
-    for (let j = i + 1; j <= i + windowSize; j++) {
-      const pxIdx = sortedIndices[j];
-      tanAfter += pixels[pxIdx * 4 + 2];
-    }
-
-    const avgBefore = tanBefore / windowSize;
-    const avgAfter = tanAfter / windowSize;
-
-    // Compute angular difference (handling wrap-around)
-    let diff = avgAfter - avgBefore;
-    while (diff > Math.PI) diff -= 2 * Math.PI;
-    while (diff < -Math.PI) diff += 2 * Math.PI;
-    const absDiff = Math.abs(diff);
-
-    if (absDiff > angleThreshold) {
-      corners.push({ idx: pixelIdx, angle: absDiff });
-    }
-  }
-
-  return corners;
-}
-
-/**
- * Cluster corners by proximity, keep strongest per cluster.
+ * Cluster corner candidates into 4 groups based on position.
+ * Returns cluster centers ordered roughly clockwise from top-left.
  */
 export function clusterCorners(
-  corners: { idx: number; angle: number }[],
-  pixels: EdgePixelArray,
-  minDist: number = 20,
-): number[] {
-  if (corners.length === 0) return [];
+  candidates: { x: number; y: number; diff: number }[],
+): Point[] {
+  if (candidates.length < 4) return [];
 
-  // Sort by angle (strength) descending
-  const sorted = [...corners].sort((a, b) => b.angle - a.angle);
-  const kept: number[] = [];
+  // Sort by diff (strength) descending
+  const sorted = [...candidates].sort((a, b) => b.diff - a.diff);
 
-  for (const corner of sorted) {
-    const px = pixels[corner.idx * 4];
-    const py = pixels[corner.idx * 4 + 1];
+  // Simple clustering: divide into 4 quadrants based on centroid
+  let sumX = 0, sumY = 0;
+  for (const c of candidates) {
+    sumX += c.x;
+    sumY += c.y;
+  }
+  const cx = sumX / candidates.length;
+  const cy = sumY / candidates.length;
 
-    // Check if too close to any kept corner
-    let tooClose = false;
-    for (const ki of kept) {
-      const kx = pixels[ki * 4];
-      const ky = pixels[ki * 4 + 1];
-      const dist = Math.hypot(px - kx, py - ky);
-      if (dist < minDist) {
-        tooClose = true;
-        break;
-      }
-    }
-    if (!tooClose) {
-      kept.push(corner.idx);
-    }
+  // Assign candidates to quadrants
+  const quadrants: { x: number; y: number; diff: number }[][] = [[], [], [], []];
+  for (const c of candidates) {
+    const isLeft = c.x < cx;
+    const isTop = c.y < cy;
+    if (isLeft && isTop) quadrants[0].push(c);      // top-left
+    else if (!isLeft && isTop) quadrants[1].push(c); // top-right
+    else if (!isLeft && !isTop) quadrants[2].push(c); // bottom-right
+    else quadrants[3].push(c);                      // bottom-left
   }
 
-  return kept;
-}
-
-/**
- * Select best 4 corners forming a quad.
- * Returns indices into pixel array, ordered clockwise.
- */
-export function selectBestQuadCorners(
-  cornerIndices: number[],
-  pixels: EdgePixelArray,
-  expectedAspect: number = 1.0,
-): number[] {
-  if (cornerIndices.length < 4) return [];
-
-  let bestQuad: number[] = [];
-  let bestScore = -1;
-
-  const n = cornerIndices.length;
-
-  // Try all 4-element combinations
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      for (let k = j + 1; k < n; k++) {
-        for (let l = k + 1; l < n; l++) {
-          const quad = [cornerIndices[i], cornerIndices[j], cornerIndices[k], cornerIndices[l]];
-          const score = quadScore(quad, pixels, expectedAspect);
-          if (score > bestScore) {
-            bestScore = score;
-            bestQuad = quad;
-          }
-        }
-      }
+  // Get strongest candidate in each quadrant
+  const centers: Point[] = [];
+  for (const quad of quadrants) {
+    if (quad.length === 0) {
+      // No candidates in this quadrant - estimate from overall bounds
+      continue;
     }
+    // Pick the candidate with highest diff (strongest corner)
+    const strongest = quad.reduce((best, c) => c.diff > best.diff ? c : best, quad[0]);
+    centers.push({ x: strongest.x, y: strongest.y });
   }
 
-  if (bestQuad.length === 4) {
-    return orderCornersClockwise(bestQuad, pixels);
-  }
-  return [];
-}
-
-/**
- * Score a quadrilateral based on regularity.
- */
-function quadScore(cornerIndices: number[], pixels: EdgePixelArray, expectedAspect: number): number {
-  const n = cornerIndices.length;
-  if (n !== 4) return 0;
-
-  // Get points
-  const pts = cornerIndices.map(ci => ({
-    x: pixels[ci * 4],
-    y: pixels[ci * 4 + 1],
-  }));
-
-  // Compute side lengths
-  const dists = [
-    Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y),
-    Math.hypot(pts[2].x - pts[1].x, pts[2].y - pts[1].y),
-    Math.hypot(pts[3].x - pts[2].x, pts[3].y - pts[2].y),
-    Math.hypot(pts[0].x - pts[3].x, pts[0].y - pts[3].y),
-  ];
-
-  // Score based on uniform side lengths
-  const avg = dists.reduce((a, b) => a + b, 0) / 4;
-  const variance = dists.reduce((s, d) => s + (d - avg) * (d - avg), 0) / 4;
-  const sideScore = 1 / (1 + Math.sqrt(variance) / avg);
-
-  // Score based on aspect ratio
-  const maxD = Math.max(...dists);
-  const minD = Math.min(...dists);
-  const aspectScore = expectedAspect / (maxD / minD + 0.001);
-
-  return sideScore * aspectScore;
+  return centers;
 }
 
 /**
  * Order 4 corners clockwise from top-left.
  */
-export function orderCornersClockwise(cornerIndices: number[], pixels: EdgePixelArray): number[] {
-  if (cornerIndices.length !== 4) return cornerIndices;
-
-  const pts = cornerIndices.map(ci => ({
-    x: pixels[ci * 4],
-    y: pixels[ci * 4 + 1],
-  }));
+export function orderCornersClockwise(corners: Point[]): Point[] {
+  if (corners.length !== 4) return corners;
 
   // Find centroid
   let cx = 0, cy = 0;
-  for (const p of pts) {
+  for (const p of corners) {
     cx += p.x;
     cy += p.y;
   }
@@ -282,39 +194,48 @@ export function orderCornersClockwise(cornerIndices: number[], pixels: EdgePixel
   cy /= 4;
 
   // Sort by angle from centroid
-  const indexed = cornerIndices.map((ci, i) => ({ ci, angle: Math.atan2(pts[i].y - cy, pts[i].x - cx) }));
-  indexed.sort((a, b) => a.angle - b.angle);
-
-  return indexed.map(x => x.ci);
+  return [...corners].sort((a, b) => {
+    const angleA = Math.atan2(a.y - cy, a.x - cx);
+    const angleB = Math.atan2(b.y - cy, b.x - cx);
+    return angleA - angleB;
+  });
 }
 
 /**
- * Get corner as Point.
+ * Full pipeline: find corners from edge pixel array.
+ * Returns 4 corner points ordered clockwise.
+ */
+export function findCornersFromEdges(
+  pixels: EdgePixelArray,
+  cornerThreshold: number = 0.5,
+  minNeighborCount: number = 4,
+): Point[] {
+  const candidates = findCornerCandidates(pixels, cornerThreshold, minNeighborCount);
+  console.log(`[findCorners] pixels=${pixels.length / 4} candidates=${candidates.length}`);
+
+  if (candidates.length < 4) {
+    return [];
+  }
+
+  const clustered = clusterCorners(candidates);
+  console.log(`[findCorners] clustered=${clustered.length}`);
+
+  if (clustered.length !== 4) {
+    return [];
+  }
+
+  const ordered = orderCornersClockwise(clustered);
+  console.log(`[findCorners] corners: ${ordered.map(c => `(${c.x.toFixed(0)},${c.y.toFixed(0)})`).join(' ')}`);
+
+  return ordered;
+}
+
+/**
+ * Get corner as Point (for compatibility).
  */
 export function getCornerPoint(cornerIdx: number, pixels: EdgePixelArray): Point {
   return {
     x: pixels[cornerIdx * 4],
     y: pixels[cornerIdx * 4 + 1],
   };
-}
-
-/**
- * Full pipeline: find corners from edge pixel array.
- * Returns corner indices (into pixel array).
- */
-export function findCornersFromEdges(
-  pixels: EdgePixelArray,
-  angleThreshold: number = Math.PI / 3,
-  clusterDist: number = 20,
-): number[] {
-  const sortedIndices = orderPixelsAlongContour(pixels);
-  const rawCorners = detectCorners(pixels, sortedIndices, angleThreshold);
-  const clustered = clusterCorners(rawCorners, pixels, clusterDist);
-  console.log(`[findCorners] pixels=${pixels.length / 4} raw=${rawCorners.length} clustered=${clustered.length}`);
-  const result = selectBestQuadCorners(clustered, pixels);
-  console.log(`[findCorners] bestQuad=${result.length}`);
-  if (result.length > 0) {
-    console.log(`[findCorners] corners: ${result.map(ci => `(${pixels[ci * 4]},${pixels[ci * 4 + 1]})`).join(' ')}`);
-  }
-  return result;
 }

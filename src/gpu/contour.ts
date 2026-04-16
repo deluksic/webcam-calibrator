@@ -1,7 +1,7 @@
 // Contour detection: CPU region extraction + quad fitting (labels from GPU pointer-jump).
 
 import { buildTagGrid, decodeTagPattern } from '../lib/grid';
-import { extractEdgePixelsFromBbox, findCornersFromEdges, getCornerPoint } from '../lib/corners';
+import { extractEdgePixelsFromBbox, findCornersFromEdges } from '../lib/corners';
 import { Point } from '../lib/geometry';
 import type { TagPattern } from '../lib/tag36h11';
 
@@ -144,8 +144,8 @@ export function validateAndFilterQuads(
       region.maxY,
     );
 
-    const cornerIndices = findCornersFromEdges(edgePixels);
-    if (cornerIndices.length < 4) {
+    const cornerPoints = findCornersFromEdges(edgePixels);
+    if (cornerPoints.length < 4) {
       // Fallback to bounding box corners
       const corners = fitQuadToRegion(region);
       if (!corners) { okFailed++; continue; }
@@ -171,8 +171,8 @@ export function validateAndFilterQuads(
     }
     okCorners++;
 
-    // Convert corner indices to points
-    const corners = cornerIndices.map(ci => getCornerPoint(ci, edgePixels));
+    // Use corner points directly (no need to convert indices)
+    const corners = cornerPoints;
 
     // Check if corners are suspiciously far from the region's extent bounds.
     // If corner detection picked noise points, the quad will be far from the bbox.
