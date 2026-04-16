@@ -1,149 +1,222 @@
-import { createSignal, createMemo, onCleanup } from 'solid-js';
+import { createMemo, createSignal, onCleanup } from 'solid-js';
 import { initGPU } from '../gpu/init';
-import { createCameraPipeline, computeThreshold, processFrame, type CameraPipeline, type DisplayMode } from '../gpu/camera';
+import {
+  createCameraPipeline,
+  processFrame,
+  type CameraPipeline,
+  type DisplayMode,
+} from '../gpu/camera';
+import { computeThreshold } from '../gpu/pipelines/constants';
 import styles from './CalibrationView.module.css';
 
-export default function CalibrationView() {
-  const [videoEl, setVideoEl] = createSignal<HTMLVideoElement | undefined>(undefined);
-  const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement | undefined>(undefined);
-  const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement | undefined>(undefined);
-  const [threshold, setThreshold] = createSignal<number>(0.0);
+function deviceScore(d: MediaDeviceInfo): number {
+  const label = d.label.toLowerCase();
+  let score = 0;
+  if (label.includes('back') || label.includes('rear')) score += 100;
+  if (label.includes('wide')) score += 50;
+  if (label.includes('ultra')) score += 30;
+  if (label.includes('tele')) score -= 20;
+  if (label.includes('front') || label.includes('user')) score -= 100;
+  return score;
+}
+
+async function enumerateVideoInputs(): Promise<MediaDeviceInfo[]> {
+  try {
+    await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  } catch {
+    // Labels may be empty without permission; enumeration still works.
+  }
+  const all = await navigator.mediaDevices.enumerateDevices();
+  return all.filter((d) => d.kind === 'videoinput');
+}
+
+type GpuRoot = Awaited<ReturnType<typeof initGPU>>;
+
+function CalibrationView() {
+  const cameraVideo = document.createElement('video');
+  cameraVideo.muted = true;
+  cameraVideo.playsInline = true;
+
+  onCleanup(() => {
+    cameraVideo.pause();
+    cameraVideo.srcObject = null;
+  });
+
+  const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>();
+  const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement>();
+
+  const [threshold, setThreshold] = createSignal(0);
   const [displayMode, setDisplayMode] = createSignal<DisplayMode>('debug');
 
-  // ── User-facing state ──────────────────────────────────────────────────
-  const [selectedCameraId, setSelectedCameraId] = createSignal<string>('');
-  const [availableCameraDevices, setAvailableCameraDevices] = createSignal<MediaDeviceInfo[]>([]);
+  const availableCameraDevices = createMemo(async () => {
+    const inputs = await enumerateVideoInputs();
+    return [...inputs].sort((a, b) => deviceScore(b) - deviceScore(a));
+  }, [] as MediaDeviceInfo[]);
 
-  // ── One-time pipeline reference (set once, read forever) ───────────────
-  const [pipeline, setPipeline] = createSignal<CameraPipeline | undefined>(undefined);
+  /** Writable derived value: syncs with `availableCameraDevices`, preserves the id while it still exists. */
+  const [selectedCameraId, setSelectedCameraId] = createSignal(
+    (prev: string | undefined) => {
+      const cams = availableCameraDevices();
+      if (prev !== undefined && cams.some((d) => d.deviceId === prev)) return prev;
+      return cams[0]?.deviceId;
+    },
+    undefined,
+  );
 
-  // ── Computed ──────────────────────────────────────────────────────────
+  const selectedCameraDevice = createMemo(() => {
+    const list = availableCameraDevices();
+    const id = selectedCameraId();
+    if (id === undefined) return list[0] ?? null;
+    return list.find((d) => d.deviceId === id) ?? null;
+  });
 
-  const gpuRoot = createMemo(async () => {
+  const gpu = createMemo<GpuRoot | undefined>(async (_prev) => {
     try {
       return await initGPU();
     } catch (e) {
       console.error('GPU init failed:', e);
-      return null;
+      return undefined;
     }
   });
 
-  const selectedCameraDevice = createMemo(() => {
-    const id = selectedCameraId();
-    if (!id) return availableCameraDevices()[0] ?? null;
-    return availableCameraDevices().find((d) => d.deviceId === id) ?? null;
-  });
+  const mediaStream = createMemo<MediaStream | undefined>(async (prev) => {
+    prev?.getTracks().forEach((t) => t.stop());
 
-  // ── Camera stream (reopens when selectedCameraDevice changes) ────────
-
-  const stream = createMemo(async () => {
-    const device = selectedCameraDevice();
-    if (!device) return null;
-
-    const mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        deviceId: { exact: device.deviceId },
-        facingMode: 'environment',
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
-      audio: false,
+    let active: MediaStream | undefined = undefined;
+    let disposed = false;
+    onCleanup(() => {
+      disposed = true;
+      active?.getTracks().forEach((t) => t.stop());
+      active = undefined;
     });
-    return mediaStream;
+
+    const device = selectedCameraDevice();
+    if (disposed || !device) return undefined;
+
+    const base = { deviceId: { exact: device.deviceId } as const };
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          ...base,
+          width: { min: 1280, ideal: 1920 },
+          height: { min: 720, ideal: 1080 },
+        },
+        audio: false,
+      });
+      if (disposed) {
+        stream.getTracks().forEach((t) => t.stop());
+        return undefined;
+      }
+      active = stream;
+      return stream;
+    } catch (e) {
+      if (disposed) return undefined;
+      console.warn('getUserMedia: HD min constraints failed, retrying relaxed', e);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            ...base,
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+        if (disposed) {
+          stream.getTracks().forEach((t) => t.stop());
+          return undefined;
+        }
+        active = stream;
+        return stream;
+      } catch (e2) {
+        console.error('getUserMedia failed:', e2);
+        return undefined;
+      }
+    }
   });
 
   const frameSize = createMemo(() => {
-    const s = stream();
-    if (!s) return { w: 1920, h: 1080 };
-    const settings = s.getVideoTracks()[0]?.getSettings();
+    const stream = mediaStream();
+    if (!stream) return { w: 1280, h: 720 };
+    const track = stream.getVideoTracks()[0];
+    if (!track) return { w: 1280, h: 720 };
+    const settings = track.getSettings();
     return {
-      w: (settings?.width ?? 1920) as number,
-      h: (settings?.height ?? 1080) as number,
+      w: settings.width ?? 1280,
+      h: settings.height ?? 720,
     };
   });
 
-  // ── Pipeline setup (runs once when stream starts) ────────────────────
+  /** WebGPU pipeline + rVFC loop; `onCleanup` runs before `await video.play()`. */
+  const cameraPipeline = createMemo(
+    async (_prev: CameraPipeline | undefined) => {
+      const g = gpu();
+      const canvas = canvasEl();
+      const histCanvas = histCanvasEl();
+      const stream = mediaStream();
+      if (!g || !canvas || !histCanvas || !stream) {
+        return undefined;
+      }
+      const video = cameraVideo;
 
-  createMemo(async () => {
-    const gpu = gpuRoot();
-    const video = videoEl();
-    const canvas = canvasEl();
-    const histCanvas = histCanvasEl();
-    const s = stream();
-    if (!gpu || !video || !canvas || !histCanvas || !s) return;
+      const size = frameSize();
+      let primeHandle = 0;
+      let rafHandle = 0;
+      let disposed = false;
 
-    const size = frameSize();
-    canvas.width = size.w;
-    canvas.height = size.h;
-    histCanvas.width = 512;
-    histCanvas.height = 120;
+      onCleanup(() => {
+        disposed = true;
+        if (primeHandle) video.cancelVideoFrameCallback(primeHandle);
+        if (rafHandle) video.cancelVideoFrameCallback(rafHandle);
+        video.pause();
+        video.srcObject = null;
+      });
 
-    const pip = createCameraPipeline(
-      gpu,
-      canvas,
-      histCanvas,
-      size.w,
-      size.h,
-      navigator.gpu.getPreferredCanvasFormat(),
-    );
-    setPipeline(pip);
+      canvas.width = size.w;
+      canvas.height = size.h;
+      histCanvas.width = 512;
+      histCanvas.height = 120;
 
-    video.srcObject = s;
-    await video.play().catch(() => {});
+      const pip = createCameraPipeline(
+        g,
+        canvas,
+        histCanvas,
+        size.w,
+        size.h,
+        navigator.gpu.getPreferredCanvasFormat(),
+      );
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      if (disposed) return undefined;
 
-    const loop = async () => {
-      const vid = videoEl();
-      const g = gpuRoot();
-      const pip = pipeline();
-      if (!vid || !g || !pip) return;
-      processFrame(g, pip, vid, threshold(), displayMode());
-      const bins = await pip.histogramBuffer.read();
-      setThreshold(computeThreshold(bins, 0.9));
-      vid.requestVideoFrameCallback(loop);
-    };
-    video.requestVideoFrameCallback(loop);
-  });
+      // `importExternalTexture` needs a presented frame; `play()` can resolve earlier.
+      await new Promise<void>((resolve) => {
+        primeHandle = video.requestVideoFrameCallback(() => {
+          primeHandle = 0;
+          resolve();
+        });
+      });
+      if (disposed) return undefined;
 
-  // ── Initial device enumeration ────────────────────────────────────────
+      const loop = () => {
+        if (disposed) return;
+        const gpuNow = gpu();
+        if (!gpuNow) return;
+        processFrame(gpuNow, pip, cameraVideo, threshold(), displayMode());
+        void pip.histogramBuffer.read().then((bins) => {
+          if (disposed) return;
+          const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins);
+          setThreshold(computeThreshold([...data], 0.85));
+        });
+        rafHandle = cameraVideo.requestVideoFrameCallback(loop);
+      };
+      rafHandle = cameraVideo.requestVideoFrameCallback(loop);
 
-  async function initCameraDevices() {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const sorted = devices
-      .filter((d) => d.kind === 'videoinput')
-      .sort((a, b) => deviceScore(b) - deviceScore(a));
-    setAvailableCameraDevices(sorted);
-    if (!selectedCameraId() && sorted[0]) {
-      setSelectedCameraId(sorted[0].deviceId);
-    }
-  }
-  initCameraDevices();
-
-  // ── Cleanup ──────────────────────────────────────────────────────────
-
-  onCleanup(() => {
-    const vid = videoEl();
-    if (vid) {
-      vid.pause();
-      vid.srcObject = null;
-    }
-    const s = stream();
-    s?.getVideoTracks().forEach((t) => t.stop());
-  });
-
-  // ── Helpers ───────────────────────────────────────────────────────────
-
-  function deviceScore(d: MediaDeviceInfo): number {
-    const name = (d.label || '').toLowerCase();
-    let s = 0;
-    if (name.includes('back') || name.includes('rear')) s += 10;
-    if (name.includes('front')) s -= 5;
-    if (name.includes('ultra') || (name.includes('wide') && name.includes('0'))) s -= 8;
-    if (name.includes('telephoto') || name.includes('macro') || name.includes('aux')) s -= 3;
-    if (name.includes('0.5') || name.includes('0x')) s -= 8;
-    return s;
-  }
-
-  // ── Render ───────────────────────────────────────────────────────────
+      return pip;
+    },
+    undefined as CameraPipeline | undefined,
+    { lazy: false },
+  );
 
   return (
     <div class={styles.root}>
@@ -166,31 +239,50 @@ export default function CalibrationView() {
                 ))}
               </select>
               <button
-                class={displayMode() === 'grayscale' ? styles.modeButtonActive : styles.modeButton}
+                type="button"
+                class={
+                  displayMode() === 'grayscale'
+                    ? styles.modeButtonActive
+                    : styles.modeButton
+                }
                 onClick={() => setDisplayMode('grayscale')}
               >
                 Gray
               </button>
               <button
-                class={displayMode() === 'edges' ? styles.modeButtonActive : styles.modeButton}
+                type="button"
+                class={
+                  displayMode() === 'edges' ? styles.modeButtonActive : styles.modeButton
+                }
                 onClick={() => setDisplayMode('edges')}
               >
                 Edges
               </button>
               <button
-                class={displayMode() === 'edgesDilated' ? styles.modeButtonActive : styles.modeButton}
+                type="button"
+                class={
+                  displayMode() === 'edgesDilated'
+                    ? styles.modeButtonActive
+                    : styles.modeButton
+                }
                 onClick={() => setDisplayMode('edgesDilated')}
               >
                 Dilated
               </button>
               <button
-                class={displayMode() === 'labels' ? styles.modeButtonActive : styles.modeButton}
+                type="button"
+                class={
+                  displayMode() === 'labels' ? styles.modeButtonActive : styles.modeButton
+                }
                 onClick={() => setDisplayMode('labels')}
               >
                 Labels
               </button>
               <button
-                class={displayMode() === 'debug' ? styles.modeButtonActive : styles.modeButton}
+                type="button"
+                class={
+                  displayMode() === 'debug' ? styles.modeButtonActive : styles.modeButton
+                }
                 onClick={() => setDisplayMode('debug')}
               >
                 Debug
@@ -215,7 +307,9 @@ export default function CalibrationView() {
           </div>
         </div>
       </div>
-      <video ref={setVideoEl} style={{ display: 'none' }} />
     </div>
   );
 }
+
+export default CalibrationView;
+export { CalibrationView };
