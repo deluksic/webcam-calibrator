@@ -77,6 +77,9 @@ function CalibrationView() {
   const [renderedW, setRenderedW] = createSignal(1280);
   const [renderedH, setRenderedH] = createSignal(720);
 
+  const scaleX = createMemo(() => canvasEl() ? renderedW() / frameSize().w : 1);
+  const scaleY = createMemo(() => canvasEl() ? renderedH() / frameSize().h : 1);
+
   const canvasRefCallback = (el: HTMLCanvasElement | undefined) => {
     setCanvasEl(el);
     if (el) {
@@ -398,10 +401,10 @@ function CalibrationView() {
             <Show when={displayMode() === 'debug'}>
               <BboxOverlay
                 bboxes={bboxes}
-                fw={() => frameSize().w}
-                fh={() => frameSize().h}
-                sx={() => (canvasEl() && renderedW() > 0 && frameSize().w > 0) ? renderedW() / frameSize().w : 1}
-                sy={() => (canvasEl() && renderedH() > 0 && frameSize().h > 0) ? renderedH() / frameSize().h : 1}
+                fw={frameSize().w}
+                fh={frameSize().h}
+                sx={scaleX}
+                sy={scaleY}
               />
             </Show>
           </div>
