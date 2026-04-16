@@ -6,6 +6,7 @@ import {
   EDGES_VIEW_BINARY_MASK,
   HISTOGRAM_BINS,
   POINTER_JUMP_ITERATIONS,
+  COMPUTE_WORKGROUP_SIZE,
   computeDispatch2d,
   computeThreshold,
 } from './pipelines/constants';
@@ -30,6 +31,18 @@ import {
   createPointerJumpParentTightenPipeline,
   createPointerJumpAtomicToLabelsPipeline,
 } from './pipelines/pointerJumpPipeline';
+import {
+  createExtentTrackingLayouts,
+  createExtentResetPipeline,
+  createExtentTrackPipeline,
+  EXTENT_FIELDS,
+} from './pipelines/extentTrackingPipeline';
+import {
+  createCompactLabelLayouts,
+  createCanonicalResetPipeline,
+  createCanonicalClaimPipeline,
+  createRemapLabelPipeline,
+} from './pipelines/compactLabelPipeline';
 import type { DetectedQuad } from './contour';
 
 export type DisplayMode = 'edges' | 'edgesDilated' | 'labels' | 'grayscale' | 'debug';
@@ -186,6 +199,85 @@ export function createCameraPipeline(
       dest: pointerJumpBuffer1,
     }),
   ];
+
+  // ─── Extent tracking (per-component bounding boxes) ─────────────────────
+  // Compact labeling: raw pixel-index labels → compact IDs (0..N-1).
+  // canonicalRoot: one entry per possible root pixel index (area entries, max ~921K).
+  // compactLabelBuffer: remapped labels after compact pass.
+  // extentBuffer: sized for MAX_EXTENT_COMPONENTS entries (compact IDs < MAX_EXTENT_COMPONENTS).
+  const area = width * height;
+  const MAX_EXTENT_COMPONENTS = 4096;
+
+  const canonicalRootBuffer = root
+    .createBuffer(d.arrayOf(d.atomic(d.u32), area))
+    .$usage('storage');
+
+  const compactLabelBuffer = root
+    .createBuffer(d.arrayOf(d.u32, area))
+    .$usage('storage');
+
+  const { trackLayout: extentTrackLayout } = createExtentTrackingLayouts(root);
+
+  const extentResetLayout = tgpu.bindGroupLayout({
+    extentBuffer: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
+  });
+
+  const extentBuffer = root
+    .createBuffer(d.arrayOf(d.atomic(d.u32), MAX_EXTENT_COMPONENTS * EXTENT_FIELDS))
+    .$usage('storage');
+
+  const extentResetPipeline = createExtentResetPipeline(
+    root,
+    extentResetLayout,
+    MAX_EXTENT_COMPONENTS,
+  );
+  const extentTrackPipeline = createExtentTrackPipeline(
+    root,
+    extentTrackLayout,
+    width,
+    height,
+  );
+
+  const extentResetBindGroup = root.createBindGroup(extentResetLayout, {
+    extentBuffer,
+  });
+  const extentTrackBindGroup = root.createBindGroup(extentTrackLayout, {
+    labelBuffer: compactLabelBuffer,
+    extentBuffer,
+  });
+
+  // Compact labeling: remap raw pixel-index labels to compact IDs (0..N-1)
+  const { resetLayout, claimLayout, remapLayout } = createCompactLabelLayouts(root);
+  const compactResetPipeline = createCanonicalResetPipeline(root, resetLayout, area);
+  const compactClaimPipeline = createCanonicalClaimPipeline(
+    root,
+    claimLayout,
+    width,
+    height,
+    MAX_EXTENT_COMPONENTS,
+  );
+  const compactRemapPipeline = createRemapLabelPipeline(
+    root,
+    remapLayout,
+    width,
+    height,
+  );
+
+  // compactCounter: single u32 atomic counter for next compact ID
+  const compactResetBindGroup = root.createBindGroup(resetLayout, {
+    canonicalRoot: canonicalRootBuffer,
+  });
+  const compactClaimBindGroup = root.createBindGroup(claimLayout, {
+    labelBuffer: pointerJumpBuffer0,
+    canonicalRoot: canonicalRootBuffer,
+  });
+  const compactRemapBindGroup = root.createBindGroup(remapLayout, {
+    labelBuffer: pointerJumpBuffer0,
+    compactLabelBuffer: compactLabelBuffer,
+    canonicalRoot: canonicalRootBuffer,
+  });
+
+  // compactLabelBuffer is the remapped output used by extent tracking
 
   // ═══════════════════════════════════════════════════════════════════════
   // LAYOUTS & PIPELINES
@@ -356,8 +448,27 @@ export function createCameraPipeline(
     pointerJumpParentTightenBindGroups,
     pointerJumpAtomicToLabelsPipeline,
     pointerJumpAtomicToLabelsBindGroups,
+    extentBuffer,
+    extentResetPipeline,
+    extentResetBindGroup,
+    extentTrackPipeline,
+    extentTrackBindGroup,
+    canonicalRootBuffer,
+    compactLabelBuffer,
+    compactResetPipeline,
+    compactResetBindGroup,
+    compactClaimPipeline,
+    compactClaimBindGroup,
+    compactRemapPipeline,
+    compactRemapBindGroup,
   };
 }
+
+export const MAX_EXTENT_COMPONENTS = 65536;
+export const MAX_COMPONENTS = 65536; // alias for CalibrationView readback
+
+export const MAX_U32 = 0xFFFFFFFF;
+export const EXTENT_FIELDS = 4;
 
 export type CameraPipeline = ReturnType<typeof createCameraPipeline>;
 
@@ -395,6 +506,7 @@ export function processFrame(
   {
     const computePass = enc.beginComputePass({ label: 'gray + sobel + histogram + filter' });
     const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height);
+    const area = pipeline.width * pipeline.height;
 
     pipeline.grayPipeline
       .with(computePass)
@@ -426,7 +538,8 @@ export function processFrame(
       .with(pipeline.edgeDilateBindGroup)
       .dispatchWorkgroups(wgX, wgY);
 
-    const wantComponentViz = displayMode === 'labels' || displayMode === 'debug';
+    const wantComponentViz = displayMode === 'debug';
+    const wantLabelViz = displayMode === 'labels' || displayMode === 'debug';
 
     const runPointerJump = () => {
       pipeline.pointerJumpInitPipeline
@@ -456,8 +569,38 @@ export function processFrame(
       finalLabelBuffer = pj === 0 ? pipeline.pointerJumpBuffer0 : pipeline.pointerJumpBuffer1;
     };
 
-    if (wantComponentViz) {
+    if (wantLabelViz) {
       runPointerJump();
+
+      // Compact labeling: 3-pass remap of pixel-index labels to compact IDs.
+      // 1. Reset canonicalRoot to INVALID
+      pipeline.compactResetPipeline
+        .with(computePass)
+        .with(pipeline.compactResetBindGroup)
+        .dispatchWorkgroups(Math.ceil(area / COMPUTE_WORKGROUP_SIZE));
+      // 2. Claim: each root (label == pixel idx) stores its own index as compact ID
+      pipeline.compactClaimPipeline
+        .with(computePass)
+        .with(pipeline.compactClaimBindGroup)
+        .dispatchWorkgroups(wgX, wgY);
+      // 3. Remap: L[i] = canonicalRoot[label] (compact ID, fits in extent buffer)
+      pipeline.compactRemapPipeline
+        .with(computePass)
+        .with(pipeline.compactRemapBindGroup)
+        .dispatchWorkgroups(wgX, wgY);
+    }
+
+    if (wantComponentViz) {
+      // Reset extent buffer with sentinel values
+      pipeline.extentResetPipeline
+        .with(computePass)
+        .with(pipeline.extentResetBindGroup)
+        .dispatchWorkgroups(Math.ceil(area / COMPUTE_WORKGROUP_SIZE));
+      // Track extents for every labeled pixel
+      pipeline.extentTrackPipeline
+        .with(computePass)
+        .with(pipeline.extentTrackBindGroup)
+        .dispatchWorkgroups(wgX, wgY);
     }
 
     computePass.end();
@@ -547,10 +690,25 @@ export async function detectContours(
   }
   finalBuffer = pj === 0 ? pipeline.pointerJumpBuffer0 : pipeline.pointerJumpBuffer1;
 
+  // Extent tracking passes
+  pipeline.extentResetPipeline
+    .with(computePass)
+    .with(pipeline.extentResetBindGroup)
+    .dispatchWorkgroups(Math.ceil(MAX_COMPONENTS / COMPUTE_WORKGROUP_SIZE));
+  pipeline.extentTrackPipeline
+    .with(computePass)
+    .with(pipeline.extentTrackBindGroup)
+    .dispatchWorkgroups(wgX, wgY);
+
   computePass.end();
   root.device.queue.submit([enc.finish()]);
 
   const labelData = new Uint32Array(await finalBuffer.read());
+
+  // Read back extent buffer — CPU picks top N components by bounding box area
+  const extentData = new Uint32Array(
+    await pipeline.extentBuffer.read(new Uint32Array(MAX_COMPONENTS * EXTENT_FIELDS)),
+  );
 
   // Read edge buffer for region analysis
   const edgeData = new Float32Array(await pipeline.dilatedEdgeBuffer.read());
@@ -560,7 +718,7 @@ export async function detectContours(
   const regions = extractRegions(labelData, pipeline.width, pipeline.height, edgeData);
   const quads = validateAndFilterQuads(regions);
 
-  return { quads, labelData };
+  return { quads, labelData, extentData };
 }
 
 export { computeThreshold };

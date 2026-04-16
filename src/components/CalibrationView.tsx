@@ -1,4 +1,4 @@
-import { createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, createMemo, createSignal, onCleanup } from 'solid-js';
 import { initGPU } from '../gpu/init';
 import {
   createCameraPipeline,
@@ -32,6 +32,8 @@ async function enumerateVideoInputs(): Promise<MediaDeviceInfo[]> {
 
 type GpuRoot = Awaited<ReturnType<typeof initGPU>>;
 
+interface Bbox { minX: number; minY: number; maxX: number; maxY: number; area: number }
+
 function CalibrationView() {
   const cameraVideo = document.createElement('video');
   cameraVideo.muted = true;
@@ -47,13 +49,19 @@ function CalibrationView() {
 
   const [threshold, setThreshold] = createSignal(0);
   const [displayMode, setDisplayMode] = createSignal<DisplayMode>('debug');
+  const [bboxes, setBboxes] = createSignal<Bbox[]>([]);
+  const [logs, setLogs] = createSignal<string[]>([]);
+
+  const log = (msg: string) => {
+    setLogs(prev => [...prev.slice(-8), `${new Date().toISOString().slice(11, 19)} ${msg}`]);
+    console.log(msg);
+  };
 
   const availableCameraDevices = createMemo(async () => {
     const inputs = await enumerateVideoInputs();
     return [...inputs].sort((a, b) => deviceScore(b) - deviceScore(a));
   }, [] as MediaDeviceInfo[]);
 
-  /** Writable derived value: syncs with `availableCameraDevices`, preserves the id while it still exists. */
   const [selectedCameraId, setSelectedCameraId] = createSignal(
     (prev: string | undefined) => {
       const cams = availableCameraDevices();
@@ -72,9 +80,12 @@ function CalibrationView() {
 
   const gpu = createMemo<GpuRoot | undefined>(async (_prev) => {
     try {
-      return await initGPU();
+      log('GPU init...');
+      const g = await initGPU();
+      log('GPU ready');
+      return g;
     } catch (e) {
-      console.error('GPU init failed:', e);
+      log(`GPU init failed: ${e}`);
       return undefined;
     }
   });
@@ -98,8 +109,8 @@ function CalibrationView() {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           ...base,
-          width: { min: 1280, ideal: 1920 },
-          height: { min: 720, ideal: 1080 },
+          width: { min: 640, ideal: 1280 },
+          height: { min: 480, ideal: 720 },
         },
         audio: false,
       });
@@ -108,10 +119,11 @@ function CalibrationView() {
         return undefined;
       }
       active = stream;
+      log('Stream opened');
       return stream;
     } catch (e) {
       if (disposed) return undefined;
-      console.warn('getUserMedia: HD min constraints failed, retrying relaxed', e);
+      log('getUserMedia HD failed, retrying...');
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -127,9 +139,10 @@ function CalibrationView() {
           return undefined;
         }
         active = stream;
+        log('Stream opened (fallback)');
         return stream;
       } catch (e2) {
-        console.error('getUserMedia failed:', e2);
+        log(`getUserMedia failed: ${e2}`);
         return undefined;
       }
     }
@@ -147,7 +160,6 @@ function CalibrationView() {
     };
   });
 
-  /** WebGPU pipeline + rVFC loop; `onCleanup` runs before `await video.play()`. */
   const cameraPipeline = createMemo(
     async (_prev: CameraPipeline | undefined) => {
       const g = gpu();
@@ -155,6 +167,7 @@ function CalibrationView() {
       const histCanvas = histCanvasEl();
       const stream = mediaStream();
       if (!g || !canvas || !histCanvas || !stream) {
+        log('Pipeline: missing deps');
         return undefined;
       }
       const video = cameraVideo;
@@ -170,6 +183,7 @@ function CalibrationView() {
         if (rafHandle) video.cancelVideoFrameCallback(rafHandle);
         video.pause();
         video.srcObject = null;
+        log('Pipeline cleanup');
       });
 
       canvas.width = size.w;
@@ -177,6 +191,7 @@ function CalibrationView() {
       histCanvas.width = 512;
       histCanvas.height = 120;
 
+      log('Creating pipeline...');
       const pip = createCameraPipeline(
         g,
         canvas,
@@ -185,11 +200,11 @@ function CalibrationView() {
         size.h,
         navigator.gpu.getPreferredCanvasFormat(),
       );
+      log(`Pipeline created ${size.w}x${size.h}`);
       video.srcObject = stream;
       await video.play().catch(() => {});
       if (disposed) return undefined;
 
-      // `importExternalTexture` needs a presented frame; `play()` can resolve earlier.
       await new Promise<void>((resolve) => {
         primeHandle = video.requestVideoFrameCallback(() => {
           primeHandle = 0;
@@ -197,12 +212,20 @@ function CalibrationView() {
         });
       });
       if (disposed) return undefined;
+      log('First frame presented');
 
+      const EXTENT_FIELDS = 4;
+      const MAX_COMPONENTS = 65536;
+
+      let frameCount = 0;
       const loop = () => {
         if (disposed) return;
         const gpuNow = gpu();
         if (!gpuNow) return;
-        processFrame(gpuNow, pip, cameraVideo, threshold(), displayMode());
+        frameCount++;
+        const dm = displayMode();
+        processFrame(gpuNow, pip, cameraVideo, threshold(), dm);
+        if (frameCount % 30 === 0) log(`frame ${frameCount} mode=${dm}`);
         void pip.histogramBuffer.read().then((bins) => {
           if (disposed) return;
           const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins);
@@ -211,6 +234,33 @@ function CalibrationView() {
         rafHandle = cameraVideo.requestVideoFrameCallback(loop);
       };
       rafHandle = cameraVideo.requestVideoFrameCallback(loop);
+      log('rVFC loop started');
+
+      // Periodically read extent buffer and push bboxes only in debug mode
+      const readExtents = () => {
+        if (disposed) return;
+        if (displayMode() !== 'debug') {
+          setTimeout(readExtents, 300);
+          return;
+        }
+        void pip.extentBuffer.read(new Uint32Array(MAX_COMPONENTS * EXTENT_FIELDS)).then((raw) => {
+          if (disposed) return;
+          const boxes: Bbox[] = [];
+          for (let i = 0; i < MAX_COMPONENTS; i++) {
+            const minX = raw[i * EXTENT_FIELDS + 0];
+            const minY = raw[i * EXTENT_FIELDS + 1];
+            const maxX = raw[i * EXTENT_FIELDS + 2];
+            const maxY = raw[i * EXTENT_FIELDS + 3];
+            if (minX > maxX || minX === 0xFFFFFFFF) continue;
+            boxes.push({ minX, minY, maxX, maxY, area: (maxX - minX) * (maxY - minY) });
+          }
+          boxes.sort((a, b) => b.area - a.area);
+          setBboxes(boxes.slice(0, 50));
+          log(`Extents: ${boxes.length} components, top area=${boxes[0]?.area ?? 0}`);
+          setTimeout(readExtents, 300);
+        });
+      };
+      readExtents();
 
       return pip;
     },
@@ -289,7 +339,30 @@ function CalibrationView() {
               </button>
             </div>
           </div>
-          <canvas ref={setCanvasEl} class={styles.feedCanvas} />
+          <div style={{ position: 'relative' }}>
+            <canvas ref={setCanvasEl} class={styles.feedCanvas} />
+            {displayMode() === 'debug' && (() => {
+              const el = canvasEl();
+              const size = frameSize();
+              const sx = el && size.w > 0 ? el.getBoundingClientRect().width / size.w : 1;
+              const sy = el && size.h > 0 ? el.getBoundingClientRect().height / size.h : 1;
+              return (
+                <For each={bboxes().filter((b) => b.area > 100)}>
+                  {(b) => (
+                    <div
+                      class={styles.bbox}
+                      style={{
+                        '--bbox-x': `${b.minX * sx}px`,
+                        '--bbox-y': `${b.minY * sy}px`,
+                        '--bbox-w': `${(b.maxX - b.minX) * sx}px`,
+                        '--bbox-h': `${(b.maxY - b.minY) * sy}px`,
+                      }}
+                    />
+                  )}
+                </For>
+              );
+            })()}
+          </div>
         </div>
         <div class={`${styles.feedPanel} ${styles.feedPanelSide}`}>
           <span class={styles.feedLabel}>Edge Detection</span>
@@ -304,6 +377,9 @@ function CalibrationView() {
               {(threshold() * 255).toFixed(1)} / 255{' '}
               <span>({(threshold() * 100).toFixed(1)}%)</span>
             </span>
+          </div>
+          <div style={{ font: '9px monospace', color: '#4f8', marginTop: 4 }}>
+            {logs().map(l => <div>{l}</div>)}
           </div>
         </div>
       </div>
