@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup, createEffect } from 'solid-js';
+import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js';
 import { initGPU } from '../gpu/init';
 import {
   createCameraPipeline,
@@ -33,6 +33,32 @@ async function enumerateVideoInputs(): Promise<MediaDeviceInfo[]> {
 type GpuRoot = Awaited<ReturnType<typeof initGPU>>;
 
 interface Bbox { minX: number; minY: number; maxX: number; maxY: number; area: number }
+
+function BboxOverlay(props: {
+  bboxes: () => Bbox[];
+  sx: () => number;
+  sy: () => number;
+}) {
+  const visible = createMemo(() => props.bboxes().filter((b) => b.area > 100));
+  return (
+    <For each={visible()} keyed={false}>
+      {(box) => {
+        const b = box();
+        return (
+          <div
+            class={styles.bbox}
+            style={{
+              '--bbox-x': `${b.minX * props.sx()}px`,
+              '--bbox-y': `${b.minY * props.sy()}px`,
+              '--bbox-w': `${(b.maxX - b.minX) * props.sx()}px`,
+              '--bbox-h': `${(b.maxY - b.minY) * props.sy()}px`,
+            }}
+          />
+        );
+      }}
+    </For>
+  );
+}
 
 function CalibrationView() {
   const cameraVideo = document.createElement('video');
@@ -69,16 +95,6 @@ function CalibrationView() {
   const [displayMode, setDisplayMode] = createSignal<DisplayMode>('debug');
   const [bboxes, setBboxes] = createSignal<Bbox[]>([]);
   const [logs, setLogs] = createSignal<string[]>([]);
-
-  const filteredBboxes = createMemo(() =>
-    bboxes().filter((b) => b.area > 100)
-  );
-
-  // Debug: track bboxes signal changes
-  createEffect(() => {
-    const boxes = bboxes();
-    console.log('EFFECT bboxes changed:', boxes.length, boxes[0] ? `top=${boxes[0].area}@(${boxes[0].minX},${boxes[0].minY})` : 'none');
-  });
 
   const log = (msg: string) => {
     setLogs(prev => [...prev.slice(-8), `${new Date().toISOString().slice(11, 19)} ${msg}`]);
@@ -378,32 +394,11 @@ function CalibrationView() {
           <div style={{ position: 'relative' }}>
             <canvas ref={canvasRefCallback} class={styles.feedCanvas} />
             <Show when={displayMode() === 'debug'}>
-              {(() => {
-                const sx = () => (canvasEl() && renderedW() > 0 && frameSize().w > 0) ? renderedW() / frameSize().w : 1;
-                const sy = () => (canvasEl() && renderedH() > 0 && frameSize().h > 0) ? renderedH() / frameSize().h : 1;
-                return (
-                  <For each={filteredBboxes()} keyed={false}>
-                    {(box) => {
-                      const b = box();
-                      const x = b.minX * sx();
-                      const y = b.minY * sy();
-                      const w = (b.maxX - b.minX) * sx();
-                      const h = (b.maxY - b.minY) * sy();
-                      return (
-                        <div
-                          class={styles.bbox}
-                          style={{
-                            '--bbox-x': `${x}px`,
-                            '--bbox-y': `${y}px`,
-                            '--bbox-w': `${w}px`,
-                            '--bbox-h': `${h}px`,
-                          }}
-                        />
-                      );
-                    }}
-                  </For>
-                );
-              })()}
+              <BboxOverlay
+                bboxes={bboxes}
+                sx={() => (canvasEl() && renderedW() > 0 && frameSize().w > 0) ? renderedW() / frameSize().w : 1}
+                sy={() => (canvasEl() && renderedH() > 0 && frameSize().h > 0) ? renderedH() / frameSize().h : 1}
+              />
             </Show>
           </div>
         </div>
