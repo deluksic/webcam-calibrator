@@ -711,13 +711,12 @@ export async function detectContours(
 ): Promise<{ quads: DetectedQuad[], extentData: ExtentRow[], edgeData: Uint8Array, labelData: Uint32Array }> {
   // processFrame already ran pointer-jump + compact labeling.
   // We just read the results — no GPU re-run needed.
-  const [labelRaw, edgeRaw, sobelRaw] = await Promise.all([
+  const [labelRaw, edgeRaw] = await Promise.all([
     pipeline.compactLabelBuffer.read(),
     pipeline.dilatedEdgeBuffer.read(),
-    pipeline.sobelBuffer.read(),
   ]);
 
-  // Convert struct arrays to flat typed arrays for CPU processing
+  // Convert to flat typed arrays
   const labelData = new Uint32Array(labelRaw.length);
   for (let i = 0; i < labelRaw.length; i++) {
     labelData[i] = labelRaw[i];
@@ -728,11 +727,8 @@ export async function detectContours(
     edgeData[i] = edgeRaw[i];
   }
 
-  const sobelData = new Float32Array(sobelRaw.length * 2);
-  for (let i = 0; i < sobelRaw.length; i++) {
-    sobelData[i * 2] = sobelRaw[i].x;
-    sobelData[i * 2 + 1] = sobelRaw[i].y;
-  }
+  // TODO: read sobelBuffer on demand for corner detection, or refactor corners to use edgeData
+  const sobelData = new Float32Array(0);
 
   // CPU-side: extract regions and fit quads
   const { extractRegions, validateAndFilterQuads } = await import('./contour');
