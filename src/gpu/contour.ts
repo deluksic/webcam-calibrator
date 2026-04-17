@@ -154,6 +154,9 @@ export function validateAndFilterQuads(
       { x: region.maxX, y: region.maxY }, // BR
     ];
     const tagGrid = buildTagGrid(bboxCorners);
+    if (!tagGrid || !tagGrid.cells || tagGrid.cells.length === 0) {
+      continue;
+    }
     quads.push({
       corners: bboxCorners,
       label: region.label,
