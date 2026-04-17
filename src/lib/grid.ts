@@ -105,7 +105,16 @@ export function buildTagGrid(
       // Vertical line: from top edge to bottom edge at col position
       const vLine = lineFromPoints(topPoint, bottomPoint);
 
-      const intersection = lineIntersection(hLine!, vLine!);
+      // Guard: either line can be null if endpoints are coincident (e.g. at quad corners)
+      if (!hLine || !vLine) {
+        innerCorners.push({
+          x: (topPoint.x + bottomPoint.x) / 2,
+          y: (leftPoint.y + rightPoint.y) / 2,
+        });
+        continue;
+      }
+
+      const intersection = lineIntersection(hLine, vLine);
       if (intersection) {
         innerCorners.push(intersection);
       } else {

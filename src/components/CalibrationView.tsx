@@ -349,7 +349,9 @@ function CalibrationView() {
         }).catch((e) => {
           if (disposed) return;
           quadDetectionPending = false;
-          log(`detectContours error: ${e}`);
+          const msg = `detectContours error: ${e}\n${e instanceof Error ? e.stack : ''}`;
+          console.error(msg);
+          log(msg);
         });
       };
 

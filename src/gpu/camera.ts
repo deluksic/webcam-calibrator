@@ -306,7 +306,7 @@ export function createCameraPipeline(
   // ─── Grid visualization (AprilTag grid overlay) ─────────────────────────
   const quadCornersBuffer = root
     .createBuffer(gridCornersSchema)
-    .$usage('storage', { unsupported: ['vertex'] });
+    .$usage('storage');
 
   const { gridVizLayout } = createGridVizLayouts(root, quadCornersBuffer);
 
@@ -804,7 +804,7 @@ export function updateQuadCornersBuffer(
     const corners = quad.corners;
     const [w0, w1, w2, w3] = computeProjectiveWeights(corners);
 
-    // vec3f has 16-byte alignment: c0, pad, c1, pad, c2, pad, c3 = 16 floats per quad
+    // CornerInfo: 4 vec4f = 16 floats per quad = 64 bytes, naturally aligned
     const base = i * 16;
     view[base + 0] = corners[0].x; view[base + 1] = corners[0].y; view[base + 2] = w0; view[base + 3] = 0;
     view[base + 4] = corners[1].x; view[base + 5] = corners[1].y; view[base + 6] = w1; view[base + 7] = 0;

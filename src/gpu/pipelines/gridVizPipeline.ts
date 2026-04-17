@@ -6,12 +6,17 @@ export const GRID_DIVISIONS = 8;
 export const GRID_LINE_WIDTH = 0.06;
 export const MAX_INSTANCES = 64;
 
-// Each corner stores (x, y, w) — w is projective weight
+// CornerInfo: 4 vec3f fields = 4×16 bytes = 64 bytes in storage buffers
+// Each vec3f is 12 bytes but aligned to 16 in storage. The pad field aligns c1→index 4.
 const CornerInfo = d.struct({
-  c0: d.vec3f, // TL: x, y, w
-  c1: d.vec3f, // TR: x, y, w
-  c2: d.vec3f, // BL: x, y, w
-  c3: d.vec3f, // BR: x, y, w
+  c0: d.vec3f, // TL: x, y, w (index 0-2)
+  p0: d.f32,   // pad to align c1→index 4
+  c1: d.vec3f, // TR: x, y, w (index 4-6)
+  p1: d.f32,   // pad to align c2→index 8
+  c2: d.vec3f, // BL: x, y, w (index 8-10)
+  p2: d.f32,   // pad to align c3→index 12
+  c3: d.vec3f, // BR: x, y, w (index 12-14)
+  p3: d.f32,   // pad (index 15, unused)
 });
 
 export const gridCornersSchema = d.arrayOf(CornerInfo, MAX_INSTANCES);
@@ -48,7 +53,9 @@ export function createGridVizPipeline(
     'use gpu';
     const quad = gridVizLayout.$.quadCorners[instanceIndex];
     const corners = [d.vec3f(quad.c0), d.vec3f(quad.c1), d.vec3f(quad.c2), d.vec3f(quad.c3)];
+    const uvs = [d.vec2f(d.f32(0), d.f32(0)), d.vec2f(d.f32(1), d.f32(0)), d.vec2f(d.f32(0), d.f32(1)), d.vec2f(d.f32(1), d.f32(1))];
     const corner = corners[vertexIndex];
+    const uv = uvs[vertexIndex];
 
     // Convert to NDC
     const ndcX = corner.x / halfW - d.f32(1.0);
@@ -56,20 +63,9 @@ export function createGridVizPipeline(
 
     return {
       outPos: d.vec4f(ndcX, ndcY, 0, d.f32(1)),
-      uv: d.vec2f(d.f32(vertexIndex === d.u32(1)), d.f32(vertexIndex >= d.u32(2))),
+      uv,
     };
   });
-
-  // Simple grid - no AA
-  const gridTexture = (p: d.v2f) => {
-    'use gpu';
-    const N = GRID_DIVISIONS;
-    const lw = GRID_LINE_WIDTH;
-    const f = fract(p * N + lw * 0.5);
-    const t = d.vec2f(1.0) * lw;
-    const i = std.select(d.vec2f(0), d.vec2f(1), std.lt(f, t));
-    return (1 - i.x) * (1 - i.y);
-  };
 
   // Filtered grid - Shadertoy gridTextureGradBox, vectorized
   const gridTextureGradBox = (p: d.v2f, ddx: d.v2f, ddy: d.v2f) => {
