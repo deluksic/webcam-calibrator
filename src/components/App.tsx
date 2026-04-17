@@ -30,6 +30,7 @@ export default function App() {
         >
           Results
         </button>
+        <span class={styles.version}>v53</span>
       </nav>
 
       <main class={styles.main}>

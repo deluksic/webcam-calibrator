@@ -44,6 +44,13 @@
   background-color: var(--color-accent-muted);
 }
 
+.version {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+}
+
 .main {
   flex: 1;
   display: flex;
