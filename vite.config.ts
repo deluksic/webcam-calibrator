@@ -1,9 +1,11 @@
 import { defineConfig } from 'vite';
 import solidPlugin from 'vite-plugin-solid';
 import typegpuPlugin from 'unplugin-typegpu/vite';
+import tsover from 'tsover/plugin/vite';
 
 export default defineConfig({
   plugins: [
+    tsover(),
     typegpuPlugin(),
     solidPlugin(),
   ],

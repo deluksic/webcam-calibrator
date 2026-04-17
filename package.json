@@ -3,10 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port 5173 --host 0.0.0.0",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "ship": "pnpm build && rm -rf /var/www/webcam-calibration.clodhost.com/public/* && cp -r dist/* /var/www/webcam-calibration.clodhost.com/public/"
+    "ship:watch": "vite build --watch",
+    "typecheck:watch": "tsc --noEmit --watch"
   },
   "dependencies": {
     "@solidjs/web": "2.0.0-beta.6",
@@ -18,7 +16,8 @@
     "@webgpu/types": "^0.1.55",
     "babel-preset-solid": "2.0.0-beta.6",
     "jsdom": "^29.0.2",
-    "typescript": "^5.7.3",
+    "tsover": "npm:tsover@latest",
+    "typescript": "npm:tsover@latest",
     "unplugin-typegpu": "^0.11.0",
     "vite": "^7.3.2",
     "vite-plugin-solid": "^3.0.0-next.4",
@@ -28,7 +27,8 @@
     "overrides": {
       "@solidjs/web": "2.0.0-beta.6",
       "solid-js": "2.0.0-beta.6",
-      "babel-preset-solid": "2.0.0-beta.6"
+      "babel-preset-solid": "2.0.0-beta.6",
+      "typescript": "npm:tsover@latest"
     }
   }
 }

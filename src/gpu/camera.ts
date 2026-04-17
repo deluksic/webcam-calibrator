@@ -38,7 +38,8 @@ import {
   ExtentEntry,
 } from './pipelines/extentTrackingPipeline';
 import { createCompactLabelLayouts, createCanonicalResetPipeline, createCanonicalClaimPipeline, createRemapLabelPipeline } from './pipelines/compactLabelPipeline';
-import { createGridVizPipeline, createGridVizLayouts, gridCornersSchema } from './pipelines/gridVizPipeline';
+import { createGridVizPipeline, createGridVizLayouts, gridCornersSchema, MAX_INSTANCES } from './pipelines/gridVizPipeline';
+import { computeProjectiveWeights, type Point } from '../lib/geometry';
 import {
   type DetectedQuad,
   filterNestedQuads,
@@ -771,38 +772,68 @@ export async function readExtentDataForQuads(
 // Update quad corners buffer for grid visualization (instanced rendering)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Per-quad data passed to the grid visualization shader. */
+/** Per-quad data for projective grid rendering.
+ * 3 vec4f per quad: corners + weights.
+ */
 export const QuadCornersEntry = d.struct({
-  minX: d.f32,
-  minY: d.f32,
-  maxX: d.f32,
-  maxY: d.f32,
+  x0: d.f32, y0: d.f32, x1: d.f32, y1: d.f32, // TL, TR
+  x2: d.f32, y2: d.f32, x3: d.f32, y3: d.f32, // BL, BR
+  w0: d.f32, w1: d.f32, w2: d.f32, w3: d.f32, // weights
 });
 
 /** Plain data object for writing to the buffer. */
-export interface QuadCornersEntryData {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
+export interface QuadCornersData {
+  x0: number; y0: number; x1: number; y1: number;
+  x2: number; y2: number; x3: number; y3: number;
+  w0: number; w1: number; w2: number; w3: number;
 }
 
-/** Write quad corner data to the GPU buffer. */
+/** Write quad corner data to the GPU buffer.
+ * Accepts 4 corner points per quad and computes projective weights.
+ */
 export function updateQuadCornersBuffer(
   pipeline: CameraPipeline,
   bboxes: { minX: number; minY: number; maxX: number; maxY: number }[],
 ): void {
   const count = Math.min(bboxes.length, MAX_DETECTED_TAGS);
-  const buf = new ArrayBuffer(MAX_DETECTED_TAGS * 16);
+  // 3 vec4f per quad = 12 f32 values
+  const buf = new ArrayBuffer(MAX_INSTANCES * 3 * 16);
   const view = new Float32Array(buf);
   for (let i = 0; i < count; i++) {
     const b = bboxes[i];
-    view[i * 4 + 0] = b.minX;
-    view[i * 4 + 1] = b.minY;
-    view[i * 4 + 2] = b.maxX;
-    view[i * 4 + 3] = b.maxY;
+    const corners: Point[] = [
+      { x: b.minX, y: b.minY }, // TL
+      { x: b.maxX, y: b.minY }, // TR
+      { x: b.minX, y: b.maxY }, // BL
+      { x: b.maxX, y: b.maxY }, // BR
+    ];
+    const [w0, w1, w2, w3] = computeProjectiveWeights(corners);
+
+    // Debug log first 3 quads with NDC coords
+    if (i < 3) {
+      const sw0 = Number(w0), sw1 = Number(w1), sw2 = Number(w2), sw3 = Number(w3);
+      const halfW = pipeline.width * 0.5, halfH = pipeline.height * 0.5;
+      const ndcTL = [(corners[0].x * 2 / halfW) - 1, 1 - (corners[0].y * 2 / halfH)];
+      const ndcTR = [(corners[1].x * 2 / halfW) - 1, 1 - (corners[1].y * 2 / halfH)];
+      const ndcBL = [(corners[2].x * 2 / halfW) - 1, 1 - (corners[2].y * 2 / halfH)];
+      const ndcBR = [(corners[3].x * 2 / halfW) - 1, 1 - (corners[3].y * 2 / halfH)];
+      console.log(`Quad ${i}: px=[(${corners[0].x.toFixed(0)},${corners[0].y.toFixed(0)}) (${corners[1].x.toFixed(0)},${corners[1].y.toFixed(0)}) (${corners[2].x.toFixed(0)},${corners[2].y.toFixed(0)}) (${corners[3].x.toFixed(0)},${corners[3].y.toFixed(0)})] ndc=[(${ndcTL[0].toFixed(2)},${ndcTL[1].toFixed(2)}) (${ndcTR[0].toFixed(2)},${ndcTR[1].toFixed(2)}) (${ndcBL[0].toFixed(2)},${ndcBL[1].toFixed(2)}) (${ndcBR[0].toFixed(2)},${ndcBR[1].toFixed(2)})]`);
+    }
+
+    const base = i * 12;
+    view[base + 0] = corners[0].x;  // x0
+    view[base + 1] = corners[0].y;  // y0
+    view[base + 2] = corners[1].x;  // x1
+    view[base + 3] = corners[1].y;  // y1
+    view[base + 4] = corners[2].x;  // x2
+    view[base + 5] = corners[2].y;  // y2
+    view[base + 6] = corners[3].x;  // x3
+    view[base + 7] = corners[3].y;  // y3
+    view[base + 8] = w0;
+    view[base + 9] = w1;
+    view[base + 10] = w2;
+    view[base + 11] = w3;
   }
-  // Remaining entries stay zero
   pipeline.quadCornersBuffer.write(buf);
 }
 
