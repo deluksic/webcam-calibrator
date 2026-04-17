@@ -810,12 +810,6 @@ export function updateQuadCornersBuffer(
     view[base + 4] = corners[1].x; view[base + 5] = corners[1].y; view[base + 6] = w1; view[base + 7] = 0;
     view[base + 8] = corners[2].x; view[base + 9] = corners[2].y; view[base + 10] = w2; view[base + 11] = 0;
     view[base + 12] = corners[3].x; view[base + 13] = corners[3].y; view[base + 14] = w3; view[base + 15] = 0;
-
-    // Debug log first 3 quads
-    if (i < 3) {
-      console.log(`Quad ${i}: ${pipeline.width}x${pipeline.height}`,
-        `px=[${corners.map(c => `(${c.x.toFixed(0)},${c.y.toFixed(0)})`).join(' ')}]`);
-    }
   }
   pipeline.quadCornersBuffer.write(buf);
 }
@@ -847,19 +841,9 @@ export async function detectContours(
   pipeline.filteredStaging.unmap();
 
   // CPU-side: extract regions and fit quads
-  const n = labelDataCopy.length;
-  console.log('[detectContours] labelData len:', n);
-  console.log('[detectContours] labelData first10:', Array.from(labelDataCopy.subarray(0, 10)));
-  console.log('[detectContours] labelData mid:', Array.from(labelDataCopy.subarray(100000, 100010)));
-  console.log('[detectContours] labelData last10:', Array.from(labelDataCopy.subarray(n - 10, n)));
   const regions = extractRegions(labelDataCopy, pipeline.width, pipeline.height, dilatedCopy);
   const maxArea = pipeline.width * pipeline.height * 0.5;
-  console.log('[detectContours] regions:', regions.length);
   const quads = validateAndFilterQuads(regions, dilatedCopy, pipeline.width, 400, maxArea);
-  console.log('[detectContours] quads from validate, length:', quads?.length);
-  if (quads.length > 0) {
-    console.log('[detectContours] first quad count:', quads[0]?.count);
-  }
 
   // Read extent buffer
   const extentData: ExtentRow[] = await pipeline.extentBuffer.read();

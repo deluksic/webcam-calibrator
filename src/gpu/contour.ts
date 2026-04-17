@@ -74,19 +74,6 @@ export function extractRegions(
   }
 
   const result = [...regions.values()];
-  console.log('[extractRegions] total regions:', result.length);
-  // Log a sample of large regions
-  const sorted = result.slice().sort((a, b) => b.count - a.count);
-  for (let i = 0; i < Math.min(10, sorted.length); i++) {
-    const r = sorted[i];
-    const w = r.maxX - r.minX;
-    const h = r.maxY - r.minY;
-    const area = w * h;
-    const aspectRatio = w / h;
-    const perimeter = 2 * (w + h);
-    const edgeDensity = r.count / perimeter;
-    console.log(`  [region ${i}] label=${r.label} count=${r.count} area=${area} AR=${aspectRatio.toFixed(2)} edgeDensity=${edgeDensity.toFixed(2)}`);
-  }
   return result;
 }
 
@@ -136,24 +123,20 @@ export function validateAndFilterQuads(
     const area = w * h;
 
     if (area < minArea) {
-      console.log(`[validateAndFilterQuads] REJECT area too small: area=${area} minArea=${minArea}`);
       continue;
     }
     if (area > maxArea) {
-      console.log(`[validateAndFilterQuads] REJECT area too large: area=${area} maxArea=${maxArea}`);
       continue;
     }
 
     const aspectRatio = w / h;
     if (aspectRatio < 0.6 || aspectRatio > 1.7) {
-      console.log(`[validateAndFilterQuads] REJECT bad AR: AR=${aspectRatio.toFixed(2)}`);
       continue;
     }
 
     const perimeter = 2 * (w + h);
     const edgeDensity = region.count / perimeter;
     if (edgeDensity < 0.5 || edgeDensity > 5) {
-      console.log(`[validateAndFilterQuads] REJECT edgeDensity: ${edgeDensity.toFixed(2)}`);
       continue;
     }
 
