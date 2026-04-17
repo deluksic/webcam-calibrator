@@ -179,7 +179,7 @@ export function clusterCorners(
 }
 
 /**
- * Order 4 corners as [TL, TR, BR, BL].
+ * Order 4 corners as [TL, TR, BL, BR] for triangle strip rendering.
  * Sort by y to get top/bottom rows, then by x within each row for left/right.
  */
 export function orderCornersClockwise(corners: Point[]): Point[] {
@@ -189,7 +189,7 @@ export function orderCornersClockwise(corners: Point[]): Point[] {
   const top = sorted.slice(0, 2).sort((a, b) => a.x - b.x); // TL, TR
   const bottom = sorted.slice(2, 4).sort((a, b) => a.x - b.x); // BL, BR
 
-  return [top[0], top[1], bottom[1], bottom[0]];
+  return [top[0], top[1], bottom[0], bottom[1]];
 }
 
 /**
