@@ -10,11 +10,11 @@ import { COMPONENT_LABEL_INVALID } from '../contour';
 
 export function createPointerJumpLayouts(root: Awaited<ReturnType<typeof tgpu.init>>) {
   const initLayout = tgpu.bindGroupLayout({
-    edgeBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     labelBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
   });
   const stepLayout = tgpu.bindGroupLayout({
-    edgeBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     readBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
     writeBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
   });
@@ -23,7 +23,7 @@ export function createPointerJumpLayouts(root: Awaited<ReturnType<typeof tgpu.in
     atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
   });
   const parentTightenLayout = tgpu.bindGroupLayout({
-    edgeBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     labelRead: { storage: d.arrayOf(d.u32), access: 'readonly' },
     atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
   });
@@ -53,8 +53,9 @@ export function createPointerJumpInitPipeline(
 
     const idx = d.u32(y * w + x);
     const ei = initLayout.$.edgeBuffer[idx];
+    const em = length(ei);
     // Only initialize labels for EDGE pixels (non-zero edges)
-    if (ei <= d.f32(0)) {
+    if (em <= d.f32(0)) {
       initLayout.$.labelBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID);
       return;
     }
@@ -66,7 +67,8 @@ export function createPointerJumpInitPipeline(
         if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
           const nIdx = d.u32(ny * w + nx);
           const ej = initLayout.$.edgeBuffer[nIdx];
-          if (ej > d.f32(0) && nIdx < best) {
+          const ejm = length(ej);
+          if (ejm > d.f32(0) && nIdx < best) {
             best = nIdx;
           }
         }
@@ -152,7 +154,7 @@ export function createPointerJumpParentTightenPipeline(
 
     const idx = d.u32(y * w + x);
     const ei = parentTightenLayout.$.edgeBuffer[idx];
-    if (ei <= d.f32(0)) {
+    if (length(ei) <= d.f32(0)) {
       return;
     }
 
@@ -170,7 +172,7 @@ export function createPointerJumpParentTightenPipeline(
         if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
           const nIdx = d.u32(ny * w + nx);
           const ej = parentTightenLayout.$.edgeBuffer[nIdx];
-          if (ej > d.f32(0)) {
+          if (length(ej) > d.f32(0)) {
             const lj = parentTightenLayout.$.labelRead[nIdx];
             if (lj !== d.u32(COMPONENT_LABEL_INVALID)) {
               cand = std.min(cand, lj);

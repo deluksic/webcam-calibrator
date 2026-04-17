@@ -20,7 +20,7 @@ Frame Input
   ↓
 Sobel Gradient → Histogram (for adaptive threshold)
   ↓
-NMS + Edge Filter + Edge Dilate
+NMS + Edge Filter
   ↓
 Pointer-Jump Labeling (iterative connected components → raw pixel-index labels)
   ↓
@@ -91,7 +91,7 @@ Components with label ≥ MAX_EXTENT_COMPONENTS are not tracked (acceptable: lar
 | `grayscale` | Sobel + edge | grayscale | histogram |
 | `edges` | Sobel + edge | edges | histogram |
 | `nms` | Sobel + NMS | edges | histogram |
-| `edgesDilated` | Sobel + NMS + dilate | edges | histogram |
+| `edgesDilated` | *(removed — NMS alone is sufficient)* | — | — |
 | `labels` | Sobel + pointer-jump + compact | labels | none |
 | `debug` | Sobel + pointer-jump + extent | labels + bbox overlay | extent buffer (every frame) |
 | `grid` | Sobel + pointer-jump + extent | labels + grid overlay | extent buffer (every frame) + detectContours (every 30 frames) |
@@ -102,14 +102,14 @@ Reads compact label buffer + sobel buffer, then performs CPU-side corner detecti
 
 ```
 detectContours():
-  GPU→CPU: read compactLabelBuffer + sobelBuffer (~2.5 MB)
+  GPU→CPU: read compactLabelBuffer + dilatedEdgeBuffer (~2.5 MB)
   CPU: extract regions from labels
   CPU: for each region, extract edge pixels
   CPU: find corner candidates (pixels where neighbors have differing orientations)
   CPU: cluster into 4 quadrants → corner points
   CPU: perspective-correct grid fitting
   GPU→CPU: read extentBuffer (debug overlay, ~320 KB)
-  return { quads, extentData }
+  return { quads, extentData, dilatedGradients, labelData }
 ```
 
 This is the expensive operation (full buffer readback + CPU corner detection) and is why it's gated to grid mode only.
@@ -118,11 +118,15 @@ This is the expensive operation (full buffer readback + CPU corner detection) an
 
 | Buffer | Size | Type | Access |
 |---|---|---|---|
-| `sobelBuffer` | 1280×720×2×f32 | gradient | read |
-| `edgeBuffer` | 1280×720×u8 | edge mask | read/write |
-| `dilatedEdgeBuffer` | 1280×720×u8 | dilated edges | read |
+| `sobelBuffer` | 1280×720×vec2f | gradient | read |
+| `filteredBuffer` | 1280×720×vec2f | NMS-suppressed gradient | read/write |
 | `pointerJumpBuffer0/1` | 1280×720×u32 | labels | read/write |
-| `histogramBuffer` | 256×u32 | edge histogram | read/write |
-| `extentBuffer` | MAX_EXTENT_COMPONENTS×5×u32 | bounding boxes | read/write |
+| `pointerJumpAtomicBuffer` | 1280×720×atomic u32 | atomic labels | read/write |
+| `compactLabelBuffer` | 1280×720×u32 | compact labels (0..N-1) | read/write |
+| `canonicalRootBuffer` | area×atomic u32 | canonical root IDs | read/write |
+| `histogramBuffer` | 256×atomic u32 | edge histogram | read/write |
+| `extentBuffer` | MAX_EXTENT_COMPONENTS×ExtentEntry | bounding boxes | read/write |
 | `quadCornersBuffer` | MAX_DETECTED_TAGS×8×f32 | grid corners | write |
-| `canonicalRootBuffer` | MAX_EXTENT_COMPONENTS×u32 | compact labels | read/write |
+
+All gradient buffers (`sobelBuffer`, `filteredBuffer`, `dilatedEdgeBuffer`) store `vec2f` (gx, gy) per pixel.
+Magnitude is computed on-the-fly via `length()` in rendering kernels — no separate scalar storage.

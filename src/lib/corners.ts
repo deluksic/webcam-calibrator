@@ -211,21 +211,18 @@ export function findCornersFromEdges(
   minNeighborCount: number = 4,
 ): Point[] {
   const candidates = findCornerCandidates(pixels, cornerThreshold, minNeighborCount);
-  console.log(`[findCorners] pixels=${pixels.length / 4} candidates=${candidates.length}`);
 
   if (candidates.length < 4) {
     return [];
   }
 
   const clustered = clusterCorners(candidates);
-  console.log(`[findCorners] clustered=${clustered.length}`);
 
   if (clustered.length !== 4) {
     return [];
   }
 
   const ordered = orderCornersClockwise(clustered);
-  console.log(`[findCorners] corners: ${ordered.map(c => `(${c.x.toFixed(0)},${c.y.toFixed(0)})`).join(' ')}`);
 
   return ordered;
 }

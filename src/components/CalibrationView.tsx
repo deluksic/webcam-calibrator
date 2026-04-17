@@ -3,16 +3,18 @@ import { initGPU } from '../gpu/init';
 import {
   createCameraPipeline,
   processFrame,
+  readExtentBuffer,
+  readExtentDataForQuads,
   updateQuadCornersBuffer,
   detectContours,
-  readExtentBuffer,
   type CameraPipeline,
   type DisplayMode,
   type ExtentRow,
-  MAX_COMPONENTS,
   MAX_U32,
+  MAX_COMPONENTS,
+  MAX_DETECTED_TAGS,
 } from '../gpu/camera';
-import type { DetectedQuad } from '../gpu/contour';
+import { type DetectedQuad } from '../gpu/contour';
 import { computeThreshold, THRESHOLD_PERCENTILE } from '../gpu/pipelines/constants';
 import styles from './CalibrationView.module.css';
 
@@ -77,7 +79,6 @@ function QuadCandidateOverlay(props: {
       }
       return true;
     });
-    console.log(`[overlay] bboxes=${props.bboxes.length} okAreaAR=${okAreaAR} okContained=${okContained} dropped=${dropped} shown=${result.length}`);
     return result;
   });
 
@@ -333,20 +334,26 @@ function CalibrationView() {
       const scheduleQuadDetection = () => {
         if (quadDetectionPending || disposed) return;
         quadDetectionPending = true;
-        const gForQuad = gpu();
-        if (!gForQuad) { quadDetectionPending = false; return; }
-        detectContours(gForQuad, pip).then(({ quads }) => {
+        readExtentDataForQuads(pip).then((extentData) => {
           if (disposed) return;
           quadDetectionPending = false;
-          updateQuadCornersBuffer(pip, quads);
-          const cornerQuads = quads.filter(q => q.hasCorners);
-          const bboxQuads = quads.filter(q => !q.hasCorners);
-          setQuadCandidateCount(bboxQuads.length);
-          if (quads.length > 0) log(`Quads: ${cornerQuads.length} corner, ${bboxQuads.length} bbox → ${cornerQuads.length} shown`);
+          // Apply same filters as debug view
+          const boxes: Bbox[] = [];
+          for (const entry of extentData) {
+            if (entry.minX === MAX_U32) continue;
+            const w = entry.maxX - entry.minX;
+            const h = entry.maxY - entry.minY;
+            if (w <= 0 || h <= 0) continue;
+            boxes.push({ minX: entry.minX, minY: entry.minY, maxX: entry.maxX, maxY: entry.maxY, area: w * h });
+          }
+          boxes.sort((a, b) => b.area - a.area);
+          const top = boxes.slice(0, MAX_DETECTED_TAGS);
+          console.log('[quadDetection] writing', top.length, 'quads to buffer');
+          updateQuadCornersBuffer(pip, top);
         }).catch((e) => {
           if (disposed) return;
           quadDetectionPending = false;
-          log(`detectContours error: ${e}`);
+          log(`readExtentDataForQuads error: ${e}`);
         });
       };
 
@@ -356,10 +363,10 @@ function CalibrationView() {
         if (!gpuNow) return;
         frameCount++;
         const dm = displayMode();
-        processFrame(gpuNow, pip, cameraVideo, threshold(), dm);
+        processFrame(gpuNow, pip, cameraVideo, threshold(), dm, (err) => log(err));
         if (dm === 'debug') scheduleExtentRead();
         if (dm === 'grid' && frameCount % 30 === 0) {
-          log(`frame ${frameCount} mode=${dm}`);
+          log(`frame ${frameCount} grid: sched quad`);
           scheduleQuadDetection();
         }
         void pip.histogramBuffer.read().then((bins: Uint32Array | number[]) => {
@@ -426,17 +433,6 @@ function CalibrationView() {
                 onClick={() => setDisplayMode('nms')}
               >
                 NMS
-              </button>
-              <button
-                type="button"
-                class={
-                  displayMode() === 'edgesDilated'
-                    ? styles.modeButtonActive
-                    : styles.modeButton
-                }
-                onClick={() => setDisplayMode('edgesDilated')}
-              >
-                Dilated
               </button>
               <button
                 type="button"

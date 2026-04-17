@@ -32,10 +32,12 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
     histogram: { storage: histogramSchema, access: 'mutable' },
   });
 
-  // Display layout (edges) — HSV colorized by gradient direction
+  // Display layout (edges) — HSV colorized by gradient direction.
+  // Both fields are vec2f: sobelBuffer provides gradient for magnitude, filteredBuffer is
+  // also vec2f so it can carry gradients (e.g. from dilated edge pipeline).
   const edgesLayout = tgpu.bindGroupLayout({
     sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
-    filteredBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    filteredBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
   });
 
   // Histogram display layout
@@ -48,14 +50,16 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
   const edgeFilterLayout = tgpu.bindGroupLayout({
     sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     threshold: { uniform: d.f32 },
-    filteredBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
+    filteredBuffer: { storage: d.arrayOf(d.vec2f), access: 'mutable' },
   });
 
   // Tangent-only max merge: bridges gaps along the edge without thickening normal to the gradient.
+  // dst outputs gradient (vec2f) so it can be used directly for corner detection.
   const edgeDilateLayout = tgpu.bindGroupLayout({
-    src: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    src: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     grad: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
-    dst: { storage: d.arrayOf(d.f32), access: 'mutable' },
+    threshold: { uniform: d.f32 },
+    dst: { storage: d.arrayOf(d.vec2f), access: 'mutable' },
   });
 
   // Label visualization layout
@@ -75,7 +79,7 @@ export function createLayouts(root: Awaited<ReturnType<typeof tgpu.init>>, histo
 
   // Filtered render layout (debug: show edge filter output)
   const filteredRenderLayout = tgpu.bindGroupLayout({
-    filteredBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    filteredBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
   });
 
   return {

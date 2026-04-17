@@ -4,7 +4,8 @@
 // Edge tangent = gradient direction rotated 90°: tangent = (-gy/gm, gx/gm).
 // Uses bilinear interpolation for sub-pixel neighbor sampling.
 //
-// Output: filteredBuffer[i] = suppressed magnitude (0 if not a local max or below threshold).
+// Output: filteredBuffer[i] = suppressed gradient (vec2f; zero if not a local max or below threshold).
+// The edges display pipeline computes magnitude from length() on-the-fly.
 import { tgpu, d, std } from 'typegpu';
 import { abs, length, select } from 'typegpu/std';
 
@@ -32,7 +33,7 @@ export function createEdgeFilterPipeline(
     const threshold = edgeFilterLayout.$.threshold;
 
     if (gm < threshold) {
-      edgeFilterLayout.$.filteredBuffer[idx] = d.f32(0);
+      edgeFilterLayout.$.filteredBuffer[idx] = d.vec2f(d.f32(0), d.f32(0));
       return;
     }
 
@@ -62,7 +63,8 @@ export function createEdgeFilterPipeline(
     const strongFactor = d.f32(1.05); // neighbor must be >5% stronger to suppress
     const suppressed = gmPos > gm * strongFactor || gmNeg > gm * strongFactor;
 
-    edgeFilterLayout.$.filteredBuffer[idx] = select(gm, d.f32(0), suppressed);
+    // Store suppressed gradient (edges pipeline derives magnitude via length())
+    edgeFilterLayout.$.filteredBuffer[idx] = select(g, d.vec2f(d.f32(0), d.f32(0)), suppressed);
   });
 
   return root.createComputePipeline({ compute: kernel });

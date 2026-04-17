@@ -73,7 +73,21 @@ export function extractRegions(
     }
   }
 
-  return [...regions.values()];
+  const result = [...regions.values()];
+  console.log('[extractRegions] total regions:', result.length);
+  // Log a sample of large regions
+  const sorted = result.slice().sort((a, b) => b.count - a.count);
+  for (let i = 0; i < Math.min(10, sorted.length); i++) {
+    const r = sorted[i];
+    const w = r.maxX - r.minX;
+    const h = r.maxY - r.minY;
+    const area = w * h;
+    const aspectRatio = w / h;
+    const perimeter = 2 * (w + h);
+    const edgeDensity = r.count / perimeter;
+    console.log(`  [region ${i}] label=${r.label} count=${r.count} area=${area} AR=${aspectRatio.toFixed(2)} edgeDensity=${edgeDensity.toFixed(2)}`);
+  }
+  return result;
 }
 
 export function fitQuadToRegion(region: RegionData): [number, number][] | null {
@@ -116,115 +130,75 @@ export function validateAndFilterQuads(
 ): DetectedQuad[] {
   const quads: DetectedQuad[] = [];
 
-  let okAreaAR = 0, okEdgeDensity = 0, okCorners = 0, okBbox = 0, okFailed = 0;
-
   for (const region of regions) {
     const w = region.maxX - region.minX;
     const h = region.maxY - region.minY;
     const area = w * h;
 
-    if (area < minArea || area > maxArea) { okFailed++; continue; }
+    if (area < minArea) {
+      console.log(`[validateAndFilterQuads] REJECT area too small: area=${area} minArea=${minArea}`);
+      continue;
+    }
+    if (area > maxArea) {
+      console.log(`[validateAndFilterQuads] REJECT area too large: area=${area} maxArea=${maxArea}`);
+      continue;
+    }
 
     const aspectRatio = w / h;
-    if (aspectRatio < 0.6 || aspectRatio > 1.7) { okFailed++; continue; }
-    okAreaAR++;
+    if (aspectRatio < 0.6 || aspectRatio > 1.7) {
+      console.log(`[validateAndFilterQuads] REJECT bad AR: AR=${aspectRatio.toFixed(2)}`);
+      continue;
+    }
 
     const perimeter = 2 * (w + h);
     const edgeDensity = region.count / perimeter;
-    if (edgeDensity < 0.5 || edgeDensity > 5) { okFailed++; continue; }
-    okEdgeDensity++;
-
-    // Extract edge pixels from bbox and detect corners via tangent turns
-    const edgePixels = extractEdgePixelsFromBbox(
-      sobelData,
-      width,
-      region.minX,
-      region.minY,
-      region.maxX,
-      region.maxY,
-    );
-
-    const cornerPoints = findCornersFromEdges(edgePixels);
-    if (cornerPoints.length < 4) {
-      // Fallback to bounding box corners
-      const corners = fitQuadToRegion(region);
-      if (!corners) { okFailed++; continue; }
-
-      const tagGrid = buildTagGrid([
-        { x: corners[0][0], y: corners[0][1] },
-        { x: corners[1][0], y: corners[1][1] },
-        { x: corners[2][0], y: corners[2][1] },
-        { x: corners[3][0], y: corners[3][1] },
-      ] as [Point, Point, Point, Point]);
-
-      quads.push({
-        corners: corners.map(c => ({ x: c[0], y: c[1] })),
-        label: region.label,
-        count: region.count,
-        aspectRatio,
-        gridCells: tagGrid,
-        pattern: null,
-        hasCorners: false, // fallback - bbox only
-      });
-      okBbox++;
-      continue;
-    }
-    okCorners++;
-
-    // Use corner points directly (no need to convert indices)
-    const corners = cornerPoints;
-
-    // Check if corners are suspiciously far from the region's extent bounds.
-    // If corner detection picked noise points, the quad will be far from the bbox.
-    // Fall back to bbox corners in that case.
-    const bboxMinX = region.minX, bboxMinY = region.minY;
-    const bboxMaxX = region.maxX, bboxMaxY = region.maxY;
-    const cx = corners.reduce((s, c) => s + c.x, 0) / 4;
-    const cy = corners.reduce((s, c) => s + c.y, 0) / 4;
-    const bboxCx = (bboxMinX + bboxMaxX) / 2;
-    const bboxCy = (bboxMinY + bboxMaxY) / 2;
-    const dist = Math.hypot(cx - bboxCx, cy - bboxCy);
-    const bboxHalfW = (bboxMaxX - bboxMinX) / 2;
-    const bboxHalfH = (bboxMaxY - bboxMinY) / 2;
-    const bboxRadius = Math.hypot(bboxHalfW, bboxHalfH);
-    if (dist > bboxRadius * 0.5) {
-      console.log(`[validateQuads] corners centroid (${cx.toFixed(0)},${cy.toFixed(0)}) too far from bbox centroid (${bboxCx.toFixed(0)},${bboxCy.toFixed(0)}) — using bbox fallback`);
-      const bboxCorners: [Point, Point, Point, Point] = [
-        { x: bboxMinX, y: bboxMinY },
-        { x: bboxMaxX, y: bboxMinY },
-        { x: bboxMaxX, y: bboxMaxY },
-        { x: bboxMinX, y: bboxMaxY },
-      ];
-      const tagGrid = buildTagGrid(bboxCorners);
-      quads.push({
-        corners: bboxCorners,
-        label: region.label,
-        count: region.count,
-        aspectRatio,
-        gridCells: tagGrid,
-        pattern: null,
-        hasCorners: false,
-      });
-      okBbox++;
+    if (edgeDensity < 0.5 || edgeDensity > 5) {
+      console.log(`[validateAndFilterQuads] REJECT edgeDensity: ${edgeDensity.toFixed(2)}`);
       continue;
     }
 
-    // Build perspective-correct grid and decode pattern
-    const grid = buildTagGrid(corners as [Point, Point, Point, Point]);
-    const pattern = decodeTagPattern(grid, sobelData, width);
+    console.log('[validateAndFilterQuads] PASS:', {
+      label: region.label,
+      area,
+      aspectRatio,
+      edgeDensity,
+    });
 
+    const bboxCorners: [Point, Point, Point, Point] = [
+      { x: region.minX, y: region.minY },
+      { x: region.maxX, y: region.minY },
+      { x: region.maxX, y: region.maxY },
+      { x: region.minX, y: region.maxY },
+    ];
+    const tagGrid = buildTagGrid(bboxCorners);
     quads.push({
-      corners,
+      corners: bboxCorners,
       label: region.label,
       count: region.count,
       aspectRatio,
-      gridCells: grid,
-      pattern,
-      hasCorners: true, // detected via corner finding
+      gridCells: tagGrid,
+      pattern: null,
+      hasCorners: false,
     });
   }
 
-  console.log(`[validateQuads] regions=${regions.length} okAreaAR=${okAreaAR} okEdgeDensity=${okEdgeDensity} okCorners=${okCorners} okBbox=${okBbox} failed=${okFailed}`);
-
   return quads;
+}
+
+export function filterNestedQuads(quads: DetectedQuad[]): DetectedQuad[] {
+  return quads.filter((candidate) => {
+    for (const other of quads) {
+      if (other === candidate) continue;
+      // Discard candidate if it is fully contained inside another box
+      if (
+        other.corners[0].x <= candidate.corners[0].x &&
+        other.corners[2].x >= candidate.corners[2].x &&
+        other.corners[0].y <= candidate.corners[0].y &&
+        other.corners[2].y >= candidate.corners[2].y
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
 }

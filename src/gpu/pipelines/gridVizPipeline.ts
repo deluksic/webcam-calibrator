@@ -1,20 +1,22 @@
-// Grid visualization pipeline: draw 6x6 grid lines over detected AprilTags
-import { tgpu, d, std } from 'typegpu';
-import { common } from 'typegpu';
-import { fract, abs, clamp, min } from 'typegpu/std';
+// Grid visualization pipeline: instanced quad rendering from quadCornersBuffer
+import { tgpu, d } from 'typegpu';
+import { abs, floor, fract, min, max, dpdx, dpdy } from 'typegpu/std';
 
 export const GRID_DIVISIONS = 6;
-export const GRID_LINE_WIDTH = 0.06; // fraction of cell size
-export const MAX_DETECTED_TAGS = 64;
+export const GRID_LINE_WIDTH = 0.06;
+export const MAX_INSTANCES = 64;
+
+// Storage buffer array type — must match what camera.ts binds
+export const gridCornersSchema = d.arrayOf(d.vec4f, MAX_INSTANCES);
 
 export function createGridVizLayouts(
   root: Awaited<ReturnType<typeof tgpu.init>>,
+  _quadCornersBuffer: unknown,
 ) {
   const gridVizLayout = tgpu.bindGroupLayout({
-    quadCorners: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    quadCorners: { storage: gridCornersSchema, access: 'readonly' },
   });
-
-  return { gridVizLayout };
+  return { gridVizLayout, gridCornersSchema };
 }
 
 export function createGridVizPipeline(
@@ -24,107 +26,86 @@ export function createGridVizPipeline(
   height: number,
   presentationFormat: GPUTextureFormat,
 ) {
+  const gridVizVert = tgpu.vertexFn({
+    in: {
+      vertexIndex: d.builtin.vertexIndex,
+      instanceIndex: d.builtin.instanceIndex,
+    },
+    out: {
+      outPos: d.builtin.position,
+      uv: d.vec2f,
+    },
+  })(({ vertexIndex, instanceIndex }) => {
+    'use gpu';
+    // Read this instance's bounding box from the bind group
+    const corners = gridVizLayout.$.quadCorners[instanceIndex];
+    const minX = corners.x;
+    const minY = corners.y;
+    const maxX = corners.z;
+    const maxY = corners.w;
+
+    // Triangle strip corners: TL (0), TR (1), BL (2), BR (3)
+    const localX = [minX, maxX, minX, maxX][vertexIndex];
+    const localY = [minY, minY, maxY, maxY][vertexIndex];
+
+    const ndcX = (localX / d.f32(width)) * d.f32(2) - d.f32(1);
+    const ndcY = d.f32(1) - (localY / d.f32(height)) * d.f32(2);
+
+    const uvX = (localX - minX) / (maxX - minX);
+    const uvY = (localY - minY) / (maxY - minY);
+
+    return {
+      outPos: d.vec4f(ndcX, ndcY, 0, 1),
+      uv: d.vec2f(uvX, uvY),
+    };
+  });
+
+  // Filtered grid - Shadertoy gridTextureGradBox, vectorized
+  const gridTextureGradBox = (p: d.v2f, ddx: d.v2f, ddy: d.v2f) => {
+    'use gpu';
+    const N = d.f32(GRID_DIVISIONS);
+    const half = d.f32(0.5);
+    const epsilon = d.f32(0.01);
+    const one2 = d.vec2f(1.0);
+
+    // w = max(|ddx|, |ddy|) + epsilon
+    const w = max(abs(ddx), abs(ddy)).add(epsilon);
+
+    // a = p + w * 0.5, b = p - w * 0.5
+    const a = p.add(w.mul(half));
+    const b = p.sub(w.mul(half));
+
+    // i = (floor(a) + min(fract(a)*N, 1) - floor(b) - min(fract(b)*N, 1)) / (N*w)
+    const i = floor(a).add(min(fract(a).mul(N), one2)).sub(floor(b)).sub(min(fract(b).mul(N), one2)).div(w.mul(N));
+
+    // Extract scalars: (1-i.x) * (1-i.y)
+    return (one2.x - i.x) * (one2.x - i.y);
+  };
+
   const gridVizFrag = tgpu.fragmentFn({
-    in: { uv: d.location(0, d.vec2f) },
+    in: { uv: d.vec2f },
     out: d.vec4f,
   })((i) => {
     'use gpu';
-    const wi = d.i32(width);
-    const hi = d.i32(height);
-    const maxPx = d.f32(wi - d.i32(1));
-    const maxPy = d.f32(hi - d.i32(1));
+    'use derivatives';
+    const ddx = d.vec2f(dpdx(i.uv.x), dpdx(i.uv.y));
+    const ddy = d.vec2f(dpdy(i.uv.x), dpdy(i.uv.y));
+    const mask = gridTextureGradBox(i.uv, ddx, ddy);
 
-    // Pixel coordinates (as float for computation)
-    const px = clamp(i.uv.x * d.f32(wi), d.f32(0), maxPx);
-    const py = clamp(i.uv.y * d.f32(hi), d.f32(0), maxPy);
-
-    // Compute grid distance across all quads
-    // Use min() to combine results (lower = closer to grid line = draw it)
-    // Start with "infinity" (very large = no grid line)
-    const sentinel = d.f32(0xFFFFFFFF);
-    let minGridDist = d.f32(1000); // large sentinel
-
-    // Iterate through quads
-    for (const qi of std.range(MAX_DETECTED_TAGS)) {
-      const base = d.i32(qi) * d.i32(8);
-
-      const tlX = gridVizLayout.$.quadCorners[base + 0];
-      const tlY = gridVizLayout.$.quadCorners[base + 1];
-      const trX = gridVizLayout.$.quadCorners[base + 2];
-      const trY = gridVizLayout.$.quadCorners[base + 3];
-      const brX = gridVizLayout.$.quadCorners[base + 4];
-      const brY = gridVizLayout.$.quadCorners[base + 5];
-      const blX = gridVizLayout.$.quadCorners[base + 6];
-      const blY = gridVizLayout.$.quadCorners[base + 7];
-
-      // Skip if corners not set (check if TL is sentinel)
-      if (abs(tlX - sentinel) < d.f32(0.5)) { continue; }
-      if (abs(tlY - sentinel) < d.f32(0.5)) { continue; }
-
-      // Edge vectors
-      const e0x = trX - tlX; // top edge
-      const e0y = trY - tlY;
-      const e1x = blX - tlX; // left edge
-      const e1y = blY - tlY;
-
-      // Compute u,v using cross products (barycentric-like for quads)
-      const denom = e0x * e1y - e1x * e0y;
-      const u = ((px - tlX) * e1y - (py - tlY) * e1x) / denom;
-      const v = ((px - tlX) * e0y - (py - tlY) * e0x) / denom;
-
-      // Check if inside quad (with epsilon for edge cases)
-      const eps = d.f32(0.001);
-      const inside = (u >= -eps) && (u <= 1.0 + eps) && (v >= -eps) && (v <= 1.0 + eps);
-
-      if (inside) {
-        // Map position to 6x6 grid
-        const gridX = u * d.f32(GRID_DIVISIONS);
-        const gridY = v * d.f32(GRID_DIVISIONS);
-
-        // Distance to nearest grid line (using fract)
-        // For grid lines at integer positions: fract(x) near 0 or near 1
-        const fx = fract(gridX);
-        const distX = min(fx, d.f32(1) - fx);
-        const fy = fract(gridY);
-        const distY = min(fy, d.f32(1) - fy);
-
-        // Combine: pixel is on grid if close to ANY line
-        const gridDist = min(distX, distY);
-
-        // Keep minimum grid distance across all quads
-        minGridDist = min(minGridDist, gridDist);
-      }
-    }
-
-    // Draw grid line if we're close enough to a grid line
-    const halfWidth = d.f32(GRID_LINE_WIDTH / 2);
-    const isGridLine = minGridDist < halfWidth;
-
-    if (isGridLine) {
-      return d.vec4f(d.f32(0), d.f32(1), d.f32(1), d.f32(1)); // cyan
-    }
-
-    // Not in any quad - return transparent
-    return d.vec4f(d.f32(0), d.f32(0), d.f32(0), d.f32(0));
+    if (mask > d.f32(0.5)) return d.vec4f(0, 1, 1, 1); // opaque cyan
+    return d.vec4f(0, 0, 0, 0); // transparent
   });
 
   return root.createRenderPipeline({
-    vertex: common.fullScreenTriangle,
+    vertex: gridVizVert,
     fragment: gridVizFrag,
     targets: {
       format: presentationFormat,
       blend: {
-        color: {
-          operation: 'add',
-          srcFactor: 'src-alpha',
-          dstFactor: 'one-minus-src-alpha',
-        },
-        alpha: {
-          operation: 'add',
-          srcFactor: 'src-alpha',
-          dstFactor: 'one-minus-src-alpha',
-        },
+        color: { operation: 'add', srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
+        alpha: { operation: 'add', srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
       },
     },
+    primitive: { topology: 'triangle-strip' },
   });
 }

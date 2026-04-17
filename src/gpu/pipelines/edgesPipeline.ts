@@ -1,6 +1,6 @@
 // Edge render pipeline: filteredBuffer + sobelBuffer → edges canvas
 // Colorizes edges by gradient direction using continuous HSV coloring.
-import { tgpu, d } from 'typegpu';
+import { tgpu, d, std } from 'typegpu';
 import { common } from 'typegpu';
 import { atan2, clamp, floor, length, max } from 'typegpu/std';
 
@@ -24,15 +24,17 @@ export function createEdgesPipeline(
     const py = d.u32(floor(clamp(i.uv.y * d.f32(hi), d.f32(0), maxPy)));
     const idx = py * d.u32(wi) + px;
 
-    const mag = edgesLayout.$.filteredBuffer[idx];
+    const magVec = edgesLayout.$.filteredBuffer[idx];
+    const mag = length(magVec);
     if (mag <= d.f32(0)) {
       return d.vec4f(d.f32(0.08), d.f32(0.08), d.f32(0.12), d.f32(1));
     }
 
     const g = edgesLayout.$.sobelBuffer[idx];
     const gm = length(g);
-    const gxn = g.x / gm;
-    const gyn = g.y / gm;
+    const eps = d.f32(1e-6);
+    const gxn = std.select(g.x / gm, d.f32(0), gm <= eps);
+    const gyn = std.select(g.y / gm, d.f32(0), gm <= eps);
 
     let angle = atan2(gyn, gxn) / d.f32(6.28318530718) + d.f32(0.5);
     if (angle < d.f32(0)) { angle = angle + d.f32(1); }
