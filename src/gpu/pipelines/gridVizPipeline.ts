@@ -1,8 +1,8 @@
 // Grid visualization pipeline: instanced quad rendering from quadCornersBuffer
-import { tgpu, d } from 'typegpu';
+import { tgpu, d, std } from 'typegpu';
 import { abs, floor, fract, min, max, dpdx, dpdy } from 'typegpu/std';
 
-export const GRID_DIVISIONS = 6;
+export const GRID_DIVISIONS = 8;
 export const GRID_LINE_WIDTH = 0.06;
 export const MAX_INSTANCES = 64;
 
@@ -64,9 +64,10 @@ export function createGridVizPipeline(
   const gridTexture = (p: d.v2f) => {
     'use gpu';
     const N = d.f32(GRID_DIVISIONS);
-    const f = fract(p);
-    const t = d.vec2f(1.0).div(N);
-    const i = floor(f.div(t));
+    const lw = d.f32(GRID_LINE_WIDTH);
+    const f = fract(p.mul(N).add(lw * 0.5));
+    const t = d.vec2f(1.0).mul(lw);
+    const i = std.select(d.vec2f(0), d.vec2f(1), std.lt(f, t));
     return (1 - i.x) * (1 - i.y);
   };
 
@@ -76,13 +77,18 @@ export function createGridVizPipeline(
     const N = d.f32(GRID_DIVISIONS);
     const half = d.f32(0.5);
     const epsilon = d.f32(0.01);
+    const lw = d.f32(GRID_LINE_WIDTH);
+
+    const scaledP = p.mul(N).add(lw * 0.5);
+    const scaledDdx = ddx.mul(N);
+    const scaledDdy = ddy.mul(N);
 
     // w = max(|ddx|, |ddy|) + epsilon
-    const w = max(abs(ddx), abs(ddy)).add(epsilon);
+    const w = max(abs(scaledDdx), abs(scaledDdy)).add(epsilon);
 
     // a = p + w * 0.5, b = p - w * 0.5
-    const a = p.add(w.mul(half));
-    const b = p.sub(w.mul(half));
+    const a = scaledP.add(w.mul(half));
+    const b = scaledP.sub(w.mul(half));
 
     // i = (floor(a) + min(fract(a)*N, 1) - floor(b) - min(fract(b)*N, 1)) / (N*w)
     const i = floor(a).add(min(fract(a).mul(N), d.vec2f(1))).sub(floor(b)).sub(min(fract(b).mul(N), d.vec2f(1))).div(w.mul(N));
@@ -96,9 +102,12 @@ export function createGridVizPipeline(
     out: d.vec4f,
   })((i) => {
     'use gpu';
-    const mask = gridTexture(i.uv);
+    'use derivatives';
+    const ddx = dpdx(i.uv);
+    const ddy = dpdy(i.uv);
+    const mask = gridTextureGradBox(i.uv, ddx, ddy);
 
-    return d.vec4f(0, 1, mask, 1);
+    return d.vec4f(0, 1, 1, 1 - mask);
   });
 
   return root.createRenderPipeline({
