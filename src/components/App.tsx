@@ -3,6 +3,7 @@ import CalibrationView from './CalibrationView';
 import TargetView from './TargetView';
 import ResultsView from './ResultsView';
 import styles from './App.module.css';
+import { VERSION } from '../main';
 
 export type View = 'target' | 'calibrate' | 'results';
 
@@ -30,7 +31,7 @@ export default function App() {
         >
           Results
         </button>
-        <span class={styles.version}>v53</span>
+        <span class={styles.version}>{VERSION}</span>
       </nav>
 
       <main class={styles.main}>
