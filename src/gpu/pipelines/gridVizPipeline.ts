@@ -42,29 +42,18 @@ export function createGridVizPipeline(
   })(({ vertexIndex, instanceIndex }) => {
     'use gpu';
     // Buffer layout per instance (3 vec4f = 12 f32):
-    // entry[0] = {x0, y0, x1, y1} — TL and TR
-    // entry[1] = {x2, y2, x3, y3} — BL and BR
-    // entry[2] = {w0, w1, w2, w3} — weights for each corner
+    // entry[0] = {x0, y0, x1, y1}
+    // entry[1] = {x2, y2, x3, y3}
+    // entry[2] = {w0, w1, w2, w3}
     const entry0 = gridVizLayout.$.quadCorners[instanceIndex];
     const entry1 = gridVizLayout.$.quadCorners[instanceIndex + d.u32(1)];
     const entry2 = gridVizLayout.$.quadCorners[instanceIndex + d.u32(2)];
 
     // Triangle strip: TL(0), TR(1), BL(2), BR(3)
-    const isRight = std.select(false, true, vertexIndex === d.u32(1));
-    const isBottom = std.select(false, true, vertexIndex >= d.u32(2));
-
-    // Select corner position (vec2) based on vertex position
-    // Triangle strip: TL(0), TR(1), BL(2), BR(3)
-    // entry0.xy = TL, entry0.zw = TR, entry1.xy = BL, entry1.zw = BR
-    // isBottom selects row (entry0 for top, entry1 for bottom)
-    // isRight selects column (xy for left, zw for right)
-    const rowEntry = std.select(entry1, entry0, isBottom);
-    const corner = std.select(rowEntry.xy, rowEntry.zw, isRight);
-    const w = std.select(
-      std.select(entry2.x, entry2.z, isBottom),
-      std.select(entry2.y, entry2.w, isBottom),
-      isRight
-    );
+    const corners = [entry0.xy, entry0.zw, entry1.xy, entry1.zw];
+    const weights = [entry2.x, entry2.y, entry2.z, entry2.w];
+    const corner = corners[vertexIndex];
+    const w = weights[vertexIndex];
 
     // Hardcode w=1 for now to test corner positions
     const testW = d.f32(1.0);
@@ -77,7 +66,7 @@ export function createGridVizPipeline(
 
     return {
       outPos: d.vec4f(ndcX, ndcY, 0, d.f32(1)),
-      uv: d.vec2f(d.f32(isRight), d.f32(isBottom)),
+      uv: d.vec2f(d.f32(vertexIndex === d.u32(1)), d.f32(vertexIndex >= d.u32(2))),
     };
   });
 
