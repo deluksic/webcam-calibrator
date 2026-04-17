@@ -132,13 +132,14 @@ export function validateAndFilterQuads(
     }
 
     const aspectRatio = w / h;
-    if (aspectRatio < 0.6 || aspectRatio > 1.7) {
+    if (aspectRatio < 0.3 || aspectRatio > 3.5) {
       continue;
     }
 
     const perimeter = 2 * (w + h);
+    // Oblique/far tags have fewer edge pixels — relax density threshold
     const edgeDensity = region.count / perimeter;
-    if (edgeDensity < 0.5 || edgeDensity > 5) {
+    if (edgeDensity < 0.2 || edgeDensity > 10) {
       continue;
     }
 

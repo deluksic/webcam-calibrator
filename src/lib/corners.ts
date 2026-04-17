@@ -100,7 +100,7 @@ function kMeansTangent(
     let assignments = new Int32Array(n);
     let converged = false;
 
-    for (let iter = 0; iter < 20 && !converged; iter++) {
+    for (let iter = 0; iter < 30 && !converged; iter++) {
       converged = true;
 
       // Assign each pixel to nearest centroid
@@ -175,8 +175,8 @@ function fitLine(
   if (points.length < 3) return null;
 
   const n = points.length;
-  const ITER = 50;
-  const THRESH = 1.5;
+  const ITER = 80;  // More iterations for sparse edge regions
+  const THRESH = 3.0;  // Pixels — increased for noisy/fuzzy edges on oblique tags
 
   // Seeded LCG RNG (deterministic)
   let rng = (seed * 1664525 + 1013904223) >>> 0;
@@ -338,16 +338,18 @@ function plausibilityCheck(
   if (edges.some((e) => e < 2)) return false;
 
   // Opposite edges should have similar lengths (parallelogram check)
+  // Relaxed for oblique/foreshortened quads: allow up to 3x ratio
   const ratio01 = edges[0] / edges[2];
   const ratio23 = edges[1] / edges[3];
-  if (ratio01 < 0.5 || ratio01 > 2.0 || ratio23 < 0.5 || ratio23 > 2.0) return false;
+  if (ratio01 < 0.33 || ratio01 > 3.0 || ratio23 < 0.33 || ratio23 > 3.0) return false;
 
   // Each cluster should have a reasonable number of inliers
+  // Reduced from 5 to 3 for sparse edge regions (oblique tags)
   const clusterCounts = new Array(4).fill(0);
   for (let i = 0; i < assignments.length; i++) {
     clusterCounts[assignments[i]]++;
   }
-  if (clusterCounts.some((c) => c < 5)) return false;
+  if (clusterCounts.some((c) => c < 3)) return false;
 
   return true;
 }
@@ -376,8 +378,8 @@ export function findCornersFromEdges(
   minY: number,
   maxX: number,
   maxY: number,
-  minR2: number = 0.80,
-  minEdgePixels: number = 20,
+  minR2: number = 0.70,
+  minEdgePixels: number = 12,
   seed: number = 42,
 ): Point[] {
   // Step 1: Extract label-filtered edge pixels

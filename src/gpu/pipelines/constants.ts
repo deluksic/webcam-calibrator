@@ -21,10 +21,11 @@ export const POINTER_JUMP_ITERATIONS = 10;
  * Neighbors with dot(g_i, g_j) / (|g_i||g_j|) < this value are NOT connected.
  * -1 = all neighbors connect (old behavior)
  *  0 = perpendicular is OK, opposite is blocked
- *  cos(140°) ≈ -0.766 — blocks gradients > 140° apart
- *  cos(160°) ≈ -0.94  — aggressive, only near-parallel connects
+ *  cos(143°) ≈ -0.8  — only near-parallel connects (was the default)
+ *  cos(120°) ≈ -0.5  — allows edges up to 60° apart (good for oblique tags)
+ *  cos(100°) ≈ -0.17 — allows edges up to 80° apart (very permissive)
  */
-export const GRADIENT_COS_THRESHOLD = -0.8;
+export const GRADIENT_COS_THRESHOLD = -0.5;
 
 /**
  * Edge tangent-only dilation: closes small gaps along the edge.

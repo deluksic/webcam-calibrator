@@ -53,8 +53,8 @@ function QuadCandidateOverlay(props: {
   const candidates = createMemo(() => {
     const MIN_AREA = 400;
     const MAX_AREA = 200000;
-    const MIN_AR = 0.6;
-    const MAX_AR = 1.7;
+    const MIN_AR = 0.3;
+    const MAX_AR = 3.5;
     let okAreaAR = 0, okContained = 0, dropped = 0;
     const passing = props.bboxes.filter((b) => {
       const w = b.maxX - b.minX;
