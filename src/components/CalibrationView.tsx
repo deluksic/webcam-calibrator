@@ -341,7 +341,7 @@ function CalibrationView() {
           quadDetectionPending = false;
           const { quads } = result;
           const validQuads = quads.filter((q) => q != null && typeof q.count === 'number');
-          console.log('[quadDetection] valid:', validQuads.length);
+          console.log('[quadDetection] validQuads:', validQuads);
           validQuads.sort((a, b) => b.count - a.count);
           const top = validQuads.slice(0, MAX_DETECTED_TAGS);
           console.log('[quadDetection] writing', top.length, 'quads to buffer');
