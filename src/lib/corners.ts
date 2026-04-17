@@ -179,26 +179,17 @@ export function clusterCorners(
 }
 
 /**
- * Order 4 corners clockwise from top-left.
+ * Order 4 corners as [TL, TR, BR, BL].
+ * Sort by y to get top/bottom rows, then by x within each row for left/right.
  */
 export function orderCornersClockwise(corners: Point[]): Point[] {
   if (corners.length !== 4) return corners;
 
-  // Find centroid
-  let cx = 0, cy = 0;
-  for (const p of corners) {
-    cx += p.x;
-    cy += p.y;
-  }
-  cx /= 4;
-  cy /= 4;
+  const sorted = [...corners].sort((a, b) => a.y - b.y);
+  const top = sorted.slice(0, 2).sort((a, b) => a.x - b.x); // TL, TR
+  const bottom = sorted.slice(2, 4).sort((a, b) => a.x - b.x); // BL, BR
 
-  // Sort by angle from centroid
-  return [...corners].sort((a, b) => {
-    const angleA = Math.atan2(a.y - cy, a.x - cx);
-    const angleB = Math.atan2(b.y - cy, b.x - cx);
-    return angleA - angleB;
-  });
+  return [top[0], top[1], bottom[1], bottom[0]];
 }
 
 /**
