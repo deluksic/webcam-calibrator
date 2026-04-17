@@ -140,12 +140,6 @@ export function validateAndFilterQuads(
       continue;
     }
 
-    console.log('[validateAndFilterQuads] PASS:', {
-      label: region.label,
-      area,
-      aspectRatio,
-      edgeDensity,
-    });
 
     // Try to detect real corners from edge pixels in the region
     const edgePixels = extractEdgePixelsFromBbox(

@@ -105,7 +105,6 @@ function CalibrationView() {
   cameraVideo.playsInline = true;
 
   onCleanup(() => {
-    console.log('[CalibrationView] onCleanup fired - pausing cameraVideo');
     cameraVideo.pause();
     cameraVideo.srcObject = null;
   });
@@ -184,8 +183,7 @@ function CalibrationView() {
     let active: MediaStream | undefined = undefined;
     let disposed = false;
     onCleanup(() => {
-      console.log('[mediaStream] onCleanup fired');
-      disposed = true;
+        disposed = true;
       active?.getTracks().forEach((t) => t.stop());
       active = undefined;
     });
@@ -267,7 +265,6 @@ function CalibrationView() {
       let disposed = false;
 
       onCleanup(() => {
-        console.log('[cameraPipeline] onCleanup fired');
         disposed = true;
         if (primeHandle) video.cancelVideoFrameCallback(primeHandle);
         if (rafHandle) video.cancelVideoFrameCallback(rafHandle);
@@ -327,7 +324,6 @@ function CalibrationView() {
         }).catch((e) => {
           if (disposed) return;
           extentReadPending = false;
-          console.log(`[extentRead] error: ${e}`);
         });
       };
 
@@ -341,17 +337,13 @@ function CalibrationView() {
           quadDetectionPending = false;
           const { quads } = result;
           const validQuads = quads.filter((q) => q != null && typeof q.count === 'number');
-          console.log('[quadDetection] validQuads:', validQuads);
           validQuads.sort((a, b) => b.count - a.count);
           const top = validQuads.slice(0, MAX_DETECTED_TAGS);
-          console.log('[quadDetection] writing', top.length, 'quads to buffer');
           updateQuadCornersBuffer(pip, top);
         }).catch((e) => {
           if (disposed) return;
           quadDetectionPending = false;
-          const msg = `detectContours error: ${e}\n${e instanceof Error ? e.stack : ''}`;
-          console.error(msg);
-          log(msg);
+          log(`detectContours error: ${e}`);
         });
       };
 
