@@ -3,7 +3,7 @@ import CalibrationView from './CalibrationView';
 import TargetView from './TargetView';
 import ResultsView from './ResultsView';
 import styles from './App.module.css';
-import { VERSION } from '../main';
+import { VERSION } from '../version';
 
 export type View = 'target' | 'calibrate' | 'results';
 
