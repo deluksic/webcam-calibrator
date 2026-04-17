@@ -340,8 +340,14 @@ function CalibrationView() {
           if (disposed) return;
           quadDetectionPending = false;
           const { quads } = result;
-          quads.sort((a, b) => b.count - a.count);
-          const top = quads.slice(0, MAX_DETECTED_TAGS);
+          console.log('[quadDetection] quads length:', quads?.length);
+          for (let i = 0; i < quads.length; i++) {
+            if (!quads[i]) console.log('[quadDetection] null at index', i);
+          }
+          const validQuads = quads.filter((q) => q != null && typeof q.count === 'number');
+          console.log('[quadDetection] valid quads:', validQuads.length);
+          validQuads.sort((a, b) => b.count - a.count);
+          const top = validQuads.slice(0, MAX_DETECTED_TAGS);
           console.log('[quadDetection] writing', top.length, 'quads to buffer');
           updateQuadCornersBuffer(pip, top);
         }).catch((e) => {

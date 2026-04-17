@@ -165,10 +165,10 @@ export function validateAndFilterQuads(
     });
 
     const bboxCorners: [Point, Point, Point, Point] = [
-      { x: region.minX, y: region.minY },
-      { x: region.maxX, y: region.minY },
-      { x: region.maxX, y: region.maxY },
-      { x: region.minX, y: region.maxY },
+      { x: region.minX, y: region.minY }, // TL
+      { x: region.maxX, y: region.minY }, // TR
+      { x: region.minX, y: region.maxY }, // BL
+      { x: region.maxX, y: region.maxY }, // BR
     ];
     const tagGrid = buildTagGrid(bboxCorners);
     quads.push({

@@ -306,7 +306,7 @@ export function createCameraPipeline(
   // ─── Grid visualization (AprilTag grid overlay) ─────────────────────────
   const quadCornersBuffer = root
     .createBuffer(gridCornersSchema)
-    .$usage('storage');
+    .$usage('storage', { unsupported: ['vertex'] });
 
   const { gridVizLayout } = createGridVizLayouts(root, quadCornersBuffer);
 
@@ -838,21 +838,33 @@ export async function detectContours(
   // Read from staging buffers — no TypeGPU wrapper, no per-element toString()
   await pipeline.compactLabelStaging.mapAsync(GPUMapMode.READ);
   const labelData = new Uint32Array(pipeline.compactLabelStaging.getMappedRange());
+  const labelDataCopy = new Uint32Array(labelData);
   pipeline.compactLabelStaging.unmap();
 
   await pipeline.filteredStaging.mapAsync(GPUMapMode.READ);
   const dilatedGradients = new Float32Array(pipeline.filteredStaging.getMappedRange());
+  const dilatedCopy = new Float32Array(dilatedGradients);
   pipeline.filteredStaging.unmap();
 
   // CPU-side: extract regions and fit quads
-  const regions = extractRegions(labelData, pipeline.width, pipeline.height, dilatedGradients);
+  const n = labelDataCopy.length;
+  console.log('[detectContours] labelData len:', n);
+  console.log('[detectContours] labelData first10:', Array.from(labelDataCopy.subarray(0, 10)));
+  console.log('[detectContours] labelData mid:', Array.from(labelDataCopy.subarray(100000, 100010)));
+  console.log('[detectContours] labelData last10:', Array.from(labelDataCopy.subarray(n - 10, n)));
+  const regions = extractRegions(labelDataCopy, pipeline.width, pipeline.height, dilatedCopy);
   const maxArea = pipeline.width * pipeline.height * 0.5;
-  const quads = validateAndFilterQuads(regions, dilatedGradients, pipeline.width, 400, maxArea);
+  console.log('[detectContours] regions:', regions.length);
+  const quads = validateAndFilterQuads(regions, dilatedCopy, pipeline.width, 400, maxArea);
+  console.log('[detectContours] quads from validate, length:', quads?.length);
+  if (quads.length > 0) {
+    console.log('[detectContours] first quad count:', quads[0]?.count);
+  }
 
   // Read extent buffer
   const extentData: ExtentRow[] = await pipeline.extentBuffer.read();
 
-  return { quads, extentData, dilatedGradients, labelData };
+  return { quads, extentData, dilatedGradients: dilatedCopy, labelData: labelDataCopy };
 }
 
 // (empty space)
