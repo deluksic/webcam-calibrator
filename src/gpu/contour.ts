@@ -147,24 +147,37 @@ export function validateAndFilterQuads(
       edgeDensity,
     });
 
-    const bboxCorners: [Point, Point, Point, Point] = [
-      { x: region.minX, y: region.minY }, // TL
-      { x: region.maxX, y: region.minY }, // TR
-      { x: region.minX, y: region.maxY }, // BL
-      { x: region.maxX, y: region.maxY }, // BR
-    ];
-    const tagGrid = buildTagGrid(bboxCorners);
+    // Try to detect real corners from edge pixels in the region
+    const edgePixels = extractEdgePixelsFromBbox(
+      sobelData,
+      width,
+      region.minX,
+      region.minY,
+      region.maxX,
+      region.maxY,
+    );
+    const detectedCorners = findCornersFromEdges(edgePixels, 0.4, 6);
+    const corners: [Point, Point, Point, Point] =
+      detectedCorners.length === 4
+        ? [detectedCorners[0], detectedCorners[1], detectedCorners[2], detectedCorners[3]]
+        : [
+            { x: region.minX, y: region.minY },
+            { x: region.maxX, y: region.minY },
+            { x: region.minX, y: region.maxY },
+            { x: region.maxX, y: region.maxY },
+          ];
+    const tagGrid = buildTagGrid(corners);
     if (!tagGrid || !tagGrid.cells || tagGrid.cells.length === 0) {
       continue;
     }
     quads.push({
-      corners: bboxCorners,
+      corners,
       label: region.label,
       count: region.count,
       aspectRatio,
       gridCells: tagGrid,
       pattern: null,
-      hasCorners: false,
+      hasCorners: detectedCorners.length === 4,
     });
   }
 

@@ -2,7 +2,7 @@ import { render } from '@solidjs/web';
 import App from './components/App';
 import './styles/global.css';
 
-console.log('[build] v35 - explicit uvs array for grid triangle strip');
+console.log('[build] v36 - detect real corners via findCornersFromEdges');
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root element not found');
