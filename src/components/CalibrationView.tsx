@@ -334,26 +334,20 @@ function CalibrationView() {
       const scheduleQuadDetection = () => {
         if (quadDetectionPending || disposed) return;
         quadDetectionPending = true;
-        readExtentDataForQuads(pip).then((extentData) => {
+        const g = gpu();
+        if (!g) return;
+        detectContours(g, pip).then((result) => {
           if (disposed) return;
           quadDetectionPending = false;
-          // Apply same filters as debug view
-          const boxes: Bbox[] = [];
-          for (const entry of extentData) {
-            if (entry.minX === MAX_U32) continue;
-            const w = entry.maxX - entry.minX;
-            const h = entry.maxY - entry.minY;
-            if (w <= 0 || h <= 0) continue;
-            boxes.push({ minX: entry.minX, minY: entry.minY, maxX: entry.maxX, maxY: entry.maxY, area: w * h });
-          }
-          boxes.sort((a, b) => b.area - a.area);
-          const top = boxes.slice(0, MAX_DETECTED_TAGS);
+          const { quads } = result;
+          quads.sort((a, b) => b.count - a.count);
+          const top = quads.slice(0, MAX_DETECTED_TAGS);
           console.log('[quadDetection] writing', top.length, 'quads to buffer');
           updateQuadCornersBuffer(pip, top);
         }).catch((e) => {
           if (disposed) return;
           quadDetectionPending = false;
-          log(`readExtentDataForQuads error: ${e}`);
+          log(`detectContours error: ${e}`);
         });
       };
 

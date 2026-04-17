@@ -1,4 +1,3 @@
-// v2 - w=1 hardcoded for corner position test
 // Grid visualization pipeline: instanced quad rendering via projective weights
 import { tgpu, d, std } from 'typegpu';
 import { abs, floor, fract, min, max, dpdx, dpdy } from 'typegpu/std';
@@ -7,9 +6,15 @@ export const GRID_DIVISIONS = 8;
 export const GRID_LINE_WIDTH = 0.06;
 export const MAX_INSTANCES = 64;
 
-// Per-quad data: 4 corner positions (x,y) + 4 weights packed as 4 vec4f
-// vec4f(px0, py0, px1, py1) + vec4f(px2, py2, px3, py3) + vec4f(w0, w1, w2, w3) = 3 vec4f per quad
-export const gridCornersSchema = d.arrayOf(d.vec4f, MAX_INSTANCES * 3);
+// Each corner stores (x, y, w) — w is projective weight
+const CornerInfo = d.struct({
+  c0: d.vec3f, // TL: x, y, w
+  c1: d.vec3f, // TR: x, y, w
+  c2: d.vec3f, // BL: x, y, w
+  c3: d.vec3f, // BR: x, y, w
+});
+
+export const gridCornersSchema = d.arrayOf(CornerInfo, MAX_INSTANCES);
 
 export function createGridVizLayouts(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -41,28 +46,13 @@ export function createGridVizPipeline(
     },
   })(({ vertexIndex, instanceIndex }) => {
     'use gpu';
-    // Buffer layout per instance (3 vec4f = 12 f32):
-    // entry[0] = {x0, y0, x1, y1}
-    // entry[1] = {x2, y2, x3, y3}
-    // entry[2] = {w0, w1, w2, w3}
-    const entry0 = gridVizLayout.$.quadCorners[instanceIndex];
-    const entry1 = gridVizLayout.$.quadCorners[instanceIndex + d.u32(1)];
-    const entry2 = gridVizLayout.$.quadCorners[instanceIndex + d.u32(2)];
-
-    // Triangle strip: TL(0), TR(1), BL(2), BR(3)
-    const corners = [entry0.xy, entry0.zw, entry1.xy, entry1.zw];
-    const weights = [entry2.x, entry2.y, entry2.z, entry2.w];
+    const quad = gridVizLayout.$.quadCorners[instanceIndex];
+    const corners = [d.vec3f(quad.c0), d.vec3f(quad.c1), d.vec3f(quad.c2), d.vec3f(quad.c3)];
     const corner = corners[vertexIndex];
-    const w = weights[vertexIndex];
 
-    // Hardcode w=1 for now to test corner positions
-    const testW = d.f32(1.0);
-
-    // Apply w scaling to corner position, then convert to NDC
-    const scaledX = corner.x * testW;
-    const scaledY = corner.y * testW;
-    const ndcX = (scaledX * d.f32(2.0) / halfW) - d.f32(1.0);
-    const ndcY = d.f32(1.0) - (scaledY * d.f32(2.0) / halfH);
+    // Convert to NDC
+    const ndcX = corner.x / halfW - d.f32(1.0);
+    const ndcY = d.f32(1.0) - corner.y / halfH;
 
     return {
       outPos: d.vec4f(ndcX, ndcY, 0, d.f32(1)),
@@ -117,7 +107,7 @@ export function createGridVizPipeline(
     const ddy = dpdy(i.uv);
     const mask = gridTextureGradBox(i.uv, ddx, ddy);
 
-    return d.vec4f(1, 0, 0, 1 - mask);
+    return d.vec4f(0, 0, 1, 1 - mask);
   });
 
   return root.createRenderPipeline({

@@ -793,46 +793,29 @@ export interface QuadCornersData {
  */
 export function updateQuadCornersBuffer(
   pipeline: CameraPipeline,
-  bboxes: { minX: number; minY: number; maxX: number; maxY: number }[],
+  quads: DetectedQuad[],
 ): void {
-  const count = Math.min(bboxes.length, MAX_DETECTED_TAGS);
-  // 3 vec4f per quad = 12 f32 values
-  const buf = new ArrayBuffer(MAX_INSTANCES * 3 * 16);
+  const count = Math.min(quads.length, MAX_DETECTED_TAGS);
+  // CornerInfo: 4 vec3f with 16-byte alignment each = 64 bytes
+  const buf = new ArrayBuffer(MAX_INSTANCES * 64);
   const view = new Float32Array(buf);
   for (let i = 0; i < count; i++) {
-    const b = bboxes[i];
-    const corners: Point[] = [
-      { x: b.minX, y: b.minY }, // TL
-      { x: b.maxX, y: b.minY }, // TR
-      { x: b.minX, y: b.maxY }, // BL
-      { x: b.maxX, y: b.maxY }, // BR
-    ];
+    const quad = quads[i];
+    const corners = quad.corners;
     const [w0, w1, w2, w3] = computeProjectiveWeights(corners);
 
-    // Debug log first 3 quads with NDC coords
-    if (i < 3) {
-      const sw0 = Number(w0), sw1 = Number(w1), sw2 = Number(w2), sw3 = Number(w3);
-      const halfW = pipeline.width * 0.5, halfH = pipeline.height * 0.5;
-      const ndcTL = [(corners[0].x * 2 / halfW) - 1, 1 - (corners[0].y * 2 / halfH)];
-      const ndcTR = [(corners[1].x * 2 / halfW) - 1, 1 - (corners[1].y * 2 / halfH)];
-      const ndcBL = [(corners[2].x * 2 / halfW) - 1, 1 - (corners[2].y * 2 / halfH)];
-      const ndcBR = [(corners[3].x * 2 / halfW) - 1, 1 - (corners[3].y * 2 / halfH)];
-      console.log(`Quad ${i}: px=[(${corners[0].x.toFixed(0)},${corners[0].y.toFixed(0)}) (${corners[1].x.toFixed(0)},${corners[1].y.toFixed(0)}) (${corners[2].x.toFixed(0)},${corners[2].y.toFixed(0)}) (${corners[3].x.toFixed(0)},${corners[3].y.toFixed(0)})] ndc=[(${ndcTL[0].toFixed(2)},${ndcTL[1].toFixed(2)}) (${ndcTR[0].toFixed(2)},${ndcTR[1].toFixed(2)}) (${ndcBL[0].toFixed(2)},${ndcBL[1].toFixed(2)}) (${ndcBR[0].toFixed(2)},${ndcBR[1].toFixed(2)})]`);
-    }
+    // vec3f has 16-byte alignment: c0, pad, c1, pad, c2, pad, c3 = 16 floats per quad
+    const base = i * 16;
+    view[base + 0] = corners[0].x; view[base + 1] = corners[0].y; view[base + 2] = w0; view[base + 3] = 0;
+    view[base + 4] = corners[1].x; view[base + 5] = corners[1].y; view[base + 6] = w1; view[base + 7] = 0;
+    view[base + 8] = corners[2].x; view[base + 9] = corners[2].y; view[base + 10] = w2; view[base + 11] = 0;
+    view[base + 12] = corners[3].x; view[base + 13] = corners[3].y; view[base + 14] = w3; view[base + 15] = 0;
 
-    const base = i * 12;
-    view[base + 0] = corners[0].x;  // x0
-    view[base + 1] = corners[0].y;  // y0
-    view[base + 2] = corners[1].x;  // x1
-    view[base + 3] = corners[1].y;  // y1
-    view[base + 4] = corners[2].x;  // x2
-    view[base + 5] = corners[2].y;  // y2
-    view[base + 6] = corners[3].x;  // x3
-    view[base + 7] = corners[3].y;  // y3
-    view[base + 8] = w0;
-    view[base + 9] = w1;
-    view[base + 10] = w2;
-    view[base + 11] = w3;
+    // Debug log first 3 quads
+    if (i < 3) {
+      console.log(`Quad ${i}: ${pipeline.width}x${pipeline.height}`,
+        `px=[${corners.map(c => `(${c.x.toFixed(0)},${c.y.toFixed(0)})`).join(' ')}]`);
+    }
   }
   pipeline.quadCornersBuffer.write(buf);
 }
@@ -863,7 +846,8 @@ export async function detectContours(
 
   // CPU-side: extract regions and fit quads
   const regions = extractRegions(labelData, pipeline.width, pipeline.height, dilatedGradients);
-  const quads = validateAndFilterQuads(regions, dilatedGradients, pipeline.width);
+  const maxArea = pipeline.width * pipeline.height * 0.5;
+  const quads = validateAndFilterQuads(regions, dilatedGradients, pipeline.width, 400, maxArea);
 
   // Read extent buffer
   const extentData: ExtentRow[] = await pipeline.extentBuffer.read();
