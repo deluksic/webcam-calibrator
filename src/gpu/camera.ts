@@ -774,6 +774,7 @@ export async function readExtentDataForQuads(
 
 /** Write 8 homography parameters per quad to the GPU buffer.
  * H maps unit square → detected quad. Vertex shader applies: (x,y) = H*(u,v)/w.
+ * H2 = vec4(failureCode, edgePixelCount/100, minR2, intersectionCount)
  */
 export function updateQuadCornersBuffer(
   pipeline: CameraPipeline,
@@ -789,7 +790,7 @@ export function updateQuadCornersBuffer(
   for (let i = 0; i < count; i++) {
     const quad = filtered[i];
     const H = computeHomography(quad.corners);
-    // vec4f(h1,h2,h3,h4) + vec4f(h5,h6,h7,h8) + vec4f(hasCorners, 0, 0, 0)
+    // vec4f(h1,h2,h3,h4) + vec4f(h5,h6,h7,h8) + vec4f(failureCode, edgeCount/100, minR2, interCount)
     const base = i * 12;
     view[base + 0] = H[0];
     view[base + 1] = H[1];
@@ -799,7 +800,21 @@ export function updateQuadCornersBuffer(
     view[base + 5] = H[5];
     view[base + 6] = H[6];
     view[base + 7] = H[7];
-    view[base + 8] = quad.hasCorners ? 1.0 : 0.0;
+    // Debug info: failureCode (0 = success), edgeCount (normalized), minR2, intersectionCount
+    if (quad.hasCorners) {
+      // Success: no failure, H2 = vec4(0, 0, 0, 0)
+      view[base + 8] = 0;
+      view[base + 9] = 0;
+      view[base + 10] = 0;
+      view[base + 11] = 0;
+    } else {
+      // Fallback: encode failure code and debug values
+      const debug = quad.cornerDebug;
+      view[base + 8]  = debug ? debug.failureCode : 0;
+      view[base + 9]  = debug ? debug.edgePixelCount / 100 : 0;
+      view[base + 10] = debug ? debug.minR2 : 0;
+      view[base + 11] = debug ? debug.intersectionCount : 0;
+    }
   }
   pipeline.quadCornersBuffer.write(buf);
 }

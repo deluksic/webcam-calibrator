@@ -1,7 +1,7 @@
 // Contour detection: CPU region extraction + quad fitting (labels from GPU pointer-jump).
 
 import { buildTagGrid, decodeTagPattern } from '../lib/grid';
-import { findCornersFromEdges } from '../lib/corners';
+import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from '../lib/corners';
 import { Point } from '../lib/geometry';
 import type { TagPattern } from '../lib/tag36h11';
 
@@ -16,6 +16,7 @@ export interface DetectedQuad {
   gridCells: ReturnType<typeof buildTagGrid> | null;
   pattern: TagPattern | null;
   hasCorners: boolean; // true if detected via corner finding, false if fallback bbox
+  cornerDebug: CornerDebugInfo | null; // debug info from corner detection (null if fallback)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,7 +146,7 @@ export function validateAndFilterQuads(
 
 
     // Try to detect real corners via line intersection
-    const detectedCorners = findCornersFromEdges(
+    const cornerResult = findCornersFromEdgesWithDebug(
       sobelData,
       labelData,
       width,
@@ -155,6 +156,7 @@ export function validateAndFilterQuads(
       region.maxX,
       region.maxY,
     );
+    const detectedCorners = cornerResult.corners;
     const corners: [Point, Point, Point, Point] =
       detectedCorners.length === 4
         ? [detectedCorners[0], detectedCorners[1], detectedCorners[2], detectedCorners[3]]
@@ -177,6 +179,7 @@ export function validateAndFilterQuads(
       gridCells: tagGrid,
       pattern: null,
       hasCorners: detectedCorners.length === 4,
+      cornerDebug: detectedCorners.length === 4 ? cornerResult.debug : null,
     });
   }
 

@@ -4,6 +4,21 @@
 import { Point } from './geometry';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Debug info returned alongside corners (for GPU overlay visualization)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CornerDebugInfo {
+  /** Failure code: 0 = success, or bitmask of failure reasons */
+  failureCode: number;
+  /** Number of edge pixels extracted */
+  edgePixelCount: number;
+  /** Minimum R² among the 4 fitted lines */
+  minR2: number;
+  /** Number of valid line-line intersections found */
+  intersectionCount: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Step 1: Label-filtered edge pixel extraction
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -359,6 +374,23 @@ function plausibilityCheck(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Result of corner detection: corners + debug info for GPU overlay.
+ */
+export interface CornerResult {
+  /** 4 corners ordered [TL, TR, BL, BR], or empty if detection failed */
+  corners: Point[];
+  /** Debug info for shader visualization (always populated, even on failure) */
+  debug: CornerDebugInfo;
+}
+
+// Failure codes (bitmask — can combine multiple failures)
+const FAIL_INSUFFICIENT_EDGES = 1 << 0; // not enough edge pixels
+const FAIL_ASPECT_RATIO        = 1 << 1; // aspect ratio out of bounds
+const FAIL_LINE_FIT_FAILED     = 1 << 2; // null line from RANSAC
+const FAIL_PLAUSIBILITY        = 1 << 3; // convexity / edge ratio / R² check
+const FAIL_NO_INTERSECTIONS     = 1 << 4; // <4 valid line-line intersections
+
+/**
  * Find quad corners using:
  * 1. Label-filtered Sobel edge extraction
  * 2. K-means clustering of edge tangents into 4 groups
@@ -366,8 +398,8 @@ function plausibilityCheck(
  * 4. Intersection of adjacent lines → 4 corner points
  * 5. Plausibility checks (convexity, R² threshold, bounds, edge ratios)
  *
- * Returns 4 corners ordered [TL, TR, BL, BR] for triangle strip topology,
- * or empty array if detection fails.
+ * Returns corners ordered [TL, TR, BL, BR] for triangle strip topology,
+ * or empty array if detection fails. Use getDebugInfo() to get failure details.
  */
 export function findCornersFromEdges(
   sobelData: Float32Array,
@@ -382,12 +414,45 @@ export function findCornersFromEdges(
   minEdgePixels: number = 12,
   seed: number = 42,
 ): Point[] {
+  const result = findCornersFromEdgesWithDebug(
+    sobelData, labelData, width, regionLabel,
+    minX, minY, maxX, maxY, minR2, minEdgePixels, seed,
+  );
+  return result.corners;
+}
+
+/**
+ * Same as findCornersFromEdges but returns corners + debug info for GPU overlay.
+ */
+export function findCornersFromEdgesWithDebug(
+  sobelData: Float32Array,
+  labelData: Uint32Array,
+  width: number,
+  regionLabel: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  minR2: number = 0.70,
+  minEdgePixels: number = 12,
+  seed: number = 42,
+): CornerResult {
+  // Debug state accumulated as we go
+  let failureCode = 0;
+  let edgePixelCount = 0;
+  let minR2Seen = 1.0;
+  let intersectionCount = 0;
+
   // Step 1: Extract label-filtered edge pixels
   const pixels = extractLabeledEdgePixels(
     sobelData, labelData, width, regionLabel, minX, minY, maxX, maxY,
   );
+  edgePixelCount = pixels.length;
 
-  if (pixels.length < minEdgePixels) return [];
+  if (pixels.length < minEdgePixels) {
+    failureCode |= FAIL_INSUFFICIENT_EDGES;
+    return { corners: [], debug: { failureCode, edgePixelCount, minR2: 0, intersectionCount: 0 } };
+  }
 
   // Step 2: Cluster by tangent direction
   const assignments = kMeansTangent(pixels, 4, 3);
@@ -403,9 +468,15 @@ export function findCornersFromEdges(
         clusterTangents.push(pixels[i].tangent);
       }
     }
-    lines.push(fitLine(clusterPoints, clusterTangents, seed + c));
+    const line = fitLine(clusterPoints, clusterTangents, seed + c);
+    lines.push(line);
+    if (line) {
+      minR2Seen = Math.min(minR2Seen, line.r2);
+    }
+    if (!line) {
+      failureCode |= FAIL_LINE_FIT_FAILED;
+    }
   }
-
 
   // Step 4: Intersect lines.
   // Pair each line with those whose normal is ~90° away (perpendicular).
@@ -422,10 +493,14 @@ export function findCornersFromEdges(
       if (p.x < minX - margin || p.x > maxX + margin) continue;
       if (p.y < minY - margin || p.y > maxY + margin) continue;
       rawIntersections.push(p);
+      intersectionCount++;
     }
   }
 
-  if (rawIntersections.length < 4) return [];
+  if (rawIntersections.length < 4) {
+    failureCode |= FAIL_NO_INTERSECTIONS;
+    return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
+  }
 
   // Deduplicate: intersections that are very close together belong to the same corner.
   const corners: Point[] = [];
@@ -433,7 +508,10 @@ export function findCornersFromEdges(
     const tooClose = corners.some((c) => Math.hypot(p.x - c.x, p.y - c.y) < 5);
     if (!tooClose) corners.push(p);
   }
-  if (corners.length < 4) return [];
+  if (corners.length < 4) {
+    failureCode |= FAIL_NO_INTERSECTIONS;
+    return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
+  }
 
   // Step 5: Order corners as [TL, TR, BL, BR] using centroid-based row split.
   const cx = corners.reduce((s, p) => s + p.x, 0) / corners.length;
@@ -453,8 +531,9 @@ export function findCornersFromEdges(
 
   // Step 6: Plausibility checks
   if (!plausibilityCheck([tl, tr, br, bl], lines.filter((l) => l !== null) as LineFit[], assignments, pixels, minX, minY, maxX, maxY, minR2)) {
-    return [];
+    failureCode |= FAIL_PLAUSIBILITY;
+    return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
   }
 
-  return [tl, tr, bl, br];
+  return { corners: [tl, tr, bl, br], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
 }

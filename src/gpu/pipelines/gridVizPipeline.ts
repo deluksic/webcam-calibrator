@@ -8,8 +8,14 @@ export const GRID_LINE_WIDTH = 0.06;
 export const MAX_INSTANCES = 64;
 
 // 12 f32 per quad packed into 3 vec4f:
-// vec4f(h1, h2, h3, h4) + vec4f(h5, h6, h7, h8) + vec4f(hasCorners, 0, 0, 0)
-// hasCorners: 1.0 = real corners (blue grid), 0.0 = fallback bbox (red outline, 0.5 opacity)
+// vec4f(h1, h2, h3, h4) + vec4f(h5, h6, h7, h8) + vec4f(failureMask, debug, debug, debug)
+// failureMask: 0.0 = success (hasCorners), > 0 = failure code (for fallback quads)
+//   bit 0: insufficient edge pixels
+//   bit 1: aspect ratio out of bounds
+//   bit 2: line fit failed (null)
+//   bit 3: plausibility check failed (convex/ratio/R²)
+//   bit 4: intersection out of bounds
+// debug floats: extra info (edgePixelCount, minR2, etc.) for shader visualization
 export const gridCornersSchema = d.arrayOf(d.vec4f, MAX_INSTANCES * 3);
 
 export function createGridVizLayouts(
@@ -40,7 +46,10 @@ export function createGridVizPipeline(
     out: {
       outPos: d.builtin.position,
       uv: d.vec2f,
-      hasCorners: d.f32,
+      failureCode: d.f32,
+      edgeCount: d.f32,
+      minR2: d.f32,
+      intersectionCount: d.f32,
     },
   })(({ vertexIndex, instanceIndex }) => {
     'use gpu';
@@ -56,7 +65,10 @@ export function createGridVizPipeline(
     const h6 = H1.y;
     const h7 = H1.z;
     const h8 = H1.w;
-    const hasCorners = H2.x;
+    const failureCode = H2.x;
+    const edgeCount = H2.y;
+    const minR2 = H2.z;
+    const intersectionCount = H2.w;
 
     // UV at each triangle-strip vertex: [TL, TR, BL, BR]
     const uv = [d.vec2f(0, 0), d.vec2f(1, 0), d.vec2f(0, 1), d.vec2f(1, 1)][vertexIndex];
@@ -77,7 +89,10 @@ export function createGridVizPipeline(
     return {
       outPos: d.vec4f(ndcX * w, ndcY * w, 0, w),
       uv,
-      hasCorners,
+      failureCode,
+      edgeCount,
+      minR2,
+      intersectionCount,
     };
   });
 
@@ -136,7 +151,7 @@ export function createGridVizPipeline(
   };
 
   const gridVizFrag = tgpu.fragmentFn({
-    in: { uv: d.vec2f, outPos: d.builtin.position, hasCorners: d.f32 },
+    in: { uv: d.vec2f, outPos: d.builtin.position, failureCode: d.f32, edgeCount: d.f32, minR2: d.f32, intersectionCount: d.f32 },
     out: d.vec4f,
   })((i) => {
     'use gpu';
@@ -145,19 +160,46 @@ export function createGridVizPipeline(
     const ddx = dpdx(uv);
     const ddy = dpdy(uv);
 
-    const isFallback = i.hasCorners < d.f32(0.5);
+    // failureCode == 0 means success (real corners)
+    // failureCode > 0 means corner detection failed — show color-coded overlay
+    const isSuccess = i.failureCode < d.f32(0.5);
+    const failureCode = i.failureCode;
 
-    // Grid pattern for real corners, edge-only for fallback
+    // Grid pattern for success, edge-only for fallback
     const grid = gridTextureGradBox(uv, ddx, ddy);
     const edge = edgeMask(uv, ddx, ddy);
-    const mask = select(grid, edge, isFallback);
+    const mask = select(grid, edge, isSuccess);
 
-    // Blue for real corners, red for fallback
-    const r = select(d.f32(0.0), d.f32(1.0), isFallback);
-    const b = select(d.f32(1.0), d.f32(0.0), isFallback);
-    const alpha = select(d.f32(1.0), d.f32(0.5), isFallback);
+    // Color per failure code:
+    //   1 = white (insufficient edge pixels)
+    //   2 = cyan  (aspect ratio)
+    //   4 = yellow (line fit failed)
+    //   8 = orange (plausibility check)
+    //  16 = magenta (no intersections)
+    //  combined = additive blend of colors
+    // success = blue
+    const fc = abs(failureCode - d.f32(1.0)) < d.f32(0.5); // 1: white
+    const ec = abs(failureCode - d.f32(2.0)) < d.f32(0.5); // 2: cyan
+    const lc = abs(failureCode - d.f32(4.0)) < d.f32(0.5); // 4: yellow
+    const pc = abs(failureCode - d.f32(8.0)) < d.f32(0.5); // 8: orange
+    const nc = abs(failureCode - d.f32(16.0)) < d.f32(0.5); // 16: magenta
 
-    return d.vec4f(r, 0, b, alpha * (d.f32(1.0) - mask));
+    const isKnownCode = fc || ec || lc || pc || nc;
+
+    // Build color — additive for multiple failures
+    let r = d.f32(fc ? 1.0 : 0.0) + d.f32(lc ? 1.0 : 0.0) + d.f32(nc ? 1.0 : 0.0);
+    let g = d.f32(ec ? 1.0 : 0.0) + d.f32(pc ? 1.0 : 0.0) + d.f32(lc ? 1.0 : 0.0);
+    let b = d.f32(fc ? 1.0 : 0.0) + d.f32(ec ? 1.0 : 0.0) + d.f32(pc ? 1.0 : 0.0);
+
+    // Unknown code — dim gray
+    const unknown = select(d.f32(0.0), d.f32(0.3), isKnownCode);
+
+    r = select(r, unknown, isKnownCode || isSuccess);
+    g = select(g, unknown, isKnownCode || isSuccess);
+    b = select(b, d.f32(1.0), isSuccess); // blue for success
+
+    const alpha = select(d.f32(1.0), d.f32(0.8), !isSuccess);
+    return d.vec4f(r, g, b, alpha * (d.f32(1.0) - mask));
   });
 
   return root.createRenderPipeline({
