@@ -55,7 +55,7 @@ export function computeDispatch2d(width: number, height: number): [number, numbe
 // Prefer `i32` for coordinates, bounds checks, and (extent - 1); cast to `u32` only for nonnegative buffer indices.
 
 /** Compute adaptive threshold from histogram */
-export const THRESHOLD_PERCENTILE = 0.90;
+export const THRESHOLD_PERCENTILE = 0.95;
 
 export function computeThreshold(histogramData: number[], percentile: number = THRESHOLD_PERCENTILE): number {
   const totalPixels = histogramData.reduce((a, b) => a + b, 0);
