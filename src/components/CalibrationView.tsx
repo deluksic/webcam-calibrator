@@ -137,11 +137,11 @@ function CalibrationView() {
   const [displayMode, setDisplayMode] = createSignal<DisplayMode>('debug');
   const [bboxes, setBboxes] = createSignal<Bbox[]>([]);
   const [logs, setLogs] = createSignal<string[]>([]);
-  const [quadCandidateCount, setQuadCandidateCount] = createSignal(0);
+  const [showGrid, setShowGrid] = createSignal(true);
+  const [showFallbacks, setShowFallbacks] = createSignal(false);
 
   const log = (msg: string) => {
     setLogs(prev => [...prev.slice(-8), `${new Date().toISOString().slice(11, 19)} ${msg}`]);
-    console.log(msg);
   };
 
   const availableCameraDevices = createMemo(async () => {
@@ -301,7 +301,6 @@ function CalibrationView() {
       if (disposed) return undefined;
       log('First frame presented');
 
-      let frameCount = 0;
       let extentReadPending = false;
       let quadDetectionPending = false;
 
@@ -327,7 +326,7 @@ function CalibrationView() {
         });
       };
 
-      const scheduleQuadDetection = () => {
+      const scheduleQuadDetection = (sf: boolean) => {
         if (quadDetectionPending || disposed) return;
         quadDetectionPending = true;
         const g = gpu();
@@ -339,7 +338,7 @@ function CalibrationView() {
           const validQuads = quads.filter((q) => q != null && typeof q.count === 'number');
           validQuads.sort((a, b) => b.count - a.count);
           const top = validQuads.slice(0, MAX_DETECTED_TAGS);
-          updateQuadCornersBuffer(pip, top);
+          updateQuadCornersBuffer(pip, top, sf);
         }).catch((e) => {
           if (disposed) return;
           quadDetectionPending = false;
@@ -351,13 +350,11 @@ function CalibrationView() {
         if (disposed) return;
         const gpuNow = gpu();
         if (!gpuNow) return;
-        frameCount++;
         const dm = displayMode();
-        processFrame(gpuNow, pip, cameraVideo, threshold(), dm, (err) => log(err));
+        processFrame(gpuNow, pip, cameraVideo, threshold(), dm, (_err) => {});
         if (dm === 'debug') scheduleExtentRead();
-        if (dm === 'grid' && frameCount % 30 === 0) {
-          log(`frame ${frameCount} grid: sched quad`);
-          scheduleQuadDetection();
+        if (dm === 'grid' && showGrid()) {
+          scheduleQuadDetection(showFallbacks());
         }
         void pip.histogramBuffer.read().then((bins: Uint32Array | number[]) => {
           if (disposed) return;
@@ -442,6 +439,14 @@ function CalibrationView() {
               >
                 Grid
               </button>
+              <label class={styles.checkboxLabel}>
+                <input
+                  type="checkbox"
+                  checked={showFallbacks()}
+                  onChange={(e) => setShowFallbacks(e.currentTarget.checked)}
+                />
+                Fallbk
+              </label>
               <button
                 type="button"
                 class={

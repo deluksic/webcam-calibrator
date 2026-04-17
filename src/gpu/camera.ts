@@ -39,7 +39,7 @@ import {
 } from './pipelines/extentTrackingPipeline';
 import { createCompactLabelLayouts, createCanonicalResetPipeline, createCanonicalClaimPipeline, createRemapLabelPipeline } from './pipelines/compactLabelPipeline';
 import { createGridVizPipeline, createGridVizLayouts, gridCornersSchema, MAX_INSTANCES } from './pipelines/gridVizPipeline';
-import { computeProjectiveWeights, type Point } from '../lib/geometry';
+import { computeHomography, type Point } from '../lib/geometry';
 import {
   type DetectedQuad,
   filterNestedQuads,
@@ -772,44 +772,34 @@ export async function readExtentDataForQuads(
 // Update quad corners buffer for grid visualization (instanced rendering)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Per-quad data for projective grid rendering.
- * 3 vec4f per quad: corners + weights.
- */
-export const QuadCornersEntry = d.struct({
-  x0: d.f32, y0: d.f32, x1: d.f32, y1: d.f32, // TL, TR
-  x2: d.f32, y2: d.f32, x3: d.f32, y3: d.f32, // BL, BR
-  w0: d.f32, w1: d.f32, w2: d.f32, w3: d.f32, // weights
-});
-
-/** Plain data object for writing to the buffer. */
-export interface QuadCornersData {
-  x0: number; y0: number; x1: number; y1: number;
-  x2: number; y2: number; x3: number; y3: number;
-  w0: number; w1: number; w2: number; w3: number;
-}
-
-/** Write quad corner data to the GPU buffer.
- * Accepts 4 corner points per quad and computes projective weights.
+/** Write 8 homography parameters per quad to the GPU buffer.
+ * H maps unit square → detected quad. Vertex shader applies: (x,y) = H*(u,v)/w.
  */
 export function updateQuadCornersBuffer(
   pipeline: CameraPipeline,
   quads: DetectedQuad[],
+  showFallbacks: boolean = true,
 ): void {
-  const count = Math.min(quads.length, MAX_DETECTED_TAGS);
-  // CornerInfo: 4 vec3f with 16-byte alignment each = 64 bytes
-  const buf = new ArrayBuffer(MAX_INSTANCES * 64);
+  // Filter to only quads the user wants to see
+  const filtered = showFallbacks ? quads : quads.filter(q => q.hasCorners);
+  const count = Math.min(filtered.length, MAX_DETECTED_TAGS);
+  // 3 vec4f per quad = 12 f32 = 48 bytes
+  const buf = new ArrayBuffer(MAX_INSTANCES * 48);
   const view = new Float32Array(buf);
   for (let i = 0; i < count; i++) {
-    const quad = quads[i];
-    const corners = quad.corners;
-    const [w0, w1, w2, w3] = computeProjectiveWeights(corners);
-
-    // CornerInfo: 4 vec4f = 16 floats per quad = 64 bytes, naturally aligned
-    const base = i * 16;
-    view[base + 0] = corners[0].x; view[base + 1] = corners[0].y; view[base + 2] = w0; view[base + 3] = 0;
-    view[base + 4] = corners[1].x; view[base + 5] = corners[1].y; view[base + 6] = w1; view[base + 7] = 0;
-    view[base + 8] = corners[2].x; view[base + 9] = corners[2].y; view[base + 10] = w2; view[base + 11] = 0;
-    view[base + 12] = corners[3].x; view[base + 13] = corners[3].y; view[base + 14] = w3; view[base + 15] = 0;
+    const quad = filtered[i];
+    const H = computeHomography(quad.corners);
+    // vec4f(h1,h2,h3,h4) + vec4f(h5,h6,h7,h8) + vec4f(hasCorners, 0, 0, 0)
+    const base = i * 12;
+    view[base + 0] = H[0];
+    view[base + 1] = H[1];
+    view[base + 2] = H[2];
+    view[base + 3] = H[3];
+    view[base + 4] = H[4];
+    view[base + 5] = H[5];
+    view[base + 6] = H[6];
+    view[base + 7] = H[7];
+    view[base + 8] = quad.hasCorners ? 1.0 : 0.0;
   }
   pipeline.quadCornersBuffer.write(buf);
 }
@@ -843,7 +833,9 @@ export async function detectContours(
   // CPU-side: extract regions and fit quads
   const regions = extractRegions(labelDataCopy, pipeline.width, pipeline.height, dilatedCopy);
   const maxArea = pipeline.width * pipeline.height * 0.5;
-  const quads = validateAndFilterQuads(regions, dilatedCopy, pipeline.width, 400, maxArea);
+  const quads = validateAndFilterQuads(regions, dilatedCopy, labelDataCopy, pipeline.width, 400, maxArea).filter(
+    (q) => q.area < pipeline.width * pipeline.height * 0.25,
+  );
 
   // Read extent buffer
   const extentData: ExtentRow[] = await pipeline.extentBuffer.read();

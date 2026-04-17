@@ -2,7 +2,7 @@ import { render } from '@solidjs/web';
 import App from './components/App';
 import './styles/global.css';
 
-console.log('[build] v37 - fix corner ordering, remove logs');
+console.log('[build] v51 - showFallbacks checkbox to toggle rejected quad outlines');
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root element not found');
