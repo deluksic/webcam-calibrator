@@ -55,31 +55,16 @@ function QuadCandidateOverlay(props: {
     const MAX_AREA = 200000;
     const MIN_AR = 0.3;
     const MAX_AR = 3.5;
-    let okAreaAR = 0, okContained = 0, dropped = 0;
-    const passing = props.bboxes.filter((b) => {
+    return props.bboxes.filter((b) => {
       const w = b.maxX - b.minX;
       const h = b.maxY - b.minY;
-      if (w <= 0 || h <= 0) { dropped++; return false; }
+      if (w <= 0 || h <= 0) return false;
       const area = w * h;
-      if (area < MIN_AREA || area > MAX_AREA) { dropped++; return false; }
+      if (area < MIN_AREA || area > MAX_AREA) return false;
       const ar = w / h;
-      if (ar < MIN_AR || ar > MAX_AR) { dropped++; return false; }
-      okAreaAR++;
+      if (ar < MIN_AR || ar > MAX_AR) return false;
       return true;
     });
-    const result = passing.filter((candidate) => {
-      for (const other of passing) {
-        if (other === candidate) continue;
-        // Discard candidate if it is fully contained inside another box
-        if (other.minX <= candidate.minX && other.maxX >= candidate.maxX &&
-            other.minY <= candidate.minY && other.maxY >= candidate.maxY) {
-          okContained++;
-          return false;
-        }
-      }
-      return true;
-    });
-    return result;
   });
 
   return (

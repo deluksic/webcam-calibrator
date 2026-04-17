@@ -2,7 +2,7 @@ import { render } from '@solidjs/web';
 import App from './components/App';
 import './styles/global.css';
 
-console.log('[build] v52 - relaxed detection for oblique/non-square AprilTags');
+console.log('[build] v53 - debug view shows all extent candidates, no containment filter');
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root element not found');
