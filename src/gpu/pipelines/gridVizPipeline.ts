@@ -60,13 +60,22 @@ export function createGridVizPipeline(
     };
   });
 
+  // Simple grid - no AA
+  const gridTexture = (p: d.v2f) => {
+    'use gpu';
+    const N = d.f32(GRID_DIVISIONS);
+    const f = fract(p);
+    const t = d.vec2f(1.0).div(N);
+    const i = floor(f.div(t));
+    return (1 - i.x) * (1 - i.y);
+  };
+
   // Filtered grid - Shadertoy gridTextureGradBox, vectorized
   const gridTextureGradBox = (p: d.v2f, ddx: d.v2f, ddy: d.v2f) => {
     'use gpu';
     const N = d.f32(GRID_DIVISIONS);
     const half = d.f32(0.5);
     const epsilon = d.f32(0.01);
-    const one2 = d.vec2f(1.0);
 
     // w = max(|ddx|, |ddy|) + epsilon
     const w = max(abs(ddx), abs(ddy)).add(epsilon);
@@ -76,10 +85,10 @@ export function createGridVizPipeline(
     const b = p.sub(w.mul(half));
 
     // i = (floor(a) + min(fract(a)*N, 1) - floor(b) - min(fract(b)*N, 1)) / (N*w)
-    const i = floor(a).add(min(fract(a).mul(N), one2)).sub(floor(b)).sub(min(fract(b).mul(N), one2)).div(w.mul(N));
+    const i = floor(a).add(min(fract(a).mul(N), d.vec2f(1))).sub(floor(b)).sub(min(fract(b).mul(N), d.vec2f(1))).div(w.mul(N));
 
     // Extract scalars: (1-i.x) * (1-i.y)
-    return (one2.x - i.x) * (one2.x - i.y);
+    return (1 - i.x) * (1 - i.y);
   };
 
   const gridVizFrag = tgpu.fragmentFn({
@@ -87,13 +96,9 @@ export function createGridVizPipeline(
     out: d.vec4f,
   })((i) => {
     'use gpu';
-    'use derivatives';
-    const ddx = d.vec2f(dpdx(i.uv.x), dpdx(i.uv.y));
-    const ddy = d.vec2f(dpdy(i.uv.x), dpdy(i.uv.y));
-    const mask = gridTextureGradBox(i.uv, ddx, ddy);
+    const mask = gridTexture(i.uv);
 
-    if (mask > d.f32(0.5)) return d.vec4f(0, 1, 1, 1); // opaque cyan
-    return d.vec4f(0, 0, 0, 0); // transparent
+    return d.vec4f(0, 1, mask, 1);
   });
 
   return root.createRenderPipeline({
