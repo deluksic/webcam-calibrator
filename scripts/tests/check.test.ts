@@ -6,6 +6,9 @@ import {
   findLastFoundSummaryLineIndex,
   parseFoundErrorCount,
   checkResultsNeedFailureExit,
+  resolveTscWatcherStatus,
+  resolveBuildWatcherStatus,
+  readWatcherLogIfRunning,
 } from '../check';
 
 describe('sanitizeLine', () => {
@@ -196,6 +199,44 @@ transforming...`;
     if (result.status === 'building') {
       expect(result.content).toContain('transforming');
     }
+  });
+});
+
+describe('readWatcherLogIfRunning', () => {
+  it('returns empty string when watcher is not running (no read)', async () => {
+    expect(await readWatcherLogIfRunning(false, '/this/path/does/not/exist', 'typecheck')).toBe(
+      '',
+    );
+  });
+
+  it('throws when watcher is running but log file is missing', async () => {
+    await expect(
+      readWatcherLogIfRunning(true, '/nonexistent-tsc-watch-log-xyz.log', 'typecheck'),
+    ).rejects.toThrow(/log file is missing/);
+  });
+});
+
+describe('resolveTscWatcherStatus / resolveBuildWatcherStatus', () => {
+  it('returns stopped when process is not running, without parsing pass from stale log', async () => {
+    const stalePassLog = `Starting compilation in watch mode...
+Found 0 errors. Watching for file changes.`;
+    expect(await resolveTscWatcherStatus(false, stalePassLog)).toEqual({ status: 'stopped' });
+
+    const staleBuildLog = `watching for file changes...
+build started...
+✓ 999 modules transformed.
+✓ built in 0.01s`;
+    expect(await resolveBuildWatcherStatus(false, staleBuildLog)).toEqual({ status: 'stopped' });
+  });
+
+  it('parses log when process is running', async () => {
+    const log = `Starting compilation in watch mode...
+Found 0 errors. Watching for file changes.`;
+    expect(await resolveTscWatcherStatus(true, log)).toEqual({ status: 'pass' });
+
+    const blog = `build started...
+✓ 1 modules transformed.`;
+    expect(await resolveBuildWatcherStatus(true, blog)).toEqual({ status: 'pass' });
   });
 });
 
