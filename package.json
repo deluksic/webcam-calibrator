@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "ship:watch": "vite build --watch",
-    "typecheck:watch": "tsc --noEmit --watch"
+    "ship:watch": "vite build --watch 2>&1 | tee /tmp/ship-watch.log",
+    "typecheck:watch": "tsc --noEmit --watch 2>&1 | tee /tmp/tsc-watch.log",
+    "check": "bash scripts/check.sh"
   },
   "dependencies": {
     "@solidjs/web": "2.0.0-beta.6",

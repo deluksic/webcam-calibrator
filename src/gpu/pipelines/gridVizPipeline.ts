@@ -1,7 +1,7 @@
 // Grid visualization pipeline: instanced quad rendering via homography warping
 // Sends hasCorners flag to fragment shader for color/style selection
 import { tgpu, d, std } from 'typegpu';
-import { abs, floor, fract, min, max, dpdx, dpdy, select } from 'typegpu/std';
+import { abs, floor, fract, min, max, dpdx, dpdy, select, smoothstep } from 'typegpu/std';
 
 export const GRID_DIVISIONS = 8;
 export const GRID_LINE_WIDTH = 0.06;
@@ -136,18 +136,6 @@ export function createGridVizPipeline(
     const t = minDist / (edgeWidth + pixelUV + d.f32(0.001));
     // 1 on edge, 0 in interior
     return d.f32(1.0) - smoothstep(d.f32(0.0), d.f32(1.0), t);
-  };
-
-  // Smoothstep
-  const smoothstep = (edge0: d.f32, edge1: d.f32, x: d.f32) => {
-    'use gpu';
-    const t = clamp((x - edge0) / (edge1 - edge0), d.f32(0.0), d.f32(1.0));
-    return t * t * (d.f32(3.0) - d.f32(2.0) * t);
-  };
-
-  const clamp = (x: d.f32, minVal: d.f32, maxVal: d.f32) => {
-    'use gpu';
-    return min(max(x, minVal), maxVal);
   };
 
   const gridVizFrag = tgpu.fragmentFn({

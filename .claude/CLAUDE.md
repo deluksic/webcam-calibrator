@@ -2,9 +2,15 @@
 
 ## Development
 
-**IMPORTANT**: Never run `pnpm vite build`, `npx tsc`, or any build/typecheck commands manually. A continuous watcher runs in the background. Use only the scripts in package.json:
-- `pnpm ship:watch` - Watch mode (auto-rebuild + deploy via symlink)
-- `pnpm typecheck:watch` - Type check in watch mode
+**IMPORTANT**: Never run `pnpm vite build`, `npx tsc`, or any build/typecheck commands manually. Watchers run in the background.
+
+- `pnpm check` — check typecheck + build status (reads from running watchers). **Always use this** instead of `tsc` manually.
+- `pnpm ship:watch` — rebuild + redeploy on file changes.
+- `pnpm typecheck:watch` — typecheck on file changes.
+
+Watchers log to:
+- Typecheck: `/tmp/tsc-watch.log`
+- Build: `/tmp/ship-watch.log`
 
 ## Setup
 
@@ -14,15 +20,9 @@ rm -rf /var/www/webcam-calibration.clodhost.com/public
 ln -s /webcam-calibrator/dist /var/www/webcam-calibration.clodhost.com/public
 ```
 
-## Status
-```bash
-ps aux | grep "vite build" | grep -v grep
-ps aux | grep tsc | grep -v grep
-```
-
 ## Versioning
 
-Increment the version number in `src/main.tsx` console.log on every change:
-```
-console.log('[build] v{N} - change description');
+Increment the version number in `src/version.ts` on every change:
+```typescript
+export const VERSION = 'v{N}';
 ```
