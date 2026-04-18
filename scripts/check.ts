@@ -41,18 +41,13 @@ const STATUS_MAP: Record<string, string> = {
 /** Printed after check lines so following tool output (e.g. pnpm ELIFECYCLE) is visually separated. */
 const CHECK_OUTPUT_END = '-----';
 
-/** How many lines we show from the start of a log when there is no cycle marker. */
-const TSC_LOG_HEAD_MAX_LINES = 12;
-const BUILD_LOG_HEAD_MAX_LINES = 12;
-
-/** Tail lines shown from the current watch/build cycle when status is building (or for tsc context). */
-const TSC_WATCH_CYCLE_TAIL_LINES = 8;
-const BUILD_WATCH_CYCLE_TAIL_LINES = 12;
+/** Max lines we print for first/last log excerpts (shorter logs show fewer). */
+const SNIPPET_MAX_LINES = 8;
 
 export type LogSnippetCaption =
-  | { kind: 'last'; n: number }
-  | { kind: 'first'; n: number }
-  | { kind: 'lines'; n: number };
+  | { kind: 'last'; shown: number; total: number }
+  | { kind: 'first'; shown: number; total: number }
+  | { kind: 'lines'; shown: number; total: number };
 
 export type ParseCheckResult =
   | { status: 'pass' }
@@ -103,9 +98,19 @@ export function checkResultsNeedFailureExit(
 }
 
 function formatSnippetCaption(side: 'typecheck' | 'build', s: LogSnippetCaption): string {
-  if (s.kind === 'last') return `${side}: (last ${s.n} lines)`;
-  if (s.kind === 'first') return `${side}: (first ${s.n} lines)`;
-  return `${side}: (${s.n} lines)`;
+  if (s.kind === 'last') return `${side}: (last ${s.shown} lines)`;
+  if (s.kind === 'first') return `${side}: (first ${s.shown} lines)`;
+  return `${side}: (${s.shown} lines)`;
+}
+
+function snippetSubtitle(s: LogSnippetCaption): string {
+  if (s.kind === 'last') {
+    return `... (showing last ${s.shown} / ${s.total} lines of output) ...`;
+  }
+  if (s.kind === 'first') {
+    return `... (showing first ${s.shown} / ${s.total} lines of output) ...`;
+  }
+  return `... (showing ${s.shown} / ${s.total} lines of output) ...`;
 }
 
 function hasWatcherDetail(r: ParseCheckResult): boolean {
@@ -128,6 +133,7 @@ function printWatcherDetail(side: 'typecheck' | 'build', r: ParseCheckResult): b
   }
   if ('snippet' in r && r.snippet && text) {
     console.log(formatSnippetCaption(side, r.snippet));
+    console.log(snippetSubtitle(r.snippet));
     console.log('');
     console.log(text);
     return true;
@@ -265,25 +271,27 @@ export async function parseTscLog(content: string): Promise<ParseCheckResult> {
   );
 
   if (lastStartIdx === -1) {
-    const headLines = lines.slice(0, TSC_LOG_HEAD_MAX_LINES);
+    const takeHead = Math.min(lines.length, SNIPPET_MAX_LINES);
+    const headLines = lines.slice(0, takeHead);
     const head = headLines.join('\n').trim();
     return {
       status: 'fail',
       hint: 'No tsc watch start marker (expected "Starting compilation" or "File change detected").',
-      snippet: { kind: 'first', n: headLines.length },
+      snippet: { kind: 'first', shown: headLines.length, total: lines.length },
       content: head || '(empty)',
     };
   }
 
   const lastRunOutput = lines.slice(lastStartIdx);
   const foundLineIdx = findLastFoundSummaryLineIndex(lastRunOutput);
-  const tailLines = lastRunOutput.slice(-TSC_WATCH_CYCLE_TAIL_LINES);
+  const takeTail = Math.min(lastRunOutput.length, SNIPPET_MAX_LINES);
+  const tailLines = lastRunOutput.slice(-takeTail);
   const tail = tailLines.map(l => sanitizeLine(l).trim()).join('\n');
 
   if (foundLineIdx === -1) {
     return {
       status: 'building',
-      snippet: { kind: 'last', n: tailLines.length },
+      snippet: { kind: 'last', shown: tailLines.length, total: lastRunOutput.length },
       content: tail,
     };
   }
@@ -298,7 +306,7 @@ export async function parseTscLog(content: string): Promise<ParseCheckResult> {
     const body = bodyLines.join('\n').trim();
     return {
       status: 'fail',
-      snippet: { kind: 'lines', n: bodyLines.length },
+      snippet: { kind: 'lines', shown: bodyLines.length, total: bodyLines.length },
       content: body,
     };
   }
@@ -306,7 +314,7 @@ export async function parseTscLog(content: string): Promise<ParseCheckResult> {
   return {
     status: 'fail',
     hint: `Unrecognized tsc "Found" summary: ${sanitizeLine(foundLine).trim()}`,
-    snippet: { kind: 'last', n: tailLines.length },
+    snippet: { kind: 'last', shown: tailLines.length, total: lastRunOutput.length },
     content: tail,
   };
 }
@@ -341,12 +349,13 @@ export async function parseBuildLog(content: string): Promise<ParseCheckResult> 
   const lastBuildIdx = lines.findLastIndex(line => line.includes('build started'));
 
   if (lastBuildIdx === -1) {
-    const headLines = lines.slice(0, BUILD_LOG_HEAD_MAX_LINES);
+    const takeHead = Math.min(lines.length, SNIPPET_MAX_LINES);
+    const headLines = lines.slice(0, takeHead);
     const head = headLines.join('\n').trim();
     return {
       status: 'fail',
       hint: 'No "build started" marker in vite watch log.',
-      snippet: { kind: 'first', n: headLines.length },
+      snippet: { kind: 'first', shown: headLines.length, total: lines.length },
       content: head || '(empty)',
     };
   }
@@ -356,9 +365,10 @@ export async function parseBuildLog(content: string): Promise<ParseCheckResult> 
 
   if (buildRunLooksFailed(sanitizedRun)) {
     const body = lastRunOutput.join('\n').trim();
+    const n = lastRunOutput.length;
     return {
       status: 'fail',
-      snippet: { kind: 'lines', n: lastRunOutput.length },
+      snippet: { kind: 'lines', shown: n, total: n },
       content: body,
     };
   }
@@ -367,11 +377,12 @@ export async function parseBuildLog(content: string): Promise<ParseCheckResult> 
     return { status: 'pass' };
   }
 
-  const tailLines = lastRunOutput.slice(-BUILD_WATCH_CYCLE_TAIL_LINES);
+  const takeTail = Math.min(lastRunOutput.length, SNIPPET_MAX_LINES);
+  const tailLines = lastRunOutput.slice(-takeTail);
   const tail = tailLines.map(l => sanitizeLine(l)).join('\n');
   return {
     status: 'building',
-    snippet: { kind: 'last', n: tailLines.length },
+    snippet: { kind: 'last', shown: tailLines.length, total: lastRunOutput.length },
     content: tail,
   };
 }

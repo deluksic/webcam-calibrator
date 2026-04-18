@@ -121,8 +121,29 @@ Found 1 error. Watching for file changes.`;
     if (result.status === 'fail') {
       expect(result.hint).toContain('No tsc watch start marker');
       expect(result.snippet).toMatchObject({ kind: 'first' });
-      expect(result.snippet?.n).toBeGreaterThanOrEqual(2);
+      expect(result.snippet?.shown).toBeLessThanOrEqual(8);
       expect(result.content).toContain('random noise');
+    }
+  });
+
+  it('does not include a prior watch cycle in building excerpts', async () => {
+    const log = `Starting compilation in watch mode
+EARLIER_CYCLE_UNIQUE_MARKER
+Found 0 errors. Watching for file changes.
+File change detected. Starting incremental compilation...
+only_latest_cycle
+p1
+p2
+p3
+p4
+p5
+p6
+p7`;
+    const result = await parseTscLog(log);
+    expect(result.status).toBe('building');
+    if (result.status === 'building') {
+      expect(result.content).not.toContain('EARLIER_CYCLE_UNIQUE_MARKER');
+      expect(result.content).toContain('only_latest_cycle');
     }
   });
 });
@@ -219,7 +240,7 @@ rendering chunks...
     if (result.status === 'fail') {
       expect(result.hint).toContain('No "build started"');
       expect(result.snippet).toMatchObject({ kind: 'first' });
-      expect(result.snippet?.n).toBeGreaterThanOrEqual(1);
+      expect(result.snippet?.shown).toBeLessThanOrEqual(8);
       expect(result.content).toContain('vite v7 watching');
     }
   });
@@ -232,6 +253,29 @@ transforming...`;
     expect(result.status).toBe('building');
     if (result.status === 'building') {
       expect(result.content).toContain('transforming');
+    }
+  });
+
+  it('does not include a prior build cycle in building excerpts', async () => {
+    const log = `watching for file changes...
+build started...
+EARLIER_BUILD_UNIQUE_MARKER
+✓ 1 modules transformed.
+✓ built in 0.01s
+build started...
+only_latest_build_cycle
+p1
+p2
+p3
+p4
+p5
+p6
+p7`;
+    const result = await parseBuildLog(log);
+    expect(result.status).toBe('building');
+    if (result.status === 'building') {
+      expect(result.content).not.toContain('EARLIER_BUILD_UNIQUE_MARKER');
+      expect(result.content).toContain('only_latest_build_cycle');
     }
   });
 });
@@ -291,7 +335,7 @@ describe('checkResultsNeedFailureExit', () => {
     expect(checkResultsNeedFailureExit({ status: 'pass' }, { status: 'pass' })).toBe(false);
     expect(
       checkResultsNeedFailureExit(
-        { status: 'building', content: '', snippet: { kind: 'last', n: 0 } },
+        { status: 'building', content: '', snippet: { kind: 'last', shown: 0, total: 0 } },
         { status: 'pass' },
       ),
     ).toBe(false);
