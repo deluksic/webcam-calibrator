@@ -134,20 +134,41 @@ export function createGridVizPipeline(
     // failureCode == 0 means success (real corners)
     const isSuccess = i.failureCode < d.f32(0.5);
 
+    // Color per failure code:
+    //   1 = white, 2 = cyan, 4 = yellow, 8 = orange, 16 = magenta
+    const fc = abs(i.failureCode - d.f32(1.0)) < d.f32(0.5);
+    const ec = abs(i.failureCode - d.f32(2.0)) < d.f32(0.5);
+    const lc = abs(i.failureCode - d.f32(4.0)) < d.f32(0.5);
+    const pc = abs(i.failureCode - d.f32(8.0)) < d.f32(0.5);
+    const nc = abs(i.failureCode - d.f32(16.0)) < d.f32(0.5);
+
+    const failR = select(d.f32(0.0), d.f32(1.0), fc) + select(d.f32(0.0), d.f32(1.0), lc) + select(d.f32(0.0), d.f32(1.0), nc);
+    const failG = select(d.f32(0.0), d.f32(1.0), ec) + select(d.f32(0.0), d.f32(1.0), pc);
+    const failB = select(d.f32(0.0), d.f32(1.0), fc) + select(d.f32(0.0), d.f32(1.0), ec) + select(d.f32(0.0), d.f32(1.0), pc);
+
+    const isKnownFailure = fc || ec || lc || pc || nc;
+
     // Success: N-division grid, full opacity, blue
-    // Failure: single-cell outline (N=1), 0.3 opacity, gray
-    const mask = select(
-      gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS),
-      gridTextureGradBox(uv, ddx, ddy, 1),
+    // Failure: single-cell outline (N=1), 0.2 fill + solid edge, color by code
+    const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
+    const cell = gridTextureGradBox(uv, ddx, ddy, 1);
+
+    // For failures: cell=1 on edge, 0 inside; invert for fill
+    const fillMask = d.f32(1.0) - cell;
+    // Edge contribution: 1 on edge lines, 0 elsewhere
+    const edgeMask = cell;
+
+    const r = select(select(failR, d.f32(0.0), isKnownFailure), d.f32(0.0), isSuccess);
+    const g = select(select(failG, d.f32(0.0), isKnownFailure), d.f32(0.0), isSuccess);
+    const b = select(select(failB, d.f32(1.0), isKnownFailure), d.f32(1.0), isSuccess);
+
+    const alpha = select(
+      d.f32(0.2) * fillMask + edgeMask,
+      grid,
       isSuccess,
     );
 
-    const r = select(d.f32(0.5), d.f32(0.0), isSuccess);
-    const g = select(d.f32(0.5), d.f32(0.0), isSuccess);
-    const b = select(d.f32(1.0), d.f32(0.5), isSuccess);
-    const alpha = select(d.f32(0.3), d.f32(1.0), isSuccess);
-
-    return d.vec4f(r, g, b, alpha * mask);
+    return d.vec4f(r, g, b, alpha);
   });
 
   return root.createRenderPipeline({
