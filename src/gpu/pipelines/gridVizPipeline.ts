@@ -117,8 +117,8 @@ export function createGridVizPipeline(
     // i = (floor(a) + min(fract(a)*N, 1) - floor(b) - min(fract(b)*N, 1)) / (N*w)
     const iv = (floor(a) + min(fract(a) * N, d.vec2f(1)) - floor(b) - min(fract(b) * N, d.vec2f(1))) / (N * wv);
 
-    // Extract scalars: (1-i.x) * (1-i.y)
-    return (1 - iv.x) * (1 - iv.y);
+    // Returns 1 on grid lines, 0 in cell interiors
+    return iv.x * iv.y;
   };
 
   const gridVizFrag = tgpu.fragmentFn({
@@ -153,9 +153,9 @@ export function createGridVizPipeline(
     const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
     const cell = gridTextureGradBox(uv, ddx, ddy, 1);
 
-    // For failures: cell=1 on edge, 0 inside; invert for fill
+    // grid/cell return 1 on lines, 0 in cells
+    // For failures: fill 0.2 alpha inside cell, edge 1.0 alpha on lines
     const fillMask = d.f32(1.0) - cell;
-    // Edge contribution: 1 on edge lines, 0 elsewhere
     const edgeMask = cell;
 
     const r = select(select(failR, d.f32(0.0), isKnownFailure), d.f32(0.0), isSuccess);
