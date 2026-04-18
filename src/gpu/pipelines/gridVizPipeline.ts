@@ -16,7 +16,7 @@ export const MAX_INSTANCES = 64;
 //   bit 3: plausibility check failed (convex/ratio/R²)
 //   bit 4: intersection out of bounds
 // debug floats: extra info (edgePixelCount, minR2, etc.) for shader visualization
-export const gridCornersSchema = d.arrayOf(d.vec4f, MAX_INSTANCES * 3);
+export const GridCornersSchema = d.arrayOf(d.vec4f, MAX_INSTANCES * 3);
 
 export function createGridVizLayouts(
   root: Awaited<ReturnType<typeof tgpu.init>>,

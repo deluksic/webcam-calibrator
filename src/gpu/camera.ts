@@ -38,7 +38,7 @@ import {
   ExtentEntry,
 } from './pipelines/extentTrackingPipeline';
 import { createCompactLabelLayouts, createCanonicalResetPipeline, createCanonicalClaimPipeline, createRemapLabelPipeline } from './pipelines/compactLabelPipeline';
-import { createGridVizPipeline, createGridVizLayouts, gridCornersSchema, MAX_INSTANCES } from './pipelines/gridVizPipeline';
+import { createGridVizPipeline, createGridVizLayouts, GridCornersSchema, MAX_INSTANCES } from './pipelines/gridVizPipeline';
 import { computeHomography, type Point } from '../lib/geometry';
 import {
   type DetectedQuad,
@@ -305,7 +305,7 @@ export function createCameraPipeline(
 
   // ─── Grid visualization (AprilTag grid overlay) ─────────────────────────
   const quadCornersBuffer = root
-    .createBuffer(gridCornersSchema)
+    .createBuffer(GridCornersSchema)
     .$usage('storage');
 
   const { gridVizLayout } = createGridVizLayouts(root, quadCornersBuffer);
