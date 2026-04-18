@@ -175,9 +175,9 @@ export function createGridVizPipeline(
     const isKnownCode = fc || ec || lc || pc || nc;
 
     // Build color — additive for multiple failures
-    let r = d.f32(fc ? 1.0 : 0.0) + d.f32(lc ? 1.0 : 0.0) + d.f32(nc ? 1.0 : 0.0);
-    let g = d.f32(ec ? 1.0 : 0.0) + d.f32(pc ? 1.0 : 0.0) + d.f32(lc ? 1.0 : 0.0);
-    let b = d.f32(fc ? 1.0 : 0.0) + d.f32(ec ? 1.0 : 0.0) + d.f32(pc ? 1.0 : 0.0);
+    let r = select(d.f32(0.0), d.f32(1.0), fc) + select(d.f32(0.0), d.f32(1.0), lc) + select(d.f32(0.0), d.f32(1.0), nc);
+    let g = select(d.f32(0.0), d.f32(1.0), ec) + select(d.f32(0.0), d.f32(1.0), pc) + select(d.f32(0.0), d.f32(1.0), lc);
+    let b = select(d.f32(0.0), d.f32(1.0), fc) + select(d.f32(0.0), d.f32(1.0), ec) + select(d.f32(0.0), d.f32(1.0), pc);
 
     // Unknown code — dim gray
     const unknown = select(d.f32(0.0), d.f32(0.3), isKnownCode);
