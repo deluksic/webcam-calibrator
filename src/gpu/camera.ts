@@ -38,7 +38,7 @@ import {
   ExtentEntry,
 } from './pipelines/extentTrackingPipeline';
 import { createCompactLabelLayouts, createCanonicalResetPipeline, createCanonicalClaimPipeline, createRemapLabelPipeline } from './pipelines/compactLabelPipeline';
-import { createGridVizPipeline, createGridVizLayouts, GridCornersSchema, MAX_INSTANCES } from './pipelines/gridVizPipeline';
+import { createGridVizPipeline, createGridVizLayouts, GridDataSchema, QuadData, MAX_INSTANCES } from './pipelines/gridVizPipeline';
 import { computeHomography, type Point } from '../lib/geometry';
 import {
   type DetectedQuad,
@@ -305,7 +305,7 @@ export function createCameraPipeline(
 
   // ─── Grid visualization (AprilTag grid overlay) ─────────────────────────
   const quadCornersBuffer = root
-    .createBuffer(GridCornersSchema)
+    .createBuffer(GridDataSchema)
     .$usage('storage');
 
   const { gridVizLayout } = createGridVizLayouts(root, quadCornersBuffer);
@@ -319,7 +319,7 @@ export function createCameraPipeline(
   );
 
   const gridVizBindGroup = root.createBindGroup(gridVizLayout, {
-    quadCorners: quadCornersBuffer,
+    quads: quadCornersBuffer,
   });
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -772,9 +772,9 @@ export async function readExtentDataForQuads(
 // Update quad corners buffer for grid visualization (instanced rendering)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Write 8 homography parameters per quad to the GPU buffer.
- * H maps unit square → detected quad. Vertex shader applies: (x,y) = H*(u,v)/w.
- * H2 = vec4(failureCode, edgePixelCount/100, minR2, intersectionCount)
+/** Write homography matrix (mat3x3) + debug data per quad to the GPU buffer.
+ * H maps unit square → detected quad. Vertex shader applies: (x,y,z) = H * (u,v,1).
+ * H is column-major mat3x3f: [c0.x, c0.y, c0.z, 0, c1..., c2...]
  */
 export function updateQuadCornersBuffer(
   pipeline: CameraPipeline,
@@ -782,34 +782,28 @@ export function updateQuadCornersBuffer(
   showFallbacks: boolean = true,
   log: (msg: string) => void = () => {},
 ): void {
-  // Filter to only quads the user wants to see
   const filtered = showFallbacks ? quads : quads.filter(q => q.hasCorners);
-  const count = Math.min(filtered.length, MAX_DETECTED_TAGS);
-  // 3 vec4f per quad = 12 f32 = 48 bytes
-  const buf = new ArrayBuffer(MAX_INSTANCES * 48);
-  const view = new Float32Array(buf);
+  const count = Math.min(filtered.length, MAX_INSTANCES);
+
+  const data: QuadData[] = [];
   for (let i = 0; i < count; i++) {
     const quad = filtered[i];
     const H = computeHomography(quad.corners);
-    // vec4f(h1,h2,h3,h4) + vec4f(h5,h6,h7,h8) + vec4f(failureCode, edgeCount/100, minR2, interCount)
-    const base = i * 12;
-    view[base + 0] = H[0];
-    view[base + 1] = H[1];
-    view[base + 2] = H[2];
-    view[base + 3] = H[3];
-    view[base + 4] = H[4];
-    view[base + 5] = H[5];
-    view[base + 6] = H[6];
-    view[base + 7] = H[7];
-    // Debug info: failureCode (0 = success), edgeCount (normalized), minR2, intersectionCount
     const debug = quad.cornerDebug;
-    view[base + 8]  = debug ? debug.failureCode : 0;
-    view[base + 9]  = debug ? debug.edgePixelCount / 100 : 0;
-    view[base + 10] = debug ? debug.minR2 : 0;
-    view[base + 11] = debug ? debug.intersectionCount : 0;
+
+    data.push({
+      homography: d.mat3x3f(H[0], H[1], H[2], H[3], H[4], H[5], H[6], H[7], 1),
+      debug: {
+        failureCode: debug ? debug.failureCode : 0,
+        edgePixelCount: debug ? debug.edgePixelCount / 100 : 0,
+        minR2: debug ? debug.minR2 : 0,
+        intersectionCount: debug ? debug.intersectionCount : 0,
+      },
+    });
   }
-  log(`quads:${count} ` + filtered.map((q, i) => `${i}:${q.hasCorners ? 'OK' : 'F'}[fc:${view[i * 12 + 8]?.toFixed(1)},ec:${view[i * 12 + 9]?.toFixed(2)},r2:${view[i * 12 + 10]?.toFixed(2)}]`).join(' '));
-  pipeline.quadCornersBuffer.write(buf);
+
+  log(`quads:${count} ` + filtered.map((q, i) => `${i}:${q.hasCorners ? 'OK' : 'F'}[fc:${data[i].debug.failureCode},ec:${data[i].debug.edgePixelCount.toFixed(2)},r2:${data[i].debug.minR2.toFixed(2)}]`).join(' '));
+  pipeline.quadCornersBuffer.write(data);
 }
 
 export { filterNestedQuads } from './contour';
