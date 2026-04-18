@@ -117,8 +117,9 @@ export function createGridVizPipeline(
     // i = (floor(a) + min(fract(a)*N, 1) - floor(b) - min(fract(b)*N, 1)) / (N*w)
     const iv = (floor(a) + min(fract(a) * N, d.vec2f(1)) - floor(b) - min(fract(b) * N, d.vec2f(1))) / (N * wv);
 
-    // Returns 1 in cells, 0 on grid lines (original Shadertoy)
-    return (1 - iv.x) * (1 - iv.y);
+    // Returns 1 on grid lines, 0 in cell interiors (inverted original)
+    const inside = (1 - iv.x) * (1 - iv.y);
+    return 1 - inside;
   };
 
   const gridVizFrag = tgpu.fragmentFn({
@@ -142,15 +143,24 @@ export function createGridVizPipeline(
     const pc = abs(i.failureCode - d.f32(8.0)) < d.f32(0.5);
     const nc = abs(i.failureCode - d.f32(16.0)) < d.f32(0.5);
 
-    const r = select(d.f32(1.0), d.f32(0.0), fc) + select(d.f32(1.0), d.f32(0.0), lc) + select(d.f32(1.0), d.f32(0.0), nc);
+    // Handle bitmask failure codes: each bit maps to a color channel
+    // bit 0 (1) = r, bit 1 (2) = g, bit 2 (4) = r, bit 3 (8) = g, bit 4 (16) = r/b
+    const fc = d.f32(failureCode & 1) > 0.5;  // r
+    const ec = d.f32(failureCode & 2) > 0.5;  // g
+    const lc = d.f32(failureCode & 4) > 0.5;  // r
+    const pc = d.f32(failureCode & 8) > 0.5;  // g
+    const nc = d.f32(failureCode & 16) > 0.5; // r+b
+
+    const r = select(1, 0, fc) + select(1, 0, lc) + select(1, 0, nc);
     const g = select(1, 0, ec) + select(1, 0, pc) + select(1, 0, lc);
     const b = select(1, 0, fc) + select(1, 0, ec) + select(1, 0, pc);
 
+    // Success: N=8 grid, full opacity
+    // Failure: N=1 single cell, 0.2 fill + 1.0 solid edge
     const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
     const cell = gridTextureGradBox(uv, ddx, ddy, 1);
 
-    // cell returns 1 in cells, 0 on lines
-    // failure: edge 1.0, fill 0.2 → alpha = 1.0 - 0.8*cell
+    // alpha = 1 - 0.8*cell: 1 on lines (cell=0), 0.2 inside (cell=1)
     const alpha = select(1 - 0.8 * cell, grid, isSuccess);
 
     return d.vec4f(r, g, b, alpha);
