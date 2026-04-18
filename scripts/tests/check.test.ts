@@ -1,3 +1,6 @@
+import { readFile } from 'fs/promises';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { describe, it, expect } from 'vitest';
 import {
   parseTscLog,
@@ -11,6 +14,8 @@ import {
   readWatcherLogIfRunning,
 } from '../check';
 
+const FIXTURE_DIR = dirname(fileURLToPath(import.meta.url));
+
 describe('sanitizeLine', () => {
   it('strips common ANSI SGR sequences', () => {
     expect(sanitizeLine('\x1b[32mFound 0 errors\x1b[0m')).toBe('Found 0 errors');
@@ -23,6 +28,12 @@ describe('parseFoundErrorCount', () => {
     expect(parseFoundErrorCount('Found 0 errors. Watching for file changes.')).toBe(0);
     expect(parseFoundErrorCount('Found 1 error. Watching for file changes.')).toBe(1);
     expect(parseFoundErrorCount('Found 12 errors. Watching for file changes.')).toBe(12);
+  });
+
+  it('parses tsc watch timestamp prefix before Found', () => {
+    expect(
+      parseFoundErrorCount('9:06:31 PM - Found 17 errors. Watching for file changes.'),
+    ).toBe(17);
   });
 
   it('returns null for non-summary lines', () => {
@@ -95,8 +106,21 @@ Found 1 error. Watching for file changes.`;
     }
   });
 
-  it('returns stopped when no tsc start marker', async () => {
-    expect(await parseTscLog('random noise\nno compilation here\n')).toEqual({ status: 'stopped' });
+  it('parses scripts/tests/tsc-watch.log fixture (timestamped Found lines)', async () => {
+    const log = await readFile(join(FIXTURE_DIR, 'tsc-watch.log'), 'utf8');
+    const result = await parseTscLog(log);
+    expect(result.status).toBe('fail');
+    if (result.status === 'fail') {
+      expect(result.content).toContain('Found 17 errors');
+    }
+  });
+
+  it('returns fail when no tsc start marker', async () => {
+    const result = await parseTscLog('random noise\nno compilation here\n');
+    expect(result.status).toBe('fail');
+    if (result.status === 'fail') {
+      expect(result.content).toContain('No tsc watch start marker');
+    }
   });
 });
 
@@ -186,8 +210,12 @@ rendering chunks...
     expect(await parseBuildLog(log)).toEqual({ status: 'pass' });
   });
 
-  it('returns stopped without build started', async () => {
-    expect(await parseBuildLog('vite v7 watching\n')).toEqual({ status: 'stopped' });
+  it('returns fail without build started', async () => {
+    const result = await parseBuildLog('vite v7 watching\n');
+    expect(result.status).toBe('fail');
+    if (result.status === 'fail') {
+      expect(result.content).toContain('No "build started"');
+    }
   });
 
   it('returns building when run has started but no completion yet', async () => {
@@ -203,16 +231,19 @@ transforming...`;
 });
 
 describe('readWatcherLogIfRunning', () => {
-  it('returns empty string when watcher is not running (no read)', async () => {
-    expect(await readWatcherLogIfRunning(false, '/this/path/does/not/exist', 'typecheck')).toBe(
-      '',
+  it('returns skip when watcher is not running (no read)', async () => {
+    expect(await readWatcherLogIfRunning(false, '/this/path/does/not/exist', 'typecheck')).toEqual(
+      { kind: 'skip' },
     );
   });
 
-  it('throws when watcher is running but log file is missing', async () => {
-    await expect(
-      readWatcherLogIfRunning(true, '/nonexistent-tsc-watch-log-xyz.log', 'typecheck'),
-    ).rejects.toThrow(/log file is missing/);
+  it('returns missing when watcher is running but log file does not exist', async () => {
+    const path = '/nonexistent-tsc-watch-log-xyz.log';
+    expect(await readWatcherLogIfRunning(true, path, 'typecheck')).toEqual({
+      kind: 'missing',
+      path,
+      label: 'typecheck',
+    });
   });
 });
 

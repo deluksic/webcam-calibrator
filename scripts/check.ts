@@ -18,8 +18,11 @@ import { readFile } from 'fs/promises';
  * **Linux only** for the real CLI: requires `pgrep` (typically **procps-ng**). Other platforms
  * are not supported for `pnpm check` (use Vitest for parser coverage).
  *
- * If a watcher **is** running but the expected log file is **missing** (`ENOENT`), `runCheck`
- * **throws** (misconfigured `tee` path or permissions).
+ * If a watcher **is** running but the log file is **missing** (`ENOENT`), that side is
+ * **fail** (misconfigured `tee` path). Other read errors still throw.
+ *
+ * **stopped** is only returned when the watcher process is not running (`resolve*`). Log
+ * parsing yields **pass**, **building** (in progress), or **fail**.
  */
 const TC_LOG = '/tmp/tsc-watch.log';
 const BUILD_LOG = '/tmp/ship-watch.log';
@@ -48,11 +51,19 @@ export function sanitizeLine(line: string): string {
     .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 }
 
+/**
+ * tsc `--watch` summary line, with optional leading timestamp (`HH:MM:SS AM - …`) as tsc prints.
+ */
+const TSC_FOUND_SUMMARY_RE = /Found (\d+) errors?\.?\s*Watching for file changes/i;
+
+export function isTscFoundSummaryLine(line: string): boolean {
+  return TSC_FOUND_SUMMARY_RE.test(sanitizeLine(line).trim());
+}
+
 /** Last line in `lines` that looks like a tsc `Found N error(s)` summary, or -1. */
 export function findLastFoundSummaryLineIndex(lines: string[]): number {
   for (let i = lines.length - 1; i >= 0; i--) {
-    const s = sanitizeLine(lines[i]).trim();
-    if (/^Found \d+ errors?\.?/i.test(s)) {
+    if (isTscFoundSummaryLine(lines[i])) {
       return i;
     }
   }
@@ -62,7 +73,7 @@ export function findLastFoundSummaryLineIndex(lines: string[]): number {
 /** Parses N from `Found N errors` / `Found N error` summary line; null if not a summary. */
 export function parseFoundErrorCount(line: string): number | null {
   const s = sanitizeLine(line).trim();
-  const m = s.match(/^Found (\d+) errors?\.?/i);
+  const m = s.match(TSC_FOUND_SUMMARY_RE);
   if (!m) return null;
   return parseInt(m[1], 10);
 }
@@ -157,30 +168,39 @@ export async function resolveBuildWatcherStatus(
   return parseBuildLog(logContent);
 }
 
+export type ReadWatcherLogOutcome =
+  | { kind: 'skip' }
+  | { kind: 'ok'; content: string }
+  | { kind: 'missing'; path: string; label: string };
+
 /**
- * When `running` is false, returns `''` without touching the filesystem.
- * When `running` is true, reads `path` as UTF-8; throws if the file is missing (`ENOENT`)
- * or on other read errors.
+ * When `running` is false → `skip` (no read). When true, read UTF-8; `missing` on `ENOENT`;
+ * other errors throw.
  */
 export async function readWatcherLogIfRunning(
   running: boolean,
   path: string,
   watcherLabel: string,
-): Promise<string> {
+): Promise<ReadWatcherLogOutcome> {
   if (!running) {
-    return '';
+    return { kind: 'skip' };
   }
   try {
-    return await readFile(path, 'utf8');
+    return { kind: 'ok', content: await readFile(path, 'utf8') };
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
     if (err.code === 'ENOENT') {
-      throw new Error(
-        `${watcherLabel}: log file is missing but the watcher process appears to be running (expected tee to write ${path})`,
-      );
+      return { kind: 'missing', path, label: watcherLabel };
     }
     throw e;
   }
+}
+
+function failMissingLog(o: Extract<ReadWatcherLogOutcome, { kind: 'missing' }>): ParseCheckResult {
+  return {
+    status: 'fail',
+    content: `${o.label}: log file missing at ${o.path} (watcher running; tee should write here).`,
+  };
 }
 
 export async function parseTscLog(content: string): Promise<ParseCheckResult> {
@@ -192,7 +212,11 @@ export async function parseTscLog(content: string): Promise<ParseCheckResult> {
   );
 
   if (lastStartIdx === -1) {
-    return { status: 'stopped' };
+    const head = lines.slice(0, 12).join('\n').trim();
+    return {
+      status: 'fail',
+      content: `No tsc watch start marker (expected "Starting compilation" or "File change detected"). Log head:\n${head || '(empty)'}`,
+    };
   }
 
   const lastRunOutput = lines.slice(lastStartIdx);
@@ -212,7 +236,10 @@ export async function parseTscLog(content: string): Promise<ParseCheckResult> {
     return { status: 'fail', content: lastRunOutput.slice(foundLineIdx).join('\n').trim() };
   }
 
-  return { status: 'building', content: tail };
+  return {
+    status: 'fail',
+    content: `Unrecognized tsc summary line after "Found": ${sanitizeLine(foundLine).trim()}\n---\n${tail}`,
+  };
 }
 
 function buildRunLooksComplete(sanitizedLines: string[]): boolean {
@@ -245,7 +272,11 @@ export async function parseBuildLog(content: string): Promise<ParseCheckResult> 
   const lastBuildIdx = lines.findLastIndex(line => line.includes('build started'));
 
   if (lastBuildIdx === -1) {
-    return { status: 'stopped' };
+    const head = lines.slice(0, 12).join('\n').trim();
+    return {
+      status: 'fail',
+      content: `No "build started" marker in vite watch log. Log head:\n${head || '(empty)'}`,
+    };
   }
 
   const lastRunOutput = lines.slice(lastBuildIdx);
@@ -269,11 +300,24 @@ export async function runCheck(): Promise<void> {
   const tscRunning = await isTypecheckWatcherRunning();
   const buildRunning = await isShipWatchRunning();
 
-  const tscContent = await readWatcherLogIfRunning(tscRunning, TC_LOG, 'typecheck');
-  const buildContent = await readWatcherLogIfRunning(buildRunning, BUILD_LOG, 'build');
+  const tscRead = await readWatcherLogIfRunning(tscRunning, TC_LOG, 'typecheck');
+  const buildRead = await readWatcherLogIfRunning(buildRunning, BUILD_LOG, 'build');
 
-  const tsc = await resolveTscWatcherStatus(tscRunning, tscContent);
-  const build = await resolveBuildWatcherStatus(buildRunning, buildContent);
+  const tsc =
+    tscRead.kind === 'missing'
+      ? failMissingLog(tscRead)
+      : await resolveTscWatcherStatus(
+          tscRunning,
+          tscRead.kind === 'ok' ? tscRead.content : '',
+        );
+
+  const build =
+    buildRead.kind === 'missing'
+      ? failMissingLog(buildRead)
+      : await resolveBuildWatcherStatus(
+          buildRunning,
+          buildRead.kind === 'ok' ? buildRead.content : '',
+        );
 
   console.log(`typecheck: ${STATUS_MAP[tsc.status]}`);
   console.log(`build: ${STATUS_MAP[build.status]}`);
