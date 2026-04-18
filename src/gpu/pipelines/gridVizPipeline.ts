@@ -97,9 +97,8 @@ export function createGridVizPipeline(
   });
 
   // Filtered grid - Shadertoy gridTextureGradBox, vectorized
-  const gridTextureGradBox = (p: d.v2f, ddx: d.v2f, ddy: d.v2f) => {
+  const gridTextureGradBox = (p: d.v2f, ddx: d.v2f, ddy: d.v2f, N: number) => {
     'use gpu';
-    const N = GRID_DIVISIONS;
     const half = 0.5;
     const epsilon = 0.01;
     const lw = GRID_LINE_WIDTH;
@@ -122,22 +121,6 @@ export function createGridVizPipeline(
     return (1 - iv.x) * (1 - iv.y);
   };
 
-  // Edge outline mask: returns 1 near UV edges, 0 in interior
-  const edgeMask = (uv: d.v2f, ddx: d.v2f, ddy: d.v2f) => {
-    'use gpu';
-    const edgeWidth = d.f32(0.02);
-    // Distance to nearest edge in UV space (accounting for derivatives for AA)
-    const distToEdgeX = min(uv.x, d.f32(1.0) - uv.x);
-    const distToEdgeY = min(uv.y, d.f32(1.0) - uv.y);
-    const minDist = min(distToEdgeX, distToEdgeY);
-    // Approx pixel size in UV space
-    const pixelUV = max(abs(ddx.x) + abs(ddx.y), abs(ddy.x) + abs(ddy.y));
-    // Smooth step from edge
-    const t = minDist / (edgeWidth + pixelUV + d.f32(0.001));
-    // 1 on edge, 0 in interior
-    return d.f32(1.0) - smoothstep(d.f32(0.0), d.f32(1.0), t);
-  };
-
   const gridVizFrag = tgpu.fragmentFn({
     in: { uv: d.vec2f, outPos: d.builtin.position, failureCode: d.f32, edgeCount: d.f32, minR2: d.f32, intersectionCount: d.f32 },
     out: d.vec4f,
@@ -149,45 +132,22 @@ export function createGridVizPipeline(
     const ddy = dpdy(uv);
 
     // failureCode == 0 means success (real corners)
-    // failureCode > 0 means corner detection failed — show color-coded overlay
     const isSuccess = i.failureCode < d.f32(0.5);
-    const failureCode = i.failureCode;
 
-    // Grid pattern for success, edge-only for fallback
-    const grid = gridTextureGradBox(uv, ddx, ddy);
-    const edge = edgeMask(uv, ddx, ddy);
-    const mask = select(grid, edge, isSuccess);
+    // Success: N-division grid, full opacity, blue
+    // Failure: single-cell outline (N=1), 0.3 opacity, gray
+    const mask = select(
+      gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS),
+      gridTextureGradBox(uv, ddx, ddy, 1),
+      isSuccess,
+    );
 
-    // Color per failure code:
-    //   1 = white (insufficient edge pixels)
-    //   2 = cyan  (aspect ratio)
-    //   4 = yellow (line fit failed)
-    //   8 = orange (plausibility check)
-    //  16 = magenta (no intersections)
-    //  combined = additive blend of colors
-    // success = blue
-    const fc = abs(failureCode - d.f32(1.0)) < d.f32(0.5); // 1: white
-    const ec = abs(failureCode - d.f32(2.0)) < d.f32(0.5); // 2: cyan
-    const lc = abs(failureCode - d.f32(4.0)) < d.f32(0.5); // 4: yellow
-    const pc = abs(failureCode - d.f32(8.0)) < d.f32(0.5); // 8: orange
-    const nc = abs(failureCode - d.f32(16.0)) < d.f32(0.5); // 16: magenta
+    const r = select(d.f32(0.5), d.f32(0.0), isSuccess);
+    const g = select(d.f32(0.5), d.f32(0.0), isSuccess);
+    const b = select(d.f32(1.0), d.f32(0.5), isSuccess);
+    const alpha = select(d.f32(0.3), d.f32(1.0), isSuccess);
 
-    const isKnownCode = fc || ec || lc || pc || nc;
-
-    // Build color — additive for multiple failures
-    let r = select(d.f32(0.0), d.f32(1.0), fc) + select(d.f32(0.0), d.f32(1.0), lc) + select(d.f32(0.0), d.f32(1.0), nc);
-    let g = select(d.f32(0.0), d.f32(1.0), ec) + select(d.f32(0.0), d.f32(1.0), pc) + select(d.f32(0.0), d.f32(1.0), lc);
-    let b = select(d.f32(0.0), d.f32(1.0), fc) + select(d.f32(0.0), d.f32(1.0), ec) + select(d.f32(0.0), d.f32(1.0), pc);
-
-    // Unknown code — dim gray
-    const unknown = select(d.f32(0.0), d.f32(0.3), isKnownCode);
-
-    r = select(r, unknown, isKnownCode || isSuccess);
-    g = select(g, unknown, isKnownCode || isSuccess);
-    b = select(b, d.f32(1.0), isSuccess); // blue for success
-
-    const alpha = select(d.f32(1.0), d.f32(0.8), !isSuccess);
-    return d.vec4f(r, g, b, alpha * (d.f32(1.0) - mask));
+    return d.vec4f(r, g, b, alpha * mask);
   });
 
   return root.createRenderPipeline({
