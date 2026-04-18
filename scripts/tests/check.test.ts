@@ -115,7 +115,7 @@ Found 1 error. Watching for file changes.`;
     }
   });
 
-  it('parses multi-cycle tsc log like tee output (snippet total is full current cycle)', async () => {
+  it('parses multi-cycle tsc log like tee output (lines snippet is capped, shown equals total)', async () => {
     const log = await readFile(join(FIXTURE_DIR, 'tsc-watch-multi-cycle.log'), 'utf8');
     const result = await parseTscLog(log);
     expect(result.status).toBe('fail');
@@ -124,6 +124,24 @@ Found 1 error. Watching for file changes.`;
       expect(result.content).toContain('rrors. Watching for file changes.');
       expect(result.snippet?.kind).toBe('lines');
       if (result.snippet?.kind === 'lines') {
+        expect(result.snippet.shown).toBe(result.snippet.total);
+        expect(result.snippet.shown).toBeLessThanOrEqual(8);
+      }
+    }
+  });
+
+  it('caps Found-fail log excerpt at SNIPPET_MAX_LINES lines from the summary', async () => {
+    const filler = Array.from({ length: 12 }, (_, i) => `err_line_${i} after Found`).join('\n');
+    const log = `Starting compilation in watch mode
+Found 3 errors. Watching for file changes.
+${filler}`;
+    const result = await parseTscLog(log);
+    expect(result.status).toBe('fail');
+    if (result.status === 'fail') {
+      expect(result.content.split('\n').length).toBeLessThanOrEqual(8);
+      if (result.snippet?.kind === 'lines') {
+        expect(result.snippet.shown).toBe(8);
+        expect(result.snippet.total).toBe(13);
         expect(result.snippet.shown).toBeLessThan(result.snippet.total);
       }
     }

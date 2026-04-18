@@ -110,7 +110,10 @@ function snippetSubtitle(s: LogSnippetCaption): string {
   if (s.kind === 'first') {
     return `... (showing first ${s.shown} / ${s.total} lines of output) ...`;
   }
-  return `... (showing ${s.shown} / ${s.total} lines of output) ...`;
+  if (s.kind === 'lines' && s.shown < s.total) {
+    return `... (showing ${s.shown} / ${s.total} lines of output) ...`;
+  }
+  return '';
 }
 
 function hasWatcherDetail(r: ParseCheckResult): boolean {
@@ -133,7 +136,10 @@ function printWatcherDetail(side: 'typecheck' | 'build', r: ParseCheckResult): b
   }
   if ('snippet' in r && r.snippet && text) {
     console.log(formatSnippetCaption(side, r.snippet));
-    console.log(snippetSubtitle(r.snippet));
+    const sub = snippetSubtitle(r.snippet);
+    if (sub) {
+      console.log(sub);
+    }
     console.log('');
     console.log(text);
     return true;
@@ -303,10 +309,15 @@ export async function parseTscLog(content: string): Promise<ParseCheckResult> {
   }
   if (count !== null && count > 0) {
     const bodyLines = lastRunOutput.slice(foundLineIdx);
-    const body = bodyLines.join('\n').trim();
+    const displayLines = bodyLines.slice(0, SNIPPET_MAX_LINES);
+    const body = displayLines.join('\n').trim();
     return {
       status: 'fail',
-      snippet: { kind: 'lines', shown: bodyLines.length, total: lastRunOutput.length },
+      snippet: {
+        kind: 'lines',
+        shown: displayLines.length,
+        total: bodyLines.length,
+      },
       content: body,
     };
   }
@@ -364,11 +375,19 @@ export async function parseBuildLog(content: string): Promise<ParseCheckResult> 
   const sanitizedRun = lastRunOutput.map(l => sanitizeLine(l));
 
   if (buildRunLooksFailed(sanitizedRun)) {
-    const body = lastRunOutput.join('\n').trim();
-    const n = lastRunOutput.length;
+    const fullLen = lastRunOutput.length;
+    const displayLines =
+      fullLen > SNIPPET_MAX_LINES
+        ? lastRunOutput.slice(-SNIPPET_MAX_LINES)
+        : lastRunOutput;
+    const body = displayLines.join('\n').trim();
     return {
       status: 'fail',
-      snippet: { kind: 'lines', shown: n, total: n },
+      snippet: {
+        kind: 'lines',
+        shown: displayLines.length,
+        total: fullLen,
+      },
       content: body,
     };
   }
