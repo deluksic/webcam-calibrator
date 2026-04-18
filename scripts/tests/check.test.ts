@@ -115,6 +115,20 @@ Found 1 error. Watching for file changes.`;
     }
   });
 
+  it('parses multi-cycle tsc log like tee output (snippet total is full current cycle)', async () => {
+    const log = await readFile(join(FIXTURE_DIR, 'tsc-watch-multi-cycle.log'), 'utf8');
+    const result = await parseTscLog(log);
+    expect(result.status).toBe('fail');
+    if (result.status === 'fail') {
+      expect(result.content).toContain('Found 2 errors');
+      expect(result.content).toContain('rrors. Watching for file changes.');
+      expect(result.snippet?.kind).toBe('lines');
+      if (result.snippet?.kind === 'lines') {
+        expect(result.snippet.shown).toBeLessThan(result.snippet.total);
+      }
+    }
+  });
+
   it('returns fail when no tsc start marker', async () => {
     const result = await parseTscLog('random noise\nno compilation here\n');
     expect(result.status).toBe('fail');

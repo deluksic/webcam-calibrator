@@ -306,7 +306,7 @@ export async function parseTscLog(content: string): Promise<ParseCheckResult> {
     const body = bodyLines.join('\n').trim();
     return {
       status: 'fail',
-      snippet: { kind: 'lines', shown: bodyLines.length, total: bodyLines.length },
+      snippet: { kind: 'lines', shown: bodyLines.length, total: lastRunOutput.length },
       content: body,
     };
   }
