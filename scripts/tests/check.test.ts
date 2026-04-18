@@ -119,7 +119,10 @@ Found 1 error. Watching for file changes.`;
     const result = await parseTscLog('random noise\nno compilation here\n');
     expect(result.status).toBe('fail');
     if (result.status === 'fail') {
-      expect(result.content).toContain('No tsc watch start marker');
+      expect(result.hint).toContain('No tsc watch start marker');
+      expect(result.snippet).toMatchObject({ kind: 'first' });
+      expect(result.snippet?.n).toBeGreaterThanOrEqual(2);
+      expect(result.content).toContain('random noise');
     }
   });
 });
@@ -214,7 +217,10 @@ rendering chunks...
     const result = await parseBuildLog('vite v7 watching\n');
     expect(result.status).toBe('fail');
     if (result.status === 'fail') {
-      expect(result.content).toContain('No "build started"');
+      expect(result.hint).toContain('No "build started"');
+      expect(result.snippet).toMatchObject({ kind: 'first' });
+      expect(result.snippet?.n).toBeGreaterThanOrEqual(1);
+      expect(result.content).toContain('vite v7 watching');
     }
   });
 
@@ -284,7 +290,10 @@ describe('checkResultsNeedFailureExit', () => {
   it('is false when both pass or non-fail', () => {
     expect(checkResultsNeedFailureExit({ status: 'pass' }, { status: 'pass' })).toBe(false);
     expect(
-      checkResultsNeedFailureExit({ status: 'building', content: '' }, { status: 'pass' }),
+      checkResultsNeedFailureExit(
+        { status: 'building', content: '', snippet: { kind: 'last', n: 0 } },
+        { status: 'pass' },
+      ),
     ).toBe(false);
     expect(checkResultsNeedFailureExit({ status: 'stopped' }, { status: 'stopped' })).toBe(
       false,
