@@ -115,13 +115,15 @@ Found 1 error. Watching for file changes.`;
     }
   });
 
-  it('parses multi-cycle tsc log like tee output (lines snippet is capped, shown equals total)', async () => {
+  it('parses multi-cycle tsc log like tee output (fail excerpt is full last cycle, capped at 8)', async () => {
     const log = await readFile(join(FIXTURE_DIR, 'tsc-watch-multi-cycle.log'), 'utf8');
     const result = await parseTscLog(log);
     expect(result.status).toBe('fail');
     if (result.status === 'fail') {
+      expect(result.content).toContain('9:51:58 PM - File change detected');
+      expect(result.content).toContain('gridVizPipeline.ts(26,29)');
       expect(result.content).toContain('Found 2 errors');
-      expect(result.content).toContain('rrors. Watching for file changes.');
+      expect(result.content).not.toContain('9:45:05 PM - Found 2 errors');
       expect(result.snippet?.kind).toBe('lines');
       if (result.snippet?.kind === 'lines') {
         expect(result.snippet.shown).toBe(result.snippet.total);
@@ -130,7 +132,7 @@ Found 1 error. Watching for file changes.`;
     }
   });
 
-  it('caps Found-fail log excerpt at SNIPPET_MAX_LINES lines from the summary', async () => {
+  it('caps Found-fail log excerpt at SNIPPET_MAX_LINES lines from start of current cycle', async () => {
     const filler = Array.from({ length: 12 }, (_, i) => `err_line_${i} after Found`).join('\n');
     const log = `Starting compilation in watch mode
 Found 3 errors. Watching for file changes.
@@ -141,7 +143,7 @@ ${filler}`;
       expect(result.content.split('\n').length).toBeLessThanOrEqual(8);
       if (result.snippet?.kind === 'lines') {
         expect(result.snippet.shown).toBe(8);
-        expect(result.snippet.total).toBe(13);
+        expect(result.snippet.total).toBe(14);
         expect(result.snippet.shown).toBeLessThan(result.snippet.total);
       }
     }

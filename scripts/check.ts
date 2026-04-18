@@ -135,10 +135,15 @@ function printWatcherDetail(side: 'typecheck' | 'build', r: ParseCheckResult): b
     printed = true;
   }
   if ('snippet' in r && r.snippet && text) {
-    console.log(formatSnippetCaption(side, r.snippet));
-    const sub = snippetSubtitle(r.snippet);
-    if (sub) {
-      console.log(sub);
+    const s = r.snippet;
+    const omitLinesCaption =
+      s.kind === 'lines' && s.shown === s.total;
+    if (!omitLinesCaption) {
+      console.log(formatSnippetCaption(side, s));
+      const sub = snippetSubtitle(s);
+      if (sub) {
+        console.log(sub);
+      }
     }
     console.log('');
     console.log(text);
@@ -308,15 +313,15 @@ export async function parseTscLog(content: string): Promise<ParseCheckResult> {
     return { status: 'pass' };
   }
   if (count !== null && count > 0) {
-    const bodyLines = lastRunOutput.slice(foundLineIdx);
-    const displayLines = bodyLines.slice(0, SNIPPET_MAX_LINES);
+    const cycleLines = lastRunOutput;
+    const displayLines = cycleLines.slice(0, SNIPPET_MAX_LINES);
     const body = displayLines.join('\n').trim();
     return {
       status: 'fail',
       snippet: {
         kind: 'lines',
         shown: displayLines.length,
-        total: bodyLines.length,
+        total: cycleLines.length,
       },
       content: body,
     };
