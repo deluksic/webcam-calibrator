@@ -780,6 +780,7 @@ export function updateQuadCornersBuffer(
   pipeline: CameraPipeline,
   quads: DetectedQuad[],
   showFallbacks: boolean = true,
+  log: (msg: string) => void = () => {},
 ): void {
   // Filter to only quads the user wants to see
   const filtered = showFallbacks ? quads : quads.filter(q => q.hasCorners);
@@ -801,21 +802,13 @@ export function updateQuadCornersBuffer(
     view[base + 6] = H[6];
     view[base + 7] = H[7];
     // Debug info: failureCode (0 = success), edgeCount (normalized), minR2, intersectionCount
-    if (quad.hasCorners) {
-      // Success: no failure, H2 = vec4(0, 0, 0, 0)
-      view[base + 8] = 0;
-      view[base + 9] = 0;
-      view[base + 10] = 0;
-      view[base + 11] = 0;
-    } else {
-      // Fallback: encode failure code and debug values
-      const debug = quad.cornerDebug;
-      view[base + 8]  = debug ? debug.failureCode : 0;
-      view[base + 9]  = debug ? debug.edgePixelCount / 100 : 0;
-      view[base + 10] = debug ? debug.minR2 : 0;
-      view[base + 11] = debug ? debug.intersectionCount : 0;
-    }
+    const debug = quad.cornerDebug;
+    view[base + 8]  = debug ? debug.failureCode : 0;
+    view[base + 9]  = debug ? debug.edgePixelCount / 100 : 0;
+    view[base + 10] = debug ? debug.minR2 : 0;
+    view[base + 11] = debug ? debug.intersectionCount : 0;
   }
+  log(`quads:${count} ` + filtered.map((q, i) => `${i}:${q.hasCorners ? 'OK' : 'F'}[fc:${view[i * 12 + 8]?.toFixed(1)},ec:${view[i * 12 + 9]?.toFixed(2)},r2:${view[i * 12 + 10]?.toFixed(2)}]`).join(' '));
   pipeline.quadCornersBuffer.write(buf);
 }
 

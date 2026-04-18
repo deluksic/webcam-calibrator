@@ -179,7 +179,7 @@ export function validateAndFilterQuads(
       gridCells: tagGrid,
       pattern: null,
       hasCorners: detectedCorners.length === 4,
-      cornerDebug: detectedCorners.length === 4 ? cornerResult.debug : null,
+      cornerDebug: cornerResult.debug,
     });
   }
 
