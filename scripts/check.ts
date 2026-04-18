@@ -97,12 +97,6 @@ export function checkResultsNeedFailureExit(
   return tsc.status === 'fail' || build.status === 'fail';
 }
 
-function formatSnippetCaption(side: 'typecheck' | 'build', s: LogSnippetCaption): string {
-  if (s.kind === 'last') return `${side}: (last ${s.shown} lines)`;
-  if (s.kind === 'first') return `${side}: (first ${s.shown} lines)`;
-  return `${side}: (${s.shown} lines)`;
-}
-
 function snippetSubtitle(s: LogSnippetCaption): string {
   if (s.kind === 'last') {
     return `... (showing last ${s.shown} / ${s.total} lines of output) ...`;
@@ -136,14 +130,10 @@ function printWatcherDetail(side: 'typecheck' | 'build', r: ParseCheckResult): b
   }
   if ('snippet' in r && r.snippet && text) {
     const s = r.snippet;
-    const omitLinesCaption =
-      s.kind === 'lines' && s.shown === s.total;
-    if (!omitLinesCaption) {
-      console.log(formatSnippetCaption(side, s));
-      const sub = snippetSubtitle(s);
-      if (sub) {
-        console.log(sub);
-      }
+    console.log(`${side}:`);
+    const sub = snippetSubtitle(s);
+    if (sub) {
+      console.log(sub);
     }
     console.log('');
     console.log(text);
