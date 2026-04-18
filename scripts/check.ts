@@ -38,6 +38,9 @@ const STATUS_MAP: Record<string, string> = {
   stopped: '× stopped',
 };
 
+/** Printed after check lines so following tool output (e.g. pnpm ELIFECYCLE) is visually separated. */
+const CHECK_OUTPUT_END = '-----';
+
 export type ParseCheckResult =
   | { status: 'pass' }
   | { status: 'stopped' }
@@ -330,6 +333,8 @@ export async function runCheck(): Promise<void> {
     console.log(`build: ${build.content.trim()}`);
   }
 
+  console.log(CHECK_OUTPUT_END);
+
   if (checkResultsNeedFailureExit(tsc, build)) {
     process.exit(1);
   }
@@ -340,6 +345,7 @@ const isVitest = process.env.VITEST === 'true';
 if (!isVitest) {
   runCheck().catch(error => {
     console.error('Unhandled error:', error);
+    console.log(CHECK_OUTPUT_END);
     process.exit(1);
   });
 }
