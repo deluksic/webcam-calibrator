@@ -61,7 +61,7 @@ export function createGridVizPipeline(
     const debug = quad.debug;
 
     const uv = [d.vec2f(0, 0), d.vec2f(1, 0), d.vec2f(0, 1), d.vec2f(1, 1)][vertexIndex];
-    const imgPos = mul(H, d.vec3f(uv, 1));
+    const imgPos = mul(d.vec3f(uv, 1), H);
     const imgX = imgPos.x;
     const imgY = imgPos.y;
     const w = imgPos.z;

@@ -815,7 +815,7 @@ export function updateQuadCornersBuffer(
     });
   }
 
-  log(`quads:${count} ` + filtered.map((q, i) => `${i}:${q.hasCorners ? 'OK' : 'F'}[fc:${data[i].debug.failureCode},ec:${data[i].debug.edgePixelCount.toFixed(2)},r2:${data[i].debug.minR2.toFixed(2)}]`).join(' '));
+  log(`quads:${count}`);
   pipeline.quadCornersBuffer.write(data);
 }
 
