@@ -802,6 +802,19 @@ export function updateQuadCornersBuffer(
     });
   }
 
+  // Pad remaining slots with zeros
+  for (let i = count; i < MAX_INSTANCES; i++) {
+    data.push({
+      homography: d.mat3x3f(0, 0, 0, 0, 0, 0, 0, 0, 1),
+      debug: {
+        failureCode: 0,
+        edgePixelCount: 0,
+        minR2: 0,
+        intersectionCount: 0,
+      },
+    });
+  }
+
   log(`quads:${count} ` + filtered.map((q, i) => `${i}:${q.hasCorners ? 'OK' : 'F'}[fc:${data[i].debug.failureCode},ec:${data[i].debug.edgePixelCount.toFixed(2)},r2:${data[i].debug.minR2.toFixed(2)}]`).join(' '));
   pipeline.quadCornersBuffer.write(data);
 }
