@@ -118,7 +118,7 @@ export function createGridVizPipeline(
     const iv = (floor(a) + min(fract(a) * N, d.vec2f(1)) - floor(b) - min(fract(b) * N, d.vec2f(1))) / (N * wv);
 
     // Returns 1 on grid lines, 0 in cell interiors
-    return iv.x * iv.y;
+    return d.f32(1.0) - (d.f32(1.0) - iv.x) * (d.f32(1.0) - iv.y);
   };
 
   const gridVizFrag = tgpu.fragmentFn({
