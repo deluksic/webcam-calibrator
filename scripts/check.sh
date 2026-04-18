@@ -17,11 +17,14 @@ if [ -z "$tc_pid" ]; then
 else
   echo "✓ running (pid $tc_pid)"
   if [ -f "$TC_LOG" ]; then
-    if grep -q "Found 0 errors" "$TC_LOG"; then
+    tc_content=$(cat "$TC_LOG" | tr -d '\0' 2>/dev/null)
+    if echo "$tc_content" | grep -qa "Found 0 errors"; then
       echo "✓ pass"
-    else
+    elif echo "$tc_content" | grep -qaE "error TS"; then
       echo "✗ fail — errors:"
-      tail -20 "$TC_LOG" | grep -E "error TS|lib/|\\.ts:"
+      echo "$tc_content" | grep -E "error TS|lib/" | tail -10
+    else
+      echo "⚠ checking..."
     fi
   fi
 fi
@@ -35,11 +38,14 @@ if [ -z "$build_pid" ]; then
 else
   echo "✓ running (pid $build_pid)"
   if [ -f "$BUILD_LOG" ]; then
-    if grep -q "built in" "$BUILD_LOG"; then
+    build_content=$(cat "$BUILD_LOG" | tr -d '\0' 2>/dev/null)
+    if echo "$build_content" | grep -qa "built in"; then
       echo "✓ pass"
+    elif echo "$build_content" | grep -qa "build started"; then
+      echo "⚠ building..."
     else
       echo "✗ fail:"
-      tail -20 "$BUILD_LOG" | grep -vE "^$"
+      echo "$build_content" | tail -20
     fi
   fi
 fi

@@ -1,3 +1,8 @@
-// Version number — change here to update both the navbar and the build log
-export const VERSION = 'v54';
-console.log(`[build] ${VERSION} - debug overlay color-codes corner detection failure reasons`);
+// Build hash injected by vite-build-hash plugin
+declare global {
+  interface Window {
+    __BUILD_HASH__?: string;
+  }
+}
+export const VERSION: string = window.__BUILD_HASH__ ?? 'dev';
+console.log(`[build] ${VERSION}`);

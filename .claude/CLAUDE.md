@@ -22,7 +22,4 @@ ln -s /webcam-calibrator/dist /var/www/webcam-calibration.clodhost.com/public
 
 ## Versioning
 
-Increment the version number in `src/version.ts` on every change:
-```typescript
-export const VERSION = 'v{N}';
-```
+Build hash is automatic — injected by `src/plugins/buildHash.ts`. Check the `[build] <hash>` console log to verify which build is running.
