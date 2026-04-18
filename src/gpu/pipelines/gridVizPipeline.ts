@@ -117,8 +117,8 @@ export function createGridVizPipeline(
     // i = (floor(a) + min(fract(a)*N, 1) - floor(b) - min(fract(b)*N, 1)) / (N*w)
     const iv = (floor(a) + min(fract(a) * N, d.vec2f(1)) - floor(b) - min(fract(b) * N, d.vec2f(1))) / (N * wv);
 
-    // Returns 1 on grid lines, 0 in cell interiors
-    return d.f32(1.0) - (d.f32(1.0) - iv.x) * (d.f32(1.0) - iv.y);
+    // Returns 1 in cells, 0 on grid lines (original Shadertoy)
+    return (1 - iv.x) * (1 - iv.y);
   };
 
   const gridVizFrag = tgpu.fragmentFn({
@@ -142,31 +142,16 @@ export function createGridVizPipeline(
     const pc = abs(i.failureCode - d.f32(8.0)) < d.f32(0.5);
     const nc = abs(i.failureCode - d.f32(16.0)) < d.f32(0.5);
 
-    const failR = select(d.f32(0.0), d.f32(1.0), fc) + select(d.f32(0.0), d.f32(1.0), lc) + select(d.f32(0.0), d.f32(1.0), nc);
-    const failG = select(d.f32(0.0), d.f32(1.0), ec) + select(d.f32(0.0), d.f32(1.0), pc);
-    const failB = select(d.f32(0.0), d.f32(1.0), fc) + select(d.f32(0.0), d.f32(1.0), ec) + select(d.f32(0.0), d.f32(1.0), pc);
+    const r = select(d.f32(1.0), d.f32(0.0), fc) + select(d.f32(1.0), d.f32(0.0), lc) + select(d.f32(1.0), d.f32(0.0), nc);
+    const g = select(1, 0, ec) + select(1, 0, pc) + select(1, 0, lc);
+    const b = select(1, 0, fc) + select(1, 0, ec) + select(1, 0, pc);
 
-    const isKnownFailure = fc || ec || lc || pc || nc;
-
-    // Success: N-division grid, full opacity, blue
-    // Failure: single-cell outline (N=1), 0.2 fill + solid edge, color by code
     const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
     const cell = gridTextureGradBox(uv, ddx, ddy, 1);
 
-    // grid/cell return 1 on lines, 0 in cells
-    // For failures: fill 0.2 alpha inside cell, edge 1.0 alpha on lines
-    const fillMask = d.f32(1.0) - cell;
-    const edgeMask = cell;
-
-    const r = select(select(failR, d.f32(0.0), isKnownFailure), d.f32(0.0), isSuccess);
-    const g = select(select(failG, d.f32(0.0), isKnownFailure), d.f32(0.0), isSuccess);
-    const b = select(select(failB, d.f32(1.0), isKnownFailure), d.f32(1.0), isSuccess);
-
-    const alpha = select(
-      d.f32(0.2) * fillMask + edgeMask,
-      grid,
-      isSuccess,
-    );
+    // cell returns 1 in cells, 0 on lines
+    // failure: edge 1.0, fill 0.2 → alpha = 1.0 - 0.8*cell
+    const alpha = select(1 - 0.8 * cell, grid, isSuccess);
 
     return d.vec4f(r, g, b, alpha);
   });
