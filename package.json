@@ -5,7 +5,8 @@
   "scripts": {
     "ship:watch": "vite build --watch 2>&1 | tee /tmp/ship-watch.log",
     "typecheck:watch": "tsc --noEmit --watch 2>&1 | tee /tmp/tsc-watch.log",
-    "check": "bash scripts/check.sh"
+    "check": "tsx scripts/check.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@solidjs/web": "2.0.0-beta.6",
@@ -19,6 +20,7 @@
     "babel-preset-solid": "2.0.0-beta.6",
     "jsdom": "^29.0.2",
     "tsover": "npm:tsover@latest",
+    "tsx": "^4.19.4",
     "typescript": "npm:tsover@latest",
     "unplugin-typegpu": "^0.11.0",
     "vite": "^7.3.2",

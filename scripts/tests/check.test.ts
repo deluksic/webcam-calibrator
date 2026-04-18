@@ -1,14 +1,51 @@
 import { describe, it, expect } from 'vitest';
-import { parseTscLog, parseBuildLog } from '../check';
+import {
+  parseTscLog,
+  parseBuildLog,
+  sanitizeLine,
+  findLastFoundSummaryLineIndex,
+  parseFoundErrorCount,
+  checkResultsNeedFailureExit,
+} from '../check';
+
+describe('sanitizeLine', () => {
+  it('strips common ANSI SGR sequences', () => {
+    expect(sanitizeLine('\x1b[32mFound 0 errors\x1b[0m')).toBe('Found 0 errors');
+    expect(sanitizeLine('\x1b[1;31merror\x1b[m')).toBe('error');
+  });
+});
+
+describe('parseFoundErrorCount', () => {
+  it('parses plural and singular summaries', () => {
+    expect(parseFoundErrorCount('Found 0 errors. Watching for file changes.')).toBe(0);
+    expect(parseFoundErrorCount('Found 1 error. Watching for file changes.')).toBe(1);
+    expect(parseFoundErrorCount('Found 12 errors. Watching for file changes.')).toBe(12);
+  });
+
+  it('returns null for non-summary lines', () => {
+    expect(parseFoundErrorCount('src/a.ts(1,1): error TS2304: not found')).toBe(null);
+    expect(parseFoundErrorCount('Found configuration at ./tsconfig.json')).toBe(null);
+  });
+});
+
+describe('findLastFoundSummaryLineIndex', () => {
+  it('prefers the last Found summary in the buffer', () => {
+    const lines = [
+      'File change detected. Starting incremental compilation...',
+      'Found 0 errors. Watching for file changes.',
+      'more noise',
+      'Found 2 errors. Watching for file changes.',
+    ];
+    expect(findLastFoundSummaryLineIndex(lines)).toBe(3);
+  });
+});
 
 describe('parseTscLog', () => {
   it('should pass on Found 0 errors', async () => {
     const log = `Starting compilation in watch mode...
 src/app.ts:5:10: error TS2339: Property does not exist.
 Found 0 errors. Watching for file changes.`;
-    const result = await parseTscLog(log);
-    expect(result.status).toBe('pass');
-    expect(result.content).toContain('Found 0 errors');
+    expect(await parseTscLog(log)).toEqual({ status: 'pass' });
   });
 
   it('should fail on Found X errors', async () => {
@@ -17,11 +54,22 @@ src/app.ts:5:10: error TS2339: Property does not exist.
 Found 2 errors. Watching for file changes.`;
     const result = await parseTscLog(log);
     expect(result.status).toBe('fail');
-    expect(result.content).toContain('Found 2 errors');
-    expect(result.content).toContain('Watching for file changes');
+    if (result.status === 'fail') {
+      expect(result.content).toContain('Found 2 errors');
+      expect(result.content).toContain('Watching for file changes');
+    }
   });
 
-  it('should capture second compilation cycle', async () => {
+  it('uses the latest Found summary after a new incremental cycle', async () => {
+    const log = `Starting compilation in watch mode...
+Found 2 errors. Watching for file changes.
+File change detected. Starting incremental compilation...
+src/app.ts:1:1: error TS1000: fixme
+Found 0 errors. Watching for file changes.`;
+    expect(await parseTscLog(log)).toEqual({ status: 'pass' });
+  });
+
+  it('should capture second compilation cycle failure', async () => {
     const log = `Starting compilation in watch mode...
 src/app.ts:5:10: error TS2339: Property does not exist.
 Found 2 errors. Watching for file changes.
@@ -30,13 +78,22 @@ src/app.ts:7:10: error TS2339: Another error.
 Found 1 error. Watching for file changes.`;
     const result = await parseTscLog(log);
     expect(result.status).toBe('fail');
-    expect(result.content).toContain('Found 1 error');
+    if (result.status === 'fail') {
+      expect(result.content).toContain('Found 1 error');
+    }
   });
 
   it('should return building status without Found line', async () => {
     const log = `Starting compilation in watch mode...`;
     const result = await parseTscLog(log);
     expect(result.status).toBe('building');
+    if (result.status === 'building') {
+      expect(result.content.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('returns stopped when no tsc start marker', async () => {
+    expect(await parseTscLog('random noise\nno compilation here\n')).toEqual({ status: 'stopped' });
   });
 });
 
@@ -47,9 +104,22 @@ watching for file changes...
 build started...
 [tsover] Type checking warnings:
 ✓ 191 modules transformed.`;
-    const result = await parseBuildLog(log);
-    expect(result.status).toBe('pass');
-    expect(result.content).toContain('191 modules transformed');
+    expect(await parseBuildLog(log)).toEqual({ status: 'pass' });
+  });
+
+  it('should pass when success markers are far from end of log', async () => {
+    const filler = Array.from({ length: 25 }, (_, i) => `line ${i} after transform`).join('\n');
+    const log = `watching for file changes...
+build started...
+transforming...
+✓ 190 modules transformed.
+${filler}
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.50 kB
+dist/assets/index-abc123.js     100.00 kB
+✓ built in 2.02s`;
+    expect(await parseBuildLog(log)).toEqual({ status: 'pass' });
   });
 
   it('should capture second build cycle', async () => {
@@ -60,17 +130,92 @@ build started...
 build started...
 [tsover] warnings:
 ✓ 195 modules transformed.`;
-    const result = await parseBuildLog(log);
-    expect(result.status).toBe('pass');
-    expect(result.content).toContain('195 modules transformed');
+    expect(await parseBuildLog(log)).toEqual({ status: 'pass' });
   });
 
-  it('should fail on build errors', async () => {
+  it('should pass on built in only (no modules transformed line)', async () => {
+    const log = `watching for file changes...
+build started...
+rendering chunks...
+✓ built in 0.42s`;
+    expect(await parseBuildLog(log)).toEqual({ status: 'pass' });
+  });
+
+  it('should fail on error: prefix', async () => {
     const log = `vite v7.3.2 building client environment for production...
 watching for file changes...
 build started...
 error: something went wrong`;
     const result = await parseBuildLog(log);
     expect(result.status).toBe('fail');
+    if (result.status === 'fail') {
+      expect(result.content).toContain('something went wrong');
+    }
+  });
+
+  it('should fail on error during build', async () => {
+    const log = `build started...
+transforming...
+error during build:
+Could not resolve "./missing"`;
+    const result = await parseBuildLog(log);
+    expect(result.status).toBe('fail');
+  });
+
+  it('should fail on Rollup failed', async () => {
+    const log = `build started...
+Rollup failed to resolve import`;
+    expect((await parseBuildLog(log)).status).toBe('fail');
+  });
+
+  it('should fail on error TS in log', async () => {
+    const log = `build started...
+src/foo.ts(1,1): error TS2304: Cannot find name 'x'.`;
+    expect((await parseBuildLog(log)).status).toBe('fail');
+  });
+
+  it('should not false-fail on path containing /error/', async () => {
+    const log = `build started...
+✓ 10 modules transformed.
+(!) /Users/me/proj/src/error/utils.ts is dynamically imported
+rendering chunks...
+✓ built in 1.00s`;
+    expect(await parseBuildLog(log)).toEqual({ status: 'pass' });
+  });
+
+  it('returns stopped without build started', async () => {
+    expect(await parseBuildLog('vite v7 watching\n')).toEqual({ status: 'stopped' });
+  });
+
+  it('returns building when run has started but no completion yet', async () => {
+    const log = `watching for file changes...
+build started...
+transforming...`;
+    const result = await parseBuildLog(log);
+    expect(result.status).toBe('building');
+    if (result.status === 'building') {
+      expect(result.content).toContain('transforming');
+    }
+  });
+});
+
+describe('checkResultsNeedFailureExit', () => {
+  it('is true when either watcher failed', () => {
+    expect(
+      checkResultsNeedFailureExit({ status: 'fail', content: 'x' }, { status: 'pass' }),
+    ).toBe(true);
+    expect(
+      checkResultsNeedFailureExit({ status: 'pass' }, { status: 'fail', content: 'y' }),
+    ).toBe(true);
+  });
+
+  it('is false when both pass or non-fail', () => {
+    expect(checkResultsNeedFailureExit({ status: 'pass' }, { status: 'pass' })).toBe(false);
+    expect(
+      checkResultsNeedFailureExit({ status: 'building', content: '' }, { status: 'pass' }),
+    ).toBe(false);
+    expect(checkResultsNeedFailureExit({ status: 'stopped' }, { status: 'stopped' })).toBe(
+      false,
+    );
   });
 });

@@ -3,6 +3,7 @@ dist/
 
 # Dependencies
 node_modules/
+.pnpm-store/
 
 # OS
 .DS_Store
