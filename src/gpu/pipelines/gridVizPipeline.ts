@@ -107,25 +107,24 @@ export function createGridVizPipeline(
     const ddx = dpdx(uv);
     const ddy = dpdy(uv);
 
-    const isSuccess = failureCode === 0;
+    if (failureCode === 0) {
+      const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
+      return d.vec4f(d.f32(0.0), d.f32(1.0), d.f32(0.0), grid);
+    }
 
     const code = failureCode;
-    const fc = (code & 1) > 0;
-    const ec = (code & 2) > 0;
-    const lc = (code & 4) > 0;
-    const pc = (code & 8) > 0;
-    const nc = (code & 16) > 0;
+    const fc = d.f32((code & 1) > 0);
+    const ec = d.f32((code & 2) > 0);
+    const lc = d.f32((code & 4) > 0);
+    const pc = d.f32((code & 8) > 0);
+    const nc = d.f32((code & 16) > 0);
 
-    const r = select(1, 0, fc) + select(1, 0, lc) + select(1, 0, nc);
-    const g = select(1, 0, ec) + select(1, 0, pc) + select(1, 0, lc);
-    const b = select(1, 0, fc) + select(1, 0, ec) + select(1, 0, pc);
+    const failR = fc + lc + nc;
+    const failG = ec + pc + lc;
+    const failB = fc + ec + pc;
 
-    const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
     const cell = gridTextureGradBox(uv, ddx, ddy, 1);
-
-    const alpha = 1 - 0.8 * cell;
-
-    return d.vec4f(r, g, b, alpha);
+    return d.vec4f(failR, failG, failB, d.f32(0.2) + d.f32(0.8) * cell);
   });
 
   return root.createRenderPipeline({

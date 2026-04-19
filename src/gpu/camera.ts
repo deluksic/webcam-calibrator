@@ -793,7 +793,8 @@ export function updateQuadCornersBuffer(
 
     if (i === 0) {
       log(`[grid] first quad corners: ${quad.corners.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}`);
-      log(`[grid] first quad cornerDebug:`, debug);
+      const failCode = debug ? debug.failureCode : 0;
+      log(`[grid] first quad cornerDebug failureCode: ${failCode}`);
     }
 
     data.push({
@@ -864,7 +865,7 @@ export async function detectContours(
 
     return { quads, extentData, dilatedGradients: dilatedCopy, labelData: labelDataCopy };
   } catch (e) {
-    console.error('[detectContours] Error:', e, e?.stack);
+    console.error('[detectContours] Error:', e, (e as any).stack);
     throw e;
   }
 }
