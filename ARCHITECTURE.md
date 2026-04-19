@@ -2,7 +2,7 @@
 
 ## Overview
 
-The webcam calibrator uses WebGPU compute shaders to perform camera calibration via AprilTag detection. The pipeline runs entirely on the GPU except for minimal CPU readbacks used for debug visualization and grid rendering.
+The webcam calibrator uses WebGPU compute shaders to perform camera calibration via AprilTag detection.
 
 ## Coordinate Spaces
 

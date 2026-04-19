@@ -17,6 +17,8 @@ export interface DetectedQuad {
   pattern: TagPattern | null;
   hasCorners: boolean; // true if detected via corner finding, false if fallback bbox
   cornerDebug: CornerDebugInfo | null; // debug info from corner detection (null if fallback)
+  /** Test / viz: random or decoded id for GPU hash + HTML label (omit = unknown/black). */
+  vizTagId?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

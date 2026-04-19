@@ -1,6 +1,7 @@
 // Grid visualization pipeline: instanced quad rendering via homography warping
-import { tgpu, d, std } from 'typegpu';
-import { abs, floor, fract, min, max, dpdx, dpdy, select, mul } from 'typegpu/std';
+import { tgpu, d } from 'typegpu';
+import { abs, floor, fract, min, max, dpdx, dpdy, mul } from 'typegpu/std';
+import { stableHashToRgb01 } from '../../lib/hashStableColor';
 
 export const GRID_DIVISIONS = 8;
 export const GRID_LINE_WIDTH = 0.06;
@@ -16,9 +17,14 @@ const QuadDebug = d.struct({
 const QuadData = d.struct({
   homography: d.mat3x3f,
   debug: QuadDebug,
+  /** `0xFFFFFFFF` = unknown — solid black (no hash). Same convention as CPU. */
+  decodedTagId: d.u32,
 });
 
 export type QuadData = d.Infer<typeof QuadData>;
+
+/** Sentinel: no decoded id (GPU draws black, no hash). */
+export const DECODED_TAG_ID_UNKNOWN = 0xffff_ffff;
 
 export const GridDataSchema = d.arrayOf(QuadData, MAX_INSTANCES);
 
@@ -55,6 +61,7 @@ export function createGridVizPipeline(
       edgeCount: d.f32,
       minR2: d.f32,
       intersectionCount: d.f32,
+      decodedTagId: d.interpolate('flat', d.u32),
     },
   })(({ vertexIndex, instanceIndex }) => {
     const quad = gridVizLayout.$.quads[instanceIndex];
@@ -80,6 +87,7 @@ export function createGridVizPipeline(
       edgeCount: debug.edgePixelCount,
       minR2: debug.minR2,
       intersectionCount: debug.intersectionCount,
+      decodedTagId: quad.decodedTagId,
     };
   });
 
@@ -105,29 +113,38 @@ export function createGridVizPipeline(
   };
 
   const gridVizFrag = tgpu.fragmentFn({
-    in: { uv: d.vec2f, outPos: d.builtin.position, failureCode: d.interpolate('flat', d.u32) },
+    in: {
+      uv: d.vec2f,
+      outPos: d.builtin.position,
+      failureCode: d.interpolate('flat', d.u32),
+      decodedTagId: d.interpolate('flat', d.u32),
+    },
     out: d.vec4f,
-  })(({ uv, failureCode }) => {
+  })(({ uv, failureCode, decodedTagId }) => {
     const ddx = dpdx(uv);
     const ddy = dpdy(uv);
-    const mode = gridVizLayout.$.failInterrogate;
+    const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
+    const a = 0.2 + 0.75 * grid;
 
-    if (failureCode === d.u32(0)) {
-      const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
-      return d.vec4f(d.f32(0.0), d.f32(1.0), d.f32(0.0), grid);
+    if (failureCode === d.u32(0) && decodedTagId !== d.u32(0xffffffff)) {
+      const rgb = stableHashToRgb01(decodedTagId);
+      const fill = mul(rgb, d.vec3f(0.55, 0.55, 0.55));
+      return d.vec4f(fill, 0.28 + 0.72 * grid);
     }
 
-    const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
-    const a = d.f32(0.2) + d.f32(0.75) * grid;
-    const mask = 0b1000;
+    if (failureCode === d.u32(0)) {
+      return d.vec4f(0, 0, 0, grid);
+    }
+
+    const mask = d.u32(8);
     if ((failureCode & mask) !== d.u32(0)) {
       if ((failureCode ^ mask) === d.u32(0)) {
         return d.vec4f(d.f32(1), d.f32(0), d.f32(0), a);
       }
-      return d.vec4f(d.f32(0), d.f32(0.25), d.f32(1), a);
+      return d.vec4f(0, 0.25, 1, a);
     }
 
-    return d.vec4f(d.f32(0), d.f32(0), d.f32(0), a);
+    return d.vec4f(0, 0, 0, a);
   });
 
   return root.createRenderPipeline({

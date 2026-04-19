@@ -1,18 +1,8 @@
-// Debug visualization pipeline: label buffer → stable pseudo-random color per component
 import { tgpu, d } from 'typegpu';
 import { common } from 'typegpu';
 import { clamp, floor } from 'typegpu/std';
 import { COMPONENT_LABEL_INVALID } from '../contour';
-
-/** 32→32 mix (Murmur3 finalizer style); same label → same color. */
-function hashU32(x: ReturnType<typeof d.u32>) {
-  'use gpu';
-  const h0 = x ^ (x >> d.u32(16));
-  const h1 = h0 * d.u32(0x7feb352d);
-  const h2 = h1 ^ (h1 >> d.u32(15));
-  const h3 = h2 * d.u32(0x846ca68b);
-  return h3 ^ (h3 >> d.u32(16));
-}
+import { stableHashToRgb01 } from '../../lib/hashStableColor';
 
 export function createLabelVizPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -45,11 +35,8 @@ export function createLabelVizPipeline(
       return d.vec4f(d.f32(0.12), d.f32(0.12), d.f32(0.14), d.f32(1));
     }
 
-    const h = hashU32(label);
-    const r = d.f32(h & d.u32(255)) / d.f32(255);
-    const g = d.f32((h >> d.u32(8)) & d.u32(255)) / d.f32(255);
-    const b = d.f32((h >> d.u32(16)) & d.u32(255)) / d.f32(255);
-    return d.vec4f(r, g, b, d.f32(1));
+    const rgb = stableHashToRgb01(label);
+    return d.vec4f(rgb, 1);
   });
 
   return root.createRenderPipeline({

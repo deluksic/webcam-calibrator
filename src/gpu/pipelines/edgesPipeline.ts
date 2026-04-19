@@ -36,6 +36,7 @@ export function createEdgesPipeline(
     const gxn = std.select(g.x / gm, d.f32(0), gm <= eps);
     const gyn = std.select(g.y / gm, d.f32(0), gm <= eps);
 
+    // TODO: clean up this angle stuff, avoid if statements
     let angle = atan2(gyn, gxn) / d.f32(6.28318530718) + d.f32(0.5);
     if (angle < d.f32(0)) { angle = angle + d.f32(1); }
     if (angle >= d.f32(1)) { angle = angle - d.f32(1); }

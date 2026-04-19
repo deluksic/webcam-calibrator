@@ -41,6 +41,7 @@ import { createCompactLabelLayouts, createCanonicalResetPipeline, createCanonica
 import {
   createGridVizPipeline,
   createGridVizLayouts,
+  DECODED_TAG_ID_UNKNOWN,
   GridDataSchema,
   QuadData,
   MAX_INSTANCES,
@@ -803,6 +804,10 @@ export function updateQuadCornersBuffer(
     const quad = filtered[i];
     const H = computeHomography(quad.corners);
     const debug = quad.cornerDebug;
+    const tagId =
+      quad.vizTagId !== undefined && quad.vizTagId !== null
+        ? quad.vizTagId >>> 0
+        : DECODED_TAG_ID_UNKNOWN;
 
     data.push({
       homography: d.mat3x3f(
@@ -817,6 +822,7 @@ export function updateQuadCornersBuffer(
         minR2: debug ? debug.minR2 : 0,
         intersectionCount: debug ? debug.intersectionCount : 0,
       },
+      decodedTagId: d.u32(tagId),
     });
   }
 
@@ -830,11 +836,10 @@ export function updateQuadCornersBuffer(
         minR2: 0,
         intersectionCount: 0,
       },
+      decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
     });
   }
 
-  log(`quads:${count}`);
-  console.log(`[grid] first quad debug:`, data[0]?.debug);
   pipeline.quadCornersBuffer.write(data);
 }
 

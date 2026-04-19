@@ -23,6 +23,7 @@ import {
   computeThreshold,
   THRESHOLD_PERCENTILE,
 } from "../gpu/pipelines/constants";
+import type { DetectedQuad } from "../gpu/contour";
 import styles from "./CalibrationView.module.css";
 
 function deviceScore(d: MediaDeviceInfo): number {
@@ -97,6 +98,39 @@ function QuadCandidateOverlay(props: {
   );
 }
 
+/** Random / decoded id labels on grid quads (same canvas scaling as bbox debug). */
+function TagIdGridOverlay(props: {
+  quads: DetectedQuad[];
+  sx: number;
+  sy: number;
+}) {
+  return (
+    <For each={props.quads}>
+      {(quad) => {
+        const c = () => quad().corners;
+        const cx = () => (c()[0]!.x + c()[1]!.x + c()[2]!.x + c()[3]!.x) / 4;
+        const cy = () => (c()[0]!.y + c()[1]!.y + c()[2]!.y + c()[3]!.y) / 4;
+        const id = () => quad().vizTagId;
+        const label = () => {
+          const id_ = id();
+          return id_ !== undefined && id_ !== null ? String(id_ >>> 0) : "?";
+        };
+        return (
+          <div
+            class={styles.tagIdOverlay}
+            style={{
+              "--tag-x": `${cx() * props.sx}px`,
+              "--tag-y": `${cy() * props.sy}px`,
+            }}
+          >
+            {label()}
+          </div>
+        );
+      }}
+    </For>
+  );
+}
+
 function CalibrationView() {
   const cameraVideo = document.createElement("video");
   cameraVideo.muted = true;
@@ -142,6 +176,9 @@ function CalibrationView() {
   const [logs, setLogs] = createSignal<string[]>([]);
   const [showGrid, setShowGrid] = createSignal(true);
   const [showFallbacks, setShowFallbacks] = createSignal(true);
+  const [gridOverlayQuads, setGridOverlayQuads] = createSignal<DetectedQuad[]>(
+    [],
+  );
 
   const log = (msg: string) => {
     Promise.resolve().then(() => {
@@ -339,7 +376,20 @@ function CalibrationView() {
             );
             validQuads.sort((a, b) => b.count - a.count);
             const top = validQuads.slice(0, MAX_DETECTED_TAGS);
-            updateQuadCornersBuffer(pip, top, sf);
+            const tagged = top.map((q) => {
+              const ok =
+                q.hasCorners &&
+                q.cornerDebug !== null &&
+                q.cornerDebug.failureCode === 0;
+              return {
+                ...q,
+                vizTagId: ok
+                  ? Math.floor(Math.random() * 0x7fffffff)
+                  : undefined,
+              };
+            });
+            setGridOverlayQuads(tagged.filter((q) => q.vizTagId !== undefined));
+            updateQuadCornersBuffer(pip, tagged, sf);
           })
           .catch((e) => {
             if (disposed) return;
@@ -476,6 +526,13 @@ function CalibrationView() {
                 bboxes={bboxes()}
                 fw={frameSize().w}
                 fh={frameSize().h}
+                sx={scaleX()}
+                sy={scaleY()}
+              />
+            </Show>
+            <Show when={displayMode() === "grid" && showGrid()}>
+              <TagIdGridOverlay
+                quads={gridOverlayQuads()}
                 sx={scaleX()}
                 sy={scaleY()}
               />
