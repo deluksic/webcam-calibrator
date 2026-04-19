@@ -791,6 +791,11 @@ export function updateQuadCornersBuffer(
     const H = computeHomography(quad.corners);
     const debug = quad.cornerDebug;
 
+    if (i === 0) {
+      log(`[grid] first quad corners: ${quad.corners.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}`);
+      log(`[grid] first quad cornerDebug:`, debug);
+    }
+
     data.push({
       homography: d.mat3x3f(H[0], H[1], H[2], H[3], H[4], H[5], H[6], H[7], 1),
       debug: {
@@ -816,7 +821,7 @@ export function updateQuadCornersBuffer(
   }
 
   log(`quads:${count}`);
-    console.warn(`quads stack:`, new Error().stack);
+  console.log(`[grid] first quad debug:`, data[0]?.debug);
   pipeline.quadCornersBuffer.write(data);
 }
 
