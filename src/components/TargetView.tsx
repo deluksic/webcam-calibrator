@@ -1,6 +1,7 @@
-import { createSignal, createMemo } from 'solid-js';
+import { For, createSignal, createMemo } from 'solid-js';
 import { TAG36H11_CODES, codeToPattern } from '../lib/tag36h11';
 import { selectRandomTags } from '../lib/april-tag-gen';
+import { gridVizFillRgbCss } from '../lib/hashStableColor';
 import styles from './TargetView.module.css';
 
 export default function TargetView() {
@@ -153,6 +154,27 @@ export default function TargetView() {
         >
           Randomize Tags
         </button>
+
+        <div class={styles.field}>
+          <span class={styles.label}>Expected IDs (same layout as target)</span>
+          <div
+            class={styles.legendList}
+            style={{
+              'grid-template-columns': `repeat(${cols()}, minmax(0, 1fr))`,
+            }}
+          >
+            <For each={tagPositions()}>
+              {(p) => (
+                <div
+                  class={styles.legendCell}
+                  style={{ 'background-color': gridVizFillRgbCss(p().tagId) }}
+                >
+                  {p().tagId}
+                </div>
+              )}
+            </For>
+          </div>
+        </div>
 
         <div class={styles.info}>
           <p>Print at 100% scale for accurate sizing.</p>

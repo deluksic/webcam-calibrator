@@ -79,6 +79,18 @@ Replace `classList` with array class (like clsx):
 <button class={[styles.btn, isActive() && styles.active]}>
 ```
 
+## `<For>`: item and index are accessors
+
+In Solid 2.0, the render callback receives **accessors** (zero-arg functions), not raw values. Always call them. The second argument (`index`) is optional—omit it if you do not need it.
+
+```tsx
+<For each={items()}>
+  {(item) => <span>{item().label}</span>}
+</For>
+```
+
+**Wrong:** `item.label` — stale / non-reactive.
+
 ## No /store Subpath
 
 Import directly from `solid-js`:
@@ -127,5 +139,6 @@ For loading UI while async memos resolve:
 3. No `classList` - use array class syntax
 4. No `/store` subpath for imports
 5. `isPending()` utility for async state
-6. `<Errored>` for error boundaries (replaces try/catch)
+6. `<Errored>` for error boundaries (replaces try/catch) when exported by your Solid build
 7. `flush()` to manually flush pending updates
+8. `<For>` / `<Index>` pass **accessors** for item (and index where applicable) — call `item()`, `index()`

@@ -439,7 +439,7 @@ function CalibrationView() {
   return (
     <div class={styles.root}>
       <div class={styles.feedRow}>
-        <div class={`${styles.feedPanel} ${styles.feedPanelMain}`}>
+        <div class={[styles.feedPanel, styles.feedPanelMain]}>
           <div class={styles.feedHeader}>
             <span class={styles.feedLabel}>
               Camera Feed — {frameSize().w}×{frameSize().h}
@@ -555,7 +555,7 @@ function CalibrationView() {
             </Show>
           </div>
         </div>
-        <div class={`${styles.feedPanel} ${styles.feedPanelSide}`}>
+        <div class={[styles.feedPanel, styles.feedPanelSide]}>
           <span class={styles.feedLabel}>Edge Detection</span>
           <canvas
             ref={setHistCanvasEl}
