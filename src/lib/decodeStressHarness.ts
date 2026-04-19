@@ -7,7 +7,7 @@ import { buildTagGrid, decodeTagPattern } from './grid';
 import {
   finiteDifferenceSobelFromIntensity,
   renderAprilTagIntensity,
-} from './aprilTagRaycast';
+} from '../test-utils/syntheticAprilTag';
 import {
   TAG36H11_CODES,
   codeToPattern,

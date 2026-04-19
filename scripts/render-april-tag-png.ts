@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 
-import { renderAprilTagIntensity } from '../src/lib/aprilTagRaycast.ts';
+import { renderAprilTagIntensity } from '../src/test-utils/syntheticAprilTag.ts';
 import { codeToPattern, TAG36H11_CODES } from '../src/lib/tag36h11.ts';
 import type { Point } from '../src/lib/geometry.ts';
 

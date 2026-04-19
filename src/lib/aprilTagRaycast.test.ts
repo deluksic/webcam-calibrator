@@ -1,14 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { applyHomography, computeHomography, type Point } from './geometry';
+import { imagePixelToUnitSquareUv, invertMat3RowMajor } from './aprilTagRaycast';
 import {
   finiteDifferenceSobelFromIntensity,
-  imagePixelToUnitSquareUv,
   intensityAtTagUv,
-  invertMat3RowMajor,
   renderAprilTagIntensity,
   renderAprilTagSobelFiniteDifference,
-  sampleIntensityBilinear,
-} from './aprilTagRaycast';
+} from '../test-utils/syntheticAprilTag';
 import { TAG36H11_CODES, codeToPattern, decodeTag36h11AnyRotation } from './tag36h11';
 import { buildTagGrid, decodeTagPattern } from './grid';
 
@@ -114,7 +112,7 @@ describe('aprilTagRaycast', () => {
     expect(Math.abs(s[o])).toBeGreaterThan(0.2);
   });
 
-  it('buildTagGrid cell centers: UV indices match row/col; raster matches tag law (bilinear)', () => {
+  it('buildTagGrid cell centers: UV indices match row/col; raster matches tag law (nearest pixel)', () => {
     const tagId = 7;
     const pattern = codeToPattern(TAG36H11_CODES[tagId]);
     const size = 360;
@@ -139,7 +137,9 @@ describe('aprilTagRaycast', () => {
       expect(col).toBe(cell.col);
 
       const analytical = intensityAtTagUv(u, v, pattern);
-      const pix = sampleIntensityBilinear(intensity, w, h, cell.center.x, cell.center.y);
+      const xi = Math.max(0, Math.min(w - 1, Math.round(cell.center.x)));
+      const yi = Math.max(0, Math.min(h - 1, Math.round(cell.center.y)));
+      const pix = intensity[yi * w + xi];
       expect(pix).toBeCloseTo(analytical, 4);
     }
   });

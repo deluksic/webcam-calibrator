@@ -5,6 +5,8 @@ import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from '../lib/corn
 import { Point } from '../lib/geometry';
 import { decodeTag36h11AnyRotation, type TagPattern } from '../lib/tag36h11';
 
+const { min, max, floor } = Math;
+
 export const COMPONENT_LABEL_INVALID = 0xFFFFFFFF;
 
 export interface DetectedQuad {
@@ -75,10 +77,10 @@ export function extractRegions(
 
       const region = regions.get(label)!;
       region.count++;
-      region.minX = Math.min(region.minX, x);
-      region.minY = Math.min(region.minY, y);
-      region.maxX = Math.max(region.maxX, x);
-      region.maxY = Math.max(region.maxY, y);
+      region.minX = min(region.minX, x);
+      region.minY = min(region.minY, y);
+      region.maxX = max(region.maxX, x);
+      region.maxY = max(region.maxY, y);
 
       if (region.pixels.length < 500) {
         region.pixels.push([x, y]);
@@ -130,7 +132,7 @@ export function validateAndFilterQuads(
   maxArea: number = 200000,
 ): DetectedQuad[] {
   const quads: DetectedQuad[] = [];
-  const imageHeight = Math.floor(labelData.length / width);
+  const imageHeight = floor(labelData.length / width);
 
   for (const region of regions) {
     const w = region.maxX - region.minX;
