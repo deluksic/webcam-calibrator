@@ -539,8 +539,7 @@ export function findCornersFromEdgesWithDebug(
   // Step 6: Plausibility checks
   if (!plausibilityCheck([tl, tr, br, bl], lines.filter((l) => l !== null) as LineFit[], assignments, pixels, minX, minY, maxX, maxY, minR2)) {
     failureCode |= FAIL_PLAUSIBILITY;
-    // Return original corners (either detected or fallback box) instead of rejecting
-    return { corners, debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
+    return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
   }
 
   return { corners: [tl, tr, bl, br], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };

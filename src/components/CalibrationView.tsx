@@ -1,31 +1,38 @@
-import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js';
-import { initGPU } from '../gpu/init';
+import {
+  For,
+  Show,
+  createMemo,
+  createRenderEffect,
+  createSignal,
+  onCleanup,
+} from "solid-js";
+import { initGPU } from "../gpu/init";
 import {
   createCameraPipeline,
   processFrame,
   readExtentBuffer,
-  readExtentDataForQuads,
   updateQuadCornersBuffer,
   detectContours,
   type CameraPipeline,
   type DisplayMode,
   type ExtentRow,
   MAX_U32,
-  MAX_COMPONENTS,
   MAX_DETECTED_TAGS,
-} from '../gpu/camera';
-import { type DetectedQuad } from '../gpu/contour';
-import { computeThreshold, THRESHOLD_PERCENTILE } from '../gpu/pipelines/constants';
-import styles from './CalibrationView.module.css';
+} from "../gpu/camera";
+import {
+  computeThreshold,
+  THRESHOLD_PERCENTILE,
+} from "../gpu/pipelines/constants";
+import styles from "./CalibrationView.module.css";
 
 function deviceScore(d: MediaDeviceInfo): number {
   const label = d.label.toLowerCase();
   let score = 0;
-  if (label.includes('back') || label.includes('rear')) score += 100;
-  if (label.includes('wide')) score += 50;
-  if (label.includes('ultra')) score += 30;
-  if (label.includes('tele')) score -= 20;
-  if (label.includes('front') || label.includes('user')) score -= 100;
+  if (label.includes("back") || label.includes("rear")) score += 100;
+  if (label.includes("wide")) score += 50;
+  if (label.includes("ultra")) score += 30;
+  if (label.includes("tele")) score -= 20;
+  if (label.includes("front") || label.includes("user")) score -= 100;
   return score;
 }
 
@@ -36,12 +43,18 @@ async function enumerateVideoInputs(): Promise<MediaDeviceInfo[]> {
     // Labels may be empty without permission; enumeration still works.
   }
   const all = await navigator.mediaDevices.enumerateDevices();
-  return all.filter((d) => d.kind === 'videoinput');
+  return all.filter((d) => d.kind === "videoinput");
 }
 
 type GpuRoot = Awaited<ReturnType<typeof initGPU>>;
 
-interface Bbox { minX: number; minY: number; maxX: number; maxY: number; area: number }
+interface Bbox {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  area: number;
+}
 
 function QuadCandidateOverlay(props: {
   bboxes: Bbox[];
@@ -73,10 +86,10 @@ function QuadCandidateOverlay(props: {
         <div
           class={styles.bbox}
           style={{
-            '--bbox-x': `${box().minX * props.sx}px`,
-            '--bbox-y': `${box().minY * props.sy}px`,
-            '--bbox-w': `${(box().maxX - box().minX) * props.sx}px`,
-            '--bbox-h': `${(box().maxY - box().minY) * props.sy}px`,
+            "--bbox-x": `${box().minX * props.sx}px`,
+            "--bbox-y": `${box().minY * props.sy}px`,
+            "--bbox-w": `${(box().maxX - box().minX) * props.sx}px`,
+            "--bbox-h": `${(box().maxY - box().minY) * props.sy}px`,
           }}
         />
       )}
@@ -85,7 +98,7 @@ function QuadCandidateOverlay(props: {
 }
 
 function CalibrationView() {
-  const cameraVideo = document.createElement('video');
+  const cameraVideo = document.createElement("video");
   cameraVideo.muted = true;
   cameraVideo.playsInline = true;
 
@@ -99,34 +112,45 @@ function CalibrationView() {
   const [renderedW, setRenderedW] = createSignal(1280);
   const [renderedH, setRenderedH] = createSignal(720);
 
-  const scaleX = createMemo(() => canvasEl() ? renderedW() / frameSize().w : 1);
-  const scaleY = createMemo(() => canvasEl() ? renderedH() / frameSize().h : 1);
+  const scaleX = createMemo(() =>
+    canvasEl() ? renderedW() / frameSize().w : 1,
+  );
+  const scaleY = createMemo(() =>
+    canvasEl() ? renderedH() / frameSize().h : 1,
+  );
 
-  const canvasRefCallback = (el: HTMLCanvasElement | undefined) => {
-    setCanvasEl(el);
-    if (el) {
-      setRenderedW(el.clientWidth || 1280);
-      setRenderedH(el.clientHeight || 720);
+  createRenderEffect(
+    () => ({ canvas: canvasEl() }),
+    ({ canvas }) => {
+      if (!canvas) {
+        return;
+      }
       const ro = new ResizeObserver((entries) => {
         for (const entry of entries) {
           setRenderedW(entry.contentRect.width);
           setRenderedH(entry.contentRect.height);
         }
       });
-      ro.observe(el);
-      onCleanup(() => ro.disconnect());
-    }
-  };
+      ro.observe(canvas);
+      return () => ro.disconnect();
+    },
+  );
 
   const [threshold, setThreshold] = createSignal(0);
-  const [displayMode, setDisplayMode] = createSignal<DisplayMode>('debug');
+  const [displayMode, setDisplayMode] = createSignal<DisplayMode>("debug");
   const [bboxes, setBboxes] = createSignal<Bbox[]>([]);
   const [logs, setLogs] = createSignal<string[]>([]);
   const [showGrid, setShowGrid] = createSignal(true);
   const [showFallbacks, setShowFallbacks] = createSignal(false);
 
   const log = (msg: string) => {
-    setLogs(prev => [...prev.slice(-8), `${new Date().toISOString().slice(11, 19)} ${msg}`]);
+    Promise.resolve().then(() => {
+      setLogs((prev) => [
+        ...prev.slice(-8),
+        `${new Date().toISOString().slice(11, 19)} ${msg}`,
+      ]);
+      console.log(msg);
+    });
   };
 
   const availableCameraDevices = createMemo(async () => {
@@ -137,7 +161,8 @@ function CalibrationView() {
   const [selectedCameraId, setSelectedCameraId] = createSignal(
     (prev: string | undefined) => {
       const cams = availableCameraDevices();
-      if (prev !== undefined && cams.some((d) => d.deviceId === prev)) return prev;
+      if (prev !== undefined && cams.some((d) => d.deviceId === prev))
+        return prev;
       return cams[0]?.deviceId;
     },
     undefined,
@@ -150,11 +175,11 @@ function CalibrationView() {
     return list.find((d) => d.deviceId === id) ?? null;
   });
 
-  const gpu = createMemo<GpuRoot | undefined>(async (_prev) => {
+  const gpu = createMemo<GpuRoot | undefined>(async () => {
     try {
-      log('GPU init...');
+      log("GPU init...");
       const g = await initGPU();
-      log('GPU ready');
+      log("GPU ready");
       return g;
     } catch (e) {
       log(`GPU init failed: ${e}`);
@@ -162,27 +187,25 @@ function CalibrationView() {
     }
   });
 
-  const mediaStream = createMemo<MediaStream | undefined>(async (prev) => {
-    prev?.getTracks().forEach((t) => t.stop());
+  const mediaStream = createMemo<MediaStream | undefined>(async () => {
+    const device = selectedCameraDevice();
+    if (!device) return undefined;
 
     let active: MediaStream | undefined = undefined;
     let disposed = false;
     onCleanup(() => {
-        disposed = true;
+      disposed = true;
       active?.getTracks().forEach((t) => t.stop());
       active = undefined;
     });
-
-    const device = selectedCameraDevice();
-    if (disposed || !device) return undefined;
 
     const base = { deviceId: { exact: device.deviceId } as const };
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           ...base,
-          width: { min: 640, ideal: 1280 },
-          height: { min: 480, ideal: 720 },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
         },
         audio: false,
       });
@@ -191,32 +214,12 @@ function CalibrationView() {
         return undefined;
       }
       active = stream;
-      log('Stream opened');
+      log("Stream opened");
       return stream;
     } catch (e) {
       if (disposed) return undefined;
-      log('getUserMedia HD failed, retrying...');
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            ...base,
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        });
-        if (disposed) {
-          stream.getTracks().forEach((t) => t.stop());
-          return undefined;
-        }
-        active = stream;
-        log('Stream opened (fallback)');
-        return stream;
-      } catch (e2) {
-        log(`getUserMedia failed: ${e2}`);
-        return undefined;
-      }
+      log(`getUserMedia failed: ${e}`);
+      return undefined;
     }
   });
 
@@ -234,12 +237,14 @@ function CalibrationView() {
 
   const cameraPipeline = createMemo(
     async (_prev: CameraPipeline | undefined) => {
+      console.log("huhuhuh");
       const g = gpu();
+      console.log("reached");
       const canvas = canvasEl();
       const histCanvas = histCanvasEl();
       const stream = mediaStream();
       if (!g || !canvas || !histCanvas || !stream) {
-        log('Pipeline: missing deps');
+        log("Pipeline: missing deps");
         return undefined;
       }
       const video = cameraVideo;
@@ -255,7 +260,7 @@ function CalibrationView() {
         if (rafHandle) video.cancelVideoFrameCallback(rafHandle);
         video.pause();
         video.srcObject = null;
-        log('Pipeline cleanup');
+        log("Pipeline cleanup");
       });
 
       canvas.width = size.w;
@@ -263,7 +268,7 @@ function CalibrationView() {
       histCanvas.width = 512;
       histCanvas.height = 120;
 
-      log('Creating pipeline...');
+      log("Creating pipeline...");
       const pip = createCameraPipeline(
         g,
         canvas,
@@ -284,7 +289,7 @@ function CalibrationView() {
         });
       });
       if (disposed) return undefined;
-      log('First frame presented');
+      log("First frame presented");
 
       let extentReadPending = false;
       let quadDetectionPending = false;
@@ -292,23 +297,31 @@ function CalibrationView() {
       const scheduleExtentRead = () => {
         if (extentReadPending || disposed) return;
         extentReadPending = true;
-        readExtentBuffer(pip).then((extentData: ExtentRow[]) => {
-          if (disposed) return;
-          extentReadPending = false;
-          const boxes: Bbox[] = [];
-          for (const entry of extentData) {
-            if (entry.minX === MAX_U32) continue; // uninitialized
-            const w = entry.maxX - entry.minX;
-            const h = entry.maxY - entry.minY;
-            if (w <= 0 || h <= 0) continue;
-            boxes.push({ minX: entry.minX, minY: entry.minY, maxX: entry.maxX, maxY: entry.maxY, area: w * h });
-          }
-          boxes.sort((a, b) => b.area - a.area);
-          setBboxes(boxes.slice(0, 128));
-        }).catch((e) => {
-          if (disposed) return;
-          extentReadPending = false;
-        });
+        readExtentBuffer(pip)
+          .then((extentData: ExtentRow[]) => {
+            if (disposed) return;
+            extentReadPending = false;
+            const boxes: Bbox[] = [];
+            for (const entry of extentData) {
+              if (entry.minX === MAX_U32) continue; // uninitialized
+              const w = entry.maxX - entry.minX;
+              const h = entry.maxY - entry.minY;
+              if (w <= 0 || h <= 0) continue;
+              boxes.push({
+                minX: entry.minX,
+                minY: entry.minY,
+                maxX: entry.maxX,
+                maxY: entry.maxY,
+                area: w * h,
+              });
+            }
+            boxes.sort((a, b) => b.area - a.area);
+            setBboxes(boxes.slice(0, 128));
+          })
+          .catch((e) => {
+            if (disposed) return;
+            extentReadPending = false;
+          });
       };
 
       const scheduleQuadDetection = (sf: boolean) => {
@@ -316,19 +329,23 @@ function CalibrationView() {
         quadDetectionPending = true;
         const g = gpu();
         if (!g) return;
-        detectContours(g, pip).then((result) => {
-          if (disposed) return;
-          quadDetectionPending = false;
-          const { quads } = result;
-          const validQuads = quads.filter((q) => q != null && typeof q.count === 'number');
-          validQuads.sort((a, b) => b.count - a.count);
-          const top = validQuads.slice(0, MAX_DETECTED_TAGS);
-          updateQuadCornersBuffer(pip, top, sf);
-        }).catch((e) => {
-          if (disposed) return;
-          quadDetectionPending = false;
-          log(`detectContours error: ${e}`);
-        });
+        detectContours(g, pip)
+          .then((result) => {
+            if (disposed) return;
+            quadDetectionPending = false;
+            const { quads } = result;
+            const validQuads = quads.filter(
+              (q) => q != null && typeof q.count === "number",
+            );
+            validQuads.sort((a, b) => b.count - a.count);
+            const top = validQuads.slice(0, MAX_DETECTED_TAGS);
+            updateQuadCornersBuffer(pip, top, sf);
+          })
+          .catch((e) => {
+            if (disposed) return;
+            quadDetectionPending = false;
+            log(`detectContours error: ${e}`);
+          });
       };
 
       const loop = () => {
@@ -337,24 +354,23 @@ function CalibrationView() {
         if (!gpuNow) return;
         const dm = displayMode();
         processFrame(gpuNow, pip, cameraVideo, threshold(), dm, (_err) => {});
-        if (dm === 'debug') scheduleExtentRead();
-        if (dm === 'grid' && showGrid()) {
+        if (dm === "debug") scheduleExtentRead();
+        if (dm === "grid" && showGrid()) {
           scheduleQuadDetection(showFallbacks());
         }
         void pip.histogramBuffer.read().then((bins: Uint32Array | number[]) => {
           if (disposed) return;
-          const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins);
+          const data =
+            bins instanceof Uint32Array ? bins : new Uint32Array(bins);
           setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE));
         });
         rafHandle = cameraVideo.requestVideoFrameCallback(loop);
       };
       rafHandle = cameraVideo.requestVideoFrameCallback(loop);
-      log('rVFC loop started');
+      log("rVFC loop started");
 
       return pip;
     },
-    undefined as CameraPipeline | undefined,
-    { lazy: false },
   );
 
   return (
@@ -380,47 +396,55 @@ function CalibrationView() {
               <button
                 type="button"
                 class={
-                  displayMode() === 'grayscale'
+                  displayMode() === "grayscale"
                     ? styles.modeButtonActive
                     : styles.modeButton
                 }
-                onClick={() => setDisplayMode('grayscale')}
+                onClick={() => setDisplayMode("grayscale")}
               >
                 Gray
               </button>
               <button
                 type="button"
                 class={
-                  displayMode() === 'edges' ? styles.modeButtonActive : styles.modeButton
+                  displayMode() === "edges"
+                    ? styles.modeButtonActive
+                    : styles.modeButton
                 }
-                onClick={() => setDisplayMode('edges')}
+                onClick={() => setDisplayMode("edges")}
               >
                 Edges
               </button>
               <button
                 type="button"
                 class={
-                  displayMode() === 'nms' ? styles.modeButtonActive : styles.modeButton
+                  displayMode() === "nms"
+                    ? styles.modeButtonActive
+                    : styles.modeButton
                 }
-                onClick={() => setDisplayMode('nms')}
+                onClick={() => setDisplayMode("nms")}
               >
                 NMS
               </button>
               <button
                 type="button"
                 class={
-                  displayMode() === 'labels' ? styles.modeButtonActive : styles.modeButton
+                  displayMode() === "labels"
+                    ? styles.modeButtonActive
+                    : styles.modeButton
                 }
-                onClick={() => setDisplayMode('labels')}
+                onClick={() => setDisplayMode("labels")}
               >
                 Labels
               </button>
               <button
                 type="button"
                 class={
-                  displayMode() === 'grid' ? styles.modeButtonActive : styles.modeButton
+                  displayMode() === "grid"
+                    ? styles.modeButtonActive
+                    : styles.modeButton
                 }
-                onClick={() => setDisplayMode('grid')}
+                onClick={() => setDisplayMode("grid")}
               >
                 Grid
               </button>
@@ -435,17 +459,19 @@ function CalibrationView() {
               <button
                 type="button"
                 class={
-                  displayMode() === 'debug' ? styles.modeButtonActive : styles.modeButton
+                  displayMode() === "debug"
+                    ? styles.modeButtonActive
+                    : styles.modeButton
                 }
-                onClick={() => setDisplayMode('debug')}
+                onClick={() => setDisplayMode("debug")}
               >
                 Debug
               </button>
             </div>
           </div>
-          <div style={{ position: 'relative' }}>
-            <canvas ref={canvasRefCallback} class={styles.feedCanvas} />
-            <Show when={displayMode() === 'debug'}>
+          <div style={{ position: "relative" }}>
+            <canvas ref={setCanvasEl} class={styles.feedCanvas} />
+            <Show when={displayMode() === "debug"}>
               <QuadCandidateOverlay
                 bboxes={bboxes()}
                 fw={frameSize().w}
@@ -461,17 +487,27 @@ function CalibrationView() {
           <canvas
             ref={setHistCanvasEl}
             class={styles.histogramCanvas}
-            style={{ width: '512px', height: '120px' }}
+            style={{ width: "512px", height: "120px" }}
           />
           <div class={styles.histogramInfo}>
-            <span class={styles.thresholdLabel}>{(THRESHOLD_PERCENTILE * 100).toFixed(0)}th Percentile Threshold</span>
+            <span class={styles.thresholdLabel}>
+              {(THRESHOLD_PERCENTILE * 100).toFixed(0)}th Percentile Threshold
+            </span>
             <span class={styles.thresholdValue}>
-              {(threshold() * 255).toFixed(1)} / 255{' '}
+              {(threshold() * 255).toFixed(1)} / 255{" "}
               <span>({(threshold() * 100).toFixed(1)}%)</span>
             </span>
           </div>
-          <div style={{ font: '9px monospace', color: '#4f8', 'margin-top': '4px' }}>
-            {logs().map(l => <div>{l}</div>)}
+          <div
+            style={{
+              font: "9px monospace",
+              color: "#4f8",
+              "margin-top": "4px",
+            }}
+          >
+            {logs().map((l) => (
+              <div>{l}</div>
+            ))}
           </div>
         </div>
       </div>

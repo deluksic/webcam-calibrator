@@ -791,14 +791,13 @@ export function updateQuadCornersBuffer(
     const H = computeHomography(quad.corners);
     const debug = quad.cornerDebug;
 
-    if (i === 0) {
-      log(`[grid] first quad corners: ${quad.corners.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}`);
-      const failCode = debug ? debug.failureCode : 0;
-      log(`[grid] first quad cornerDebug failureCode: ${failCode}`);
-    }
-
     data.push({
-      homography: d.mat3x3f(H[0], H[1], H[2], H[3], H[4], H[5], H[6], H[7], 1),
+      homography: d.mat3x3f(
+        //transpose the matrix
+        H[0], H[3], H[6],
+        H[1], H[4], H[7],
+        H[2], H[5], 1,
+      ),
       debug: {
         failureCode: debug ? debug.failureCode : 0,
         edgePixelCount: debug ? debug.edgePixelCount / 100 : 0,
@@ -865,7 +864,7 @@ export async function detectContours(
 
     return { quads, extentData, dilatedGradients: dilatedCopy, labelData: labelDataCopy };
   } catch (e) {
-    console.error('[detectContours] Error:', e, (e as any).stack);
+    console.error('[detectContours] Error:', e);
     throw e;
   }
 }

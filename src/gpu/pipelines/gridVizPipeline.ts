@@ -39,9 +39,6 @@ export function createGridVizPipeline(
   height: number,
   presentationFormat: GPUTextureFormat,
 ) {
-  const halfW = d.f32(width) * d.f32(0.5);
-  const halfH = d.f32(height) * d.f32(0.5);
-
   const gridVizVert = tgpu.vertexFn({
     in: {
       vertexIndex: d.builtin.vertexIndex,
@@ -60,17 +57,20 @@ export function createGridVizPipeline(
     const H = quad.homography;
     const debug = quad.debug;
 
-    const uv = [d.vec2f(0, 0), d.vec2f(1, 0), d.vec2f(0, 1), d.vec2f(1, 1)][vertexIndex];
-    const imgPos = mul(d.vec3f(uv, 1), H);
+    const uvs = [d.vec2f(0, 0), d.vec2f(1, 0), d.vec2f(0, 1), d.vec2f(1, 1)];
+    const uv = uvs[vertexIndex];
+    const imgPos = mul(H, d.vec3f(uv, 1));
     const imgX = imgPos.x;
     const imgY = imgPos.y;
     const w = imgPos.z;
 
-    const ndcX = imgX / halfW - d.f32(1.0);
-    const ndcY = d.f32(1.0) - imgY / halfH;
+    // imgPos is homogeneous (x', y', w'); Cartesian image coords are x'/w', y'/w'.
+    // Emit clip so that clip.xy / w = NDC with origin at image center, y flipped.
+    const clipX = 2 * imgX / width - w;
+    const clipY = w - 2 * imgY / height;
 
     return {
-      outPos: d.vec4f(ndcX * w, ndcY * w, 0, w),
+      outPos: d.vec4f(clipX, clipY, 0, w),
       uv,
       failureCode: debug.failureCode,
       edgeCount: debug.edgePixelCount,
