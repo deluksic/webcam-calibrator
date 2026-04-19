@@ -19,7 +19,8 @@ const BIT_Y = [
   1, 1, 1, 1, 1, 2, 2, 2, 3, 1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4,
 ] as const;
 
-export type TagPattern = (0 | 1 | -1)[];
+/** `-1` = no / weak directional signal; `-2` = enough votes but pos/neg tie (ambiguous). */
+export type TagPattern = (0 | 1 | -1 | -2)[];
 
 /**
  * Decode a 36-bit tag36h11 code into a 6×6 binary grid (0/1 values).
@@ -77,33 +78,37 @@ export function patternToCode(pattern: TagPattern): bigint {
   return code;
 }
 
+export interface DictionaryMatch {
+  id: number;
+  /** Hamming distance on known bits; `maxError + 1` if no codeword within `maxError`. */
+  dist: number;
+}
+
 /**
- * Match detected pattern against tag36h11 dictionary.
- * Returns tag ID if found within error threshold, or -1 if no match.
- *
- * @param pattern 6×6 binary pattern (36 bits)
- * @param maxError Maximum Hamming distance to consider a match
- * @returns Tag family ID (0–586) or -1
+ * Best tag36h11 codeword for this pattern (known bits only).
+ * @returns `id === -1` when no tag has `dist <= maxError`.
  */
-export function decodeTag36h11(
+export function decodeTag36h11Best(
   pattern: TagPattern | null,
   maxError: number = 5,
-): number {
-  if (!pattern || pattern.length !== 36) return -1;
+): DictionaryMatch {
+  if (!pattern || pattern.length !== 36) {
+    return { id: -1, dist: maxError + 1 };
+  }
 
-  const unknownCount = pattern.filter(v => v === -1).length;
-  if (unknownCount > maxError * 2) return -1; // Too many unknown cells
+  const unknownCount = pattern.filter((v) => v === -1 || v === -2).length;
+  if (unknownCount > maxError * 2) {
+    return { id: -1, dist: maxError + 1 };
+  }
 
-  // Build 36-bit code from pattern, tracking which bits are known
   let code = 0n;
   let knownMask = 0n;
   for (let bit = 0; bit < 36; bit++) {
     const x = BIT_X[bit];
     const y = BIT_Y[bit];
-    // Map to 6×6 pattern position
     const pRow = y - 1;
     const pCol = x - 1;
-    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) continue; // border cell
+    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) continue;
     const pIdx = pRow * 6 + pCol;
     const val = pattern[pIdx];
     if (val === 1) {
@@ -112,16 +117,13 @@ export function decodeTag36h11(
     } else if (val === 0) {
       knownMask |= (1n << BigInt(35 - bit));
     }
-    // val === -1 → unknown, skip
   }
 
-  // Find best match in dictionary
   let bestId = -1;
   let bestDist = maxError + 1;
 
   for (let id = 0; id < TAG36H11_COUNT; id++) {
     const dictCode = TAG36H11_CODES[id];
-    // Hamming distance considering only known bits
     const diff = (code ^ dictCode) & knownMask;
     const dist = popcount64(diff);
 
@@ -132,7 +134,19 @@ export function decodeTag36h11(
     }
   }
 
-  return bestId;
+  if (bestDist > maxError) return { id: -1, dist: bestDist };
+  return { id: bestId, dist: bestDist };
+}
+
+/**
+ * Match detected pattern against tag36h11 dictionary.
+ * Returns tag ID if found within error threshold, or -1 if no match.
+ */
+export function decodeTag36h11(
+  pattern: TagPattern | null,
+  maxError: number = 5,
+): number {
+  return decodeTag36h11Best(pattern, maxError).id;
 }
 
 /**
@@ -153,7 +167,8 @@ export function rotatePattern(pattern: TagPattern): TagPattern {
 }
 
 /**
- * Decode tag with all 4 rotations, return best match.
+ * Decode tag across four 90° CW rotations — picks the rotation with **lowest Hamming** `dist`
+ * (then lowest `id` on ties) among rotations with `dist <= maxError`.
  */
 export function decodeTag36h11AnyRotation(
   pattern: TagPattern | null,
@@ -161,14 +176,21 @@ export function decodeTag36h11AnyRotation(
 ): { id: number; rotation: number } | null {
   if (!pattern) return null;
 
+  let best: { id: number; rotation: number; dist: number } | null = null;
   let currentPattern = [...pattern];
   for (let r = 0; r < 4; r++) {
-    const id = decodeTag36h11(currentPattern, maxError);
+    const { id, dist } = decodeTag36h11Best(currentPattern, maxError);
     if (id !== -1) {
-      return { id, rotation: r };
+      if (
+        !best ||
+        dist < best.dist ||
+        (dist === best.dist && id < best.id)
+      ) {
+        best = { id, rotation: r, dist };
+      }
     }
     currentPattern = rotatePattern(currentPattern);
   }
 
-  return null;
+  return best ? { id: best.id, rotation: best.rotation } : null;
 }

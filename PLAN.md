@@ -28,7 +28,7 @@ DetectedQuads (CPU) → computeHomography() → quadCornersBuffer (GPU)
 - [x] Homography-based perspective warp
 - [x] Fallback quads with visual distinction (red outline, 50% opacity)
 - [x] Fallbk checkbox: show bbox quads and corner quads **without** dictionary decode; off = decoded-only grid
-- [x] CPU AprilTag grid + dictionary decode wired from filtered Sobel (see **`ARCHITECTURE.md` → AprilTag grid + decode**); overlay **`?`** when no match
+- [x] CPU AprilTag grid + dictionary decode wired from NMS-filtered Sobel readback (unweighted **τ**-voting; see **`ARCHITECTURE.md` → AprilTag grid + decode**); overlay **`?`** when no match
 
 Full roadmap and phase checkboxes: **`docs/plan.md`**. Product-wide architecture (GPU stages, corner order, buffers): **`ARCHITECTURE.md`**.
 

@@ -7,6 +7,10 @@
     "typecheck:watch": "tsc --noEmit --watch 2>&1 | tee /tmp/tsc-watch.log",
     "check": "tsx scripts/check.ts",
     "render:april-tag": "tsx scripts/render-april-tag-png.ts",
+    "test:decode-stress-png": "WRITE_DECODE_STRESS_PNGS=1 vitest run src/lib/decodeStress.test.ts",
+    "test:decode-stress-homography-3px-png": "WRITE_DECODE_STRESS_HOMOGRAPHY_DIAG_PNGS=1 vitest run src/lib/decodeStress.test.ts -t \"3px max-axis\"",
+    "find:decode-stress-speckle": "tsx scripts/find-decode-stress-speckle-limit.ts",
+    "find:decode-stress-homography": "tsx scripts/find-decode-stress-homography-limit.ts",
     "test": "vitest run"
   },
   "dependencies": {

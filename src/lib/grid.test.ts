@@ -3,9 +3,11 @@ import {
   buildDecodeEdgeMask,
   buildTagGrid,
   decodeCell,
+  fillUnknownNeighbors6,
   type CellSobelSample,
   type GridCell,
 } from './grid';
+import type { TagPattern } from './tag36h11';
 import { Point } from './geometry';
 
 describe('grid', () => {
@@ -116,6 +118,35 @@ describe('grid', () => {
         }),
       );
       expect(decodeCell(axisCell, samples)).toBe(0);
+    });
+
+    it('returns -2 when pos/neg tie with enough votes', () => {
+      const samples: CellSobelSample[] = [
+        ...Array.from({ length: 5 }, (_, i) =>
+          base({ mag: 1, gx: 1, gy: 0, u: 0.65 + i * 0.02, v: 0.5 }),
+        ),
+        ...Array.from({ length: 5 }, (_, i) =>
+          base({ mag: 1, gx: -1, gy: 0, u: 0.65 + i * 0.02, v: 0.5 }),
+        ),
+      ];
+      expect(decodeCell(axisCell, samples)).toBe(-2);
+    });
+  });
+
+  describe('fillUnknownNeighbors6', () => {
+    it('fills -1 from unanimous neighbors but leaves -2 unchanged', () => {
+      const weak = Array(36).fill(0) as unknown as TagPattern;
+      // Cell (2,2) idx 14; four cardinals all 1
+      weak[8] = weak[20] = weak[13] = weak[15] = 1;
+      weak[14] = -1;
+      fillUnknownNeighbors6(weak);
+      expect(weak[14]).toBe(1);
+
+      const tie = Array(36).fill(0) as unknown as TagPattern;
+      tie[8] = tie[20] = tie[13] = tie[15] = 1;
+      tie[14] = -2;
+      fillUnknownNeighbors6(tie);
+      expect(tie[14]).toBe(-2);
     });
   });
 

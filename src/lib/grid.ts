@@ -175,15 +175,6 @@ export function cellUvToImage(cell: GridCell, u: number, v: number): Point {
   };
 }
 
-function quantileSorted(sorted: number[], q: number): number {
-  if (sorted.length === 0) return 0;
-  const pos = (sorted.length - 1) * q;
-  const lo = Math.floor(pos);
-  const hi = Math.ceil(pos);
-  const t = pos - lo;
-  return sorted[lo]! * (1 - t) + sorted[hi]! * t;
-}
-
 /**
  * Pull image-space gradient (gx, gy) = (∂I/∂x, ∂I/∂y) back to cell UV via the bilinear quad map.
  * (∂I/∂u, ∂I/∂v) = Jᵀ (gx, gy) with J = [[∂x/∂u, ∂x/∂v], [∂y/∂u, ∂y/∂v]].
@@ -218,29 +209,25 @@ export type CellSobelSample = {
 const DECODE_RADIAL_MIN2 = 0.015 * 0.015;
 /** Dot-product deadband in UV-gradient space (noise). */
 const DECODE_DOT_EPS = 1e-8;
-/** Need at least this weighted vote mass to decide. */
-const DECODE_MIN_WEIGHT = 1e-10;
-/** Fraction of opposing votes required to call a winner (else −1). */
-const DECODE_WIN_MARGIN = 0.42;
+/**
+ * Minimum count of directional votes (pos + neg) before calling black/white vs **no signal** (`-1`).
+ * Ties with at least this many votes return **`-2`** (ambiguous, not “missing edges”).
+ */
+const DECODE_MIN_VOTE_TOTAL = 3;
 
 /**
- * Classify a 6×6 cell: **0 = white**, **1 = black**, **-1 = unknown**.
+ * Classify a 6×6 cell: **0 = white**, **1 = black**, **-1 = no/weak signal**, **-2 = tie** (enough votes).
  * Edge-only: pull `(gx, gy)` to UV, dot with outward radial from cell center `(u−½, v−½)`;
- * weighted vote on sign (gradient “component along outward UV” vs opposite). No grayscale.
+ * **unweighted** ±1 vote per sample (GPU/NMS is assumed to have already filtered edges).
  */
-export function decodeCell(cell: GridCell, samples: CellSobelSample[]): number {
+export function decodeCell(cell: GridCell, samples: CellSobelSample[]): 0 | 1 | -1 | -2 {
   const n = samples.length;
   if (n < 9) return -1;
-
-  const mags = samples.map((s) => s.mag).sort((a, b) => a - b);
-  const p50 = quantileSorted(mags, 0.5);
-  const p90 = quantileSorted(mags, 0.9);
-  const magCut = Math.max(0.002, p50 + 0.12 * (p90 - p50));
 
   let pos = 0;
   let neg = 0;
   for (const s of samples) {
-    if (s.mag < magCut) continue;
+    if (s.mag <= 1e-12) continue;
     const ru = s.u - 0.5;
     const rv = s.v - 0.5;
     const r2 = ru * ru + rv * rv;
@@ -248,19 +235,15 @@ export function decodeCell(cell: GridCell, samples: CellSobelSample[]): number {
 
     const { gu, gv } = imageGradToUvGrad(cell, s.u, s.v, s.gx, s.gy);
     const dot = gu * ru + gv * rv;
-    const w = s.mag * s.mag;
-    if (dot > DECODE_DOT_EPS) pos += w;
-    else if (dot < -DECODE_DOT_EPS) neg += w;
+    if (dot > DECODE_DOT_EPS) pos += 1;
+    else if (dot < -DECODE_DOT_EPS) neg += 1;
   }
 
   const sum = pos + neg;
-  if (sum < DECODE_MIN_WEIGHT) return -1;
-
-  const fPos = pos / sum;
-  // Large pos ⇒ ∂I/∂r̂_uv > 0 on strong edges ⇒ intensity rises toward cell rim ⇒ dark interior ⇒ black (1).
-  if (fPos >= DECODE_WIN_MARGIN) return 1;
-  if (fPos <= 1 - DECODE_WIN_MARGIN) return 0;
-  return -1;
+  if (sum < DECODE_MIN_VOTE_TOTAL) return -1;
+  if (pos > neg) return 1;
+  if (neg > pos) return 0;
+  return -2;
 }
 
 /** AprilTag unit square is an 8×8 module grid (black border ring + inner 6×6 data). */
@@ -322,17 +305,20 @@ export function distPointToClosedRectUv(
   return Math.hypot(u - cu, v - cv);
 }
 
-function classifyModuleFromPosNeg(pos: number, neg: number): number {
+function classifyModuleFromPosNeg(pos: number, neg: number): 0 | 1 | -1 | -2 {
   const sum = pos + neg;
-  if (sum < DECODE_MIN_WEIGHT) return -1;
-  const fPos = pos / sum;
-  if (fPos >= DECODE_WIN_MARGIN) return 1;
-  if (fPos <= 1 - DECODE_WIN_MARGIN) return 0;
-  return -1;
+  if (sum < DECODE_MIN_VOTE_TOTAL) return -1;
+  if (pos > neg) return 1;
+  if (neg > pos) return 0;
+  return -2;
 }
 
-/** One pass: unknown 6×6 cell becomes neighbor color if all known cardinal neighbors agree. */
-function fillUnknownNeighbors6(pattern: TagPattern): void {
+/**
+ * One pass: only **`-1`** (weak votes). If all known cardinal neighbors agree on `0`/`1`, adopt that
+ * color. **`-2`** (tie with enough votes) is skipped — neighbor homogeneity is a poor stand-in for
+ * conflicting directional evidence, and dictionary decode already treats **`-2`** as an unknown bit.
+ */
+export function fillUnknownNeighbors6(pattern: TagPattern): void {
   const idx = (r: number, c: number) => r * 6 + c;
   const next = [...pattern] as TagPattern;
   for (let r = 0; r < 6; r++) {
@@ -404,9 +390,11 @@ export function buildDecodeEdgeMask(
 }
 
 /**
- * Full decode of 6×6 tag pattern from filtered Sobel: iterate **image pixels** in the quad bbox,
+ * Full decode of 6×6 tag pattern from Sobel: iterate **image pixels** in the quad bbox,
  * inverse homography → tag UV, push gradient to tag UV, **8×8** modules (1/8 UV) with **τ = 0.1/8**
- * proximity voting (edges/corners vote multiple modules), then inner **6×6** + one neighbor fill pass.
+ * proximity voting (edges/corners vote multiple modules). **Unweighted** ±1 votes per pixel
+ * (no `mag²`; no quantile magnitude gate — use `edgeMask` / upstream NMS so only real edges run).
+ * Then inner **6×6** + neighbor fill for **`-1`** only (**`-2`** unchanged). Outcomes: `0`/`1`/`-1`/`-2`.
  *
  * @param grid Grid from `buildTagGrid` (uses `outerCorners` TL,TR,BR,BL; homography uses TL,TR,BL,BR strip order).
  * @param edgeMask Optional: skip pixels where mask index is 0.
@@ -435,24 +423,6 @@ export function decodeTagPattern(
   const ix1 = Math.min(imageWidth - 1, Math.ceil(x1));
   const iy1 = Math.min(imageH - 1, Math.ceil(y1));
 
-  const mags: number[] = [];
-  for (let iy = iy0; iy <= iy1; iy++) {
-    for (let ix = ix0; ix <= ix1; ix++) {
-      if (edgeMask && edgeMask[iy * imageWidth + ix] === 0) continue;
-      const { u, v, inside } = imagePixelToUnitSquareUv(h, ix + 0.5, iy + 0.5);
-      if (!inside) continue;
-      const gx = sobelData[(iy * imageWidth + ix) * 2];
-      const gy = sobelData[(iy * imageWidth + ix) * 2 + 1];
-      const mag = Math.hypot(gx, gy);
-      if (mag > 1e-9) mags.push(mag);
-    }
-  }
-  if (mags.length === 0) {
-    return new Array(36).fill(-1) as unknown as TagPattern;
-  }
-  mags.sort((a, b) => a - b);
-  const magCut = Math.max(0.002, quantileSorted(mags, 0.5) + 0.12 * (quantileSorted(mags, 0.9) - quantileSorted(mags, 0.5)));
-
   const posM = new Float64Array(64);
   const negM = new Float64Array(64);
 
@@ -464,10 +434,12 @@ export function decodeTagPattern(
       const gx = sobelData[(iy * imageWidth + ix) * 2];
       const gy = sobelData[(iy * imageWidth + ix) * 2 + 1];
       const mag = Math.hypot(gx, gy);
-      if (mag < magCut) continue;
+      if (mag <= 1e-12) continue;
 
       const { gu, gv } = imageSobelToTagGradient(h, u, v, gx, gy);
 
+      // Each edge pixel votes into every 8×8 module whose closed cell lies within `TAU_MODULE_UV`
+      // (distance-to-rect). **Unweighted** ±1 per pixel; sign from radial dot gu*ru + gv*rv in tag UV.
       for (let my = 0; my < TAG_MODULES; my++) {
         for (let mx = 0; mx < TAG_MODULES; mx++) {
           const u0 = mx / TAG_MODULES;
@@ -484,10 +456,9 @@ export function decodeTagPattern(
           if (ru * ru + rv * rv < TAG_MODULE_RADIAL_MIN2) continue;
 
           const dot = gu * ru + gv * rv;
-          const w = mag * mag;
           const mi = my * TAG_MODULES + mx;
-          if (dot > DECODE_DOT_EPS) posM[mi] += w;
-          else if (dot < -DECODE_DOT_EPS) negM[mi] += w;
+          if (dot > DECODE_DOT_EPS) posM[mi] += 1;
+          else if (dot < -DECODE_DOT_EPS) negM[mi] += 1;
         }
       }
     }
@@ -500,7 +471,7 @@ export function decodeTagPattern(
       const my = row + 1;
       const mi = my * TAG_MODULES + mx;
       const cell = classifyModuleFromPosNeg(posM[mi]!, negM[mi]!);
-      pattern.push(cell as 0 | 1 | -1);
+      pattern.push(cell);
     }
   }
 

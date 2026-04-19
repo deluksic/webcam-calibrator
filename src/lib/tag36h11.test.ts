@@ -133,5 +133,16 @@ describe('tag36h11', () => {
     it('returns null for null pattern', () => {
       expect(decodeTag36h11AnyRotation(null)).toBeNull();
     });
+
+    it('chooses rotation with lowest Hamming distance', () => {
+      const tagId = 42;
+      const canonical = codeToPattern(TAG36H11_CODES[tagId]);
+      let p = canonical;
+      for (let k = 0; k < 2; k++) p = rotatePattern(p);
+      const m = decodeTag36h11AnyRotation(p, 7);
+      expect(m).not.toBeNull();
+      expect(m!.id).toBe(tagId);
+      expect(m!.rotation).toBe(2);
+    });
   });
 });

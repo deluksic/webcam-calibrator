@@ -1,6 +1,6 @@
 // Synthetic AprilTag rendering for tests: inverse homography per pixel → UV → 6×6 module lookup,
 // then central finite differences → (gx, gy) in the same interleaved layout as GPU `filteredBuffer` readback.
-// Live `decodeTagPattern` (grid.ts): bbox pixels → inverse H → tag UV, 8×8 τ-votes on filtered Sobel; `decodeCell` is for tests.
+// Live `decodeTagPattern` (grid.ts): bbox pixels → inverse H → tag UV, 8×8 τ-votes (unweighted; use edgeMask/NMS upstream); `decodeCell` is for tests.
 
 import { computeHomography, type Point } from './geometry';
 import type { TagPattern } from './tag36h11';
@@ -90,6 +90,7 @@ export function intensityAtTagUv(u: number, v: number, pattern: TagPattern): num
 
   const v_ = pattern[row * 6 + col];
   if (v_ === 1) return 0;
+  // `-1` / `-2` (decode unknowns) render as white cell interior for synthetic views.
   return 1;
 }
 
