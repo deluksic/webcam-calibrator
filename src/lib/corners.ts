@@ -527,6 +527,13 @@ export function findCornersFromEdgesWithDebug(
   }
   top.sort((a, b) => a.x - b.x);
   bottom.sort((a, b) => a.x - b.x);
+
+  // Need at least 2 corners in each row to form a valid quad
+  if (top.length < 2 || bottom.length < 2) {
+    failureCode |= FAIL_PLAUSIBILITY;
+    return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
+  }
+
   const tl = top[0]!, tr = top[1]!, bl = bottom[0]!, br = bottom[1]!;
 
   // Step 6: Plausibility checks

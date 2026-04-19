@@ -816,6 +816,7 @@ export function updateQuadCornersBuffer(
   }
 
   log(`quads:${count}`);
+    console.warn(`quads stack:`, new Error().stack);
   pipeline.quadCornersBuffer.write(data);
 }
 
@@ -825,37 +826,42 @@ export async function detectContours(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
 ): Promise<{ quads: DetectedQuad[], extentData: ExtentRow[], dilatedGradients: Float32Array, labelData: Uint32Array }> {
-  // Copy storage buffers → staging buffers (staging has MAP_READ, storage does not)
-  const enc = root.device.createCommandEncoder({ label: 'readback' });
-  const labelStorage = pipeline.compactLabelBuffer.buffer as GPUBuffer;
-  enc.copyBufferToBuffer(labelStorage, 0, pipeline.compactLabelStaging, 0, labelStorage.size);
-  const edgeStorage = pipeline.filteredBuffer.buffer as GPUBuffer;
-  enc.copyBufferToBuffer(edgeStorage, 0, pipeline.filteredStaging, 0, edgeStorage.size);
-  root.device.queue.submit([enc.finish()]);
-  await root.device.queue.onSubmittedWorkDone();
+  try {
+    // Copy storage buffers → staging buffers (staging has MAP_READ, storage does not)
+    const enc = root.device.createCommandEncoder({ label: 'readback' });
+    const labelStorage = pipeline.compactLabelBuffer.buffer as GPUBuffer;
+    enc.copyBufferToBuffer(labelStorage, 0, pipeline.compactLabelStaging, 0, labelStorage.size);
+    const edgeStorage = pipeline.filteredBuffer.buffer as GPUBuffer;
+    enc.copyBufferToBuffer(edgeStorage, 0, pipeline.filteredStaging, 0, edgeStorage.size);
+    root.device.queue.submit([enc.finish()]);
+    await root.device.queue.onSubmittedWorkDone();
 
-  // Read from staging buffers — no TypeGPU wrapper, no per-element toString()
-  await pipeline.compactLabelStaging.mapAsync(GPUMapMode.READ);
-  const labelData = new Uint32Array(pipeline.compactLabelStaging.getMappedRange());
-  const labelDataCopy = new Uint32Array(labelData);
-  pipeline.compactLabelStaging.unmap();
+    // Read from staging buffers — no TypeGPU wrapper, no per-element toString()
+    await pipeline.compactLabelStaging.mapAsync(GPUMapMode.READ);
+    const labelData = new Uint32Array(pipeline.compactLabelStaging.getMappedRange());
+    const labelDataCopy = new Uint32Array(labelData);
+    pipeline.compactLabelStaging.unmap();
 
-  await pipeline.filteredStaging.mapAsync(GPUMapMode.READ);
-  const dilatedGradients = new Float32Array(pipeline.filteredStaging.getMappedRange());
-  const dilatedCopy = new Float32Array(dilatedGradients);
-  pipeline.filteredStaging.unmap();
+    await pipeline.filteredStaging.mapAsync(GPUMapMode.READ);
+    const dilatedGradients = new Float32Array(pipeline.filteredStaging.getMappedRange());
+    const dilatedCopy = new Float32Array(dilatedGradients);
+    pipeline.filteredStaging.unmap();
 
-  // CPU-side: extract regions and fit quads
-  const regions = extractRegions(labelDataCopy, pipeline.width, pipeline.height, dilatedCopy);
-  const maxArea = pipeline.width * pipeline.height * 0.5;
-  const quads = validateAndFilterQuads(regions, dilatedCopy, labelDataCopy, pipeline.width, 400, maxArea).filter(
-    (q) => q.area < pipeline.width * pipeline.height * 0.25,
-  );
+    // CPU-side: extract regions and fit quads
+    const regions = extractRegions(labelDataCopy, pipeline.width, pipeline.height, dilatedCopy);
+    const maxArea = pipeline.width * pipeline.height * 0.5;
+    const quads = validateAndFilterQuads(regions, dilatedCopy, labelDataCopy, pipeline.width, 400, maxArea).filter(
+      (q) => q.area < pipeline.width * pipeline.height * 0.25,
+    );
 
-  // Read extent buffer
-  const extentData: ExtentRow[] = await pipeline.extentBuffer.read();
+    // Read extent buffer
+    const extentData: ExtentRow[] = await pipeline.extentBuffer.read();
 
-  return { quads, extentData, dilatedGradients: dilatedCopy, labelData: labelDataCopy };
+    return { quads, extentData, dilatedGradients: dilatedCopy, labelData: labelDataCopy };
+  } catch (e) {
+    console.error('[detectContours] Error:', e, e?.stack);
+    throw e;
+  }
 }
 
 // (empty space)

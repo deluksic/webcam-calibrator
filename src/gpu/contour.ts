@@ -190,6 +190,10 @@ export function filterNestedQuads(quads: DetectedQuad[]): DetectedQuad[] {
   return quads.filter((candidate) => {
     for (const other of quads) {
       if (other === candidate) continue;
+      if (!other.corners || !candidate.corners) {
+        console.warn('Missing corners in filterNestedQuads', other, candidate);
+        continue;
+      }
       // Discard candidate if it is fully contained inside another box
       if (
         other.corners[0].x <= candidate.corners[0].x &&
