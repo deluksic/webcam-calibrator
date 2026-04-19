@@ -110,10 +110,10 @@ function TagIdGridOverlay(props: {
         const c = () => quad().corners;
         const cx = () => (c()[0]!.x + c()[1]!.x + c()[2]!.x + c()[3]!.x) / 4;
         const cy = () => (c()[0]!.y + c()[1]!.y + c()[2]!.y + c()[3]!.y) / 4;
-        const id = () => quad().vizTagId;
         const label = () => {
-          const id_ = id();
-          return id_ !== undefined && id_ !== null ? String(id_ >>> 0) : "?";
+          const q = quad();
+          if (typeof q.decodedTagId === "number") return String(q.decodedTagId);
+          return "?";
         };
         return (
           <div
@@ -175,7 +175,7 @@ function CalibrationView() {
   const [bboxes, setBboxes] = createSignal<Bbox[]>([]);
   const [logs, setLogs] = createSignal<string[]>([]);
   const [showGrid, setShowGrid] = createSignal(true);
-  const [showFallbacks, setShowFallbacks] = createSignal(true);
+  const [showFallbacks, setShowFallbacks] = createSignal(false);
   const [gridOverlayQuads, setGridOverlayQuads] = createSignal<DetectedQuad[]>(
     [],
   );
@@ -383,12 +383,25 @@ function CalibrationView() {
                 q.cornerDebug.failureCode === 0;
               return {
                 ...q,
-                vizTagId: ok
-                  ? Math.floor(Math.random() * 0x7fffffff)
-                  : undefined,
+                vizTagId:
+                  ok && typeof q.decodedTagId === "number"
+                    ? q.decodedTagId
+                    : undefined,
               };
             });
-            setGridOverlayQuads(tagged.filter((q) => q.vizTagId !== undefined));
+            setGridOverlayQuads(
+              tagged.filter((q) => {
+                if (
+                  !q.hasCorners ||
+                  q.cornerDebug === null ||
+                  q.cornerDebug.failureCode !== 0
+                ) {
+                  return false;
+                }
+                if (sf) return true;
+                return typeof q.decodedTagId === "number";
+              }),
+            );
             updateQuadCornersBuffer(pip, tagged, sf);
           })
           .catch((e) => {
@@ -498,7 +511,10 @@ function CalibrationView() {
               >
                 Grid
               </button>
-              <label class={styles.checkboxLabel}>
+              <label
+                class={styles.checkboxLabel}
+                title="BBox quads and corners without dictionary decode"
+              >
                 <input
                   type="checkbox"
                   checked={showFallbacks()}

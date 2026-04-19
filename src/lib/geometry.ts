@@ -39,9 +39,11 @@ export function lineIntersection(l1: Line, l2: Line): Point | null {
   if (Math.abs(det) < 1e-10) {
     return null; // parallel or coincident
   }
+  // Lines are a x + b y + c = 0 (same as a x + b y = −c). Cramer gives:
+  // x = (b1*c2 − c1*b2) / det,  y = (c1*a2 − a1*c2) / det
   return {
-    x: (l1.c * l2.b - l1.b * l2.c) / det,
-    y: (l1.a * l2.c - l1.c * l2.a) / det,
+    x: (l1.b * l2.c - l1.c * l2.b) / det,
+    y: (l1.c * l2.a - l1.a * l2.c) / det,
   };
 }
 

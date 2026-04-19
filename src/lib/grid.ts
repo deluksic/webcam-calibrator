@@ -1,7 +1,8 @@
 // Perspective-correct grid subdivision for AprilTag decode
 // Uses line intersection + proportional subdivision (no bilinear interpolation)
 
-import { Point, lineFromPoints, lineIntersection, subdivideSegment } from './geometry';
+import { imagePixelToUnitSquareUv } from './aprilTagRaycast';
+import { Point, computeHomography, lineFromPoints, lineIntersection, subdivideSegment } from './geometry';
 import type { TagPattern } from './tag36h11';
 
 export interface GridCell {
@@ -165,127 +166,344 @@ export function buildTagGrid(
   };
 }
 
+/** Map cell UV in [0,1]² (TL origin) to image; `cell.corners` are TL, TR, BR, BL. */
+export function cellUvToImage(cell: GridCell, u: number, v: number): Point {
+  const [tl, tr, br, bl] = cell.corners;
+  return {
+    x: (1 - u) * (1 - v) * tl.x + u * (1 - v) * tr.x + u * v * br.x + (1 - u) * v * bl.x,
+    y: (1 - u) * (1 - v) * tl.y + u * (1 - v) * tr.y + u * v * br.y + (1 - u) * v * bl.y,
+  };
+}
+
+function quantileSorted(sorted: number[], q: number): number {
+  if (sorted.length === 0) return 0;
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  const t = pos - lo;
+  return sorted[lo]! * (1 - t) + sorted[hi]! * t;
+}
+
 /**
- * Sample edge pixels within a cell using Sobel data.
- * Returns array of gradient magnitudes and directions.
+ * Pull image-space gradient (gx, gy) = (∂I/∂x, ∂I/∂y) back to cell UV via the bilinear quad map.
+ * (∂I/∂u, ∂I/∂v) = Jᵀ (gx, gy) with J = [[∂x/∂u, ∂x/∂v], [∂y/∂u, ∂y/∂v]].
  */
-export function sampleCellPixels(
+export function imageGradToUvGrad(
   cell: GridCell,
-  sobelData: Float32Array,
-  imageWidth: number,
-  edgeMask?: Uint8Array,
-): { mag: number; tangent: number }[] {
-  const samples: { mag: number; tangent: number }[] = [];
+  u: number,
+  v: number,
+  gx: number,
+  gy: number,
+): { gu: number; gv: number } {
+  const [tl, tr, br, bl] = cell.corners;
+  const dxdU = -(1 - v) * tl.x + (1 - v) * tr.x + v * br.x - v * bl.x;
+  const dxdV = -(1 - u) * tl.x - u * tr.x + u * br.x + (1 - u) * bl.x;
+  const dydU = -(1 - v) * tl.y + (1 - v) * tr.y + v * br.y - v * bl.y;
+  const dydV = -(1 - u) * tl.y - u * tr.y + u * br.y + (1 - u) * bl.y;
+  const gu = gx * dxdU + gy * dydU;
+  const gv = gx * dxdV + gy * dydV;
+  return { gu, gv };
+}
 
-  // Bounding box of cell
-  const minX = Math.max(0, Math.floor(Math.min(...cell.corners.map(c => c.x))));
-  const maxX = Math.max(0, Math.ceil(Math.max(...cell.corners.map(c => c.x))));
-  const minY = Math.max(0, Math.floor(Math.min(...cell.corners.map(c => c.y))));
-  const maxY = Math.max(0, Math.ceil(Math.max(...cell.corners.map(c => c.y))));
+export type CellSobelSample = {
+  mag: number;
+  tangent: number;
+  gx: number;
+  gy: number;
+  u: number;
+  v: number;
+};
 
-  for (let y = minY; y <= maxY; y++) {
-    for (let x = minX; x <= maxX; x++) {
-      const idx = y * imageWidth + x;
+/** Min |UV − center|² so we ignore the flat interior where radial direction is ill-defined. */
+const DECODE_RADIAL_MIN2 = 0.015 * 0.015;
+/** Dot-product deadband in UV-gradient space (noise). */
+const DECODE_DOT_EPS = 1e-8;
+/** Need at least this weighted vote mass to decide. */
+const DECODE_MIN_WEIGHT = 1e-10;
+/** Fraction of opposing votes required to call a winner (else −1). */
+const DECODE_WIN_MARGIN = 0.42;
 
-      if (edgeMask && edgeMask[idx] === 0) continue;
+/**
+ * Classify a 6×6 cell: **0 = white**, **1 = black**, **-1 = unknown**.
+ * Edge-only: pull `(gx, gy)` to UV, dot with outward radial from cell center `(u−½, v−½)`;
+ * weighted vote on sign (gradient “component along outward UV” vs opposite). No grayscale.
+ */
+export function decodeCell(cell: GridCell, samples: CellSobelSample[]): number {
+  const n = samples.length;
+  if (n < 9) return -1;
 
-      const gx = sobelData[idx * 2];
-      const gy = sobelData[idx * 2 + 1];
-      const mag = Math.sqrt(gx * gx + gy * gy);
+  const mags = samples.map((s) => s.mag).sort((a, b) => a - b);
+  const p50 = quantileSorted(mags, 0.5);
+  const p90 = quantileSorted(mags, 0.9);
+  const magCut = Math.max(0.002, p50 + 0.12 * (p90 - p50));
 
-      if (mag < 0.01) continue;
+  let pos = 0;
+  let neg = 0;
+  for (const s of samples) {
+    if (s.mag < magCut) continue;
+    const ru = s.u - 0.5;
+    const rv = s.v - 0.5;
+    const r2 = ru * ru + rv * rv;
+    if (r2 < DECODE_RADIAL_MIN2) continue;
 
-      const tangent = Math.atan2(gy, gx) + Math.PI / 2;
+    const { gu, gv } = imageGradToUvGrad(cell, s.u, s.v, s.gx, s.gy);
+    const dot = gu * ru + gv * rv;
+    const w = s.mag * s.mag;
+    if (dot > DECODE_DOT_EPS) pos += w;
+    else if (dot < -DECODE_DOT_EPS) neg += w;
+  }
 
-      samples.push({ mag, tangent });
+  const sum = pos + neg;
+  if (sum < DECODE_MIN_WEIGHT) return -1;
+
+  const fPos = pos / sum;
+  // Large pos ⇒ ∂I/∂r̂_uv > 0 on strong edges ⇒ intensity rises toward cell rim ⇒ dark interior ⇒ black (1).
+  if (fPos >= DECODE_WIN_MARGIN) return 1;
+  if (fPos <= 1 - DECODE_WIN_MARGIN) return 0;
+  return -1;
+}
+
+/** AprilTag unit square is an 8×8 module grid (black border ring + inner 6×6 data). */
+const TAG_MODULES = 8;
+/** 10% of one module side in tag UV — pixels within this distance of a module cell vote for it. */
+const TAU_MODULE_UV = 0.1 / TAG_MODULES;
+/** Skip votes when radial offset from module center in tag UV is below this (ill-conditioned). */
+const TAG_MODULE_RADIAL_MIN2 = (0.01 / TAG_MODULES) ** 2;
+
+/**
+ * Jacobian ∂(x,y)/∂(u,v) for `applyHomography` (same 8-parameter `h` as `computeHomography`).
+ */
+function jacobianImageWrtTagUv(h: Float32Array, u: number, v: number) {
+  const h0 = h[0],
+    h1 = h[1],
+    h2 = h[2];
+  const h3 = h[3],
+    h4 = h[4],
+    h5 = h[5];
+  const h6 = h[6],
+    h7 = h[7];
+  const xh = h0 * u + h1 * v + h2;
+  const yh = h3 * u + h4 * v + h5;
+  const wh = h6 * u + h7 * v + 1;
+  const wh2 = wh * wh;
+  const xu = (h0 * wh - xh * h6) / wh2;
+  const xv = (h1 * wh - xh * h7) / wh2;
+  const yu = (h3 * wh - yh * h6) / wh2;
+  const yv = (h4 * wh - yh * h7) / wh2;
+  return { xu, xv, yu, yv };
+}
+
+/** Tag-space gradient (∂I/∂u, ∂I/∂v) from image Sobel and homography: [gu,gv] = Jᵀ [gx,gy]. */
+export function imageSobelToTagGradient(
+  h: Float32Array,
+  u: number,
+  v: number,
+  gx: number,
+  gy: number,
+): { gu: number; gv: number } {
+  const { xu, xv, yu, yv } = jacobianImageWrtTagUv(h, u, v);
+  return {
+    gu: gx * xu + gy * yu,
+    gv: gx * xv + gy * yv,
+  };
+}
+
+/** Euclidean distance from (u,v) to the closed axis-aligned rectangle [u0,u1]×[v0,v1]. */
+export function distPointToClosedRectUv(
+  u: number,
+  v: number,
+  u0: number,
+  u1: number,
+  v0: number,
+  v1: number,
+): number {
+  const cu = Math.min(u1, Math.max(u0, u));
+  const cv = Math.min(v1, Math.max(v0, v));
+  return Math.hypot(u - cu, v - cv);
+}
+
+function classifyModuleFromPosNeg(pos: number, neg: number): number {
+  const sum = pos + neg;
+  if (sum < DECODE_MIN_WEIGHT) return -1;
+  const fPos = pos / sum;
+  if (fPos >= DECODE_WIN_MARGIN) return 1;
+  if (fPos <= 1 - DECODE_WIN_MARGIN) return 0;
+  return -1;
+}
+
+/** One pass: unknown 6×6 cell becomes neighbor color if all known cardinal neighbors agree. */
+function fillUnknownNeighbors6(pattern: TagPattern): void {
+  const idx = (r: number, c: number) => r * 6 + c;
+  const next = [...pattern] as TagPattern;
+  for (let r = 0; r < 6; r++) {
+    for (let c = 0; c < 6; c++) {
+      if (pattern[idx(r, c)] !== -1) continue;
+      const vals: number[] = [];
+      if (r > 0) {
+        const v = pattern[idx(r - 1, c)];
+        if (v === 0 || v === 1) vals.push(v);
+      }
+      if (r < 5) {
+        const v = pattern[idx(r + 1, c)];
+        if (v === 0 || v === 1) vals.push(v);
+      }
+      if (c > 0) {
+        const v = pattern[idx(r, c - 1)];
+        if (v === 0 || v === 1) vals.push(v);
+      }
+      if (c < 5) {
+        const v = pattern[idx(r, c + 1)];
+        if (v === 0 || v === 1) vals.push(v);
+      }
+      if (vals.length === 0) continue;
+      const first = vals[0]!;
+      if (vals.every((x) => x === first)) next[idx(r, c)] = first as 0 | 1;
     }
   }
-
-  return samples;
+  for (let i = 0; i < 36; i++) pattern[i] = next[i]!;
 }
 
+/** Same magnitude floor as `extractLabeledEdgePixels` in `corners.ts`. */
+const DECODE_EDGE_MASK_EPS = 1e-6;
+
 /**
- * Determine if a cell is black or white based on edge samples.
- * Uses gradient direction consensus.
- *
- * @param samples Edge pixels in the cell
- * @returns 0 for white, 1 for black, or -1 for uncertain
+ * Pixels where **decodeTagPattern** may sample Sobel: same connected-component `regionLabel`,
+ * non‑zero NMS gradient magnitude, within the region bbox expanded by `padPx` (quad samples can
+ * sit slightly outside the tight bbox).
  */
-export function decodeCell(samples: { mag: number; tangent: number }[]): number {
-  if (samples.length < 4) return -1;
-
-  // Check if this is an edge cell or a solid cell
-  const avgMag = samples.reduce((s, p) => s + p.mag, 0) / samples.length;
-
-  // If low average magnitude, it's likely a solid (non-edge) region
-  if (avgMag < 0.1) {
-    // Could be either black or white - need more info
-    return -1;
+export function buildDecodeEdgeMask(
+  labelData: Uint32Array,
+  sobelData: Float32Array,
+  imageWidth: number,
+  imageHeight: number,
+  regionLabel: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  padPx: number = 32,
+): Uint8Array {
+  const w = imageWidth;
+  const h = imageHeight;
+  const mask = new Uint8Array(w * h);
+  const x0 = Math.max(0, Math.floor(minX) - padPx);
+  const y0 = Math.max(0, Math.floor(minY) - padPx);
+  const x1 = Math.min(w - 1, Math.ceil(maxX) + padPx);
+  const y1 = Math.min(h - 1, Math.ceil(maxY) + padPx);
+  const eps2 = DECODE_EDGE_MASK_EPS * DECODE_EDGE_MASK_EPS;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const idx = y * w + x;
+      if (labelData[idx] !== regionLabel) continue;
+      const gx = sobelData[idx * 2];
+      const gy = sobelData[idx * 2 + 1];
+      if (gx * gx + gy * gy >= eps2) mask[idx] = 1;
+    }
   }
-
-  // Analyze gradient directions for edge cells
-  // Edges at cell boundary will have strong gradients
-  // For a black cell on white: gradient points inward (or outward from white)
-  // For a white cell on black: gradient points inward (or outward from black)
-
-  // Count gradients pointing in each direction (4 bins)
-  const bins = [0, 0, 0, 0];
-  const binSize = Math.PI / 2;
-
-  for (const sample of samples) {
-    // Normalize tangent to [0, 2pi)
-    let angle = sample.tangent;
-    while (angle < 0) angle += 2 * Math.PI;
-    while (angle >= 2 * Math.PI) angle -= 2 * Math.PI;
-
-    const bin = Math.floor(angle / binSize) % 4;
-    bins[bin] += sample.mag;
-  }
-
-  // Check for dominant direction (indicating edge orientation)
-  const maxBin = Math.max(...bins);
-  const total = bins.reduce((a, b) => a + b, 0);
-
-  if (maxBin / total < 0.4) {
-    // No strong direction consensus - might be interior of solid region
-    return -1;
-  }
-
-  // Strong edge direction - this is a boundary cell
-  // For AprilTag: black cells have edges around them, white cells don't
-  // Return based on edge density
-  return avgMag > 0.2 ? 1 : 0;
+  return mask;
 }
 
 /**
- * Full decode of 6x6 tag pattern.
+ * Full decode of 6×6 tag pattern from filtered Sobel: iterate **image pixels** in the quad bbox,
+ * inverse homography → tag UV, push gradient to tag UV, **8×8** modules (1/8 UV) with **τ = 0.1/8**
+ * proximity voting (edges/corners vote multiple modules), then inner **6×6** + one neighbor fill pass.
  *
- * @param grid Grid from buildTagGrid
- * @param sobelData Sobel gradient data
- * @param imageWidth Image width
- * @param edgeMask Optional edge mask
- * @returns 6x6 binary pattern (0=white, 1=black)
+ * @param grid Grid from `buildTagGrid` (uses `outerCorners` TL,TR,BR,BL; homography uses TL,TR,BL,BR strip order).
+ * @param edgeMask Optional: skip pixels where mask index is 0.
  */
 export function decodeTagPattern(
   grid: GridResult,
   sobelData: Float32Array,
   imageWidth: number,
   edgeMask?: Uint8Array,
+  imageHeight?: number,
 ): TagPattern | null {
-  const pattern: TagPattern = [] as unknown as TagPattern;
+  const imageH =
+    imageHeight !== undefined
+      ? imageHeight
+      : Math.floor(sobelData.length / (2 * imageWidth));
+  const oc = grid.outerCorners;
+  const strip: [Point, Point, Point, Point] = [oc[0], oc[1], oc[3], oc[2]];
+  const h = computeHomography([...strip]);
 
-  // Decode each cell
-  for (const cell of grid.cells) {
-    const samples = sampleCellPixels(cell, sobelData, imageWidth, edgeMask);
-    const cellValue = decodeCell(samples);
+  let x0 = Math.min(oc[0].x, oc[1].x, oc[2].x, oc[3].x);
+  let y0 = Math.min(oc[0].y, oc[1].y, oc[2].y, oc[3].y);
+  let x1 = Math.max(oc[0].x, oc[1].x, oc[2].x, oc[3].x);
+  let y1 = Math.max(oc[0].y, oc[1].y, oc[2].y, oc[3].y);
+  const ix0 = Math.max(0, Math.floor(x0));
+  const iy0 = Math.max(0, Math.floor(y0));
+  const ix1 = Math.min(imageWidth - 1, Math.ceil(x1));
+  const iy1 = Math.min(imageH - 1, Math.ceil(y1));
 
-    if (cellValue === -1) {
-      // Uncertain - keep as unknown
-      pattern.push(-1);
-    } else {
-      pattern.push(cellValue as 0 | 1);
+  const mags: number[] = [];
+  for (let iy = iy0; iy <= iy1; iy++) {
+    for (let ix = ix0; ix <= ix1; ix++) {
+      if (edgeMask && edgeMask[iy * imageWidth + ix] === 0) continue;
+      const { u, v, inside } = imagePixelToUnitSquareUv(h, ix + 0.5, iy + 0.5);
+      if (!inside) continue;
+      const gx = sobelData[(iy * imageWidth + ix) * 2];
+      const gy = sobelData[(iy * imageWidth + ix) * 2 + 1];
+      const mag = Math.hypot(gx, gy);
+      if (mag > 1e-9) mags.push(mag);
+    }
+  }
+  if (mags.length === 0) {
+    return new Array(36).fill(-1) as unknown as TagPattern;
+  }
+  mags.sort((a, b) => a - b);
+  const magCut = Math.max(0.002, quantileSorted(mags, 0.5) + 0.12 * (quantileSorted(mags, 0.9) - quantileSorted(mags, 0.5)));
+
+  const posM = new Float64Array(64);
+  const negM = new Float64Array(64);
+
+  for (let iy = iy0; iy <= iy1; iy++) {
+    for (let ix = ix0; ix <= ix1; ix++) {
+      if (edgeMask && edgeMask[iy * imageWidth + ix] === 0) continue;
+      const { u, v, inside } = imagePixelToUnitSquareUv(h, ix + 0.5, iy + 0.5);
+      if (!inside) continue;
+      const gx = sobelData[(iy * imageWidth + ix) * 2];
+      const gy = sobelData[(iy * imageWidth + ix) * 2 + 1];
+      const mag = Math.hypot(gx, gy);
+      if (mag < magCut) continue;
+
+      const { gu, gv } = imageSobelToTagGradient(h, u, v, gx, gy);
+
+      for (let my = 0; my < TAG_MODULES; my++) {
+        for (let mx = 0; mx < TAG_MODULES; mx++) {
+          const u0 = mx / TAG_MODULES;
+          const u1 = (mx + 1) / TAG_MODULES;
+          const v0 = my / TAG_MODULES;
+          const v1 = (my + 1) / TAG_MODULES;
+          const d = distPointToClosedRectUv(u, v, u0, u1, v0, v1);
+          if (d > TAU_MODULE_UV) continue;
+
+          const cu = (mx + 0.5) / TAG_MODULES;
+          const cv = (my + 0.5) / TAG_MODULES;
+          const ru = u - cu;
+          const rv = v - cv;
+          if (ru * ru + rv * rv < TAG_MODULE_RADIAL_MIN2) continue;
+
+          const dot = gu * ru + gv * rv;
+          const w = mag * mag;
+          const mi = my * TAG_MODULES + mx;
+          if (dot > DECODE_DOT_EPS) posM[mi] += w;
+          else if (dot < -DECODE_DOT_EPS) negM[mi] += w;
+        }
+      }
     }
   }
 
+  const pattern: TagPattern = [] as unknown as TagPattern;
+  for (let row = 0; row < 6; row++) {
+    for (let col = 0; col < 6; col++) {
+      const mx = col + 1;
+      const my = row + 1;
+      const mi = my * TAG_MODULES + mx;
+      const cell = classifyModuleFromPosNeg(posM[mi]!, negM[mi]!);
+      pattern.push(cell as 0 | 1 | -1);
+    }
+  }
+
+  fillUnknownNeighbors6(pattern);
   return pattern;
 }

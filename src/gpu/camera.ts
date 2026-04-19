@@ -796,7 +796,11 @@ export function updateQuadCornersBuffer(
   showFallbacks: boolean = true,
   log: (msg: string) => void = () => {},
 ): void {
-  const filtered = showFallbacks ? quads : quads.filter(q => q.hasCorners);
+  const filtered = showFallbacks
+    ? quads
+    : quads.filter(
+        q => q.hasCorners && typeof q.decodedTagId === 'number',
+      );
   const count = Math.min(filtered.length, MAX_INSTANCES);
 
   const data: QuadData[] = [];

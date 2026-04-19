@@ -32,11 +32,12 @@ Browser-based camera calibration using AprilTag 6×6 grid. Client-side only — 
 
 **CPU (grid mode, throttled readback — `detectContours` / `validateAndFilterQuads`):**
 
-8. Regions from compact labels → per region **corner pipeline** in order: labeled edge pixels → k-means on gradients → **four** line fits (RANSAC+PCA) → all-pairs line intersections (clip to extent bbox ± shared slack) → dedupe → strict convex CCW ordering + TL/TR/BR/BL rotation + plausibility (same slack as intersection clip)  
-9. Homography solve per quad (CPU)  
-10. Grid render (GPU, instanced homography warp)  
+8. Regions from compact labels → per region **corner pipeline** in order: labeled edge pixels → k-means on gradients → **four** line fits (RANSAC+PCA) → all-pairs line intersections (clip to extent bbox ± shared slack) → dedupe → strict convex CCW ordering + plausibility; emit corners **TL, TR, BL, BR** for homography (see **`ARCHITECTURE.md` → Corner Detection**).  
+9. **AprilTag decode (same pass)** — remap corners to **TL, TR, BR, BL** for `buildTagGrid` → `decodeTagPattern` (quad bbox pixel loop, inverse homography → tag UV, **8×8** τ-voting on **filtered** `(gx, gy)` — same buffer as step 8) → `decodeTag36h11AnyRotation` → optional `decodedTagId` / `decodedRotation` on `DetectedQuad`.  
+10. Homography solve per quad (CPU) → GPU `quadCornersBuffer` for instanced grid viz.  
+11. Grid render (GPU, `gridVizPipeline`: homography warp + fragment **8×8** grid lines; successful quads with a CPU-supplied id get **`stableHashToRgb01`** tint from the buffer’s **`decodedTagId`** field, populated from **`vizTagId`** when the dictionary match exists).  
 
-Step 8 detail and failure ordering: **`ARCHITECTURE.md` → Corner Detection**.
+Step 8 failure ordering: **`ARCHITECTURE.md` → Corner Detection**. Grid + decode detail: **`ARCHITECTURE.md` → AprilTag grid + decode**.
 
 ---
 
@@ -76,10 +77,11 @@ Step 8 detail and failure ordering: **`ARCHITECTURE.md` → Corner Detection**.
 See **`ARCHITECTURE.md` → Corner Detection** for the ordered CPU stages (what runs *before* line intersection and how that relates to failure codes).
 
 ### Phase 4.2 — Tag Decode
-- [x] tag36h11 dictionary (587 codings, Hamming distance ≥ 11)
-- [x] Hamming distance matching
-- [x] Rotation-invariant decoding (all 4 orientations)
-- [x] Pattern validation
+- [x] tag36h11 dictionary (587 codings; Hamming match in `decodeTag36h11`, configurable `maxError`)
+- [x] Hamming distance matching + rotation-invariant decode (`decodeTag36h11AnyRotation`)
+- [x] End-to-end CPU wire: `validateAndFilterQuads` → `buildTagGrid` (with TL/TR/BR/BL corner order) → `decodeTagPattern` → dictionary decode; `pattern`, `decodedTagId`, `decodedRotation` on `DetectedQuad`
+- [x] UI / GPU tint: prefer decoded id; show **`?`** when no dictionary match (see `CalibrationView`)
+- [x] **Robust decode (homography + 8×8)** — `decodeTagPattern`: bbox scan, inverse **H** → `(u,v)`, raw filtered Sobel, adaptive **`magCut`**, tag-UV gradient + **τ = 0.1/8** module votes (**`mag²`**-weighted), inner **6×6** pattern + **`fillUnknownNeighbors6`**. Optional **`buildDecodeEdgeMask`** for label/magnitude‑gated experiments; live path passes **`undefined`**. Per-cell **`decodeCell`** remains for unit tests. Further tuning may still be needed for difficult video.
 
 ### Phase 4.3 — Subpixel Refinement
 - [ ] Parabolic surface fit on gradient magnitude

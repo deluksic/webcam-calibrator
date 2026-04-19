@@ -3,7 +3,7 @@
 import { buildTagGrid, decodeTagPattern } from '../lib/grid';
 import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from '../lib/corners';
 import { Point } from '../lib/geometry';
-import type { TagPattern } from '../lib/tag36h11';
+import { decodeTag36h11AnyRotation, type TagPattern } from '../lib/tag36h11';
 
 export const COMPONENT_LABEL_INVALID = 0xFFFFFFFF;
 
@@ -19,6 +19,15 @@ export interface DetectedQuad {
   cornerDebug: CornerDebugInfo | null; // debug info from corner detection (null if fallback)
   /** Test / viz: random or decoded id for GPU hash + HTML label (omit = unknown/black). */
   vizTagId?: number;
+  /** tag36h11 id when `decodeTag36h11AnyRotation` succeeds on `pattern`. */
+  decodedTagId?: number;
+  /** Clockwise quarter-turns (0–3) from pattern grid to canonical tag orientation. */
+  decodedRotation?: number;
+}
+
+/** `buildTagGrid` / AprilTag decode need TL,TR,BR,BL; homography uses TL,TR,BL,BR (triangle strip). */
+function cornersForTagGrid(c: [Point, Point, Point, Point]): [Point, Point, Point, Point] {
+  return [c[0], c[1], c[3], c[2]];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,6 +130,7 @@ export function validateAndFilterQuads(
   maxArea: number = 200000,
 ): DetectedQuad[] {
   const quads: DetectedQuad[] = [];
+  const imageHeight = Math.floor(labelData.length / width);
 
   for (const region of regions) {
     const w = region.maxX - region.minX;
@@ -168,10 +178,15 @@ export function validateAndFilterQuads(
             { x: region.minX, y: region.maxY },
             { x: region.maxX, y: region.maxY },
           ];
-    const tagGrid = buildTagGrid(corners);
+    const cornersTuple = corners as [Point, Point, Point, Point];
+    const tagGrid = buildTagGrid(cornersForTagGrid(cornersTuple));
     if (!tagGrid || !tagGrid.cells || tagGrid.cells.length === 0) {
       continue;
     }
+    // Decode uses bilinear Sobel everywhere in the cell; do not gate on a label/mag floor mask —
+    // floor(sample) often lands on flat interiors (NMS ≈ 0) while the float bilinear tap still sees edges.
+    const pattern = decodeTagPattern(tagGrid, sobelData, width, undefined, imageHeight);
+    const decoded = decodeTag36h11AnyRotation(pattern, 7);
     quads.push({
       corners,
       label: region.label,
@@ -179,9 +194,12 @@ export function validateAndFilterQuads(
       aspectRatio,
       area,
       gridCells: tagGrid,
-      pattern: null,
+      pattern,
       hasCorners: detectedCorners.length === 4,
       cornerDebug: cornerResult.debug,
+      ...(decoded
+        ? { decodedTagId: decoded.id, decodedRotation: decoded.rotation }
+        : {}),
     });
   }
 

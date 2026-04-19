@@ -50,17 +50,20 @@ const DEFAULT_OPTIONS: TagGridOptions = {
  * White background with black tag cells.
  */
 function generateTagSVG(tagSize: number, offsetX: number, offsetY: number, pattern: (0 | 1 | -1)[]): string {
-  const cellSize = tagSize / 6;
+  const cellSize = tagSize / 8;
   let svg = '';
 
-  for (let row = 0; row < 6; row++) {
-    for (let col = 0; col < 6; col++) {
-      const value = pattern[row * 6 + col];
-      const x = offsetX + col * cellSize;
-      const y = offsetY + row * cellSize;
-      // Border cells (row 0, 5 or col 0, 5) are always black
-      // Interior cells use pattern value: 1 = black, 0 = white (drawn on white bg)
-      if (row === 0 || row === 5 || col === 0 || col === 5 || value === 1) {
+  for (let my = 0; my < 8; my++) {
+    for (let mx = 0; mx < 8; mx++) {
+      const x = offsetX + mx * cellSize;
+      const y = offsetY + my * cellSize;
+      const border = mx === 0 || mx === 7 || my === 0 || my === 7;
+      if (border) {
+        svg += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="black"/>\n`;
+        continue;
+      }
+      const value = pattern[(my - 1) * 6 + (mx - 1)];
+      if (value === 1) {
         svg += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="black"/>\n`;
       }
     }
@@ -149,16 +152,21 @@ export function generateTagGridSVG(options: Partial<TagGridOptions> = {}): strin
  * Generate a single AprilTag for standalone use.
  */
 export function generateSingleTagSVG(tagSize: number, tagId: number = 0): string {
-  const cellSize = tagSize / 6;
+  const cellSize = tagSize / 8;
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${tagSize}" height="${tagSize}" viewBox="0 0 ${tagSize} ${tagSize}" shape-rendering="crispEdges">\n`;
   svg += `  <rect width="100%" height="100%" fill="white"/>\n`;
 
   const pattern = codeToPattern(TAG36H11_CODES[tagId % TAG36H11_COUNT]);
-  for (let row = 0; row < 6; row++) {
-    for (let col = 0; col < 6; col++) {
-      if (pattern[row * 6 + col] === 1) {
-        const x = col * cellSize;
-        const y = row * cellSize;
+  for (let my = 0; my < 8; my++) {
+    for (let mx = 0; mx < 8; mx++) {
+      const x = mx * cellSize;
+      const y = my * cellSize;
+      const border = mx === 0 || mx === 7 || my === 0 || my === 7;
+      if (border) {
+        svg += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="black"/>\n`;
+        continue;
+      }
+      if (pattern[(my - 1) * 6 + (mx - 1)] === 1) {
         svg += `  <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="black"/>\n`;
       }
     }

@@ -60,7 +60,7 @@ GPU-only. One reset + one track dispatch. Atomically tracks (minX, minY, maxX, m
 | `nms` | Sobel + NMS | edges | histogram |
 | `labels` | Sobel + pointer-jump + compact | labels (hash-based colors) | none |
 | `debug` | Sobel + pointer-jump + extent | labels + bbox overlay | extent buffer |
-| `grid` | Sobel + pointer-jump + extent | grayscale + homography-warped quad grid | detectContours every ~30 frames |
+| `grid` | Sobel + pointer-jump + extent | grayscale + homography-warped quad grid | throttled `detectContours` (compact labels + **filtered** Sobel readback → corners + **CPU AprilTag decode**) |
 
 ## CPU Readbacks
 
@@ -90,6 +90,17 @@ GPU-only. One reset + one track dispatch. Atomically tracks (minX, minY, maxX, m
 
 If `contour.ts` does not get four corners, it still builds a quad from the **region bounding box** for grid/homography, but `cornerDebug.failureCode` reflects the CPU attempt above.
 
+### AprilTag grid + decode (same CPU pass, `contour.ts`)
+
+After corners exist (detected **or** bbox fallback), `validateAndFilterQuads()` builds a tag grid and runs dictionary decode:
+
+1. **Perspective 6×6 grid** — `buildTagGrid()` in `src/lib/grid.ts` expects outer corners in order **TL → TR → BR → BL**. Quad corners used for **homography** (`computeHomography` in `geometry.ts`) stay **TL → TR → BL → BR** (triangle strip with the unit square). Remap with indices **`[0, 1, 3, 2]`** before `buildTagGrid` so inner cells align with the physical tag edges.
+2. **Pattern read** — `decodeTagPattern(grid, sobelData, width, …)` in `grid.ts` walks **integer image pixels** inside the quad’s axis-aligned bounding box. For each pixel it uses **`imagePixelToUnitSquareUv`** (inverse of the tag homography) at **pixel centers** `(ix + 0.5, iy + 0.5)` and reads **raw** `(gx, gy)` from **`sobelData`**. That buffer is the **NMS edge-filter output** read back from GPU `filteredBuffer` (same readback as `findCornersFromEdgesWithDebug`). It is **not** the pre-NMS `sobelBuffer`. Pixels outside the unit square are skipped. An optional **`edgeMask`** (`buildDecodeEdgeMask`) can gate which pixels contribute; **`contour.ts`** passes **`undefined`** so every in-quad pixel may vote (no label/mag mask on the live path). Decode models AprilTag as an **8×8** module lattice in tag UV (black border ring + inner **6×6** data): gradients are pushed to tag UV with **`imageSobelToTagGradient`**, then **τ = 0.1/8** proximity voting assigns each strong edge to nearby modules; **`mag²`** weights **positive vs negative** radial votes; inner modules **`mx, my ∈ {1…6}`** map to the **36** dictionary bits, followed by **`fillUnknownNeighbors6`** for unknown cells. (`decodeCell` + per-cell UV sampling remain in `grid.ts` for tests and tooling; the live pipeline uses this homography + bbox path only.)
+3. **Dictionary** — `decodeTag36h11AnyRotation(pattern, maxError)` (currently `maxError = 7` at the call site) tries four 90° rotations against the tag36h11 set (`src/lib/tag36h11.ts`, 587 codewords).
+4. **`DetectedQuad` fields** — `pattern` (36 values `0 | 1 | -1`), and when a match is found, `decodedTagId` and `decodedRotation`. The calibration UI shows the id when decoded, **`?`** when corners succeeded but dictionary decode did not. **`updateQuadCornersBuffer`** writes **`vizTagId`** (when set) into the instanced **`decodedTagId`** field; **`0xFFFFFFFF`** means unknown — grid viz draws **black** fill with no hash. When a real id is present, **`gridVizPipeline`** tints with **`stableHashToRgb01(decodedTagId)`** (deterministic pseudo-RGB), not camera texture.
+
+**Reliability:** Adaptive **`magCut`** (median + scaled IQR of magnitudes inside the quad bbox) drops flat interior pixels before voting. Live video can still miss dictionary matches when corners, perspective, or NMS readback are weak; see **`docs/plan.md` → Phase 4.2**.
+
 ### Failure bitmask (see `corners.ts`)
 
 Bits 0–4 are defined there; bit 1 is reserved for future use. Intersection-related failure is **bit 4 only** today (both “too few raw intersections” and “dedupe left &lt;4” share that code path). **Bit 3** groups ordering/plausibility failures after four deduped points exist (convex cycle, rotation choice, `R²`, slack-aligned bbox, edge ratios, cluster counts).
@@ -118,4 +129,4 @@ Vertex shader passes `w` in `outPos.w` for automatic perspective-correct interpo
 | `canonicalRootBuffer` | area×atomic u32 | canonical root IDs |
 | `histogramBuffer` | 256×atomic u32 | edge histogram |
 | `extentBuffer` | MAX_EXTENT_COMPONENTS×ExtentEntry | bounding boxes |
-| `quadCornersBuffer` | `MAX_INSTANCES` × (`mat3x3f` homography + per-quad debug) — see `GridDataSchema` in `gridVizPipeline.ts` | instanced grid viz (`MAX_INSTANCES` in that file, e.g. 1024) |
+| `quadCornersBuffer` | `MAX_INSTANCES` × (`GridDataSchema` in `gridVizPipeline.ts`: `mat3x3f` homography + `QuadDebug` + `decodedTagId` u32) | instanced grid viz (`MAX_INSTANCES` in that file, e.g. 1024) |

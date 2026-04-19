@@ -38,6 +38,15 @@ describe('geometry', () => {
       expect(intersection!.y).toBeCloseTo(0, 5);
     });
 
+    it('intersects horizontal y=0 with vertical x = k (lineFromPoints form)', () => {
+      const l1 = lineFromPoints({ x: 0, y: 0 }, { x: 100, y: 0 })!;
+      const l2 = lineFromPoints({ x: 50, y: 0 }, { x: 50, y: 100 })!;
+      const p = lineIntersection(l1, l2);
+      expect(p).not.toBeNull();
+      expect(p!.x).toBeCloseTo(50, 5);
+      expect(p!.y).toBeCloseTo(0, 5);
+    });
+
     it('returns null for parallel lines', () => {
       const l1 = { a: 1, b: 0, c: 0 }; // x = 0
       const l2 = { a: 2, b: 0, c: 1 }; // 2x + 1 = 0 → x = -0.5 (parallel!)

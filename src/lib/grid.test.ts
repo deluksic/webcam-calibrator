@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { buildTagGrid, decodeCell, GridCell } from './grid';
+import {
+  buildDecodeEdgeMask,
+  buildTagGrid,
+  decodeCell,
+  type CellSobelSample,
+  type GridCell,
+} from './grid';
 import { Point } from './geometry';
 
 describe('grid', () => {
@@ -51,31 +57,84 @@ describe('grid', () => {
   });
 
   describe('decodeCell', () => {
+    /** Axis-aligned cell quad: x = 100u, y = 100v (TL,TR,BR,BL). */
+    const axisCell: GridCell = {
+      row: 0,
+      col: 0,
+      corners: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 100, y: 100 },
+        { x: 0, y: 100 },
+      ],
+      center: { x: 50, y: 50 },
+    };
+
+    const base = (over: Partial<CellSobelSample>): CellSobelSample => ({
+      mag: 1,
+      tangent: 0,
+      gx: 0,
+      gy: 0,
+      u: 0.5,
+      v: 0.5,
+      ...over,
+    });
+
     it('returns -1 for insufficient samples', () => {
-      const samples = [{ mag: 1, tangent: 0 }];
-      expect(decodeCell(samples)).toBe(-1);
+      const samples: CellSobelSample[] = [base({ mag: 1 })];
+      expect(decodeCell(axisCell, samples)).toBe(-1);
     });
 
     it('returns -1 for low magnitude samples (solid interior)', () => {
-      const samples = [
-        { mag: 0.01, tangent: 0 },
-        { mag: 0.02, tangent: 0.1 },
-        { mag: 0.01, tangent: 0.2 },
-        { mag: 0.02, tangent: 0.3 },
-      ];
-      expect(decodeCell(samples)).toBe(-1);
+      const samples: CellSobelSample[] = Array.from({ length: 11 }, (_, i) =>
+        base({ mag: 0.001, tangent: i * 0.1, u: 0.2 + i * 0.06, v: 0.5 }),
+      );
+      expect(decodeCell(axisCell, samples)).toBe(-1);
     });
 
-    it('returns 0 or 1 for strong edge samples', () => {
-      // Strong vertical edge
-      const samples = [
-        { mag: 1, tangent: 0 },
-        { mag: 1, tangent: 0.05 },
-        { mag: 1, tangent: -0.05 },
-        { mag: 1, tangent: 0.1 },
-      ];
-      const result = decodeCell(samples);
-      expect(result).toBeGreaterThanOrEqual(0);
+    it('votes black when UV gradient aligns with outward radial (dark interior)', () => {
+      const samples: CellSobelSample[] = Array.from({ length: 11 }, (_, i) =>
+        base({
+          mag: 1,
+          gx: 1,
+          gy: 0,
+          u: 0.65 + i * 0.02,
+          v: 0.5,
+        }),
+      );
+      expect(decodeCell(axisCell, samples)).toBe(1);
+    });
+
+    it('votes white when UV gradient opposes outward radial', () => {
+      const samples: CellSobelSample[] = Array.from({ length: 11 }, (_, i) =>
+        base({
+          mag: 1,
+          gx: -1,
+          gy: 0,
+          u: 0.65 + i * 0.02,
+          v: 0.5,
+        }),
+      );
+      expect(decodeCell(axisCell, samples)).toBe(0);
+    });
+  });
+
+  describe('buildDecodeEdgeMask', () => {
+    it('marks only matching label with non-zero Sobel', () => {
+      const w = 8;
+      const h = 4;
+      const labelData = new Uint32Array(w * h).fill(2);
+      labelData[10] = 7;
+      labelData[11] = 7;
+      const sobel = new Float32Array(w * h * 2);
+      sobel[10 * 2] = 0.1;
+      sobel[10 * 2 + 1] = 0;
+      sobel[11 * 2] = 0;
+      sobel[11 * 2 + 1] = 0;
+      const mask = buildDecodeEdgeMask(labelData, sobel, w, h, 7, 1, 1, 4, 2, 0);
+      expect(mask[10]).toBe(1);
+      expect(mask[11]).toBe(0);
+      expect(mask[0]).toBe(0);
     });
   });
 

@@ -508,10 +508,12 @@ export const FAIL_NO_INTERSECTIONS = 1 << 4; // <4 valid line-line intersections
  * 2. K-means clustering of raw Sobel gradients into 4 groups (1 − cos θ)
  * 3. Orthogonal least-squares line fit per cluster (with R² metric)
  * 4. Intersection of all line pairs (non-parallel) → up to 6 points, deduped to 4 corners
- * 5. Convex cyclic order (strict turns) + rotation to TL,TR,BR,BL, then plausibility (R², bounds, edge ratios)
+ * 5. Convex cyclic order (strict turns) + rotation so edges match fitted lines, then plausibility (R², bounds, edge ratios)
  *
- * Returns corners ordered [TL, TR, BL, BR] for triangle strip topology,
- * or empty array if detection fails. Use getDebugInfo() to get failure details.
+ * Returns corners ordered [TL, TR, BL, BR] for `computeHomography` / triangle strip.
+ * `buildTagGrid` expects [TL, TR, BR, BL] — remap with indices [0,1,3,2] where needed.
+ *
+ * Returns empty array if detection fails.
  */
 export function findCornersFromEdges(
   sobelData: Float32Array,

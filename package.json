@@ -6,6 +6,7 @@
     "ship:watch": "vite build --watch 2>&1 | tee /tmp/ship-watch.log",
     "typecheck:watch": "tsc --noEmit --watch 2>&1 | tee /tmp/tsc-watch.log",
     "check": "tsx scripts/check.ts",
+    "render:april-tag": "tsx scripts/render-april-tag-png.ts",
     "test": "vitest run"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "@webgpu/types": "^0.1.55",
     "babel-preset-solid": "2.0.0-beta.7",
     "jsdom": "^29.0.2",
+    "pngjs": "^7.0.0",
     "tsover": "npm:tsover@latest",
     "tsx": "^4.19.4",
     "typescript": "npm:tsover@latest",
