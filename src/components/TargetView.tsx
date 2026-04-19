@@ -21,7 +21,7 @@ export default function TargetView() {
   const gridHeight = createMemo(() => rows() * tagSize + (rows() - 1) * boardSize());
   const svgWidth = createMemo(() => gridWidth() + 2 * marginSize());
   const svgHeight = createMemo(() => gridHeight() + 2 * marginSize());
-  const cellSize = createMemo(() => tagSize / 6);
+  const cellSize = createMemo(() => tagSize / 8);  // 6x6 inner + 2 border cells = 8x8 total
 
   const tagPositions = createMemo(() => {
     const positions: { x: number; y: number; tagId: number }[] = [];
@@ -57,14 +57,23 @@ export default function TargetView() {
 
     for (const tag of tagPositions()) {
       const pattern = codeToPattern(TAG36H11_CODES[tag.tagId]);
-      for (let row = 0; row < 6; row++) {
-        for (let col = 0; col < 6; col++) {
-          const isBorder = row === 0 || row === 5 || col === 0 || col === 5;
-          const value = pattern[row * 6 + col];
-          if (!isBorder && value !== 1) continue;
-          const px = tag.x + col * cellSize();
-          const py = tag.y + row * cellSize();
-          content += `<rect x="${px}" y="${py}" width="${cellSize()}" height="${cellSize()}" fill="black"/>`;
+      for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+          // Border: outer ring (positions 0 or 7 in either dimension)
+          const isBorder = row === 0 || row === 7 || col === 0 || col === 7;
+          let value = 0;
+          if (!isBorder) {
+            // Inner 6×6 pattern area: positions 1-6
+            const pRow = row - 1;
+            const pCol = col - 1;
+            value = pattern[pRow * 6 + pCol];
+          }
+          // Always draw border cells, draw inner cells only if pattern bit is 1
+          if (isBorder || value === 1) {
+            const px = tag.x + col * cellSize();
+            const py = tag.y + row * cellSize();
+            content += `<rect x="${px}" y="${py}" width="${cellSize()}" height="${cellSize()}" fill="black"/>`;
+          }
         }
       }
     }
