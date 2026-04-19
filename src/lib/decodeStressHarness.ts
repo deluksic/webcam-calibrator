@@ -20,9 +20,8 @@ export const DECODE_STRESS_SUPERSAMPLE_DEFAULT = 4;
 export const DECODE_STRESS_SIZES = [200, 160, 120, 96, 80, 72, 64, 56, 48, 40] as const;
 
 /**
- * Max ± uniform speckle on `[0,1]` intensity (before Sobel) that still clears `decodeStressSuiteFailuresFromOptions`.
- * First failure in the current pipeline is just above this (≈0.4925 at `wh=160`). Re-tune with
- * `pnpm run find:decode-stress-speckle`.
+ * Max ± uniform speckle on `[0,1]` intensity (before Sobel) used by decode stress tests / suite.
+ * Re-tune with `pnpm run find:decode-stress-speckle` (`decodeStressSuite` allows Hamming / cell / unknown slack).
  */
 export const DECODE_STRESS_SPECKLE_AMP = 0.492;
 

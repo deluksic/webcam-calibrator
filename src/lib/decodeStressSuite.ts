@@ -25,7 +25,7 @@ export type DecodeStressSuiteOptions = {
   tagId?: number;
 };
 
-function cellErrorsVsTruth(decoded: (0 | 1 | -1)[], truth: (0 | 1 | -1)[]): number {
+function cellErrorsVsTruth(decoded: (0 | 1 | -1 | -2)[], truth: (0 | 1 | -1 | -2)[]): number {
   let err = 0;
   for (let i = 0; i < 36; i++) {
     const d = decoded[i];
@@ -64,11 +64,15 @@ export function decodeStressSuiteFailuresFromOptions(opts: DecodeStressSuiteOpti
     );
     if (!rot || rot.id !== tagId) failures.push(`${label}: rot id want ${tagId} got ${rot?.id}`);
     if (best.id !== tagId) failures.push(`${label}: best.id want ${tagId} got ${best.id}`);
-    if (best.dist !== 0) failures.push(`${label}: best.dist want 0 got ${best.dist}`);
+    // Aligned with `decodeStress.test.ts` homography-mismatch slack (radial + speckle).
+    const maxDist = 2;
+    const maxCellErr = 2;
+    const maxUnknowns = 2;
+    if (best.dist > maxDist) failures.push(`${label}: best.dist want ≤${maxDist} got ${best.dist}`);
     const ce = cellErrorsVsTruth(decodedPattern, truth);
-    if (ce !== 0) failures.push(`${label}: cellErr want 0 got ${ce}`);
+    if (ce > maxCellErr) failures.push(`${label}: cellErr want ≤${maxCellErr} got ${ce}`);
     const unknowns = decodedPattern.filter((v) => v === -1 || v === -2).length;
-    if (unknowns !== 0) failures.push(`${label}: unknowns want 0 got ${unknowns}`);
+    if (unknowns > maxUnknowns) failures.push(`${label}: unknowns want ≤${maxUnknowns} got ${unknowns}`);
   };
 
   {

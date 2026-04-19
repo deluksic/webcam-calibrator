@@ -323,43 +323,24 @@ export function primaryModuleFromUv(u: number, v: number): { mx: number; my: num
 
 export type DecodeTriangle = 'top' | 'bottom' | 'left' | 'right';
 
-/**
- * Classify `(fu,fv)` in module-local [0,1]² into one of four **center+diagonal** triangles
- * (`du = fu − ½`, `dv = fv − ½`). On boundaries where several regions overlap, priority is
- * **top → bottom → left → right** (deterministic single region).
- */
+/** Four wedges meeting at module center `(½,½)` in local `[0,1]²` (center + diagonals). */
 export function decodeTriangleFromLocalUv(fu: number, fv: number): DecodeTriangle {
-  const eps = 1e-14;
   const du = fu - 0.5;
   const dv = fv - 0.5;
-  const top = dv <= du + eps && dv <= -du + eps;
-  const bottom = dv + eps >= du && dv + eps >= -dv;
-  const left = du <= dv + eps && du <= -dv + eps;
-  const right = du + eps >= dv && du + eps >= -dv;
-  if (top) return 'top';
-  if (bottom) return 'bottom';
-  if (left) return 'left';
-  return 'right';
+  const d1 = dv <= du;
+  const d2 = dv <= -du;
+  if (d1 && d2) return 'top';
+  if (!d1 && !d2) return 'bottom';
+  if (du >= 0) return 'right';
+  return 'left';
 }
 
-/** Perpendicular distance in tag UV from `(u,v)` to the shared lattice edge for this triangle. */
-export function decodeEdgeDistanceUv(
-  u: number,
-  v: number,
-  mx: number,
-  my: number,
-  tri: DecodeTriangle,
-): number {
-  switch (tri) {
-    case 'top':
-      return abs(v - my / TAG_MODULES);
-    case 'bottom':
-      return abs(v - (my + 1) / TAG_MODULES);
-    case 'left':
-      return abs(u - mx / TAG_MODULES);
-    case 'right':
-      return abs(u - (mx + 1) / TAG_MODULES);
-  }
+/**
+ * L∞ distance from `(fu,fv)` in module-local `[0,1]²` to that cell’s boundary, expressed in **tag UV**
+ * (one module spans `1/TAG_MODULES` in `u` and `v`). Same as Chebyshev gap `(0.5 − max|local−½|) / 8`.
+ */
+export function decodeEdgeDistanceUv(fu: number, fv: number): number {
+  return (0.5 - max(abs(fu - 0.5), abs(fv - 0.5))) / TAG_MODULES;
 }
 
 /**
@@ -395,9 +376,8 @@ export function decodeVoteModuleIndices(mx: number, my: number, tri: DecodeTrian
 
 /**
  * Scalar used in **unit tests** only: one number from the **primary** `(mx,my)` and the shared lattice
- * line (no per‑vote‑bin center). **`decodeTagPattern`** does **not** use this for accumulation — it uses
- * {@link decodeVoteBinEdgeChannelDot} so each adjacent bin gets a **different** center→sample offset
- * (a white‑leaning score for one bin is black‑leaning for the neighbor across the edge).
+ * line (no per‑vote‑bin center). **`decodeTagPattern`** uses per‑bin **radial** dots
+ * {@link decodeVoteBinRadialDot} instead (see there vs this edge‑aligned channel).
  */
 export function decodeEdgeAlignedDot(
   u: number,
@@ -442,6 +422,24 @@ export function decodeVoteBinEdgeChannelDot(
     case 'right':
       return gu * (u - cu);
   }
+}
+
+/**
+ * Same sign convention as {@link decodeCell}: **positive** ⇒ vote **toward black**. Dot of tag UV
+ * gradient with outward radial from **that bin’s** center **`(cu, cv)`** toward **`(u, v)`**.
+ *
+ * **`decodeTagPattern`** accumulates votes with this scalar (see {@link decodeVoteBinEdgeChannelDot} for
+ * the older edge‑channel variant, still used in unit tests).
+ */
+export function decodeVoteBinRadialDot(
+  u: number,
+  v: number,
+  cu: number,
+  cv: number,
+  gu: number,
+  gv: number,
+): number {
+  return gu * (u - cu) + gv * (v - cv);
 }
 
 /** Euclidean distance from (u,v) to the closed axis-aligned rectangle [u0,u1]×[v0,v1]. */
@@ -545,29 +543,33 @@ export function buildDecodeEdgeMask(
 /**
  * Full decode of 6×6 tag pattern from Sobel: iterate **image pixels** in the quad bbox,
  * inverse homography → tag UV, push gradient to tag UV, **8×8** modules. Each sample maps to a
- * primary module, **center+diagonal** triangle in local module UV (half-spaces in `du`,`dv`;
- * tie-break **top → bottom → left → right**), then one shared lattice edge → **at most two** bins.
- * Each bin gets **`decodeVoteBinEdgeChannelDot`**: **`gv·(v−cv)`** on horizontal lattice edges (**top** /
- * **bottom** wedges), **`gu·(u−cu)`** on vertical (**left** / **right**), with **that bin’s** center
- * **`(cu,cv)`**. Half-spaces pick **which two** bins; opposite bins get **different** offsets so signs can
- * split across a seam. Proximity: **`d_edge ≤ max(TAU_MODULE_UV, 2/L_min, 0.5/8)`** in tag UV.
+ * primary module, **center+diagonal** wedge from {@link decodeTriangleFromLocalUv}, then **at most two** bins.
+ * Each bin gets **`decodeVoteBinRadialDot`**: **`gᵤ(u−cu)+gᵥ(v−cv)`** (outward radial in tag UV toward the
+ * sample). Proximity: **L∞ half-module gap** {@link decodeEdgeDistanceUv} in local `(fu,fv)` must satisfy
+ * **`d_edge ≤ max(TAU_MODULE_UV, 2/L_min, 0.5/8)`** (same units as tag UV per module side).
  * Then inner **6×6** + neighbor fill for **`-1`** only
  * (**`-2`** unchanged). Outcomes: `0`/`1`/`-1`/`-2`.
  *
  * @param grid Grid from `buildTagGrid` (uses `outerCorners` TL,TR,BR,BL; homography uses TL,TR,BL,BR strip order).
  * @param edgeMask Optional: skip pixels where mask index is 0.
  */
-export function decodeTagPattern(
+export type DecodeTagPatternVoteMaps = {
+  pattern: TagPattern;
+  /** Per 8×8 module index: unweighted count of radial dots voting “toward black”. */
+  posM: Float64Array;
+  /** Per 8×8 module index: unweighted count voting “toward white”. */
+  negM: Float64Array;
+  /** Same gate as the inner loop: `max(TAU_MODULE_UV, 2/L_min, 0.5/8)` in tag UV. */
+  uvProximityMax: number;
+};
+
+function decodeTagPatternVoteAccumulation(
   grid: GridResult,
   sobelData: Float32Array,
   imageWidth: number,
+  imageH: number,
   edgeMask?: Uint8Array,
-  imageHeight?: number,
-): TagPattern | null {
-  const imageH =
-    imageHeight !== undefined
-      ? imageHeight
-      : floor(sobelData.length / (2 * imageWidth));
+): { posM: Float64Array; negM: Float64Array; uvProximityMax: number } {
   const oc = grid.outerCorners;
   const strip: [Point, Point, Point, Point] = [oc[0], oc[1], oc[3], oc[2]];
   const h = computeHomography([...strip]);
@@ -604,7 +606,7 @@ export function decodeTagPattern(
       const fu = u * TAG_MODULES - mx;
       const fv = v * TAG_MODULES - my;
       const tri = decodeTriangleFromLocalUv(fu, fv);
-      const dEdge = decodeEdgeDistanceUv(u, v, mx, my, tri);
+      const dEdge = decodeEdgeDistanceUv(fu, fv);
       if (dEdge > uvProximityMax) continue;
 
       for (const mi of decodeVoteModuleIndices(mx, my, tri)) {
@@ -615,12 +617,38 @@ export function decodeTagPattern(
         const ru = u - cu;
         const rv = v - cv;
         if (ru * ru + rv * rv < 1e-10) continue;
-        const dot = decodeVoteBinEdgeChannelDot(tri, u, v, cu, cv, gu, gv);
+        const dot = decodeVoteBinRadialDot(u, v, cu, cv, gu, gv);
         if (dot > DECODE_DOT_EPS) posM[mi] += 1;
         else if (dot < -DECODE_DOT_EPS) negM[mi] += 1;
       }
     }
   }
+
+  return { posM, negM, uvProximityMax };
+}
+
+/**
+ * Same decode as {@link decodeTagPattern}, plus raw **posM** / **negM** tallies (for tooling / stress forensics).
+ * Each contributing pixel adds **±1** to **at most two** 8×8 bins per {@link decodeVoteBinRadialDot}.
+ */
+export function decodeTagPatternWithVoteMaps(
+  grid: GridResult,
+  sobelData: Float32Array,
+  imageWidth: number,
+  edgeMask?: Uint8Array,
+  imageHeight?: number,
+): DecodeTagPatternVoteMaps {
+  const imageH =
+    imageHeight !== undefined
+      ? imageHeight
+      : floor(sobelData.length / (2 * imageWidth));
+  const { posM, negM, uvProximityMax } = decodeTagPatternVoteAccumulation(
+    grid,
+    sobelData,
+    imageWidth,
+    imageH,
+    edgeMask,
+  );
 
   const pattern: TagPattern = [] as unknown as TagPattern;
   for (let row = 0; row < 6; row++) {
@@ -634,5 +662,15 @@ export function decodeTagPattern(
   }
 
   fillUnknownNeighbors6(pattern);
-  return pattern;
+  return { pattern, posM, negM, uvProximityMax };
+}
+
+export function decodeTagPattern(
+  grid: GridResult,
+  sobelData: Float32Array,
+  imageWidth: number,
+  edgeMask?: Uint8Array,
+  imageHeight?: number,
+): TagPattern | null {
+  return decodeTagPatternWithVoteMaps(grid, sobelData, imageWidth, edgeMask, imageHeight).pattern;
 }

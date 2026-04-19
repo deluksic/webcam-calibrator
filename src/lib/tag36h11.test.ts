@@ -100,7 +100,7 @@ describe('tag36h11', () => {
         0, 1, 0, 1, 0, 1,
         1, 0, 1, 0, 1, 0,
         0, 1, 0, 1, 0, 1,
-      ] as (0 | 1 | -1)[];
+      ] as (0 | 1 | -1 | -2)[];
       let current = pattern;
       for (let i = 0; i < 4; i++) current = rotatePattern(current);
       expect(current).toEqual(pattern);

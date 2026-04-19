@@ -241,12 +241,14 @@ describe('grid', () => {
       expect(minQuadEdgeLengthPx(thin)).toBe(10);
     });
 
-    it('decodeTriangleFromLocalUv uses center+diagonal half-spaces; ties top→bottom→left→right', () => {
+    it('decodeTriangleFromLocalUv: center + diagonals', () => {
       expect(decodeTriangleFromLocalUv(0.2, 0.2)).toBe('top');
-      expect(decodeTriangleFromLocalUv(0.8, 0.8)).toBe('bottom');
-      expect(decodeTriangleFromLocalUv(0.2, 0.8)).toBe('bottom');
-      expect(decodeTriangleFromLocalUv(0.8, 0.2)).toBe('top');
+      expect(decodeTriangleFromLocalUv(0.8, 0.8)).toBe('right');
+      expect(decodeTriangleFromLocalUv(0.15, 0.75)).toBe('left');
+      expect(decodeTriangleFromLocalUv(0.3, 0.9)).toBe('bottom');
+      expect(decodeTriangleFromLocalUv(0.75, 0.25)).toBe('top');
       expect(decodeTriangleFromLocalUv(0.5, 0.5)).toBe('top');
+      expect(decodeTriangleFromLocalUv(0.2, 0.5)).toBe('left');
     });
 
     it('decodeVoteModuleIndices returns two interior neighbors for bottom', () => {
@@ -254,12 +256,14 @@ describe('grid', () => {
       expect(idx.sort((a, b) => a - b)).toEqual([4 * 8 + 3, 5 * 8 + 3]);
     });
 
-    it('decodeEdgeDistanceUv and decodeEdgeAlignedDot for horizontal bottom edge', () => {
+    it('decodeEdgeDistanceUv is L∞ gap in local cell; decodeEdgeAlignedDot on bottom edge', () => {
       const mx = 2;
       const my = 3;
       const u = (mx + 0.5) / 8;
       const vBottom = (my + 1) / 8;
-      expect(decodeEdgeDistanceUv(u, vBottom, mx, my, 'bottom')).toBe(0);
+      const fu = 0.5;
+      const fv = 1;
+      expect(decodeEdgeDistanceUv(fu, fv)).toBe(0);
       expect(decodeEdgeAlignedDot(u, vBottom + 0.01, mx, my, 'bottom', 0, 1)).toBeCloseTo(0.01, 5);
     });
 
@@ -270,36 +274,21 @@ describe('grid', () => {
       return (0.5 - max(abs(fu - 0.5), abs(fv - 0.5))) / tagModules;
     }
 
-    it('chebyshev gap (0.5 − max|local−½|)/8 matches decodeEdgeDistanceUv on wedge midline', () => {
+    it('decodeEdgeDistanceUv matches Chebyshev gap in tag UV for all local samples', () => {
       const tag = 8;
       const mx = 2;
       const my = 3;
-      for (let k = 1; k < 24; k++) {
-        const fv = 0.52 + k * 0.018;
+      for (let k = 1; k < 40; k++) {
+        const fv = 0.03 + k * 0.024;
         if (fv >= 0.99) break;
-        const fu = 0.5;
+        const fu = 0.11 + (k % 7) * 0.11;
+        if (fu >= 0.99) continue;
         const u = (mx + fu) / tag;
         const v = (my + fv) / tag;
-        const tri = decodeTriangleFromLocalUv(fu, fv);
-        if (tri !== 'bottom') continue;
-        const line = decodeEdgeDistanceUv(u, v, mx, my, tri);
+        const line = decodeEdgeDistanceUv(fu, fv);
         const cheb = chebyshevGapPrimaryCellUv(u, v, mx, my, tag);
         expect(line).toBeCloseTo(cheb, 12);
       }
-    });
-
-    it('decodeEdgeDistanceUv can differ from chebyshev gap when a side wall is closer in L∞', () => {
-      const tag = 8;
-      const mx = 2;
-      const my = 3;
-      const fu = 0.05;
-      const fv = 0.85;
-      expect(decodeTriangleFromLocalUv(fu, fv)).toBe('bottom');
-      const u = (mx + fu) / tag;
-      const v = (my + fv) / tag;
-      const line = decodeEdgeDistanceUv(u, v, mx, my, 'bottom');
-      const cheb = chebyshevGapPrimaryCellUv(u, v, mx, my, tag);
-      expect(abs(line - cheb)).toBeGreaterThan(1e-4);
     });
 
     it('imageSobelToTagGradient pulls image Sobel to tag UV via Jᵀ (identity homography)', () => {
