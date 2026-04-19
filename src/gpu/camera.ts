@@ -38,7 +38,14 @@ import {
   ExtentEntry,
 } from './pipelines/extentTrackingPipeline';
 import { createCompactLabelLayouts, createCanonicalResetPipeline, createCanonicalClaimPipeline, createRemapLabelPipeline } from './pipelines/compactLabelPipeline';
-import { createGridVizPipeline, createGridVizLayouts, GridDataSchema, QuadData, MAX_INSTANCES } from './pipelines/gridVizPipeline';
+import {
+  createGridVizPipeline,
+  createGridVizLayouts,
+  GridDataSchema,
+  QuadData,
+  MAX_INSTANCES,
+  type GridVizFailInterrogateMode,
+} from './pipelines/gridVizPipeline';
 import { computeHomography, type Point } from '../lib/geometry';
 import {
   type DetectedQuad,
@@ -47,7 +54,8 @@ import {
   validateAndFilterQuads,
 } from './contour';
 
-export const MAX_DETECTED_TAGS = 64;
+/** Max quads drawn in grid mode; must match `MAX_INSTANCES` in gridVizPipeline (buffer + draw). */
+export const MAX_DETECTED_TAGS = MAX_INSTANCES;
 
 export type DisplayMode = 'edges' | 'nms' | 'labels' | 'grayscale' | 'debug' | 'grid';
 
@@ -310,6 +318,9 @@ export function createCameraPipeline(
 
   const { gridVizLayout } = createGridVizLayouts(root, quadCornersBuffer);
 
+  const gridVizDebugModeBuffer = root.createBuffer(d.u32).$usage('uniform');
+  gridVizDebugModeBuffer.write(0);
+
   const gridVizPipeline = createGridVizPipeline(
     root,
     gridVizLayout,
@@ -320,6 +331,7 @@ export function createCameraPipeline(
 
   const gridVizBindGroup = root.createBindGroup(gridVizLayout, {
     quads: quadCornersBuffer,
+    failInterrogate: gridVizDebugModeBuffer,
   });
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -512,6 +524,7 @@ export function createCameraPipeline(
     gridVizLayout,
     gridVizBindGroup,
     quadCornersBuffer,
+    gridVizDebugModeBuffer,
   };
 }
 
@@ -823,6 +836,14 @@ export function updateQuadCornersBuffer(
   log(`quads:${count}`);
   console.log(`[grid] first quad debug:`, data[0]?.debug);
   pipeline.quadCornersBuffer.write(data);
+}
+
+/** Grid overlay: 0 = legacy fail colors, 1 = red highlights insufficient-edge failures, 2 = blue highlights line-fit failures. */
+export function setGridVizFailInterrogate(
+  pipeline: CameraPipeline,
+  mode: GridVizFailInterrogateMode,
+): void {
+  pipeline.gridVizDebugModeBuffer.write(mode);
 }
 
 export { filterNestedQuads } from './contour';

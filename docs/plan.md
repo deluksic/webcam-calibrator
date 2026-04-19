@@ -20,16 +20,23 @@ Browser-based camera calibration using AprilTag 6×6 grid. Client-side only — 
 
 ## Detection Pipeline
 
-1. Grayscale conversion
-2. Sobel edge detection
-3. Histogram + adaptive threshold (90th percentile)
-4. Non-maximum suppression (NMS)
-5. Connected component labeling (GPU pointer-jump)
-6. Compact labeling (atomic remap to 0..N-1)
-7. Extent tracking (atomic bounding boxes)
-8. Quad fitting + corner detection (CPU, grid mode)
-9. Homography solve per quad
-10. Grid render (GPU, instanced homography warp)
+**GPU (every frame in grid / labels / debug paths):**
+
+1. Grayscale conversion  
+2. Sobel edge detection  
+3. Histogram + adaptive threshold (90th percentile)  
+4. Non-maximum suppression (NMS) + edge filter  
+5. Connected component labeling (GPU pointer-jump)  
+6. Compact labeling (atomic remap to 0..N-1)  
+7. Extent tracking (atomic bounding boxes)  
+
+**CPU (grid mode, throttled readback — `detectContours` / `validateAndFilterQuads`):**
+
+8. Regions from compact labels → per region **corner pipeline** in order: labeled edge pixels → k-means on gradients → **four** line fits (RANSAC+PCA) → all-pairs line intersections (clip to extent bbox ± shared slack) → dedupe → strict convex CCW ordering + TL/TR/BR/BL rotation + plausibility (same slack as intersection clip)  
+9. Homography solve per quad (CPU)  
+10. Grid render (GPU, instanced homography warp)  
+
+Step 8 detail and failure ordering: **`ARCHITECTURE.md` → Corner Detection**.
 
 ---
 
@@ -59,12 +66,14 @@ Browser-based camera calibration using AprilTag 6×6 grid. Client-side only — 
 
 ### Phase 4.1 — Quad Fitting
 - [x] Region extraction from labels
-- [x] K-means clustering in tangent space
-- [x] RANSAC line fitting (seeded LCG RNG)
-- [x] Line intersection → corner points
+- [x] K-means clustering on **raw Sobel gradients** (cosine dissimilarity, k=4, restarts)
+- [x] **RANSAC + PCA** line fit per cluster (`src/lib/corners.ts`)
+- [x] All line-pair intersections → dedupe → strict convex CCW cycle + rotation to TL/TR/BL/BR + plausibility
 - [x] Homography solve via Gaussian elimination
 - [x] Corner plausibility checks
 - [x] Bounding box fallback for failed quads
+
+See **`ARCHITECTURE.md` → Corner Detection** for the ordered CPU stages (what runs *before* line intersection and how that relates to failure codes).
 
 ### Phase 4.2 — Tag Decode
 - [x] tag36h11 dictionary (587 codings, Hamming distance ≥ 11)

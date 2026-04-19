@@ -4,7 +4,7 @@ import { abs, floor, fract, min, max, dpdx, dpdy, select, mul } from 'typegpu/st
 
 export const GRID_DIVISIONS = 8;
 export const GRID_LINE_WIDTH = 0.06;
-export const MAX_INSTANCES = 64;
+export const MAX_INSTANCES = 1024;
 
 const QuadDebug = d.struct({
   failureCode: d.u32,
@@ -22,12 +22,16 @@ export type QuadData = d.Infer<typeof QuadData>;
 
 export const GridDataSchema = d.arrayOf(QuadData, MAX_INSTANCES);
 
+/** 0 = legacy RGB fail tint; 1 = interrogate FAIL_INSUFFICIENT_EDGES (red hit / black miss); 2 = interrogate FAIL_LINE_FIT_FAILED (blue). */
+export type GridVizFailInterrogateMode = 0 | 1 | 2;
+
 export function createGridVizLayouts(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   _quadCornersBuffer: unknown,
 ) {
   const gridVizLayout = tgpu.bindGroupLayout({
     quads: { storage: GridDataSchema, access: 'readonly' },
+    failInterrogate: { uniform: d.u32 },
   });
   return { gridVizLayout };
 }
@@ -106,25 +110,24 @@ export function createGridVizPipeline(
   })(({ uv, failureCode }) => {
     const ddx = dpdx(uv);
     const ddy = dpdy(uv);
+    const mode = gridVizLayout.$.failInterrogate;
 
-    if (failureCode === 0) {
+    if (failureCode === d.u32(0)) {
       const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
       return d.vec4f(d.f32(0.0), d.f32(1.0), d.f32(0.0), grid);
     }
 
-    const code = failureCode;
-    const fc = d.f32((code & 1) > 0);
-    const ec = d.f32((code & 2) > 0);
-    const lc = d.f32((code & 4) > 0);
-    const pc = d.f32((code & 8) > 0);
-    const nc = d.f32((code & 16) > 0);
+    const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS);
+    const a = d.f32(0.2) + d.f32(0.75) * grid;
+    const mask = 0b1000;
+    if ((failureCode & mask) !== d.u32(0)) {
+      if ((failureCode ^ mask) === d.u32(0)) {
+        return d.vec4f(d.f32(1), d.f32(0), d.f32(0), a);
+      }
+      return d.vec4f(d.f32(0), d.f32(0.25), d.f32(1), a);
+    }
 
-    const failR = fc + lc + nc;
-    const failG = ec + pc + lc;
-    const failB = fc + ec + pc;
-
-    const cell = gridTextureGradBox(uv, ddx, ddy, 1);
-    return d.vec4f(failR, failG, failB, d.f32(0.2) + d.f32(0.8) * cell);
+    return d.vec4f(d.f32(0), d.f32(0), d.f32(0), a);
   });
 
   return root.createRenderPipeline({

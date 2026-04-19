@@ -18,10 +18,7 @@ DetectedQuads (CPU) → computeHomography() → quadCornersBuffer (GPU)
 ```
 
 ### Buffer Format
-`quadCornersBuffer` stores 3 vec4f per quad (12 f32):
-- `vec4f(h1, h2, h3, h4)` — homography row 1 + start of row 2
-- `vec4f(h5, h6, h7, h8)` — homography row 2 + row 3
-- `vec4f(hasCorners, 0, 0, 0)` — 1.0 = real corners (blue grid), 0.0 = fallback (red outline)
+`quadCornersBuffer` follows `GridDataSchema` in `gridVizPipeline.ts`: **`MAX_INSTANCES`** entries, each a **`mat3x3f` homography** (column-major, 8 free coeffs + bottom-right 1) plus **`QuadDebug`** (`failureCode`, `edgePixelCount`, `minR2`, `intersectionCount`) for overlay tinting. Homography maps unit square → image quad; failure styling is driven from CPU `cornerDebug`, not a legacy `hasCorners` vec4.
 
 ## Status
 - [x] Create gridVizPipeline.ts

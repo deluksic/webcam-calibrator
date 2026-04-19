@@ -137,11 +137,11 @@ function CalibrationView() {
   );
 
   const [threshold, setThreshold] = createSignal(0);
-  const [displayMode, setDisplayMode] = createSignal<DisplayMode>("debug");
+  const [displayMode, setDisplayMode] = createSignal<DisplayMode>("grid");
   const [bboxes, setBboxes] = createSignal<Bbox[]>([]);
   const [logs, setLogs] = createSignal<string[]>([]);
   const [showGrid, setShowGrid] = createSignal(true);
-  const [showFallbacks, setShowFallbacks] = createSignal(false);
+  const [showFallbacks, setShowFallbacks] = createSignal(true);
 
   const log = (msg: string) => {
     Promise.resolve().then(() => {
@@ -153,10 +153,10 @@ function CalibrationView() {
     });
   };
 
-  const availableCameraDevices = createMemo(async () => {
+  const availableCameraDevices = createMemo<MediaDeviceInfo[]>(async () => {
     const inputs = await enumerateVideoInputs();
     return [...inputs].sort((a, b) => deviceScore(b) - deviceScore(a));
-  }, [] as MediaDeviceInfo[]);
+  });
 
   const [selectedCameraId, setSelectedCameraId] = createSignal(
     (prev: string | undefined) => {

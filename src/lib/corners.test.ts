@@ -93,19 +93,20 @@ describe('extractLabeledEdgePixels', () => {
     expect(pixels).toHaveLength(0);
   });
 
-  it('computes tangent perpendicular to gradient', () => {
+  it('stores raw Sobel gradient for clustering', () => {
     const w = 10, h = 10;
     const sobelData = new Float32Array(w * h * 2);
     const labelData = makeRectLabel(w, h, 0, 0, 9, 9);
 
-    // gx=10, gy=0 → gradient points right → tangent = atan2(0,10)+π/2 = π/2
     sobelData[5 * w * 2 + 0] = 10;
     sobelData[5 * w * 2 + 1] = 0;
     labelData[5 * w + 5] = 1;
 
     const pixels = extractLabeledEdgePixels(sobelData, labelData, w, 1, 0, 0, 9, 9);
     expect(pixels.length).toBeGreaterThan(0);
-    expect(pixels[0].tangent).toBeCloseTo(Math.PI / 2, 5);
+    expect(pixels[0].gx).toBeCloseTo(10, 5);
+    expect(pixels[0].gy).toBeCloseTo(0, 5);
+    expect(pixels[0].magnitude).toBeCloseTo(10, 5);
   });
 });
 

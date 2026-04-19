@@ -71,16 +71,28 @@ GPU-only. One reset + one track dispatch. Atomically tracks (minX, minY, maxX, m
 
 ## Corner Detection (grid mode, CPU)
 
-Only runs in grid mode, every ~30 frames:
+`detectContours()` → `validateAndFilterQuads()` in `contour.ts` calls `findCornersFromEdgesWithDebug()` **per region** (each connected component from compact labels, after area / aspect / edge-density filters). Only runs in grid mode on a throttled cadence.
 
-1. Extract regions from compact labels
-2. For each region: extract edge pixels within bounding box
-3. Compute tangent per pixel: `atan2(gy, gx) + π/2`
-4. K-means (k=4) in circular tangent space — 3 random restarts, seeded LCG RNG
-5. RANSAC line fitting per cluster (50 iterations)
-6. Pair perpendicular lines → line intersection → 4 corner points
-7. Plausibility checks: R² ≥ 0.80, convex quad, edge length ratios
-8. Fall back to bounding box corners if corner detection fails
+### End-to-end order (GPU → CPU)
+
+**On the GPU (same frame submit as grid mode):** grayscale → Sobel → histogram/threshold → edge filter (NMS) → pointer-jump labeling → compact remap → extent tracking. CPU readback then gets **per-pixel compact labels** and **filtered Sobel buffer** `(gx, gy)` per pixel.
+
+**Per region on the CPU** (`src/lib/corners.ts`), stages run **strictly in this order**. Anything that fails **through step 5** (before four deduped intersection points exist) means intersection geometry never stabilizes — so a `failureCode` that *looks* like “intersections” can still be rooted in clustering or line fit.
+
+| Step | What happens | Typical failure / debug |
+|------|----------------|-------------------------|
+| 1 | **Labeled edge pixels** — pixels inside the region’s bbox whose compact label matches the region; each stores raw **Sobel** `(gx, gy)` and magnitude. | `FAIL_INSUFFICIENT_EDGES` (bit 0) if count &lt; `minEdgePixels` (default 12). |
+| 2 | **K-means (k=4)** on gradient vectors using **cosine dissimilarity** \(1 - \cos\theta\); cluster **reference direction** = normalized sum of member gradients (not a spatial centroid). | Poor splits → weak lines later; no dedicated bit here. |
+| 3 | **Line per cluster** — `fitLine`: RANSAC on `(x,y)` inliers, then **PCA** on inliers for the line normal; returns `null` if PCA rejects scatter. | `FAIL_LINE_FIT_FAILED` (bit 2) for that cluster; **fewer than four lines** reduces how many intersection pairs exist. |
+| 4 | **Line–line intersections** — all pairs of **non-null** lines; `lineIntersection` (parallel pairs yield no point); clip to region extent bbox ± **`extentBBoxSlack`** = `max(6px, 0.5 × max(bboxW, bboxH))`. | `FAIL_NO_INTERSECTIONS` (bit 4) if **&lt;4** raw hits pass the clip (often because step 3 left missing lines, parallel lines, or hits fall outside slack). |
+| 5 | **Deduplicate** intersections closer than **5 px**. | Same bit 4 if **&lt;4** distinct points remain (many hits collapsed to one corner). |
+| 6 | **Order + plausibility** — among permutations of the four points, require a **strictly convex CCW** cycle (consistent turn signs; largest valid signed area); **rotate** that cycle to label **TL, TR, BR, BL** and run **plausibility** until one passes: `R²`, corners inside extent bbox ± **the same `extentBBoxSlack`** as step 4, opposite-edge length ratios, cluster inlier counts. Emit `[TL, TR, BL, BR]` for homography. | `FAIL_PLAUSIBILITY` (bit 3) if no convex cycle, no rotation passes plausibility, or a check fails (e.g. `R²`, edge ratio, sparse cluster). |
+
+If `contour.ts` does not get four corners, it still builds a quad from the **region bounding box** for grid/homography, but `cornerDebug.failureCode` reflects the CPU attempt above.
+
+### Failure bitmask (see `corners.ts`)
+
+Bits 0–4 are defined there; bit 1 is reserved for future use. Intersection-related failure is **bit 4 only** today (both “too few raw intersections” and “dedupe left &lt;4” share that code path). **Bit 3** groups ordering/plausibility failures after four deduped points exist (convex cycle, rotation choice, `R²`, slack-aligned bbox, edge ratios, cluster counts).
 
 ## Homography
 
@@ -106,4 +118,4 @@ Vertex shader passes `w` in `outPos.w` for automatic perspective-correct interpo
 | `canonicalRootBuffer` | area×atomic u32 | canonical root IDs |
 | `histogramBuffer` | 256×atomic u32 | edge histogram |
 | `extentBuffer` | MAX_EXTENT_COMPONENTS×ExtentEntry | bounding boxes |
-| `quadCornersBuffer` | MAX_INSTANCES×3×vec4f | homography params + hasCorners flag |
+| `quadCornersBuffer` | `MAX_INSTANCES` × (`mat3x3f` homography + per-quad debug) — see `GridDataSchema` in `gridVizPipeline.ts` | instanced grid viz (`MAX_INSTANCES` in that file, e.g. 1024) |

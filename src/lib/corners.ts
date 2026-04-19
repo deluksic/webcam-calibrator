@@ -1,5 +1,5 @@
-// Corner detection: label-filtered edge extraction, orientation clustering,
-// line fitting with R², and line intersection for robust quad corners.
+// Corner detection: label-filtered edge extraction, Sobel-gradient clustering (cosine),
+// RANSAC + PCA line fit per cluster, and line intersection for robust quad corners.
 
 import { Point } from './geometry';
 
@@ -36,8 +36,8 @@ export function extractLabeledEdgePixels(
   minY: number,
   maxX: number,
   maxY: number,
-): { x: number; y: number; tangent: number; magnitude: number }[] {
-  const pixels: { x: number; y: number; tangent: number; magnitude: number }[] = [];
+): LabeledEdgePixel[] {
+  const pixels: LabeledEdgePixel[] = [];
   const EPS = 1e-6;
 
   const x0 = Math.floor(minX);
@@ -56,44 +56,40 @@ export function extractLabeledEdgePixels(
       const mag = Math.sqrt(gx * gx + gy * gy);
       if (mag < EPS) continue;
 
-      // Tangent is perpendicular to gradient (gives edge direction, not gradient direction)
-      const tangent = Math.atan2(gy, gx) + Math.PI / 2;
-
-      pixels.push({ x, y, tangent, magnitude: mag });
+      pixels.push({ x, y, gx, gy, magnitude: mag });
     }
   }
 
   return pixels;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Step 2: K-means clustering on circular tangent space
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Distance between two angles, accounting for circular wrap-around. */
-function tangentDist(a: number, b: number): number {
-  let d = Math.abs(a - b);
-  if (d > Math.PI) d = 2 * Math.PI - d;
-  return d;
+/** One edge sample: position, raw Sobel gradient (gx, gy), magnitude ‖(gx,gy)‖. */
+export interface LabeledEdgePixel {
+  x: number;
+  y: number;
+  gx: number;
+  gy: number;
+  magnitude: number;
 }
 
-/** Mean of circular angles (vector sum method). */
-function circularMean(angles: number[]): number {
-  let sx = 0, sy = 0;
-  for (const a of angles) {
-    sx += Math.cos(a);
-    sy += Math.sin(a);
-  }
-  return Math.atan2(sy, sx);
+function dot2(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  return a.x * b.x + a.y * b.y;
+}
+
+/** Directed cosine dissimilarity: 1 − cos θ = 1 − (u·v)/(‖u‖‖v‖). No unit pre-normalize required. */
+function cosineDissimilarity(u: { x: number; y: number }, v: { x: number; y: number }): number {
+  const mu = Math.hypot(u.x, u.y);
+  const mv = Math.hypot(v.x, v.y);
+  if (mu < 1e-14 || mv < 1e-14) return 1;
+  return 1 - dot2(u, v) / (mu * mv);
 }
 
 /**
- * K-means clustering into 4 groups on circular tangent space.
- * Uses 3 random restarts and picks the best partition by total intra-cluster distance.
- * Returns cluster assignments (each pixel index → cluster id 0..3).
+ * K-means into 4 clusters on raw gradient vectors (gx, gy).
+ * Cost = 1 − cos θ; centroids = normalized sum of member gradients (no sign flips).
  */
-function kMeansTangent(
-  pixels: { tangent: number }[],
+function kMeansGradientDirections(
+  pixels: LabeledEdgePixel[],
   k: number = 4,
   maxRestarts: number = 3,
 ): Int32Array {
@@ -101,15 +97,15 @@ function kMeansTangent(
   if (n < k) return new Int32Array(n);
 
   let bestAssignments: Int32Array | null = null;
-  let bestTotalDist = Infinity;
+  let bestTotalCost = Infinity;
 
   for (let restart = 0; restart < maxRestarts; restart++) {
-    // Initialize centroids by spreading them around the circle
-    const centroids: number[] = [];
+    const centroids: { x: number; y: number }[] = [];
     const spacing = (2 * Math.PI) / k;
+    const base = (restart / maxRestarts) * spacing;
     for (let i = 0; i < k; i++) {
-      const base = (restart / maxRestarts) * spacing;
-      centroids.push((i * spacing + base) % (2 * Math.PI));
+      const t = i * spacing + base;
+      centroids.push({ x: Math.cos(t), y: Math.sin(t) });
     }
 
     let assignments = new Int32Array(n);
@@ -118,14 +114,14 @@ function kMeansTangent(
     for (let iter = 0; iter < 30 && !converged; iter++) {
       converged = true;
 
-      // Assign each pixel to nearest centroid
       for (let i = 0; i < n; i++) {
+        const v = { x: pixels[i].gx, y: pixels[i].gy };
         let bestCluster = 0;
-        let bestDist = Infinity;
+        let bestCost = Infinity;
         for (let c = 0; c < k; c++) {
-          const d = tangentDist(pixels[i].tangent, centroids[c]);
-          if (d < bestDist) {
-            bestDist = d;
+          const cost = cosineDissimilarity(v, centroids[c]);
+          if (cost < bestCost) {
+            bestCost = cost;
             bestCluster = c;
           }
         }
@@ -134,25 +130,30 @@ function kMeansTangent(
       }
       if (converged) break;
 
-      // Update centroids
       for (let c = 0; c < k; c++) {
-        const groupAngles = [];
+        let sx = 0;
+        let sy = 0;
         for (let i = 0; i < n; i++) {
-          if (assignments[i] === c) groupAngles.push(pixels[i].tangent);
+          if (assignments[i] !== c) continue;
+          sx += pixels[i].gx;
+          sy += pixels[i].gy;
         }
-        centroids[c] = groupAngles.length > 0 ? circularMean(groupAngles) : centroids[c];
+        const len = Math.hypot(sx, sy);
+        if (len > 1e-8) {
+          centroids[c] = { x: sx / len, y: sy / len };
+        }
       }
     }
 
-    // Compute total intra-cluster distance (quality metric)
-    let totalDist = 0;
+    let totalCost = 0;
     for (let i = 0; i < n; i++) {
-      totalDist += tangentDist(pixels[i].tangent, centroids[assignments[i]]);
+      const v = { x: pixels[i].gx, y: pixels[i].gy };
+      totalCost += cosineDissimilarity(v, centroids[assignments[i]]);
     }
 
-    if (totalDist < bestTotalDist) {
-      bestTotalDist = totalDist;
-      bestAssignments = assignments;
+    if (totalCost < bestTotalCost) {
+      bestTotalCost = totalCost;
+      bestAssignments = Int32Array.from(assignments);
     }
   }
 
@@ -164,9 +165,9 @@ function kMeansTangent(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface LineFit {
-  /** Normalized direction: (cos(angle), sin(angle)) — along the edge */
+  /** Unit vector along the fitted edge */
   dir: { x: number; y: number };
-  /** Perpendicular direction: normal to the edge */
+  /** Unit normal (line: normal·(x,y) = d) */
   normal: { x: number; y: number };
   /** Distance from origin along normal (signed) */
   d: number;
@@ -177,23 +178,68 @@ export interface LineFit {
 }
 
 /**
- * RANSAC line fitting: picks random 2-point samples, counts inliers within
- * threshold, and returns the best line found.
- * Returns line in normal form: normal·(x,y) = d.
- * Normal is the average direction perpendicular to sampled segments.
+ * Unit normal from 2D point scatter: eigenvector for the smaller covariance eigenvalue.
+ * Returns null if scatter is degenerate or too isotropic for a line.
+ */
+function normalFromInlierScatter(points: { x: number; y: number }[]): { nx: number; ny: number } | null {
+  const n = points.length;
+  if (n < 2) return null;
+
+  let cx = 0;
+  let cy = 0;
+  for (const p of points) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= n;
+  cy /= n;
+
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  for (const p of points) {
+    const dx = p.x - cx;
+    const dy = p.y - cy;
+    sxx += dx * dx;
+    syy += dy * dy;
+    sxy += dx * dy;
+  }
+
+  const tr = sxx + syy;
+  const det = sxx * syy - sxy * sxy;
+  const disc = Math.max(0, tr * tr - 4 * det);
+  const root = Math.sqrt(disc);
+  const lamMax = (tr + root) * 0.5;
+  const lamMin = (tr - root) * 0.5;
+
+  if (lamMax < 1e-10) return null;
+  if (lamMin / lamMax > 0.15) return null;
+
+  let nx = sxy;
+  let ny = lamMin - sxx;
+  let len = Math.hypot(nx, ny);
+  if (len < 1e-10) {
+    nx = lamMin - syy;
+    ny = sxy;
+    len = Math.hypot(nx, ny);
+  }
+  if (len < 1e-10) return null;
+  return { nx: nx / len, ny: ny / len };
+}
+
+/**
+ * RANSAC line fit on (x,y), then PCA on inliers for the normal. Null if PCA rejects the inlier set.
  */
 function fitLine(
   points: { x: number; y: number }[],
-  tangents: number[],
   seed: number = 42,
 ): LineFit | null {
   if (points.length < 3) return null;
 
   const n = points.length;
-  const ITER = 80;  // More iterations for sparse edge regions
-  const THRESH = 3.0;  // Pixels — increased for noisy/fuzzy edges on oblique tags
+  const ITER = 80;
+  const THRESH = 3.0;
 
-  // Seeded LCG RNG (deterministic)
   let rng = (seed * 1664525 + 1013904223) >>> 0;
   const rand = () => { rng = (rng * 1664525 + 1013904223) >>> 0; return rng / 0xFFFFFFFF; };
   const randInt = (max: number) => Math.floor(rand() * max);
@@ -201,7 +247,6 @@ function fitLine(
   let bestNx = 0, bestNy = 0, bestD = 0, bestInliers = 0;
 
   for (let iter = 0; iter < ITER; iter++) {
-    // Pick 2 random distinct points
     const i1 = randInt(n);
     let i2 = randInt(n);
     while (i2 === i1) i2 = randInt(n);
@@ -211,19 +256,10 @@ function fitLine(
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len < 1) continue;
 
-    // Direction along the line segment
-    const dirX = dx / len, dirY = dy / len;
-    // Normal = perpendicular to direction
-    let nx = -dirY, ny = dirX;
-    // Ensure consistent orientation using mean tangent
-    const meanT = circularMean(tangents);
-    const tNx = Math.cos(meanT - Math.PI / 2);
-    const tNy = Math.sin(meanT - Math.PI / 2);
-    if (nx * tNx + ny * tNy < 0) { nx = -nx; ny = -ny; }
-
+    const nx = -dy / len;
+    const ny = dx / len;
     const d = nx * p1.x + ny * p1.y;
 
-    // Count inliers
     let inliers = 0;
     for (let i = 0; i < n; i++) {
       const dist = Math.abs(nx * points[i].x + ny * points[i].y - d);
@@ -232,38 +268,34 @@ function fitLine(
 
     if (inliers > bestInliers) {
       bestInliers = inliers;
-      bestNx = nx; bestNy = ny; bestD = d;
+      bestNx = nx;
+      bestNy = ny;
+      bestD = d;
     }
   }
 
   if (bestInliers < 3) return null;
 
-  // Refine: fit a line to all inliers using least-squares (centroid + normal from mean tangent)
   const inlierPoints: { x: number; y: number }[] = [];
-  const inlierTangents: number[] = [];
   for (let i = 0; i < n; i++) {
     const dist = Math.abs(bestNx * points[i].x + bestNy * points[i].y - bestD);
-    if (dist < THRESH) {
-      inlierPoints.push(points[i]);
-      inlierTangents.push(tangents[i]);
-    }
+    if (dist < THRESH) inlierPoints.push(points[i]);
   }
 
   let cx = 0, cy = 0;
-  for (const p of inlierPoints) { cx += p.x; cy += p.y; }
+  for (const p of inlierPoints) {
+    cx += p.x;
+    cy += p.y;
+  }
   cx /= inlierPoints.length;
   cy /= inlierPoints.length;
 
-  // Normal from mean inlier tangent
-  const meanT = circularMean(inlierTangents);
-  let gx = Math.cos(meanT - Math.PI / 2);
-  let gy = Math.sin(meanT - Math.PI / 2);
-  const gLen = Math.sqrt(gx * gx + gy * gy);
-  if (gLen < 1e-6) return null;
-  gx /= gLen; gy /= gLen;
-  const dRefined = gx * cx + gy * cy;
+  const refined = normalFromInlierScatter(inlierPoints);
+  if (!refined) return null;
 
-  // R² = fraction of inliers
+  const gx = refined.nx;
+  const gy = refined.ny;
+  const dRefined = gx * cx + gy * cy;
   const r2 = inlierPoints.length / n;
 
   return {
@@ -296,6 +328,15 @@ function lineIntersection(l1: LineFit, l2: LineFit): Point | null {
 // Step 5: Plausibility checks on corners
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Allowed distance outside the region extent bbox (min/max from labeling).
+ * Must match line–line intersection clipping so corners are not accepted in step 4
+ * then rejected in plausibility solely for sitting just past the bbox.
+ */
+function extentBBoxSlack(minX: number, minY: number, maxX: number, maxY: number): number {
+  return Math.max(6, 0.5 * Math.max(maxX - minX, maxY - minY));
+}
+
 /** Signed area of a polygon (positive = CCW, negative = CW). */
 function signedArea(pts: Point[]): number {
   let a = 0;
@@ -306,19 +347,91 @@ function signedArea(pts: Point[]): number {
   return a / 2;
 }
 
+/** Z-component of (b − a) × (c − b): turn at corner b along a → b → c. */
+function crossTurn(a: Point, b: Point, c: Point): number {
+  return (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+}
+
+/**
+ * True iff these four points in cyclic order form a simple strictly convex quad
+ * (every turn same sign as shoelace area — no bow-tie, no collinear vertex).
+ */
+function isStrictConvexQuadCycle(order: Point[]): boolean {
+  if (order.length !== 4) return false;
+  const area = signedArea(order);
+  if (Math.abs(area) < 1e-12) return false;
+  const s = Math.sign(area);
+  for (let i = 0; i < 4; i++) {
+    const a = order[i]!;
+    const b = order[(i + 1) % 4]!;
+    const c = order[(i + 2) % 4]!;
+    const t = crossTurn(a, b, c);
+    if (Math.abs(t) < 1e-10) return false;
+    if (Math.sign(t) !== s) return false;
+  }
+  return true;
+}
+
+function allPermutationsFour(pts: readonly [Point, Point, Point, Point]): Point[][] {
+  const out: Point[][] = [];
+  for (let a = 0; a < 4; a++) {
+    for (let b = 0; b < 4; b++) {
+      if (b === a) continue;
+      for (let c = 0; c < 4; c++) {
+        if (c === a || c === b) continue;
+        for (let d = 0; d < 4; d++) {
+          if (d === a || d === b || d === c) continue;
+          out.push([pts[a]!, pts[b]!, pts[c]!, pts[d]!]);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * One CCW convex boundary order of the four points (positive signed area, strict convexity).
+ * Picks the cyclic order with largest signed area among valid permutations.
+ */
+function findConvexCCWCycle(pts: Point[]): Point[] | null {
+  if (pts.length !== 4) return null;
+  const tuple = [pts[0]!, pts[1]!, pts[2]!, pts[3]!] as [Point, Point, Point, Point];
+  let best: Point[] | null = null;
+  let bestArea = 0;
+  for (const ordered of allPermutationsFour(tuple)) {
+    const area = signedArea(ordered);
+    if (area <= 1e-10) continue;
+    if (!isStrictConvexQuadCycle(ordered)) continue;
+    if (area > bestArea) {
+      bestArea = area;
+      best = ordered.slice();
+    }
+  }
+  return best;
+}
+
+function rotateRing(ring: Point[], k: number): [Point, Point, Point, Point] {
+  return [
+    ring[k]!,
+    ring[(k + 1) % 4]!,
+    ring[(k + 2) % 4]!,
+    ring[(k + 3) % 4]!,
+  ];
+}
+
 /**
  * Plausibility checks on 4 corners:
  * - All 4 corners defined
  * - Quad is convex (signed area must have consistent sign)
  * - All R² values above threshold (lines fit well)
- * - Corners within reasonable bounds of the region
+ * - Corners within region extent bbox ± same slack as intersection clipping (half max span, min 6px)
  * - Min/max edge lengths > 0 and edge length ratio reasonable
  */
 function plausibilityCheck(
   corners: Point[],
   lines: LineFit[],
   assignments: Int32Array,
-  pixels: { x: number; y: number; tangent: number; magnitude: number }[],
+  pixels: LabeledEdgePixel[],
   minX: number,
   minY: number,
   maxX: number,
@@ -334,8 +447,7 @@ function plausibilityCheck(
   const scale = Math.max(...corners.map(c => Math.max(Math.abs(c.x), Math.abs(c.y))));
   if (Math.abs(area) < 1e-4 * scale * scale) return false;
 
-  // Check each corner is roughly within region bounds (with some margin)
-  const margin = Math.max((maxX - minX), (maxY - minY)) * 0.1;
+  const margin = extentBBoxSlack(minX, minY, maxX, maxY);
   for (const c of corners) {
     if (c.x < minX - margin || c.x > maxX + margin) return false;
     if (c.y < minY - margin || c.y > maxY + margin) return false;
@@ -383,20 +495,20 @@ export interface CornerResult {
   debug: CornerDebugInfo;
 }
 
-// Failure codes (bitmask — can combine multiple failures)
-const FAIL_INSUFFICIENT_EDGES = 1 << 0; // not enough edge pixels
-const FAIL_ASPECT_RATIO        = 1 << 1; // aspect ratio out of bounds
-const FAIL_LINE_FIT_FAILED     = 1 << 2; // null line from RANSAC
-const FAIL_PLAUSIBILITY        = 1 << 3; // convexity / edge ratio / R² check
-const FAIL_NO_INTERSECTIONS     = 1 << 4; // <4 valid line-line intersections
+// Failure codes (bitmask — can combine multiple failures). Order matches pipeline stages.
+export const FAIL_INSUFFICIENT_EDGES = 1 << 0; // not enough edge pixels (first gate)
+export const FAIL_ASPECT_RATIO = 1 << 1; // reserved — not set by findCornersFromEdgesWithDebug today
+export const FAIL_LINE_FIT_FAILED = 1 << 2; // null line from RANSAC (after clustering)
+export const FAIL_PLAUSIBILITY = 1 << 3; // no convex cycle, no valid TL..BR rotation, or plausibility checks
+export const FAIL_NO_INTERSECTIONS = 1 << 4; // <4 valid line-line intersections
 
 /**
  * Find quad corners using:
  * 1. Label-filtered Sobel edge extraction
- * 2. K-means clustering of edge tangents into 4 groups
+ * 2. K-means clustering of raw Sobel gradients into 4 groups (1 − cos θ)
  * 3. Orthogonal least-squares line fit per cluster (with R² metric)
- * 4. Intersection of adjacent lines → 4 corner points
- * 5. Plausibility checks (convexity, R² threshold, bounds, edge ratios)
+ * 4. Intersection of all line pairs (non-parallel) → up to 6 points, deduped to 4 corners
+ * 5. Convex cyclic order (strict turns) + rotation to TL,TR,BR,BL, then plausibility (R², bounds, edge ratios)
  *
  * Returns corners ordered [TL, TR, BL, BR] for triangle strip topology,
  * or empty array if detection fails. Use getDebugInfo() to get failure details.
@@ -454,21 +566,19 @@ export function findCornersFromEdgesWithDebug(
     return { corners: [], debug: { failureCode, edgePixelCount, minR2: 0, intersectionCount: 0 } };
   }
 
-  // Step 2: Cluster by tangent direction
-  const assignments = kMeansTangent(pixels, 4, 3);
+  // Step 2: Cluster by gradient direction (cosine on raw gx, gy)
+  const assignments = kMeansGradientDirections(pixels, 4, 3);
 
   // Step 3: Fit lines per cluster
   const lines: (LineFit | null)[] = [];
   for (let c = 0; c < 4; c++) {
     const clusterPoints: { x: number; y: number }[] = [];
-    const clusterTangents: number[] = [];
     for (let i = 0; i < pixels.length; i++) {
       if (assignments[i] === c) {
         clusterPoints.push({ x: pixels[i].x, y: pixels[i].y });
-        clusterTangents.push(pixels[i].tangent);
       }
     }
-    const line = fitLine(clusterPoints, clusterTangents, seed + c);
+    const line = fitLine(clusterPoints, seed + c);
     lines.push(line);
     if (line) {
       minR2Seen = Math.min(minR2Seen, line.r2);
@@ -478,20 +588,18 @@ export function findCornersFromEdgesWithDebug(
     }
   }
 
-  // Step 4: Intersect lines.
-  // Pair each line with those whose normal is ~90° away (perpendicular).
+  // Step 4: Intersect all pairs of non-null fitted lines.
+  const intersectionSlack = extentBBoxSlack(minX, minY, maxX, maxY);
+
   const rawIntersections: Point[] = [];
   for (let i = 0; i < 4; i++) {
     if (!lines[i]) continue;
     for (let j = i + 1; j < 4; j++) {
       if (!lines[j]) continue;
-      const dot = Math.abs(lines[i]!.normal.x * lines[j]!.normal.x + lines[i]!.normal.y * lines[j]!.normal.y);
-      if (dot > 0.2) continue;
       const p = lineIntersection(lines[i]!, lines[j]!);
       if (!p) continue;
-      const margin = Math.max(maxX - minX, maxY - minY);
-      if (p.x < minX - margin || p.x > maxX + margin) continue;
-      if (p.y < minY - margin || p.y > maxY + margin) continue;
+      if (p.x < minX - intersectionSlack || p.x > maxX + intersectionSlack) continue;
+      if (p.y < minY - intersectionSlack || p.y > maxY + intersectionSlack) continue;
       rawIntersections.push(p);
       intersectionCount++;
     }
@@ -513,34 +621,27 @@ export function findCornersFromEdgesWithDebug(
     return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
   }
 
-  // Step 5: Order corners as [TL, TR, BL, BR] using centroid-based row split.
-  const cx = corners.reduce((s, p) => s + p.x, 0) / corners.length;
-  const cy = corners.reduce((s, p) => s + p.y, 0) / corners.length;
-
-  // Split into top row (y <= centroid) and bottom row (y > centroid),
-  // then sort each row by x to get left/right within the row.
-  const top: Point[] = [];
-  const bottom: Point[] = [];
-  for (const c of corners) {
-    if (c.y <= cy) top.push(c);
-    else bottom.push(c);
-  }
-  top.sort((a, b) => a.x - b.x);
-  bottom.sort((a, b) => a.x - b.x);
-
-  // Need at least 2 corners in each row to form a valid quad
-  if (top.length < 2 || bottom.length < 2) {
+  // Step 5: Convex boundary order (consistent turn signs), then label corners by rotation.
+  const cycle = findConvexCCWCycle(corners);
+  if (!cycle) {
     failureCode |= FAIL_PLAUSIBILITY;
     return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
   }
 
-  const tl = top[0]!, tr = top[1]!, bl = bottom[0]!, br = bottom[1]!;
-
-  // Step 6: Plausibility checks
-  if (!plausibilityCheck([tl, tr, br, bl], lines.filter((l) => l !== null) as LineFit[], assignments, pixels, minX, minY, maxX, maxY, minR2)) {
+  const linesNonNull = lines.filter((l) => l !== null) as LineFit[];
+  let labeled: [Point, Point, Point, Point] | null = null;
+  for (let k = 0; k < 4; k++) {
+    const c = rotateRing(cycle, k);
+    if (plausibilityCheck([c[0], c[1], c[2], c[3]], linesNonNull, assignments, pixels, minX, minY, maxX, maxY, minR2)) {
+      labeled = c;
+      break;
+    }
+  }
+  if (!labeled) {
     failureCode |= FAIL_PLAUSIBILITY;
     return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
   }
+  const [tl, tr, br, bl] = labeled;
 
   return { corners: [tl, tr, bl, br], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
 }
