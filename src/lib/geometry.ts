@@ -59,7 +59,9 @@ export function pointLineDistance(p: Point, l: Line): number {
  * Returns line coefficients or null if insufficient points.
  */
 export function fitLine(points: Point[]): Line | null {
-  if (points.length < 2) return null
+  if (points.length < 2) {
+    return null
+  }
 
   // Use orthogonal regression
   let sumX = 0,
@@ -122,7 +124,9 @@ export function angleBetween(v1: Point, v2: Point): number {
   const dot = v1.x * v2.x + v1.y * v2.y
   const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y)
   const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y)
-  if (mag1 < 1e-10 || mag2 < 1e-10) return 0
+  if (mag1 < 1e-10 || mag2 < 1e-10) {
+    return 0
+  }
   return Math.acos(Math.max(-1, Math.min(1, dot / (mag1 * mag2))))
 }
 
@@ -131,7 +135,9 @@ export function angleBetween(v1: Point, v2: Point): number {
  * Returns aspect ratio of the quad.
  */
 export function quadAspectRatio(corners: Point[]): number {
-  if (corners.length !== 4) return 0
+  if (corners.length !== 4) {
+    return 0
+  }
 
   // Compute approximate side lengths
   const dists = [

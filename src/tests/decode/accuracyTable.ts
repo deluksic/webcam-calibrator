@@ -18,8 +18,12 @@ export function cellErrorsVsTruth(decoded: (0 | 1 | -1 | -2)[], truth: TagPatter
   let err = 0
   for (let i = 0; i < 36; i++) {
     const d = decoded[i]
-    if (d === -1 || d === -2) continue
-    if (d !== truth[i]) err++
+    if (d === -1 || d === -2) {
+      continue
+    }
+    if (d !== truth[i]) {
+      err++
+    }
   }
   return err
 }

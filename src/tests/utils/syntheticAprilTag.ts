@@ -14,9 +14,13 @@ const { floor, min, max } = Math
  * inner **6×6** uses `pattern` (**1 = black**, **0 = white**). Matches decode’s 8×8 module lattice.
  */
 export function intensityAtTagUv(u: number, v: number, pattern: TagPattern): number {
-  if (u < 0 || u > 1 || v < 0 || v > 1) return 1
+  if (u < 0 || u > 1 || v < 0 || v > 1) {
+    return 1
+  }
 
-  if (u <= 1 / 8 || u >= 7 / 8 || v <= 1 / 8 || v >= 7 / 8) return 0
+  if (u <= 1 / 8 || u >= 7 / 8 || v <= 1 / 8 || v >= 7 / 8) {
+    return 0
+  }
 
   const uu = (u - 1 / 8) / (6 / 8)
   const vv = (v - 1 / 8) / (6 / 8)
@@ -24,7 +28,9 @@ export function intensityAtTagUv(u: number, v: number, pattern: TagPattern): num
   const row = min(5, max(0, floor(vv * 6 - 1e-9)))
 
   const v_ = pattern[row * 6 + col]
-  if (v_ === 1) return 0
+  if (v_ === 1) {
+    return 0
+  }
   // `-1` / `-2` (decode unknowns) render as white cell interior for synthetic views.
   return 1
 }

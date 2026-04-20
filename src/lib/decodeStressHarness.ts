@@ -59,7 +59,9 @@ export function decodeStressHomographyMismatchTemplateMaxAxisPx(): number {
  */
 export function decodeStressHomographyMismatchScaleForMaxAxisPx(maxAxisPx: number): number {
   const denom = decodeStressHomographyMismatchTemplateMaxAxisPx()
-  if (denom <= 0) throw new Error('decodeStressHomographyMismatchScaleForMaxAxisPx: empty template')
+  if (denom <= 0) {
+    throw new Error('decodeStressHomographyMismatchScaleForMaxAxisPx: empty template')
+  }
   return maxAxisPx / denom
 }
 
@@ -87,7 +89,9 @@ const REF_CY = (20 + 45 + 260 + 265) / 4
 
 /** Deterministic speckle: uniform in `[-amplitude, amplitude]`, clamped to `[0,1]`. */
 export function decodeStressAddSpeckle01(intensity: Float32Array, amplitude: number, seed: number): void {
-  if (amplitude <= 0) return
+  if (amplitude <= 0) {
+    return
+  }
   const st = { s: seed >>> 0 || 1 }
   for (let i = 0; i < intensity.length; i++) {
     const n = (xorshift32U01(st) * 2 - 1) * amplitude

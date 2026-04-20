@@ -2,7 +2,9 @@ import { xorshift32State, xorshift32U01 } from '@/tests/shared/rng'
 
 /** Additive Gaussian noise with σ in [0,1] intensity units; clamp to [0,1]. Box-Muller from uniform. */
 export function applyAdditiveGaussian01(intensity: Float32Array, sigma: number, seed: number): void {
-  if (sigma <= 0) return
+  if (sigma <= 0) {
+    return
+  }
   const st = xorshift32State(seed)
   let spare: number | undefined = undefined
   const nextGaussian = (): number => {

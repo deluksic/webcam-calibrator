@@ -43,7 +43,9 @@ export function rotateStripAroundCentroid(strip: StripCorners, rad: number): Str
 /** Uniform scale about centroid so longest edge ≤ `maxEdgePx`. */
 export function scaleStripToMaxEdgePx(strip: StripCorners, maxEdgePx: number): StripCorners {
   const m = quadMaxEdgePx(strip)
-  if (m < 1e-12) return strip
+  if (m < 1e-12) {
+    return strip
+  }
   const s = maxEdgePx / m
   const c = stripCentroid(strip)
   return strip.map((p) => ({

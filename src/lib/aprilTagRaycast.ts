@@ -29,7 +29,9 @@ export function invertMat3RowMajor(m: number[]): Float32Array | null {
   const ae_minus_bd = a * e - b * d
 
   const det = a * ei_minus_fh - b * di_minus_fg + c * dh_minus_eg
-  if (abs(det) < 1e-14) return null
+  if (abs(det) < 1e-14) {
+    return null
+  }
 
   const invDet = 1 / det
   return new Float32Array([
@@ -56,12 +58,16 @@ export function imagePixelToUnitSquareUv(
 ): { u: number; v: number; inside: boolean } {
   const M = mat3FromHomography8(homography8)
   const inv = invertMat3RowMajor(M)
-  if (!inv) return { u: 0, v: 0, inside: false }
+  if (!inv) {
+    return { u: 0, v: 0, inside: false }
+  }
 
   const xh = inv[0] * x + inv[1] * y + inv[2]
   const yh = inv[3] * x + inv[4] * y + inv[5]
   const wh = inv[6] * x + inv[7] * y + inv[8]
-  if (abs(wh) < 1e-12) return { u: 0, v: 0, inside: false }
+  if (abs(wh) < 1e-12) {
+    return { u: 0, v: 0, inside: false }
+  }
 
   const u = xh / wh
   const v = yh / wh

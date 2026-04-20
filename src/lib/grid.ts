@@ -196,27 +196,42 @@ const DECODE_MIN_VOTE_TOTAL = 3
  */
 export function decodeCell(cell: GridCell, samples: CellSobelSample[]): 0 | 1 | -1 | -2 {
   const n = samples.length
-  if (n < 9) return -1
+  if (n < 9) {
+    return -1
+  }
 
   let pos = 0
   let neg = 0
   for (const s of samples) {
-    if (s.mag <= 1e-12) continue
+    if (s.mag <= 1e-12) {
+      continue
+    }
     const ru = s.u - 0.5
     const rv = s.v - 0.5
     const r2 = ru * ru + rv * rv
-    if (r2 < DECODE_RADIAL_MIN2) continue
+    if (r2 < DECODE_RADIAL_MIN2) {
+      continue
+    }
 
     const { gu, gv } = imageGradToUvGrad(cell, s.u, s.v, s.gx, s.gy)
     const dot = gu * ru + gv * rv
-    if (dot > DECODE_DOT_EPS) pos += 1
-    else if (dot < -DECODE_DOT_EPS) neg += 1
+    if (dot > DECODE_DOT_EPS) {
+      pos += 1
+    } else if (dot < -DECODE_DOT_EPS) {
+      neg += 1
+    }
   }
 
   const sum = pos + neg
-  if (sum < DECODE_MIN_VOTE_TOTAL) return -1
-  if (pos > neg) return 1
-  if (neg > pos) return 0
+  if (sum < DECODE_MIN_VOTE_TOTAL) {
+    return -1
+  }
+  if (pos > neg) {
+    return 1
+  }
+  if (neg > pos) {
+    return 0
+  }
   return -2
 }
 
@@ -317,9 +332,15 @@ export function decodeTriangleFromLocalUv(fu: number, fv: number): DecodeTriangl
   const dv = fv - 0.5
   const d1 = dv <= du
   const d2 = dv <= -du
-  if (d1 && d2) return 'top'
-  if (!d1 && !d2) return 'bottom'
-  if (du >= 0) return 'right'
+  if (d1 && d2) {
+    return 'top'
+  }
+  if (!d1 && !d2) {
+    return 'bottom'
+  }
+  if (du >= 0) {
+    return 'right'
+  }
   return 'left'
 }
 
@@ -338,7 +359,9 @@ export function decodeEdgeDistanceUv(fu: number, fv: number): number {
 export function decodeVoteModuleIndices(mx: number, my: number, tri: DecodeTriangle): number[] {
   const out: number[] = []
   const push = (x: number, y: number) => {
-    if (x < 0 || x >= TAG_MODULES || y < 0 || y >= TAG_MODULES) return
+    if (x < 0 || x >= TAG_MODULES || y < 0 || y >= TAG_MODULES) {
+      return
+    }
     out.push(y * TAG_MODULES + x)
   }
   switch (tri) {
@@ -432,9 +455,15 @@ export function distPointToClosedRectUv(u: number, v: number, u0: number, u1: nu
 
 function classifyModuleFromPosNeg(pos: number, neg: number): 0 | 1 | -1 | -2 {
   const sum = pos + neg
-  if (sum < DECODE_MIN_VOTE_TOTAL) return -1
-  if (pos > neg) return 1
-  if (neg > pos) return 0
+  if (sum < DECODE_MIN_VOTE_TOTAL) {
+    return -1
+  }
+  if (pos > neg) {
+    return 1
+  }
+  if (neg > pos) {
+    return 0
+  }
   return -2
 }
 
@@ -448,30 +477,46 @@ export function fillUnknownNeighbors6(pattern: TagPattern): void {
   const next = [...pattern] as TagPattern
   for (let r = 0; r < 6; r++) {
     for (let c = 0; c < 6; c++) {
-      if (pattern[idx(r, c)] !== -1) continue
+      if (pattern[idx(r, c)] !== -1) {
+        continue
+      }
       const vals: number[] = []
       if (r > 0) {
         const v = pattern[idx(r - 1, c)]
-        if (v === 0 || v === 1) vals.push(v)
+        if (v === 0 || v === 1) {
+          vals.push(v)
+        }
       }
       if (r < 5) {
         const v = pattern[idx(r + 1, c)]
-        if (v === 0 || v === 1) vals.push(v)
+        if (v === 0 || v === 1) {
+          vals.push(v)
+        }
       }
       if (c > 0) {
         const v = pattern[idx(r, c - 1)]
-        if (v === 0 || v === 1) vals.push(v)
+        if (v === 0 || v === 1) {
+          vals.push(v)
+        }
       }
       if (c < 5) {
         const v = pattern[idx(r, c + 1)]
-        if (v === 0 || v === 1) vals.push(v)
+        if (v === 0 || v === 1) {
+          vals.push(v)
+        }
       }
-      if (vals.length === 0) continue
+      if (vals.length === 0) {
+        continue
+      }
       const first = vals[0]!
-      if (vals.every((x) => x === first)) next[idx(r, c)] = first as 0 | 1
+      if (vals.every((x) => x === first)) {
+        next[idx(r, c)] = first as 0 | 1
+      }
     }
   }
-  for (let i = 0; i < 36; i++) pattern[i] = next[i]!
+  for (let i = 0; i < 36; i++) {
+    pattern[i] = next[i]!
+  }
 }
 
 /** Same magnitude floor as `extractLabeledEdgePixels` in `corners.ts`. */
@@ -505,10 +550,14 @@ export function buildDecodeEdgeMask(
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       const idx = y * w + x
-      if (labelData[idx] !== regionLabel) continue
+      if (labelData[idx] !== regionLabel) {
+        continue
+      }
       const gx = sobelData[idx * 2]
       const gy = sobelData[idx * 2 + 1]
-      if (gx * gx + gy * gy >= eps2) mask[idx] = 1
+      if (gx * gx + gy * gy >= eps2) {
+        mask[idx] = 1
+      }
     }
   }
   return mask
@@ -574,13 +623,19 @@ function decodeTagPatternVoteAccumulation(
 
   for (let iy = iy0; iy <= iy1; iy++) {
     for (let ix = ix0; ix <= ix1; ix++) {
-      if (edgeMask && edgeMask[iy * imageWidth + ix] === 0) continue
+      if (edgeMask && edgeMask[iy * imageWidth + ix] === 0) {
+        continue
+      }
       const { u, v, inside } = imagePixelToUnitSquareUv(h, ix + 0.5, iy + 0.5)
-      if (!inside) continue
+      if (!inside) {
+        continue
+      }
       const gx = sobelData[(iy * imageWidth + ix) * 2]
       const gy = sobelData[(iy * imageWidth + ix) * 2 + 1]
       const mag = hypot(gx, gy)
-      if (mag <= 1e-12) continue
+      if (mag <= 1e-12) {
+        continue
+      }
 
       const { gu, gv } = imageSobelToTagGradient(h, u, v, gx, gy)
 
@@ -589,7 +644,9 @@ function decodeTagPatternVoteAccumulation(
       const fv = v * TAG_MODULES - my
       const tri = decodeTriangleFromLocalUv(fu, fv)
       const dEdge = decodeEdgeDistanceUv(fu, fv)
-      if (dEdge > uvProximityMax) continue
+      if (dEdge > uvProximityMax) {
+        continue
+      }
 
       for (const mi of decodeVoteModuleIndices(mx, my, tri)) {
         const mx2 = mi % TAG_MODULES
@@ -598,10 +655,15 @@ function decodeTagPatternVoteAccumulation(
         const cv = (my2 + 0.5) / TAG_MODULES
         const ru = u - cu
         const rv = v - cv
-        if (ru * ru + rv * rv < 1e-10) continue
+        if (ru * ru + rv * rv < 1e-10) {
+          continue
+        }
         const dot = decodeVoteBinRadialDot(u, v, cu, cv, gu, gv)
-        if (dot > DECODE_DOT_EPS) posM[mi] += 1
-        else if (dot < -DECODE_DOT_EPS) negM[mi] += 1
+        if (dot > DECODE_DOT_EPS) {
+          posM[mi] += 1
+        } else if (dot < -DECODE_DOT_EPS) {
+          negM[mi] += 1
+        }
       }
     }
   }

@@ -29,8 +29,12 @@ function cellErrorsVsTruth(decoded: (0 | 1 | -1 | -2)[], truth: (0 | 1 | -1 | -2
   let err = 0
   for (let i = 0; i < 36; i++) {
     const d = decoded[i]
-    if (d === -1 || d === -2) continue
-    if (d !== truth[i]) err++
+    if (d === -1 || d === -2) {
+      continue
+    }
+    if (d !== truth[i]) {
+      err++
+    }
   }
   return err
 }
@@ -62,17 +66,27 @@ export function decodeStressSuiteFailuresFromOptions(opts: DecodeStressSuiteOpti
       supersample,
       speckleAmp,
     )
-    if (!rot || rot.id !== tagId) failures.push(`${label}: rot id want ${tagId} got ${rot?.id}`)
-    if (best.id !== tagId) failures.push(`${label}: best.id want ${tagId} got ${best.id}`)
+    if (!rot || rot.id !== tagId) {
+      failures.push(`${label}: rot id want ${tagId} got ${rot?.id}`)
+    }
+    if (best.id !== tagId) {
+      failures.push(`${label}: best.id want ${tagId} got ${best.id}`)
+    }
     // Aligned with `decodeStress.test.ts` homography-mismatch slack (radial + speckle).
     const maxDist = 2
     const maxCellErr = 2
     const maxUnknowns = 2
-    if (best.dist > maxDist) failures.push(`${label}: best.dist want ≤${maxDist} got ${best.dist}`)
+    if (best.dist > maxDist) {
+      failures.push(`${label}: best.dist want ≤${maxDist} got ${best.dist}`)
+    }
     const ce = cellErrorsVsTruth(decodedPattern, truth)
-    if (ce > maxCellErr) failures.push(`${label}: cellErr want ≤${maxCellErr} got ${ce}`)
+    if (ce > maxCellErr) {
+      failures.push(`${label}: cellErr want ≤${maxCellErr} got ${ce}`)
+    }
     const unknowns = decodedPattern.filter((v) => v === -1 || v === -2).length
-    if (unknowns > maxUnknowns) failures.push(`${label}: unknowns want ≤${maxUnknowns} got ${unknowns}`)
+    if (unknowns > maxUnknowns) {
+      failures.push(`${label}: unknowns want ≤${maxUnknowns} got ${unknowns}`)
+    }
   }
 
   {

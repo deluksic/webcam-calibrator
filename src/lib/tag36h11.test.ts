@@ -98,7 +98,9 @@ describe('tag36h11', () => {
         1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1,
       ] as (0 | 1 | -1 | -2)[]
       let current = pattern
-      for (let i = 0; i < 4; i++) current = rotatePattern(current)
+      for (let i = 0; i < 4; i++) {
+        current = rotatePattern(current)
+      }
       expect(current).toEqual(pattern)
     })
   })
@@ -134,7 +136,9 @@ describe('tag36h11', () => {
       const tagId = 42
       const canonical = codeToPattern(TAG36H11_CODES[tagId])
       let p = canonical
-      for (let k = 0; k < 2; k++) p = rotatePattern(p)
+      for (let k = 0; k < 2; k++) {
+        p = rotatePattern(p)
+      }
       const m = decodeTag36h11AnyRotation(p, 7)
       expect(m).not.toBeNull()
       expect(m!.id).toBe(tagId)

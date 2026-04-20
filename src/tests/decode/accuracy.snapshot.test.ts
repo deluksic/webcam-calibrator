@@ -55,11 +55,15 @@ describe('decode accuracy snapshots', () => {
         })
         const grid = buildTagGrid(decodeStressCornersGridOrder(pack.groundTruthStrip), 6)
         const decodedPattern = decodeTagPattern(grid, pack.sobel, wh, undefined, wh)
-        if (!decodedPattern) continue
+        if (!decodedPattern) {
+          continue
+        }
         const unknowns = decodedPattern.filter((v) => v === -1 || v === -2).length
         const cellErr = cellErrorsVsTruth(decodedPattern, truthPat)
         const dist = decodeTag36h11Best(decodedPattern, 8).dist
-        if (cellErr === 0 && dist === 0 && unknowns === 0) continue
+        if (cellErr === 0 && dist === 0 && unknowns === 0) {
+          continue
+        }
 
         const tag = `w${wh}-cellErr${cellErr}-unk${unknowns}-ham${dist}`
         writeGreyPng(join(dir, `${tag}-intensity.png`), wh, wh, pack.grayscale)

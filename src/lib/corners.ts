@@ -48,13 +48,17 @@ export function extractLabeledEdgePixels(
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       // Only include pixels belonging to this region
-      if (labelData[y * width + x] !== regionLabel) continue
+      if (labelData[y * width + x] !== regionLabel) {
+        continue
+      }
 
       const idx = y * width + x
       const gx = sobelData[idx * 2]
       const gy = sobelData[idx * 2 + 1]
       const mag = Math.sqrt(gx * gx + gy * gy)
-      if (mag < EPS) continue
+      if (mag < EPS) {
+        continue
+      }
 
       pixels.push({ x, y, gx, gy, magnitude: mag })
     }
@@ -80,7 +84,9 @@ function dot2(a: { x: number; y: number }, b: { x: number; y: number }): number 
 function cosineDissimilarity(u: { x: number; y: number }, v: { x: number; y: number }): number {
   const mu = Math.hypot(u.x, u.y)
   const mv = Math.hypot(v.x, v.y)
-  if (mu < 1e-14 || mv < 1e-14) return 1
+  if (mu < 1e-14 || mv < 1e-14) {
+    return 1
+  }
   return 1 - dot2(u, v) / (mu * mv)
 }
 
@@ -90,7 +96,9 @@ function cosineDissimilarity(u: { x: number; y: number }, v: { x: number; y: num
  */
 function kMeansGradientDirections(pixels: LabeledEdgePixel[], k: number = 4, maxRestarts: number = 3): Int32Array {
   const n = pixels.length
-  if (n < k) return new Int32Array(n)
+  if (n < k) {
+    return new Int32Array(n)
+  }
 
   let bestAssignments: Int32Array | null = null
   let bestTotalCost = Infinity
@@ -121,16 +129,22 @@ function kMeansGradientDirections(pixels: LabeledEdgePixel[], k: number = 4, max
             bestCluster = c
           }
         }
-        if (assignments[i] !== bestCluster) converged = false
+        if (assignments[i] !== bestCluster) {
+          converged = false
+        }
         assignments[i] = bestCluster
       }
-      if (converged) break
+      if (converged) {
+        break
+      }
 
       for (let c = 0; c < k; c++) {
         let sx = 0
         let sy = 0
         for (let i = 0; i < n; i++) {
-          if (assignments[i] !== c) continue
+          if (assignments[i] !== c) {
+            continue
+          }
           sx += pixels[i].gx
           sy += pixels[i].gy
         }
@@ -179,7 +193,9 @@ export interface LineFit {
  */
 function normalFromInlierScatter(points: { x: number; y: number }[]): { nx: number; ny: number } | null {
   const n = points.length
-  if (n < 2) return null
+  if (n < 2) {
+    return null
+  }
 
   let cx = 0
   let cy = 0
@@ -208,8 +224,12 @@ function normalFromInlierScatter(points: { x: number; y: number }[]): { nx: numb
   const lamMax = (tr + root) * 0.5
   const lamMin = (tr - root) * 0.5
 
-  if (lamMax < 1e-10) return null
-  if (lamMin / lamMax > 0.15) return null
+  if (lamMax < 1e-10) {
+    return null
+  }
+  if (lamMin / lamMax > 0.15) {
+    return null
+  }
 
   let nx = sxy
   let ny = lamMin - sxx
@@ -219,7 +239,9 @@ function normalFromInlierScatter(points: { x: number; y: number }[]): { nx: numb
     ny = sxy
     len = Math.hypot(nx, ny)
   }
-  if (len < 1e-10) return null
+  if (len < 1e-10) {
+    return null
+  }
   return { nx: nx / len, ny: ny / len }
 }
 
@@ -227,7 +249,9 @@ function normalFromInlierScatter(points: { x: number; y: number }[]): { nx: numb
  * RANSAC line fit on (x,y), then PCA on inliers for the normal. Null if PCA rejects the inlier set.
  */
 function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit | null {
-  if (points.length < 3) return null
+  if (points.length < 3) {
+    return null
+  }
 
   const n = points.length
   const ITER = 80
@@ -248,14 +272,18 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
   for (let iter = 0; iter < ITER; iter++) {
     const i1 = randInt(n)
     let i2 = randInt(n)
-    while (i2 === i1) i2 = randInt(n)
+    while (i2 === i1) {
+      i2 = randInt(n)
+    }
 
     const p1 = points[i1],
       p2 = points[i2]
     const dx = p2.x - p1.x,
       dy = p2.y - p1.y
     const len = Math.sqrt(dx * dx + dy * dy)
-    if (len < 1) continue
+    if (len < 1) {
+      continue
+    }
 
     const nx = -dy / len
     const ny = dx / len
@@ -264,7 +292,9 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
     let inliers = 0
     for (let i = 0; i < n; i++) {
       const dist = Math.abs(nx * points[i].x + ny * points[i].y - d)
-      if (dist < THRESH) inliers++
+      if (dist < THRESH) {
+        inliers++
+      }
     }
 
     if (inliers > bestInliers) {
@@ -275,12 +305,16 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
     }
   }
 
-  if (bestInliers < 3) return null
+  if (bestInliers < 3) {
+    return null
+  }
 
   const inlierPoints: { x: number; y: number }[] = []
   for (let i = 0; i < n; i++) {
     const dist = Math.abs(bestNx * points[i].x + bestNy * points[i].y - bestD)
-    if (dist < THRESH) inlierPoints.push(points[i])
+    if (dist < THRESH) {
+      inlierPoints.push(points[i])
+    }
   }
 
   let cx = 0,
@@ -293,7 +327,9 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
   cy /= inlierPoints.length
 
   const refined = normalFromInlierScatter(inlierPoints)
-  if (!refined) return null
+  if (!refined) {
+    return null
+  }
 
   const gx = refined.nx
   const gy = refined.ny
@@ -319,7 +355,9 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
  */
 function lineIntersection(l1: LineFit, l2: LineFit): Point | null {
   const det = l1.normal.x * l2.normal.y - l2.normal.x * l1.normal.y
-  if (Math.abs(det) < 1e-10) return null // parallel or coincident lines
+  if (Math.abs(det) < 1e-10) {
+    return null
+  } // parallel or coincident lines
   const invDet = 1 / det
   const x = (l2.normal.y * l1.d - l1.normal.y * l2.d) * invDet
   const y = (l1.normal.x * l2.d - l2.normal.x * l1.d) * invDet
@@ -359,17 +397,25 @@ function crossTurn(a: Point, b: Point, c: Point): number {
  * (every turn same sign as shoelace area — no bow-tie, no collinear vertex).
  */
 function isStrictConvexQuadCycle(order: Point[]): boolean {
-  if (order.length !== 4) return false
+  if (order.length !== 4) {
+    return false
+  }
   const area = signedArea(order)
-  if (Math.abs(area) < 1e-12) return false
+  if (Math.abs(area) < 1e-12) {
+    return false
+  }
   const s = Math.sign(area)
   for (let i = 0; i < 4; i++) {
     const a = order[i]!
     const b = order[(i + 1) % 4]!
     const c = order[(i + 2) % 4]!
     const t = crossTurn(a, b, c)
-    if (Math.abs(t) < 1e-10) return false
-    if (Math.sign(t) !== s) return false
+    if (Math.abs(t) < 1e-10) {
+      return false
+    }
+    if (Math.sign(t) !== s) {
+      return false
+    }
   }
   return true
 }
@@ -378,11 +424,17 @@ function allPermutationsFour(pts: readonly [Point, Point, Point, Point]): Point[
   const out: Point[][] = []
   for (let a = 0; a < 4; a++) {
     for (let b = 0; b < 4; b++) {
-      if (b === a) continue
+      if (b === a) {
+        continue
+      }
       for (let c = 0; c < 4; c++) {
-        if (c === a || c === b) continue
+        if (c === a || c === b) {
+          continue
+        }
         for (let d = 0; d < 4; d++) {
-          if (d === a || d === b || d === c) continue
+          if (d === a || d === b || d === c) {
+            continue
+          }
           out.push([pts[a]!, pts[b]!, pts[c]!, pts[d]!])
         }
       }
@@ -396,14 +448,20 @@ function allPermutationsFour(pts: readonly [Point, Point, Point, Point]): Point[
  * Picks the cyclic order with largest signed area among valid permutations.
  */
 function findConvexCCWCycle(pts: Point[]): Point[] | null {
-  if (pts.length !== 4) return null
+  if (pts.length !== 4) {
+    return null
+  }
   const tuple = [pts[0]!, pts[1]!, pts[2]!, pts[3]!] as [Point, Point, Point, Point]
   let best: Point[] | null = null
   let bestArea = 0
   for (const ordered of allPermutationsFour(tuple)) {
     const area = signedArea(ordered)
-    if (area <= 1e-10) continue
-    if (!isStrictConvexQuadCycle(ordered)) continue
+    if (area <= 1e-10) {
+      continue
+    }
+    if (!isStrictConvexQuadCycle(ordered)) {
+      continue
+    }
     if (area > bestArea) {
       bestArea = area
       best = ordered.slice()
@@ -435,19 +493,29 @@ function plausibilityCheck(
   maxY: number,
   minR2: number = 0.8,
 ): boolean {
-  if (corners.length !== 4) return false
-  if (lines.some((l) => l.r2 < minR2)) return false
+  if (corners.length !== 4) {
+    return false
+  }
+  if (lines.some((l) => l.r2 < minR2)) {
+    return false
+  }
 
   // Must be convex — all corners must turn the same direction
   const area = signedArea(corners)
   // Use relative tolerance: if |area| < 1e-4 * max(|x|,|y|)^2, shape is degenerate
   const scale = Math.max(...corners.map((c) => Math.max(Math.abs(c.x), Math.abs(c.y))))
-  if (Math.abs(area) < 1e-4 * scale * scale) return false
+  if (Math.abs(area) < 1e-4 * scale * scale) {
+    return false
+  }
 
   const margin = extentBBoxSlack(minX, minY, maxX, maxY)
   for (const c of corners) {
-    if (c.x < minX - margin || c.x > maxX + margin) return false
-    if (c.y < minY - margin || c.y > maxY + margin) return false
+    if (c.x < minX - margin || c.x > maxX + margin) {
+      return false
+    }
+    if (c.y < minY - margin || c.y > maxY + margin) {
+      return false
+    }
   }
 
   // Compute edge lengths and check ratios
@@ -459,13 +527,17 @@ function plausibilityCheck(
   }
 
   // All edges must be non-zero
-  if (edges.some((e) => e < 2)) return false
+  if (edges.some((e) => e < 2)) {
+    return false
+  }
 
   // Opposite edges should have similar lengths (parallelogram check)
   // Relaxed for oblique/foreshortened quads: allow up to 3x ratio
   const ratio01 = edges[0] / edges[2]
   const ratio23 = edges[1] / edges[3]
-  if (ratio01 < 0.33 || ratio01 > 3.0 || ratio23 < 0.33 || ratio23 > 3.0) return false
+  if (ratio01 < 0.33 || ratio01 > 3.0 || ratio23 < 0.33 || ratio23 > 3.0) {
+    return false
+  }
 
   // Each cluster should have a reasonable number of inliers
   // Reduced from 5 to 3 for sparse edge regions (oblique tags)
@@ -473,7 +545,9 @@ function plausibilityCheck(
   for (let i = 0; i < assignments.length; i++) {
     clusterCounts[assignments[i]]++
   }
-  if (clusterCounts.some((c) => c < 3)) return false
+  if (clusterCounts.some((c) => c < 3)) {
+    return false
+  }
 
   return true
 }
@@ -602,13 +676,23 @@ export function findCornersFromEdgesWithDebug(
 
   const rawIntersections: Point[] = []
   for (let i = 0; i < 4; i++) {
-    if (!lines[i]) continue
+    if (!lines[i]) {
+      continue
+    }
     for (let j = i + 1; j < 4; j++) {
-      if (!lines[j]) continue
+      if (!lines[j]) {
+        continue
+      }
       const p = lineIntersection(lines[i]!, lines[j]!)
-      if (!p) continue
-      if (p.x < minX - intersectionSlack || p.x > maxX + intersectionSlack) continue
-      if (p.y < minY - intersectionSlack || p.y > maxY + intersectionSlack) continue
+      if (!p) {
+        continue
+      }
+      if (p.x < minX - intersectionSlack || p.x > maxX + intersectionSlack) {
+        continue
+      }
+      if (p.y < minY - intersectionSlack || p.y > maxY + intersectionSlack) {
+        continue
+      }
       rawIntersections.push(p)
       intersectionCount++
     }
@@ -631,7 +715,9 @@ export function findCornersFromEdgesWithDebug(
   const corners: Point[] = []
   for (const p of rawIntersections) {
     const tooClose = corners.some((c) => Math.hypot(p.x - c.x, p.y - c.y) < 5)
-    if (!tooClose) corners.push(p)
+    if (!tooClose) {
+      corners.push(p)
+    }
   }
   if (corners.length < 4) {
     failureCode |= FAIL_NO_INTERSECTIONS

@@ -24,9 +24,13 @@ if (!passes(1e-12)) {
 function findFirstFailure(maxScan: number): number | undefined {
   let a = 0.01
   while (a <= maxScan) {
-    if (!passes(a)) return a
+    if (!passes(a)) {
+      return a
+    }
     const na = Math.min(maxScan, a * 1.2)
-    if (na <= a) return passes(maxScan) ? undefined : maxScan
+    if (na <= a) {
+      return passes(maxScan) ? undefined : maxScan
+    }
     a = na
   }
   return undefined

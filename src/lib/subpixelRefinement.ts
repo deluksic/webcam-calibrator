@@ -46,7 +46,9 @@ export function refineSubpixelHomographyV1(input: SubpixelRefineInput): Float32A
     let bestDx = 0
     for (let dy = -RADIUS_PX; dy <= RADIUS_PX; dy++) {
       for (let dx = -RADIUS_PX; dx <= RADIUS_PX; dx++) {
-        if (dx * dx + dy * dy > RADIUS_SQ) continue
+        if (dx * dx + dy * dy > RADIUS_SQ) {
+          continue
+        }
         const mag = sobelMagnitudeAt(sobel, width, height, base.x + dx, base.y + dy)
         if (mag > bestMag || (mag === bestMag && (dy < bestDy || (dy === bestDy && dx < bestDx)))) {
           bestMag = mag

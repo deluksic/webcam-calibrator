@@ -6,7 +6,9 @@ import '@/styles/global.css'
 import '@/version'
 
 const root = document.getElementById('root')
-if (!root) throw new Error('#root element not found')
+if (!root) {
+  throw new Error('#root element not found')
+}
 
 render(
   () => (

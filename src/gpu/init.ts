@@ -6,7 +6,9 @@ const { navigator } = globalThis
 let rootPromise: Promise<Awaited<ReturnType<typeof tgpu.init>>> | null = null
 
 export async function initGPU(): Promise<Awaited<ReturnType<typeof tgpu.init>>> {
-  if (rootPromise) return rootPromise
+  if (rootPromise) {
+    return rootPromise
+  }
 
   if (!navigator.gpu) {
     throw new Error(

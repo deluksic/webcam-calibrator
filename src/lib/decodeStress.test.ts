@@ -65,8 +65,12 @@ function cellErrorsVsTruth(decoded: (0 | 1 | -1 | -2)[], truth: TagPattern): num
   let err = 0
   for (let i = 0; i < 36; i++) {
     const d = decoded[i]
-    if (d === -1 || d === -2) continue
-    if (d !== truth[i]) err++
+    if (d === -1 || d === -2) {
+      continue
+    }
+    if (d !== truth[i]) {
+      err++
+    }
   }
   return err
 }
@@ -253,11 +257,15 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
         )
         const grid = buildTagGrid(decodeStressCornersGridOrder(strip), 6)
         const decodedPattern = decodeTagPattern(grid, sobel, wh, undefined, wh)
-        if (!decodedPattern) continue
+        if (!decodedPattern) {
+          continue
+        }
         const unknowns = decodedPattern.filter((v) => v === -1 || v === -2).length
         const cellErr = cellErrorsVsTruth(decodedPattern, truthPat)
         const dist = decodeTag36h11Best(decodedPattern, 8).dist
-        if (cellErr === 0 && dist === 0 && unknowns === 0) continue
+        if (cellErr === 0 && dist === 0 && unknowns === 0) {
+          continue
+        }
 
         const tag = `w${wh}-cellErr${cellErr}-unk${unknowns}-ham${dist}`
         writeGreyPng(join(dir, `${tag}-intensity.png`), wh, wh, intensity)

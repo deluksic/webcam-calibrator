@@ -1,35 +1,29 @@
 const { navigator } = globalThis
 
-/**
- * Production-oriented `getUserMedia` + `applyConstraints` upgrade.
- * Browsers often start at 640×480; climb via constraint ladder + capabilities.
- */
+const ACCEPT_THRESHOLD = 0.9
 
-const SIZE_LADDER: readonly MediaTrackConstraints[] = [
-  { width: { ideal: 1920 }, height: { ideal: 1080 } },
+const SIZE_LADDER: MediaTrackConstraints[] = [
   { width: { ideal: 1280 }, height: { ideal: 720 } },
   { width: { ideal: 640 }, height: { ideal: 480 } },
   {},
 ]
 
 export async function tryUpgradeVideoTrack(track: MediaStreamTrack): Promise<void> {
-  const vt = track as MediaStreamTrack & {
-    getCapabilities?: () => MediaTrackCapabilities
+  const caps = track.getCapabilities()
+  const { width, height } = caps
+  if (!width?.max || !height?.max) {
+    return
   }
-  if (typeof vt.getCapabilities !== 'function') return
-
-  const caps = vt.getCapabilities()
-  const w = caps.width
-  const h = caps.height
-  if (!w?.max || !h?.max) return
 
   const settings = track.getSettings()
   const sw = settings.width ?? 0
   const sh = settings.height ?? 0
-  if (sw >= w.max * 0.92 && sh >= h.max * 0.92) return
+  if (sw >= width.max * ACCEPT_THRESHOLD && sh >= height.max * ACCEPT_THRESHOLD) {
+    return
+  }
 
-  const targetW = Math.min(w.max, 1280)
-  const targetH = Math.min(h.max, 720)
+  const targetW = Math.min(width.max, 1280)
+  const targetH = Math.min(height.max, 720)
   for (const attempt of [0, 1, 2]) {
     try {
       await track.applyConstraints({
@@ -40,7 +34,9 @@ export async function tryUpgradeVideoTrack(track: MediaStreamTrack): Promise<voi
       const after = track.getSettings()
       const aw = after.width ?? 0
       const ah = after.height ?? 0
-      if (aw >= targetW * 0.85 && ah >= targetH * 0.85) break
+      if (aw >= targetW * 0.85 && ah >= targetH * 0.85) {
+        break
+      }
     } catch {
       /* keep default */
     }
@@ -62,7 +58,9 @@ export async function acquireVideoStream(deviceId: string): Promise<MediaStream>
         audio: false,
       })
       const track = stream.getVideoTracks()[0]
-      if (track) await tryUpgradeVideoTrack(track)
+      if (track) {
+        await tryUpgradeVideoTrack(track)
+      }
       return stream
     } catch (e) {
       lastErr = e

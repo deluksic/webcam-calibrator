@@ -47,11 +47,17 @@ function QuadCandidateOverlay(props: { bboxes: Bbox[]; sx: number; sy: number })
     return props.bboxes.filter((b) => {
       const w = b.maxX - b.minX
       const h = b.maxY - b.minY
-      if (w <= 0 || h <= 0) return false
+      if (w <= 0 || h <= 0) {
+        return false
+      }
       const area = w * h
-      if (area < MIN_AREA || area > MAX_AREA) return false
+      if (area < MIN_AREA || area > MAX_AREA) {
+        return false
+      }
       const ar = w / h
-      if (ar < MIN_AR || ar > MAX_AR) return false
+      if (ar < MIN_AR || ar > MAX_AR) {
+        return false
+      }
       return true
     })
   })
@@ -82,7 +88,9 @@ function TagIdGridOverlay(props: { quads: DetectedQuad[]; sx: number; sy: number
         const cy = () => (c()[0]!.y + c()[1]!.y + c()[2]!.y + c()[3]!.y) / 4
         const label = () => {
           const q = quad()
-          if (typeof q.decodedTagId === 'number') return String(q.decodedTagId)
+          if (typeof q.decodedTagId === 'number') {
+            return String(q.decodedTagId)
+          }
           return '?'
         }
         return (
@@ -144,7 +152,9 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
 
   createTrackedEffect(() => {
     const canvas = canvasEl()
-    if (!canvas) return
+    if (!canvas) {
+      return
+    }
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         setRenderedW(entry.contentRect.width)
@@ -190,8 +200,12 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
 
     onCleanup(() => {
       disposed = true
-      if (primeHandle) video.cancelVideoFrameCallback(primeHandle)
-      if (rafHandle) video.cancelVideoFrameCallback(rafHandle)
+      if (primeHandle) {
+        video.cancelVideoFrameCallback(primeHandle)
+      }
+      if (rafHandle) {
+        video.cancelVideoFrameCallback(rafHandle)
+      }
       video.pause()
       video.srcObject = null
       setBufferSize(undefined)
@@ -209,7 +223,9 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
 
     video.srcObject = stream
     await video.play().catch(() => {})
-    if (disposed) return undefined
+    if (disposed) {
+      return undefined
+    }
 
     const vw = video.videoWidth > 0 ? video.videoWidth : Math.max(1, size.w)
     const vh = video.videoHeight > 0 ? video.videoHeight : Math.max(1, size.h)
@@ -227,25 +243,35 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         resolve()
       })
     })
-    if (disposed) return undefined
+    if (disposed) {
+      return undefined
+    }
     log('First frame presented')
 
     let extentReadPending = false
     let quadDetectionPending = false
 
     const scheduleExtentRead = () => {
-      if (extentReadPending || disposed) return
+      if (extentReadPending || disposed) {
+        return
+      }
       extentReadPending = true
       readExtentBuffer(pip)
         .then((extentData: ExtentRow[]) => {
-          if (disposed) return
+          if (disposed) {
+            return
+          }
           extentReadPending = false
           const boxes: Bbox[] = []
           for (const entry of extentData) {
-            if (entry.minX === MAX_U32) continue
+            if (entry.minX === MAX_U32) {
+              continue
+            }
             const w = entry.maxX - entry.minX
             const h = entry.maxY - entry.minY
-            if (w <= 0 || h <= 0) continue
+            if (w <= 0 || h <= 0) {
+              continue
+            }
             boxes.push({
               minX: entry.minX,
               minY: entry.minY,
@@ -258,19 +284,27 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           setBboxes(boxes.slice(0, 128))
         })
         .catch(() => {
-          if (disposed) return
+          if (disposed) {
+            return
+          }
           extentReadPending = false
         })
     }
 
     const scheduleQuadDetection = (sf: boolean) => {
-      if (quadDetectionPending || disposed) return
+      if (quadDetectionPending || disposed) {
+        return
+      }
       quadDetectionPending = true
       const gNow = gpu()
-      if (!gNow) return
+      if (!gNow) {
+        return
+      }
       detectContours(gNow, pip)
         .then((result) => {
-          if (disposed) return
+          if (disposed) {
+            return
+          }
           quadDetectionPending = false
           const { quads } = result
           quads.sort((a, b) => b.count - a.count)
@@ -287,7 +321,9 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               if (!q?.hasCorners || q.cornerDebug?.failureCode !== 0) {
                 return false
               }
-              if (sf) return true
+              if (sf) {
+                return true
+              }
               return typeof q.decodedTagId === 'number'
             }),
           )
@@ -296,24 +332,34 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           props.onQuadDetection?.(tagged, { frameId: frameSeq })
         })
         .catch((e) => {
-          if (disposed) return
+          if (disposed) {
+            return
+          }
           quadDetectionPending = false
           log(`detectContours error: ${e}`)
         })
     }
 
     const loop = () => {
-      if (disposed) return
+      if (disposed) {
+        return
+      }
       const gpuNow = gpu()
-      if (!gpuNow) return
+      if (!gpuNow) {
+        return
+      }
       const dm = props.displayMode()
       processFrame(gpuNow, pip, cameraVideo, threshold(), dm, (_err) => {})
-      if (dm === 'debug') scheduleExtentRead()
+      if (dm === 'debug') {
+        scheduleExtentRead()
+      }
       if (dm === 'grid' && props.showGrid()) {
         scheduleQuadDetection(props.showFallbacks())
       }
       void pip.histogramBuffer.read().then((bins: Uint32Array | number[]) => {
-        if (disposed) return
+        if (disposed) {
+          return
+        }
         const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins)
         setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE))
       })

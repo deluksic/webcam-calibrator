@@ -25,7 +25,9 @@ function makeRectSobel(
       const onTop = y === minY
       const onBottom = y === maxY
       const onBorder = onLeft || onRight || onTop || onBottom
-      if (!onBorder) continue
+      if (!onBorder) {
+        continue
+      }
 
       if (onLeft) {
         sobelData[idx] = 10

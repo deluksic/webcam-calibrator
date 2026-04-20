@@ -67,7 +67,9 @@ export function hammingDistance(code1: bigint, code2: bigint): number {
  * This is the inverse of codeToPattern.
  */
 export function patternToCode(pattern: TagPattern): bigint {
-  if (pattern.length !== 36) return -1 as unknown as bigint
+  if (pattern.length !== 36) {
+    return -1 as unknown as bigint
+  }
   let code = 0n
   for (let bit = 0; bit < 36; bit++) {
     const x = BIT_X[bit]
@@ -108,7 +110,9 @@ export function decodeTag36h11Best(pattern: TagPattern | undefined, maxError: nu
     const y = BIT_Y[bit]
     const pRow = y - 1
     const pCol = x - 1
-    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) continue
+    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) {
+      continue
+    }
     const pIdx = pRow * 6 + pCol
     const val = pattern[pIdx]
     if (val === 1) {
@@ -130,11 +134,15 @@ export function decodeTag36h11Best(pattern: TagPattern | undefined, maxError: nu
     if (dist < bestDist) {
       bestDist = dist
       bestId = id
-      if (bestDist === 0) break
+      if (bestDist === 0) {
+        break
+      }
     }
   }
 
-  if (bestDist > maxError) return { id: -1, dist: bestDist }
+  if (bestDist > maxError) {
+    return { id: -1, dist: bestDist }
+  }
   return { id: bestId, dist: bestDist }
 }
 
@@ -171,7 +179,9 @@ export function decodeTag36h11AnyRotation(
   pattern: TagPattern | undefined,
   maxError: number = 5,
 ): { id: number; rotation: number } | undefined {
-  if (!pattern) return undefined
+  if (!pattern) {
+    return undefined
+  }
 
   let best: { id: number; rotation: number; dist: number } | undefined = undefined
   let currentPattern = [...pattern]

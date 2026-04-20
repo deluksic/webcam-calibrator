@@ -263,9 +263,13 @@ describe('grid', () => {
       const my = 3
       for (let k = 1; k < 40; k++) {
         const fv = 0.03 + k * 0.024
-        if (fv >= 0.99) break
+        if (fv >= 0.99) {
+          break
+        }
         const fu = 0.11 + (k % 7) * 0.11
-        if (fu >= 0.99) continue
+        if (fu >= 0.99) {
+          continue
+        }
         const u = (mx + fu) / tag
         const v = (my + fv) / tag
         const line = decodeEdgeDistanceUv(fu, fv)

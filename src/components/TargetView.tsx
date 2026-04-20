@@ -41,7 +41,9 @@ export function TargetView() {
   })
 
   const checkerPositions = createMemo(() => {
-    if (!checkerboard() || cols() < 2 || rows() < 2) return [] as { x: number; y: number }[]
+    if (!checkerboard() || cols() < 2 || rows() < 2) {
+      return [] as { x: number; y: number }[]
+    }
     const positions: { x: number; y: number }[] = []
     for (let r = 0; r < rows() - 1; r++) {
       for (let c = 0; c < cols() - 1; c++) {

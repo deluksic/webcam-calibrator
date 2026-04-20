@@ -61,7 +61,9 @@ export function extractRegions(
       const idx = y * width + x
       const label = labelData[idx]
 
-      if (label === COMPONENT_LABEL_INVALID) continue
+      if (label === COMPONENT_LABEL_INVALID) {
+        continue
+      }
 
       if (!regions.has(label)) {
         regions.set(label, {
@@ -110,10 +112,18 @@ export function fitQuadToRegion(region: RegionData): [number, number][] | undefi
   let bottomEdge = minY
 
   for (const [px, py] of region.pixels) {
-    if (px - minX < leftEdge - minX) leftEdge = px
-    if (maxX - px < maxX - rightEdge) rightEdge = px
-    if (py - minY < topEdge - minY) topEdge = py
-    if (maxY - py < maxY - bottomEdge) bottomEdge = py
+    if (px - minX < leftEdge - minX) {
+      leftEdge = px
+    }
+    if (maxX - px < maxX - rightEdge) {
+      rightEdge = px
+    }
+    if (py - minY < topEdge - minY) {
+      topEdge = py
+    }
+    if (maxY - py < maxY - bottomEdge) {
+      bottomEdge = py
+    }
   }
 
   return [
@@ -209,7 +219,9 @@ export function validateAndFilterQuads(
 export function filterNestedQuads(quads: DetectedQuad[]): DetectedQuad[] {
   return quads.filter((candidate) => {
     for (const other of quads) {
-      if (other === candidate) continue
+      if (other === candidate) {
+        continue
+      }
       if (!other.corners || !candidate.corners) {
         console.warn('Missing corners in filterNestedQuads', other, candidate)
         continue

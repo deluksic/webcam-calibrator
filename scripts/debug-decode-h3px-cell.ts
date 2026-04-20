@@ -107,9 +107,15 @@ function writeVotesOnRasterPng(
 
 function classify(pos: number, neg: number): string {
   const sum = pos + neg
-  if (sum < MIN_VOTE_TOTAL) return `-1 (sum=${sum} < ${MIN_VOTE_TOTAL})`
-  if (pos > neg) return `1 black (pos ${pos} > neg ${neg})`
-  if (neg > pos) return `0 white (neg ${neg} > pos ${pos})`
+  if (sum < MIN_VOTE_TOTAL) {
+    return `-1 (sum=${sum} < ${MIN_VOTE_TOTAL})`
+  }
+  if (pos > neg) {
+    return `1 black (pos ${pos} > neg ${neg})`
+  }
+  if (neg > pos) {
+    return `0 white (neg ${neg} > pos ${pos})`
+  }
   return `-2 tie (pos=${pos} neg=${neg})`
 }
 
@@ -124,8 +130,12 @@ type Sample = {
 }
 
 function signFromDot(dot: number): Sample['sign'] {
-  if (dot > DOT_EPS) return 'pos'
-  if (dot < -DOT_EPS) return 'neg'
+  if (dot > DOT_EPS) {
+    return 'pos'
+  }
+  if (dot < -DOT_EPS) {
+    return 'neg'
+  }
   return 'skip'
 }
 
@@ -200,32 +210,45 @@ function main() {
   for (let iy = iy0; iy <= iy1; iy++) {
     for (let ix = ix0; ix <= ix1; ix++) {
       const { u, v, inside } = imagePixelToUnitSquareUv(h, ix + 0.5, iy + 0.5)
-      if (!inside) continue
+      if (!inside) {
+        continue
+      }
       const gx = sobel[(iy * wh + ix) * 2]!
       const gy = sobel[(iy * wh + ix) * 2 + 1]!
       const mag = Math.hypot(gx, gy)
-      if (mag <= 1e-12) continue
+      if (mag <= 1e-12) {
+        continue
+      }
       const { gu, gv } = imageSobelToTagGradient(h, u, v, gx, gy)
       const { mx, my } = primaryModuleFromUv(u, v)
       const fu = u * TAG - mx
       const fv = v * TAG - my
       const tri = decodeTriangleFromLocalUv(fu, fv)
       const dEdge = decodeEdgeDistanceUv(fu, fv)
-      if (dEdge > uvMax) continue
+      if (dEdge > uvMax) {
+        continue
+      }
 
       for (const mi of decodeVoteModuleIndices(mx, my, tri)) {
-        if (mi !== target) continue
+        if (mi !== target) {
+          continue
+        }
         const mx2 = mi % TAG
         const my2 = (mi / TAG) | 0
         const cu = (mx2 + 0.5) / TAG
         const cv = (my2 + 0.5) / TAG
         const ru = u - cu
         const rv = v - cv
-        if (ru * ru + rv * rv < 1e-10) continue
+        if (ru * ru + rv * rv < 1e-10) {
+          continue
+        }
         const dot = decodeVoteBinRadialDot(u, v, cu, cv, gu, gv)
         const sign = signFromDot(dot)
-        if (sign === 'pos') scriptPos++
-        else if (sign === 'neg') scriptNeg++
+        if (sign === 'pos') {
+          scriptPos++
+        } else if (sign === 'neg') {
+          scriptNeg++
+        }
         const p = iy * wh + ix
         voteKind[p] = sign === 'pos' ? 1 : sign === 'neg' ? 2 : 3
         samples.push({ ix, iy, u, v, tri, dot, sign })
