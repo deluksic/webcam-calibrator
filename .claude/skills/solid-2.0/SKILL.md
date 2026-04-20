@@ -2,13 +2,13 @@
 
 ## Async in createMemo
 
-`createMemo` accepts async functions. The memo value is a Promise while pending.
+`createMemo` also accepts async functions. The memo value is of the resulting type; sync code does not continue while still pending (throws to stop execution).
 
 ```tsx
 const data = createMemo(() => api.fetchData())
 
 // In JSX - will suspend until resolved
-;<Show when={data()}>{(d) => <div>{d()}</div>}</Show>
+<Show when={data()}>{(d) => <div>{d()}</div>}</Show>
 ```
 
 ## isPending Utility
@@ -24,10 +24,10 @@ const loading = () => isPending(() => someAsyncMemo())
 Use `createSignal` + `ref` callback instead of `let` variables:
 
 ```tsx
-const [el, setEl] = createSignal<HTMLDivElement | undefined>(undefined)
+const [el, setEl] = createSignal<HTMLDivElement>()
 
 // In JSX
-;<div ref={setEl}>...</div>
+<div ref={setEl}>...</div>
 ```
 
 **Wrong:**

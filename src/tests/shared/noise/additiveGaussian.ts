@@ -4,11 +4,11 @@ import { xorshift32State, xorshift32U01 } from '@/tests/shared/rng'
 export function applyAdditiveGaussian01(intensity: Float32Array, sigma: number, seed: number): void {
   if (sigma <= 0) return
   const st = xorshift32State(seed)
-  let spare: number | null = null
+  let spare: number | undefined = undefined
   const nextGaussian = (): number => {
-    if (spare !== null) {
+    if (spare !== undefined) {
       const z = spare
-      spare = null
+      spare = undefined
       return z
     }
     const u1 = xorshift32U01(st)

@@ -2,7 +2,7 @@
 
 import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from '@/lib/corners'
 import { Point } from '@/lib/geometry'
-import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
+import { buildTagGrid, decodeTagPattern, GridResult } from '@/lib/grid'
 import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
 
 const { min, max, floor } = Math
@@ -15,10 +15,10 @@ export interface DetectedQuad {
   count: number
   aspectRatio: number
   area: number
-  gridCells: ReturnType<typeof buildTagGrid> | null
-  pattern: TagPattern | null
+  gridCells: GridResult | undefined
+  pattern: TagPattern | undefined
   hasCorners: boolean // true if detected via corner finding, false if fallback bbox
-  cornerDebug: CornerDebugInfo | null // debug info from corner detection (null if fallback)
+  cornerDebug: CornerDebugInfo | undefined
   /** Test / viz: random or decoded id for GPU hash + HTML label (omit = unknown/black). */
   vizTagId?: number
   /** tag36h11 id when `decodeTag36h11AnyRotation` succeeds on `pattern`. */
@@ -92,7 +92,7 @@ export function extractRegions(
   return result
 }
 
-export function fitQuadToRegion(region: RegionData): [number, number][] | null {
+export function fitQuadToRegion(region: RegionData): [number, number][] | undefined {
   const { minX, minY, maxX, maxY } = region
 
   const boundingBoxWidth = maxX - minX
@@ -100,7 +100,7 @@ export function fitQuadToRegion(region: RegionData): [number, number][] | null {
 
   const aspectRatio = boundingBoxWidth / boundingBoxHeight
   if (aspectRatio < 0.5 || aspectRatio > 2.0) {
-    return null
+    return undefined
   }
 
   let leftEdge = maxX

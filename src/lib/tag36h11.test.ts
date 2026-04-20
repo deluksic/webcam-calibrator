@@ -105,7 +105,7 @@ describe('tag36h11', () => {
 
   describe('decodeTag36h11', () => {
     it('returns -1 for null pattern', () => {
-      expect(decodeTag36h11(null)).toBe(-1)
+      expect(decodeTag36h11(undefined)).toBe(-1)
     })
 
     it('returns -1 for wrong-length pattern', () => {
@@ -126,8 +126,8 @@ describe('tag36h11', () => {
   })
 
   describe('decodeTag36h11AnyRotation', () => {
-    it('returns null for null pattern', () => {
-      expect(decodeTag36h11AnyRotation(null)).toBeNull()
+    it('returns undefined for undefined pattern', () => {
+      expect(decodeTag36h11AnyRotation(undefined)).toBeUndefined()
     })
 
     it('chooses rotation with lowest Hamming distance', () => {

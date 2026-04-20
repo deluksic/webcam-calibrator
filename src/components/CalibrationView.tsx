@@ -110,7 +110,9 @@ function CalibrationView() {
 
   return (
     <div class={styles.root}>
-      {cam.streamError() ? <p class={styles.error}>Camera: {cam.streamError()}</p> : null}
+      <Show when={cam.streamError()}>
+        <p class={styles.error}>Camera: {cam.streamError()}</p>
+      </Show>
 
       <p class={styles.hint}>
         Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target. Layout is recovered in bundle
@@ -118,7 +120,7 @@ function CalibrationView() {
       </p>
 
       <div class={styles.cameraBlock}>
-        <Show when={() => !isPending(() => devicesSorted())}>
+        <Show when={!isPending(devicesSorted)}>
           <select
             class={[pipelineStyles.cameraSelect, styles.calibrateCameraSelect]}
             value={cam.deviceId() ?? ''}

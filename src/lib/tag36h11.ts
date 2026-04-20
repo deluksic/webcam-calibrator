@@ -91,7 +91,7 @@ export interface DictionaryMatch {
  * Best tag36h11 codeword for this pattern (known bits only).
  * @returns `id === -1` when no tag has `dist <= maxError`.
  */
-export function decodeTag36h11Best(pattern: TagPattern | null, maxError: number = 5): DictionaryMatch {
+export function decodeTag36h11Best(pattern: TagPattern | undefined, maxError: number = 5): DictionaryMatch {
   if (!pattern || pattern.length !== 36) {
     return { id: -1, dist: maxError + 1 }
   }
@@ -142,7 +142,7 @@ export function decodeTag36h11Best(pattern: TagPattern | null, maxError: number 
  * Match detected pattern against tag36h11 dictionary.
  * Returns tag ID if found within error threshold, or -1 if no match.
  */
-export function decodeTag36h11(pattern: TagPattern | null, maxError: number = 5): number {
+export function decodeTag36h11(pattern: TagPattern | undefined, maxError: number = 5): number {
   return decodeTag36h11Best(pattern, maxError).id
 }
 
@@ -168,12 +168,12 @@ export function rotatePattern(pattern: TagPattern): TagPattern {
  * (then lowest `id` on ties) among rotations with `dist <= maxError`.
  */
 export function decodeTag36h11AnyRotation(
-  pattern: TagPattern | null,
+  pattern: TagPattern | undefined,
   maxError: number = 5,
-): { id: number; rotation: number } | null {
-  if (!pattern) return null
+): { id: number; rotation: number } | undefined {
+  if (!pattern) return undefined
 
-  let best: { id: number; rotation: number; dist: number } | null = null
+  let best: { id: number; rotation: number; dist: number } | undefined = undefined
   let currentPattern = [...pattern]
   for (let r = 0; r < 4; r++) {
     const { id, dist } = decodeTag36h11Best(currentPattern, maxError)
@@ -185,5 +185,5 @@ export function decodeTag36h11AnyRotation(
     currentPattern = rotatePattern(currentPattern)
   }
 
-  return best ? { id: best.id, rotation: best.rotation } : null
+  return best ? { id: best.id, rotation: best.rotation } : undefined
 }

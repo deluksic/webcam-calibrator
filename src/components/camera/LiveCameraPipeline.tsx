@@ -101,8 +101,6 @@ function TagIdGridOverlay(props: { quads: DetectedQuad[]; sx: number; sy: number
   )
 }
 
-type GpuRoot = Awaited<ReturnType<typeof initGPU>>
-
 export type LiveCameraPipelineProps = {
   displayMode: Accessor<DisplayMode>
   showGrid: Accessor<boolean>
@@ -167,7 +165,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     props.onLog?.(msg)
   }
 
-  const gpu = createMemo<GpuRoot | undefined>(async () => {
+  const gpu = createMemo(async () => {
     try {
       log('GPU init...')
       const g = await initGPU()
@@ -275,11 +273,10 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           if (disposed) return
           quadDetectionPending = false
           const { quads } = result
-          const validQuads = quads.filter((q) => q != null && typeof q.count === 'number')
-          validQuads.sort((a, b) => b.count - a.count)
-          const top = validQuads.slice(0, MAX_DETECTED_TAGS)
+          quads.sort((a, b) => b.count - a.count)
+          const top = quads.slice(0, MAX_DETECTED_TAGS)
           const tagged = top.map((q) => {
-            const ok = q.hasCorners && q.cornerDebug !== null && q.cornerDebug.failureCode === 0
+            const ok = q.hasCorners && q.cornerDebug && q.cornerDebug.failureCode === 0
             return {
               ...q,
               vizTagId: ok && typeof q.decodedTagId === 'number' ? q.decodedTagId : undefined,
@@ -287,7 +284,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           })
           setGridOverlayQuads(
             tagged.filter((q) => {
-              if (!q.hasCorners || q.cornerDebug === null || q.cornerDebug.failureCode !== 0) {
+              if (!q?.hasCorners || q.cornerDebug?.failureCode !== 0) {
                 return false
               }
               if (sf) return true

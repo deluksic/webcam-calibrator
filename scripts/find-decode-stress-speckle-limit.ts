@@ -20,20 +20,20 @@ if (!passes(1e-12)) {
   process.exit(1)
 }
 
-/** Smallest `a` in `(0, maxScan]` with `!passes(a)`, or `null` if none found. */
-function findFirstFailure(maxScan: number): number | null {
+/** Smallest `a` in `(0, maxScan]` with `!passes(a)`, or `undefined` if none found. */
+function findFirstFailure(maxScan: number): number | undefined {
   let a = 0.01
   while (a <= maxScan) {
     if (!passes(a)) return a
     const na = Math.min(maxScan, a * 1.2)
-    if (na <= a) return passes(maxScan) ? null : maxScan
+    if (na <= a) return passes(maxScan) ? undefined : maxScan
     a = na
   }
-  return null
+  return undefined
 }
 
 const firstFail = findFirstFailure(1)
-if (firstFail === null) {
+if (firstFail === undefined) {
   console.log(JSON.stringify({ note: 'No failure up to amplitude 1.0' }, null, 2))
   console.log('\nSuggested DECODE_STRESS_SPECKLE_AMP = 1 (no failure up to 1.0)')
   process.exit(0)

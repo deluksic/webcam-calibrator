@@ -1,5 +1,0 @@
-Starting compilation in watch mode
-
-src/app.ts(1,1): error TS2300: duplicate
-
-9:06:31 PM - Found 17 errors. Watching for file changes.

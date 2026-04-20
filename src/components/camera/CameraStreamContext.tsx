@@ -43,7 +43,7 @@ export function useCameraStream(): CameraStreamContextValue {
 }
 
 export function CameraStreamProvider(props: ParentProps) {
-  const [deviceId, setDeviceId] = createSignal<string | undefined>()
+  const [deviceId, setDeviceId] = createSignal<string>()
   const [streamError, setStreamError] = createSignal<string | undefined>(undefined, {
     ownedWrite: true,
   })
@@ -96,7 +96,7 @@ export function CameraStreamProvider(props: ParentProps) {
     devices: devices as unknown as Accessor<Promise<MediaDeviceInfo[]>>,
     deviceId,
     setDeviceId,
-    stream: stream as unknown as Accessor<Promise<MediaStream | undefined>>,
+    stream,
     streamError,
     trackSize,
   }

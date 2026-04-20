@@ -29,9 +29,9 @@ export function calibrationQuadScore(q: DetectedQuad): number {
 }
 
 export function acceptQuadForCalibration(q: DetectedQuad): boolean {
-  if (typeof q.decodedTagId !== 'number') return false
+  if (q.decodedTagId === undefined) return false
   if (!q.hasCorners) return false
-  if (q.cornerDebug === null || q.cornerDebug.failureCode !== 0) return false
+  if (!q || q.cornerDebug?.failureCode !== 0) return false
   if (!q.gridCells?.innerCorners || q.gridCells.innerCorners.length !== 49) return false
   const minR2 = q.cornerDebug.minR2
   if (minR2 < CALIB_MIN_MIN_R2) return false

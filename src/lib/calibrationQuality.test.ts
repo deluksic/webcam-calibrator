@@ -15,8 +15,8 @@ function bareQuad(tagId?: number): DetectedQuad {
     count: 1000,
     aspectRatio: 1,
     area: 10000,
-    gridCells: null,
-    pattern: null,
+    gridCells: undefined,
+    pattern: undefined,
     hasCorners: true,
     cornerDebug: {
       failureCode: 0,

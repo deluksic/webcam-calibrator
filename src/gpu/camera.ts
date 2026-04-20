@@ -732,7 +732,7 @@ export function updateQuadCornersBuffer(
     const quad = filtered[i]
     const H = tryComputeHomography(quad.corners)
     const debug = quad.cornerDebug
-    const tagId = quad.vizTagId !== undefined && quad.vizTagId !== null ? quad.vizTagId >>> 0 : DECODED_TAG_ID_UNKNOWN
+    const tagId = quad.vizTagId !== undefined ? quad.vizTagId >>> 0 : DECODED_TAG_ID_UNKNOWN
 
     data.push({
       homography: H

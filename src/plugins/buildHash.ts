@@ -21,7 +21,6 @@ export function buildHashPlugin(): Plugin {
         const hash = contentHash(code)
         return `window.__BUILD_HASH__ = "${VERSION}-${hash}";\n${code}`
       }
-      return null
     },
   }
 }
