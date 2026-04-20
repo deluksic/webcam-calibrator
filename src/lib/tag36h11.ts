@@ -2,27 +2,25 @@
 // https://github.com/AprilRobotics/apriltag/blob/master/tag36h11.c
 // BSD-3-Clause license
 
-import codesRaw from "./tag36h11.json";
+import codesRaw from '@/lib/tag36h11.json'
 
 // Parse JSON strings as BigInt (needed because JSON can't store 64-bit integers)
-const TAG36H11_CODES: readonly bigint[] = (codesRaw as unknown as string[]).map((s) => BigInt(s));
-export { TAG36H11_CODES };
-export const TAG36H11_COUNT = TAG36H11_CODES.length;
+const TAG36H11_CODES: readonly bigint[] = (codesRaw as unknown as string[]).map((s) => BigInt(s))
+export { TAG36H11_CODES }
+export const TAG36H11_COUNT = TAG36H11_CODES.length
 
 // LUT: each of 36 bits maps to (x, y) in 1-indexed 10×10 tag coords.
 // The 10×10 grid has 8×8 inner data area (coords 1–8). Border = 0 and 9.
 // For tag36h11, the data bits (1-indexed 6×6) are at coords 1–6 in both axes.
 const BIT_X = [
-  1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4, 1, 1, 1, 1, 1, 2,
-  2, 2, 3,
-] as const;
+  1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4, 1, 1, 1, 1, 1, 2, 2, 2, 3,
+] as const
 const BIT_Y = [
-  1, 1, 1, 1, 1, 2, 2, 2, 3, 1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5,
-  4, 3, 4,
-] as const;
+  1, 1, 1, 1, 1, 2, 2, 2, 3, 1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4,
+] as const
 
 /** `-1` = no / weak directional signal; `-2` = enough votes but pos/neg tie (ambiguous). */
-export type TagPattern = (0 | 1 | -1 | -2)[];
+export type TagPattern = (0 | 1 | -1 | -2)[]
 
 /**
  * Decode a 36-bit tag36h11 code into a 6×6 binary grid (0/1 values).
@@ -32,35 +30,35 @@ export type TagPattern = (0 | 1 | -1 | -2)[];
  * 6×6 pattern extracts rows 1–6, cols 1–6 (1-indexed).
  */
 export function codeToPattern(code: bigint): TagPattern {
-  const pattern = new Array(36).fill(0) as TagPattern;
+  const pattern: TagPattern = Array.from({ length: 36 }, () => 0)
   for (let bit = 0; bit < 36; bit++) {
-    const x = BIT_X[bit];
-    const y = BIT_Y[bit];
+    const x = BIT_X[bit]
+    const y = BIT_Y[bit]
     // 10×10 coords (1-indexed) → 6×6 0-indexed pattern
-    const row = y - 1; // 0–5
-    const col = x - 1; // 0–5
-    pattern[row * 6 + col] = (code >> BigInt(35 - bit)) & 1n ? 1 : 0;
+    const row = y - 1 // 0–5
+    const col = x - 1 // 0–5
+    pattern[row * 6 + col] = (code >> BigInt(35 - bit)) & 1n ? 1 : 0
   }
-  return pattern;
+  return pattern
 }
 
 /**
  * Fast popcount for 64-bit BigInt.
  */
 function popcount64(x: bigint): number {
-  let count = 0;
+  let count = 0
   while (x) {
-    count++;
-    x &= x - 1n;
+    count++
+    x &= x - 1n
   }
-  return count;
+  return count
 }
 
 /**
  * Compute Hamming distance between two 36-bit codes.
  */
 export function hammingDistance(code1: bigint, code2: bigint): number {
-  return popcount64(code1 ^ code2);
+  return popcount64(code1 ^ code2)
 }
 
 /**
@@ -69,78 +67,75 @@ export function hammingDistance(code1: bigint, code2: bigint): number {
  * This is the inverse of codeToPattern.
  */
 export function patternToCode(pattern: TagPattern): bigint {
-  if (pattern.length !== 36) return -1 as unknown as bigint;
-  let code = 0n;
+  if (pattern.length !== 36) return -1 as unknown as bigint
+  let code = 0n
   for (let bit = 0; bit < 36; bit++) {
-    const x = BIT_X[bit];
-    const y = BIT_Y[bit];
-    const row = y - 1;
-    const col = x - 1;
+    const x = BIT_X[bit]
+    const y = BIT_Y[bit]
+    const row = y - 1
+    const col = x - 1
     if (pattern[row * 6 + col] === 1) {
-      code |= 1n << BigInt(35 - bit);
+      code |= 1n << BigInt(35 - bit)
     }
   }
-  return code;
+  return code
 }
 
 export interface DictionaryMatch {
-  id: number;
+  id: number
   /** Hamming distance on known bits; `maxError + 1` if no codeword within `maxError`. */
-  dist: number;
+  dist: number
 }
 
 /**
  * Best tag36h11 codeword for this pattern (known bits only).
  * @returns `id === -1` when no tag has `dist <= maxError`.
  */
-export function decodeTag36h11Best(
-  pattern: TagPattern | null,
-  maxError: number = 5,
-): DictionaryMatch {
+export function decodeTag36h11Best(pattern: TagPattern | null, maxError: number = 5): DictionaryMatch {
   if (!pattern || pattern.length !== 36) {
-    return { id: -1, dist: maxError + 1 };
+    return { id: -1, dist: maxError + 1 }
   }
 
-  const unknownCount = pattern.filter((v) => v === -1 || v === -2).length;
+  const unknownCount = pattern.filter((v) => v === -1 || v === -2).length
   if (unknownCount > maxError * 2) {
-    return { id: -1, dist: maxError + 1 };
+    return { id: -1, dist: maxError + 1 }
   }
 
-  let code = 0n;
-  let knownMask = 0n;
+  let code = 0n
+  let knownMask = 0n
   for (let bit = 0; bit < 36; bit++) {
-    const x = BIT_X[bit];
-    const y = BIT_Y[bit];
-    const pRow = y - 1;
-    const pCol = x - 1;
-    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) continue;
-    const pIdx = pRow * 6 + pCol;
-    const val = pattern[pIdx];
+    const x = BIT_X[bit]
+    const y = BIT_Y[bit]
+    const pRow = y - 1
+    const pCol = x - 1
+    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) continue
+    const pIdx = pRow * 6 + pCol
+    const val = pattern[pIdx]
     if (val === 1) {
-      code |= 1n << BigInt(35 - bit);
-      knownMask |= 1n << BigInt(35 - bit);
+      code |= 1n << BigInt(35 - bit)
+      knownMask |= 1n << BigInt(35 - bit)
     } else if (val === 0) {
-      knownMask |= 1n << BigInt(35 - bit);
+      knownMask |= 1n << BigInt(35 - bit)
     }
   }
 
-  let bestId = -1;
-  let bestDist = maxError + 1;
+  let bestId = -1
+  let bestDist = maxError + 1
 
   for (let id = 0; id < TAG36H11_COUNT; id++) {
-    const dictCode = TAG36H11_CODES[id];
-    const diff = (code ^ dictCode) & knownMask;
-    const dist = popcount64(diff);
+    const dictCode = TAG36H11_CODES[id]
+    const diff = (code ^ dictCode) & knownMask
+    const dist = popcount64(diff)
 
     if (dist < bestDist) {
-      bestDist = dist;
-      bestId = id;
-      if (bestDist === 0) break;
+      bestDist = dist
+      bestId = id
+      if (bestDist === 0) break
     }
   }
 
-  if (bestDist > maxError) return { id: -1, dist: bestDist };
-  return { id: bestId, dist: bestDist };
+  if (bestDist > maxError) return { id: -1, dist: bestDist }
+  return { id: bestId, dist: bestDist }
 }
 
 /**
@@ -148,24 +143,24 @@ export function decodeTag36h11Best(
  * Returns tag ID if found within error threshold, or -1 if no match.
  */
 export function decodeTag36h11(pattern: TagPattern | null, maxError: number = 5): number {
-  return decodeTag36h11Best(pattern, maxError).id;
+  return decodeTag36h11Best(pattern, maxError).id
 }
 
 /**
  * Rotate a 6×6 pattern 90 degrees clockwise.
  */
 export function rotatePattern(pattern: TagPattern): TagPattern {
-  const result: TagPattern = new Array(36) as TagPattern;
+  const result: TagPattern = Array.from({ length: 36 }, () => 0)
   for (let row = 0; row < 6; row++) {
     for (let col = 0; col < 6; col++) {
-      const srcIdx = row * 6 + col;
-      const dstRow = col;
-      const dstCol = 5 - row;
-      const dstIdx = dstRow * 6 + dstCol;
-      result[dstIdx] = pattern[srcIdx];
+      const srcIdx = row * 6 + col
+      const dstRow = col
+      const dstCol = 5 - row
+      const dstIdx = dstRow * 6 + dstCol
+      result[dstIdx] = pattern[srcIdx]
     }
   }
-  return result;
+  return result
 }
 
 /**
@@ -176,19 +171,19 @@ export function decodeTag36h11AnyRotation(
   pattern: TagPattern | null,
   maxError: number = 5,
 ): { id: number; rotation: number } | null {
-  if (!pattern) return null;
+  if (!pattern) return null
 
-  let best: { id: number; rotation: number; dist: number } | null = null;
-  let currentPattern = [...pattern];
+  let best: { id: number; rotation: number; dist: number } | null = null
+  let currentPattern = [...pattern]
   for (let r = 0; r < 4; r++) {
-    const { id, dist } = decodeTag36h11Best(currentPattern, maxError);
+    const { id, dist } = decodeTag36h11Best(currentPattern, maxError)
     if (id !== -1) {
       if (!best || dist < best.dist || (dist === best.dist && id < best.id)) {
-        best = { id, rotation: r, dist };
+        best = { id, rotation: r, dist }
       }
     }
-    currentPattern = rotatePattern(currentPattern);
+    currentPattern = rotatePattern(currentPattern)
   }
 
-  return best ? { id: best.id, rotation: best.rotation } : null;
+  return best ? { id: best.id, rotation: best.rotation } : null
 }

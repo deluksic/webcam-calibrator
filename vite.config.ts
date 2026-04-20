@@ -1,26 +1,32 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
-import solidPlugin from "vite-plugin-solid";
-import typegpuPlugin from "unplugin-typegpu/vite";
-import tsover from "tsover/plugin/vite";
-import { buildHashPlugin } from "./src/plugins/buildHash";
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const root = path.dirname(fileURLToPath(import.meta.url));
+import typegpuPlugin from 'unplugin-typegpu/vite'
+import { defineConfig } from 'vite'
+import solidPlugin from 'vite-plugin-solid'
+
+import { buildHashPlugin } from './src/plugins/buildHash'
+
+const root = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   resolve: {
     alias: {
-      "@": path.resolve(root, "src"),
+      '@': path.resolve(root, 'src'),
     },
   },
-  plugins: [tsover(), typegpuPlugin(), solidPlugin(), buildHashPlugin()],
+  plugins: [
+    // tsover(), disabled because slow
+    typegpuPlugin(),
+    solidPlugin(),
+    buildHashPlugin(),
+  ],
   server: {
     port: 5173,
-    host: "0.0.0.0",
+    host: '0.0.0.0',
   },
   build: {
-    target: "esnext",
+    target: 'esnext',
     minify: false,
   },
-});
+})

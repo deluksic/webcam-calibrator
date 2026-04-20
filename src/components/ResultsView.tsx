@@ -1,4 +1,4 @@
-import styles from "./ResultsView.module.css";
+import styles from '@/components/ResultsView.module.css'
 
 export function ResultsView() {
   return (
@@ -7,5 +7,5 @@ export function ResultsView() {
         <p class={styles.placeholderText}>Calibration results coming soon</p>
       </div>
     </div>
-  );
+  )
 }

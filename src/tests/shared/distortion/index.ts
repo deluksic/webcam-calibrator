@@ -1,1 +1,1 @@
-export { applyRadialDistortion01 } from "./radial";
+export { applyRadialDistortion01 } from '@/tests/shared/distortion/radial'

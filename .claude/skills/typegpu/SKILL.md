@@ -32,12 +32,12 @@ A single schema (`d.*`) defines a GPU type, CPU buffer layout, and TypeScript ty
 ## Setup
 
 ```ts
-import tgpu, { d, std, common } from "typegpu";
+import tgpu, { d, std, common } from 'typegpu'
 
-const root = await tgpu.init(); // request a GPU device
-const root = tgpu.initFromDevice(device); // or wrap an existing GPUDevice
+const root = await tgpu.init() // request a GPU device
+const root = tgpu.initFromDevice(device) // or wrap an existing GPUDevice
 
-const context = root.configureContext({ canvas, alphaMode: "premultiplied" });
+const context = root.configureContext({ canvas, alphaMode: 'premultiplied' })
 ```
 
 Create one root at app startup. Resources from different roots cannot interact.
@@ -71,17 +71,17 @@ Instance types: `d.vec3f()` -> `d.v3f`, `d.mat4x4f()` -> `d.m4x4f`.
 **Vector constructors are richly overloaded - use them.** They compose from any mix of scalars and smaller vectors that adds up to the right component count:
 
 ```ts
-d.vec3f(); // zero-init: (0, 0, 0)
-d.vec3f(1); // broadcast:  (1, 1, 1)
-d.vec3f(1, 2, 3); // individual components
-d.vec3f(someVec2, 1); // vec2 + scalar
-d.vec3f(1, someVec2); // scalar + vec2
+d.vec3f() // zero-init: (0, 0, 0)
+d.vec3f(1) // broadcast:  (1, 1, 1)
+d.vec3f(1, 2, 3) // individual components
+d.vec3f(someVec2, 1) // vec2 + scalar
+d.vec3f(1, someVec2) // scalar + vec2
 
-d.vec4f(); // zero-init: (0, 0, 0, 0)
-d.vec4f(0.5); // broadcast:  (0.5, 0.5, 0.5, 0.5)
-d.vec4f(rgb, 1); // vec3 + scalar (common: color + alpha)
-d.vec4f(v2a, v2b); // two vec2s
-d.vec4f(1, uv, 0); // scalar + vec2 + scalar
+d.vec4f() // zero-init: (0, 0, 0, 0)
+d.vec4f(0.5) // broadcast:  (0.5, 0.5, 0.5, 0.5)
+d.vec4f(rgb, 1) // vec3 + scalar (common: color + alpha)
+d.vec4f(v2a, v2b) // two vec2s
+d.vec4f(1, uv, 0) // scalar + vec2 + scalar
 ```
 
 Swizzles (`.xy`, `.zw`, `.rgb`, `.ba`, etc.) return vector instances that work as constructor arguments: `d.vec4f(pos.xy, vel.zw)`.
@@ -95,9 +95,9 @@ const Particle = d.struct({
   position: d.vec2f,
   velocity: d.vec2f,
   color: d.vec4f,
-});
+})
 
-const ParticleArray = d.arrayOf(Particle, 1000); // fixed-size
+const ParticleArray = d.arrayOf(Particle, 1000) // fixed-size
 ```
 
 **Runtime-sized schemas.** `d.arrayOf(Element)` without a count returns a _function_ `(n: number) => WgslArray<Element>`. This dual nature is the key: pass the function itself (unsized) to bind group layouts, call it with a count (sized) for buffer creation.
@@ -105,21 +105,21 @@ const ParticleArray = d.arrayOf(Particle, 1000); // fixed-size
 ```ts
 // Plain array - arrayOf without count is already a factory:
 const layout = tgpu.bindGroupLayout({
-  data: { storage: d.arrayOf(d.f32), access: "mutable" }, // unsized for layout
-});
-const buf = root.createBuffer(d.arrayOf(d.f32, 1024)).$usage("storage"); // sized for buffer
+  data: { storage: d.arrayOf(d.f32), access: 'mutable' }, // unsized for layout
+})
+const buf = root.createBuffer(d.arrayOf(d.f32, 1024)).$usage('storage') // sized for buffer
 
 // Struct with a runtime-sized last field - wrap in a factory function:
 const RuntimeStruct = (n: number) =>
   d.struct({
     counter: d.atomic(d.u32),
     items: d.arrayOf(d.f32, n), // last field gets the runtime size
-  });
+  })
 
 const layout2 = tgpu.bindGroupLayout({
-  runtimeData: { storage: RuntimeStruct, access: "mutable" }, // unsized (the function)
-});
-const buf2 = root.createBuffer(RuntimeStruct(1024)).$usage("storage"); // sized (called)
+  runtimeData: { storage: RuntimeStruct, access: 'mutable' }, // unsized (the function)
+})
+const buf2 = root.createBuffer(RuntimeStruct(1024)).$usage('storage') // sized (called)
 ```
 
 You cannot pass an unsized schema directly to `createBuffer` - size must be known on the CPU.
@@ -136,11 +136,11 @@ No explicit signature; best for helper math and flexible utilities.
 
 ```ts
 const rotate = (v: d.v2f, angle: number) => {
-  "use gpu";
-  const c = std.cos(angle);
-  const s = std.sin(angle);
-  return d.vec2f(c * v.x - s * v.y, s * v.x + c * v.y);
-};
+  'use gpu'
+  const c = std.cos(angle)
+  const s = std.sin(angle)
+  return d.vec2f(c * v.x - s * v.y, s * v.x + c * v.y)
+}
 ```
 
 `number` parameters and unions like `d.v2f | d.v3f` are polymorphic - TypeGPU generates one WGSL overload per unique call-site type combination. Values captured from outer scope are **inlined as WGSL literals**; use buffers/uniforms for anything that changes at runtime.
@@ -154,9 +154,9 @@ const rotate = tgpu.fn(
   [d.vec2f, d.f32],
   d.vec2f,
 )((v, angle) => {
-  "use gpu";
+  'use gpu'
   // ...
-});
+})
 ```
 
 ### Shader entrypoints
@@ -167,26 +167,26 @@ const myCompute = tgpu.computeFn({
   workgroupSize: [64],
   in: { gid: d.builtin.globalInvocationId },
 })((input) => {
-  "use gpu"; /* input.gid: d.v3u */
-});
+  'use gpu' /* input.gid: d.v3u */
+})
 
 // Vertex
 const myVertex = tgpu.vertexFn({
   in: { position: d.vec3f, uv: d.vec2f },
   out: { position: d.builtin.position, fragUv: d.vec2f },
 })((input) => {
-  "use gpu";
-  return { position: d.vec4f(input.position, 1), fragUv: input.uv };
-});
+  'use gpu'
+  return { position: d.vec4f(input.position, 1), fragUv: input.uv }
+})
 
 // Fragment
 const myFragment = tgpu.fragmentFn({
   in: { fragUv: d.vec2f },
   out: d.vec4f,
 })((input) => {
-  "use gpu";
-  return d.vec4f(input.fragUv, 0, 1);
-});
+  'use gpu'
+  return d.vec4f(input.fragUv, 0, 1)
+})
 ```
 
 Vertex `in` may include builtins: `d.builtin.vertexIndex`, `d.builtin.instanceIndex`.
@@ -207,20 +207,20 @@ Full shader syntax, branch pruning, the `std` library, and type inference: see `
 
 ```ts
 // Schema only:
-const buf = root.createBuffer(d.arrayOf(Particle, 1000)).$usage("storage");
+const buf = root.createBuffer(d.arrayOf(Particle, 1000)).$usage('storage')
 
 // With typed initial value (only when non-zero — all buffers are zero-initialized by default):
-const uBuf = root.createBuffer(Config, { time: 1, scale: 2.0 }).$usage("uniform");
+const uBuf = root.createBuffer(Config, { time: 1, scale: 2.0 }).$usage('uniform')
 
 // With an initializer callback - buffer is still mapped (cheapest CPU path):
 const buf = root.createBuffer(Schema, (mappedBuffer) => {
-  mappedBuffer.write([10, 20], { startOffset: firstChunk.offset });
-  mappedBuffer.write([30, 40], { startOffset: secondChunk.offset });
-});
+  mappedBuffer.write([10, 20], { startOffset: firstChunk.offset })
+  mappedBuffer.write([30, 40], { startOffset: secondChunk.offset })
+})
 
 // Wrap an existing GPUBuffer (you own its lifecycle and flags):
-const buf = root.createBuffer(d.u32, existingGPUBuffer);
-buf.write(12);
+const buf = root.createBuffer(d.u32, existingGPUBuffer)
+buf.write(12)
 ```
 
 ### Usage flags
@@ -251,8 +251,8 @@ Cache plain arrays or `Float32Array` at setup and reuse. For the padding rules (
 **Slice write** - update a sub-region using `d.memoryLayoutOf` to get byte offsets:
 
 ```ts
-const layout = d.memoryLayoutOf(schema, (a) => a[3]);
-buffer.write([4, 5, 6], { startOffset: layout.offset });
+const layout = d.memoryLayoutOf(schema, (a) => a[3])
+buffer.write([4, 5, 6], { startOffset: layout.offset })
 ```
 
 **`.patch(data)`** - update specific struct fields or array indices without touching the rest:
@@ -261,7 +261,7 @@ buffer.write([4, 5, 6], { startOffset: layout.offset });
 planetBuffer.patch({
   mass: 123.1,
   colors: { 2: [1, 0, 0], 4: d.vec3f(0, 0, 1) },
-});
+})
 ```
 
 **`common.writeSoA(buffer, { field: Float32Array, ... })`** - scatter separate packed per-field arrays into the GPU's AoS layout with correct padding. The idiomatic path for particle systems, simulations, and model loading where CPU data is already field-separated. See `references/matrices.md` for examples and `references/pipelines.md` for the model-loading pattern.
@@ -271,7 +271,7 @@ planetBuffer.patch({
 ### Reading
 
 ```ts
-const data = await buffer.read(); // returns a typed JS value matching the schema
+const data = await buffer.read() // returns a typed JS value matching the schema
 ```
 
 ### Shorthand "fixed" resources
@@ -279,9 +279,9 @@ const data = await buffer.read(); // returns a typed JS value matching the schem
 Skip manual bind groups - the buffer is always bound when referenced in any shader:
 
 ```ts
-const particlesMutable = root.createMutable(d.arrayOf(Particle, 1000)); // var<storage, read_write>
-const configUniform = root.createUniform(Config); // var<uniform>
-const bufReadonly = root.createReadonly(d.arrayOf(d.f32, N)); // var<storage, read>
+const particlesMutable = root.createMutable(d.arrayOf(Particle, 1000)) // var<storage, read_write>
+const configUniform = root.createUniform(Config) // var<uniform>
+const bufReadonly = root.createReadonly(d.arrayOf(d.f32, N)) // var<storage, read>
 ```
 
 Access inside shaders via `particles.$`, `config.$`. Prefer fixed resources by default; switch to manual bind groups when you need to swap resources per frame, manage `@group` indices, or share layouts across pipelines.
@@ -293,10 +293,10 @@ Access inside shaders via `particles.$`, `config.$`. Prefer fixed resources by d
 ```ts
 const layout = tgpu.bindGroupLayout({
   config: { uniform: ConfigSchema },
-  particles: { storage: d.arrayOf(Particle), access: "mutable" },
-  mySampler: { sampler: "filtering" }, // 'filtering' | 'non-filtering' | 'comparison'
+  particles: { storage: d.arrayOf(Particle), access: 'mutable' },
+  mySampler: { sampler: 'filtering' }, // 'filtering' | 'non-filtering' | 'comparison'
   myTexture: { texture: d.texture2d(d.f32) },
-});
+})
 
 // Inside shaders: layout.$.config, layout.$.particles, ...
 
@@ -305,9 +305,9 @@ const bindGroup = root.createBindGroup(layout, {
   particles: particleBuffer,
   mySampler: tgpuSampler,
   myTexture: textureOrView,
-});
+})
 
-pipeline.with(bindGroup).dispatchWorkgroups(N);
+pipeline.with(bindGroup).dispatchWorkgroups(N)
 ```
 
 Explicit `@group` index (only needed when integrating with raw WGSL that hardcodes group indices): `layout.$idx(0)`.
@@ -318,28 +318,28 @@ Explicit `@group` index (only needed when integrating with raw WGSL that hardcod
 
 ```ts
 // Standard - you control workgroup sizing
-const pipeline = root.createComputePipeline({ compute: myComputeFn });
-pipeline.with(bindGroup).dispatchWorkgroups(Math.ceil(N / 64));
+const pipeline = root.createComputePipeline({ compute: myComputeFn })
+pipeline.with(bindGroup).dispatchWorkgroups(Math.ceil(N / 64))
 
 // Guarded - TypeGPU handles workgroup sizing and bounds checking automatically.
 // The callback's parameter count sets the dimensionality (0D to 3D):
 const p0 = root.createGuardedComputePipeline(() => {
-  "use gpu"; /* runs once */
-});
+  'use gpu' /* runs once */
+})
 const p1 = root.createGuardedComputePipeline((x: number) => {
-  "use gpu";
-});
+  'use gpu'
+})
 const p2 = root.createGuardedComputePipeline((x: number, y: number) => {
-  "use gpu";
-});
+  'use gpu'
+})
 const p3 = root.createGuardedComputePipeline((x: number, y: number, z: number) => {
-  "use gpu";
-});
+  'use gpu'
+})
 
 // dispatchThreads matches the callback's arity - pass thread counts, not workgroup counts.
 // TypeGPU picks workgroup sizes internally and injects a bounds guard so threads
 // outside the requested range are no-ops.
-p2.with(bindGroup).dispatchThreads(width, height);
+p2.with(bindGroup).dispatchThreads(width, height)
 
 // WGSL builtins like globalInvocationId are NOT available - use the callback parameters instead.
 ```
@@ -407,29 +407,29 @@ For vertex buffer layouts, the attribs spread trick, and the `common.fullScreenT
 `tgpu.slot<T>()` is a typed placeholder; fill with `.with(slot, value)` at pipeline, root, or function scope. Any type fits: GPU values, functions, callbacks. Slots are the idiomatic way to build configurable/reusable shaders.
 
 ```ts
-const distFnSlot = tgpu.slot<(pos: d.v3f) => number>();
+const distFnSlot = tgpu.slot<(pos: d.v3f) => number>()
 
 const rayMarcher = tgpu.computeFn({
   workgroupSize: [64],
   in: { gid: d.builtin.globalInvocationId },
 })(({ gid }) => {
-  "use gpu";
-  const dist = distFnSlot.$(d.vec3f(gid)); // call the injected function
-});
+  'use gpu'
+  const dist = distFnSlot.$(d.vec3f(gid)) // call the injected function
+})
 
 root
   .with(distFnSlot, (pos) => {
-    "use gpu";
-    return std.length(pos - d.vec3f(0, 0, -5)) - 1.0; // sphere SDF
+    'use gpu'
+    return std.length(pos - d.vec3f(0, 0, -5)) - 1.0 // sphere SDF
   })
-  .createComputePipeline({ compute: rayMarcher });
+  .createComputePipeline({ compute: rayMarcher })
 ```
 
 Scalar/vector slot with a default:
 
 ```ts
-const colorSlot = tgpu.slot(d.vec4f(1, 0, 0, 1));
-pipeline.with(colorSlot, d.vec4f(0, 1, 0, 1)).draw(3);
+const colorSlot = tgpu.slot(d.vec4f(1, 0, 0, 1))
+pipeline.with(colorSlot, d.vec4f(0, 1, 0, 1)).draw(3)
 ```
 
 ---

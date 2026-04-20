@@ -3,41 +3,42 @@
 //
 // Gradient compatibility: neighbors with strongly opposing gradient directions (dot(g_i, g_j) < cosThreshold)
 // are NOT connected — this prevents corners from spanning across edge discontinuities.
-import { tgpu, d, std } from "typegpu";
-import { atomicLoad, atomicMin, atomicStore, length, sqrt } from "typegpu/std";
-import { COMPUTE_WORKGROUP_SIZE, GRADIENT_COS_THRESHOLD } from "./constants";
-import { COMPONENT_LABEL_INVALID } from "../contour";
+import { tgpu, d, std } from 'typegpu'
+import { atomicLoad, atomicMin, atomicStore, length } from 'typegpu/std'
 
-export function createPointerJumpLayouts(root: Awaited<ReturnType<typeof tgpu.init>>) {
+import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPUTE_WORKGROUP_SIZE } from '@/gpu/pipelines/constants'
+
+export function createPointerJumpLayouts() {
   const initLayout = tgpu.bindGroupLayout({
-    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: "readonly" },
-    labelBuffer: { storage: d.arrayOf(d.u32), access: "mutable" },
-  });
+    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+    labelBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
+  })
   const stepLayout = tgpu.bindGroupLayout({
-    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: "readonly" },
-    readBuffer: { storage: d.arrayOf(d.u32), access: "readonly" },
-    writeBuffer: { storage: d.arrayOf(d.u32), access: "mutable" },
-  });
+    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+    readBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
+    writeBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
+  })
   const labelsToAtomicLayout = tgpu.bindGroupLayout({
-    source: { storage: d.arrayOf(d.u32), access: "readonly" },
-    atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: "mutable" },
-  });
+    source: { storage: d.arrayOf(d.u32), access: 'readonly' },
+    atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
+  })
   const parentTightenLayout = tgpu.bindGroupLayout({
-    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: "readonly" },
-    labelRead: { storage: d.arrayOf(d.u32), access: "readonly" },
-    atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: "mutable" },
-  });
+    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+    labelRead: { storage: d.arrayOf(d.u32), access: 'readonly' },
+    atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
+  })
   const atomicToLabelsLayout = tgpu.bindGroupLayout({
-    atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: "mutable" },
-    dest: { storage: d.arrayOf(d.u32), access: "mutable" },
-  });
+    atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
+    dest: { storage: d.arrayOf(d.u32), access: 'mutable' },
+  })
   return {
     initLayout,
     stepLayout,
     labelsToAtomicLayout,
     parentTightenLayout,
     atomicToLabelsLayout,
-  };
+  }
 }
 
 export function createPointerJumpInitPipeline(
@@ -50,42 +51,42 @@ export function createPointerJumpInitPipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
   })((input) => {
-    "use gpu";
-    const x = d.i32(input.gid.x);
-    const y = d.i32(input.gid.y);
-    const w = d.i32(width);
-    const h = d.i32(height);
+    'use gpu'
+    const x = d.i32(input.gid.x)
+    const y = d.i32(input.gid.y)
+    const w = d.i32(width)
+    const h = d.i32(height)
     if (x >= w || y >= h) {
-      return;
+      return
     }
 
-    const idx = d.u32(y * w + x);
-    const ei = initLayout.$.edgeBuffer[idx];
-    const em = length(ei);
+    const idx = d.u32(y * w + x)
+    const ei = initLayout.$.edgeBuffer[idx]
+    const em = length(ei)
     // Only initialize labels for EDGE pixels (non-zero edges)
     if (em <= d.f32(0)) {
-      initLayout.$.labelBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID);
-      return;
+      initLayout.$.labelBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID)
+      return
     }
-    let best = idx;
+    let best = idx
     for (const dy of tgpu.unroll(std.range(-1, 2))) {
       for (const dx of tgpu.unroll(std.range(-1, 2))) {
-        const nx = x + dx;
-        const ny = y + dy;
+        const nx = x + dx
+        const ny = y + dy
         if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
-          const nIdx = d.u32(ny * w + nx);
-          const ej = initLayout.$.edgeBuffer[nIdx];
-          const ejm = length(ej);
+          const nIdx = d.u32(ny * w + nx)
+          const ej = initLayout.$.edgeBuffer[nIdx]
+          const ejm = length(ej)
           if (ejm > d.f32(0) && nIdx < best) {
-            best = nIdx;
+            best = nIdx
           }
         }
       }
     }
-    initLayout.$.labelBuffer[idx] = best;
-  });
+    initLayout.$.labelBuffer[idx] = best
+  })
 
-  return root.createComputePipeline({ compute: kernel });
+  return root.createComputePipeline({ compute: kernel })
 }
 
 export function createPointerJumpStepPipeline(
@@ -98,31 +99,31 @@ export function createPointerJumpStepPipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
   })((input) => {
-    "use gpu";
-    const x = d.i32(input.gid.x);
-    const y = d.i32(input.gid.y);
-    const w = d.i32(width);
-    const h = d.i32(height);
+    'use gpu'
+    const x = d.i32(input.gid.x)
+    const y = d.i32(input.gid.y)
+    const w = d.i32(width)
+    const h = d.i32(height)
     if (x >= w || y >= h) {
-      return;
+      return
     }
 
-    const idx = d.u32(y * w + x);
-    const wh = d.u32(w) * d.u32(h);
-    const p = stepLayout.$.readBuffer[idx];
+    const idx = d.u32(y * w + x)
+    const wh = d.u32(w) * d.u32(h)
+    const p = stepLayout.$.readBuffer[idx]
     if (p === d.u32(COMPONENT_LABEL_INVALID) || p >= wh) {
-      stepLayout.$.writeBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID);
-      return;
+      stepLayout.$.writeBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID)
+      return
     }
-    stepLayout.$.writeBuffer[idx] = stepLayout.$.readBuffer[p];
-  });
+    stepLayout.$.writeBuffer[idx] = stepLayout.$.readBuffer[p]
+  })
 
-  return root.createComputePipeline({ compute: kernel });
+  return root.createComputePipeline({ compute: kernel })
 }
 
 export function createPointerJumpLabelsToAtomicPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
-  labelsToAtomicLayout: ReturnType<typeof createPointerJumpLayouts>["labelsToAtomicLayout"],
+  labelsToAtomicLayout: ReturnType<typeof createPointerJumpLayouts>['labelsToAtomicLayout'],
   width: number,
   height: number,
 ) {
@@ -130,26 +131,26 @@ export function createPointerJumpLabelsToAtomicPipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
   })((input) => {
-    "use gpu";
-    const x = d.i32(input.gid.x);
-    const y = d.i32(input.gid.y);
-    const w = d.i32(width);
-    const h = d.i32(height);
+    'use gpu'
+    const x = d.i32(input.gid.x)
+    const y = d.i32(input.gid.y)
+    const w = d.i32(width)
+    const h = d.i32(height)
     if (x >= w || y >= h) {
-      return;
+      return
     }
 
-    const idx = d.u32(y * w + x);
-    const v = labelsToAtomicLayout.$.source[idx];
-    atomicStore(labelsToAtomicLayout.$.atomicLabels[idx], v);
-  });
+    const idx = d.u32(y * w + x)
+    const v = labelsToAtomicLayout.$.source[idx]
+    atomicStore(labelsToAtomicLayout.$.atomicLabels[idx], v)
+  })
 
-  return root.createComputePipeline({ compute: kernel });
+  return root.createComputePipeline({ compute: kernel })
 }
 
 export function createPointerJumpParentTightenPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
-  parentTightenLayout: ReturnType<typeof createPointerJumpLayouts>["parentTightenLayout"],
+  parentTightenLayout: ReturnType<typeof createPointerJumpLayouts>['parentTightenLayout'],
   width: number,
   height: number,
 ) {
@@ -157,39 +158,39 @@ export function createPointerJumpParentTightenPipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
   })((input) => {
-    "use gpu";
-    const x = d.i32(input.gid.x);
-    const y = d.i32(input.gid.y);
-    const w = d.i32(width);
-    const h = d.i32(height);
+    'use gpu'
+    const x = d.i32(input.gid.x)
+    const y = d.i32(input.gid.y)
+    const w = d.i32(width)
+    const h = d.i32(height)
     if (x >= w || y >= h) {
-      return;
+      return
     }
 
-    const idx = d.u32(y * w + x);
-    const ei = parentTightenLayout.$.edgeBuffer[idx];
+    const idx = d.u32(y * w + x)
+    const ei = parentTightenLayout.$.edgeBuffer[idx]
     if (length(ei) <= d.f32(0)) {
-      return;
+      return
     }
 
-    const wh = d.u32(w) * d.u32(h);
-    const p = parentTightenLayout.$.labelRead[idx];
+    const wh = d.u32(w) * d.u32(h)
+    const p = parentTightenLayout.$.labelRead[idx]
     if (p === d.u32(COMPONENT_LABEL_INVALID) || p >= wh) {
-      return;
+      return
     }
 
-    let cand = d.u32(COMPONENT_LABEL_INVALID);
+    let cand = d.u32(COMPONENT_LABEL_INVALID)
     for (const dy of tgpu.unroll(std.range(-1, 2))) {
       for (const dx of tgpu.unroll(std.range(-1, 2))) {
-        const nx = x + dx;
-        const ny = y + dy;
+        const nx = x + dx
+        const ny = y + dy
         if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
-          const nIdx = d.u32(ny * w + nx);
-          const ej = parentTightenLayout.$.edgeBuffer[nIdx];
+          const nIdx = d.u32(ny * w + nx)
+          const ej = parentTightenLayout.$.edgeBuffer[nIdx]
           if (length(ej) > d.f32(0)) {
-            const lj = parentTightenLayout.$.labelRead[nIdx];
+            const lj = parentTightenLayout.$.labelRead[nIdx]
             if (lj !== d.u32(COMPONENT_LABEL_INVALID)) {
-              cand = std.min(cand, lj);
+              cand = std.min(cand, lj)
             }
           }
         }
@@ -197,16 +198,16 @@ export function createPointerJumpParentTightenPipeline(
     }
 
     if (cand !== d.u32(COMPONENT_LABEL_INVALID)) {
-      atomicMin(parentTightenLayout.$.atomicLabels[p], cand);
+      atomicMin(parentTightenLayout.$.atomicLabels[p], cand)
     }
-  });
+  })
 
-  return root.createComputePipeline({ compute: kernel });
+  return root.createComputePipeline({ compute: kernel })
 }
 
 export function createPointerJumpAtomicToLabelsPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
-  atomicToLabelsLayout: ReturnType<typeof createPointerJumpLayouts>["atomicToLabelsLayout"],
+  atomicToLabelsLayout: ReturnType<typeof createPointerJumpLayouts>['atomicToLabelsLayout'],
   width: number,
   height: number,
 ) {
@@ -214,19 +215,19 @@ export function createPointerJumpAtomicToLabelsPipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
   })((input) => {
-    "use gpu";
-    const x = d.i32(input.gid.x);
-    const y = d.i32(input.gid.y);
-    const w = d.i32(width);
-    const h = d.i32(height);
+    'use gpu'
+    const x = d.i32(input.gid.x)
+    const y = d.i32(input.gid.y)
+    const w = d.i32(width)
+    const h = d.i32(height)
     if (x >= w || y >= h) {
-      return;
+      return
     }
 
-    const idx = d.u32(y * w + x);
-    const v = atomicLoad(atomicToLabelsLayout.$.atomicLabels[idx]);
-    atomicToLabelsLayout.$.dest[idx] = v;
-  });
+    const idx = d.u32(y * w + x)
+    const v = atomicLoad(atomicToLabelsLayout.$.atomicLabels[idx])
+    atomicToLabelsLayout.$.dest[idx] = v
+  })
 
-  return root.createComputePipeline({ compute: kernel });
+  return root.createComputePipeline({ compute: kernel })
 }

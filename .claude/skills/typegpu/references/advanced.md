@@ -5,13 +5,13 @@
 Pass an existing `GPUBuffer` as `initialData` to create a TypeGPU buffer aliasing the same GPU memory with a different type. Useful for SSBO-as-vertex-buffer patterns.
 
 ```ts
-const packedBuffer = root.createBuffer(d.arrayOf(d.unorm8x4)).$usage("vertex");
+const packedBuffer = root.createBuffer(d.arrayOf(d.unorm8x4)).$usage('vertex')
 
 // Add STORAGE to the underlying GPUBuffer:
-packedBuffer.$addFlags(GPUBufferUsage.STORAGE);
+packedBuffer.$addFlags(GPUBufferUsage.STORAGE)
 
 // Alias same memory, typed as u32 storage:
-const storageView = root.createBuffer(d.arrayOf(d.u32), packedBuffer.buffer);
+const storageView = root.createBuffer(d.arrayOf(d.u32), packedBuffer.buffer)
 ```
 
 Pairs well with WGSL pack/unpack builtins (`std.pack4x8unorm`, `std.unpack4x8unorm`, `std.pack2x16float`, etc.) - reinterpret a buffer as `u32` storage and pack/unpack in the shader for compact vertex data, color encoding, or quantized weights.
@@ -45,9 +45,9 @@ const IndirectParams = d.struct({
   instanceCount: d.u32,
   firstVertex: d.u32,
   firstInstance: d.u32,
-});
-const indirectBuf = root.createBuffer(IndirectParams).$usage("storage", "indirect");
-pipeline.drawIndirect(indirectBuf); // offset 0 implied
+})
+const indirectBuf = root.createBuffer(IndirectParams).$usage('storage', 'indirect')
+pipeline.drawIndirect(indirectBuf) // offset 0 implied
 ```
 
 ### `d.memoryLayoutOf` - safe offset calculation
@@ -61,12 +61,12 @@ const Schema = d.struct({
   instanceCount: d.u32,
   firstVertex: d.u32,
   firstInstance: d.u32,
-});
+})
 
-const MyBuffer = root.createBuffer(Schema).$usage("storage", "indirect");
+const MyBuffer = root.createBuffer(Schema).$usage('storage', 'indirect')
 
-const drawOffset = d.memoryLayoutOf(Schema, (s) => s.vertexCount); // compute once
-pipeline.drawIndirect(MyBuffer, drawOffset); // reuse every frame
+const drawOffset = d.memoryLayoutOf(Schema, (s) => s.vertexCount) // compute once
+pipeline.drawIndirect(MyBuffer, drawOffset) // reuse every frame
 ```
 
 ### Packing indirect params as a vector
@@ -77,10 +77,10 @@ pipeline.drawIndirect(MyBuffer, drawOffset); // reuse every frame
 const Schema = d.struct({
   someData: d.arrayOf(d.vec3f, 10),
   drawParams: d.vec4u, // [vertexCount, instanceCount, firstVertex, firstInstance]
-});
+})
 
-const offset = d.memoryLayoutOf(Schema, (s) => s.drawParams);
-pipeline.drawIndirect(MyBuffer, offset);
+const offset = d.memoryLayoutOf(Schema, (s) => s.drawParams)
+pipeline.drawIndirect(MyBuffer, offset)
 ```
 
 ---
@@ -98,12 +98,12 @@ TypeGPU supports passing an existing `GPUCommandEncoder` or active `GPURenderPas
 **Escape hatch.** Returns the underlying raw WebGPU object, letting you pass TypeGPU resources to APIs that require native handles:
 
 ```ts
-const gpuBuffer = root.unwrap(tgpuBuffer); // GPUBuffer
-const gpuPipeline = root.unwrap(computePipeline); // GPUComputePipeline
-const gpuLayout = root.unwrap(bindGroupLayout); // GPUBindGroupLayout
-const gpuTexture = root.unwrap(tgpuTexture); // GPUTexture
-const gpuView = root.unwrap(textureView); // GPUTextureView
-const gpuSampler = root.unwrap(tgpuSampler); // GPUSampler
+const gpuBuffer = root.unwrap(tgpuBuffer) // GPUBuffer
+const gpuPipeline = root.unwrap(computePipeline) // GPUComputePipeline
+const gpuLayout = root.unwrap(bindGroupLayout) // GPUBindGroupLayout
+const gpuTexture = root.unwrap(tgpuTexture) // GPUTexture
+const gpuView = root.unwrap(textureView) // GPUTextureView
+const gpuSampler = root.unwrap(tgpuSampler) // GPUSampler
 // also: TgpuRenderPipeline, TgpuBindGroup, TgpuVertexLayout,
 //       TgpuComparisonSampler, TgpuQuerySet
 ```
@@ -114,8 +114,8 @@ const gpuSampler = root.unwrap(tgpuSampler); // GPUSampler
 
 ```ts
 // Optional: force init during a loading screen rather than on first use
-root.unwrap(computePipeline);
-root.unwrap(particleBuffer); // initial data written here instead of on first dispatch
+root.unwrap(computePipeline)
+root.unwrap(particleBuffer) // initial data written here instead of on first dispatch
 ```
 
 Don't reach for this by default — lazy init is simpler and correct for most apps. It's mainly worth considering when first-use timing is observable to the user and you have a natural moment (loading screen, asset preload) to absorb the cost.
@@ -127,7 +127,7 @@ Don't reach for this by default — lazy init is simpler and correct for most ap
 For flags not covered by `$usage` (e.g. `MAP_READ`, `QUERY_RESOLVE`):
 
 ```ts
-const mappableBuffer = root.createBuffer(d.vec4f).$addFlags(GPUBufferUsage.MAP_READ);
+const mappableBuffer = root.createBuffer(d.vec4f).$addFlags(GPUBufferUsage.MAP_READ)
 ```
 
 `MAP_READ` and `MAP_WRITE` are mutually exclusive with most other usages - setting either overwrites existing flags and adds `COPY_(DST|SRC)`. Other flags are OR'd. Cannot be used on buffers created from an existing `GPUBuffer`.

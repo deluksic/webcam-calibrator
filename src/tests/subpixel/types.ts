@@ -1,5 +1,5 @@
-import type { SubpixelRefineInput } from "../../lib/subpixelRefinement";
+import type { SubpixelRefineInput } from '@/lib/subpixelRefinement'
 
-export type { SubpixelRefineInput };
+export type { SubpixelRefineInput }
 
-export type SubpixelRefineFn = (input: SubpixelRefineInput) => Float32Array;
+export type SubpixelRefineFn = (input: SubpixelRefineInput) => Float32Array

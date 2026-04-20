@@ -1,90 +1,92 @@
-import { For, createSignal, createMemo } from "solid-js";
-import { TAG36H11_CODES, codeToPattern } from "../lib/tag36h11";
-import { selectRandomTags } from "../lib/april-tag-gen";
-import { gridVizFillRgbCss } from "../lib/hashStableColor";
-import styles from "./TargetView.module.css";
+import { For, createSignal, createMemo } from 'solid-js'
+
+import { selectRandomTags } from '@/lib/april-tag-gen'
+import { gridVizFillRgbCss } from '@/lib/hashStableColor'
+import { TAG36H11_CODES, codeToPattern } from '@/lib/tag36h11'
+
+import styles from '@/components/TargetView.module.css'
 
 export function TargetView() {
-  const [cols, setCols] = createSignal(4);
-  const [rows, setRows] = createSignal(3);
-  const [spacing, setSpacing] = createSignal(1.5);
-  const [checkerboard, setCheckerboard] = createSignal(true);
-  const [randomSeed, setRandomSeed] = createSignal(Date.now());
+  const [cols, setCols] = createSignal(4)
+  const [rows, setRows] = createSignal(3)
+  const [spacing, setSpacing] = createSignal(1.5)
+  const [checkerboard, setCheckerboard] = createSignal(true)
+  const [randomSeed, setRandomSeed] = createSignal(Date.now())
 
-  const tagSize = 40;
+  const tagSize = 40
 
-  const totalTags = createMemo(() => cols() * rows());
-  const tagIds = createMemo(() => selectRandomTags(totalTags(), randomSeed()));
+  const totalTags = createMemo(() => cols() * rows())
+  const tagIds = createMemo(() => selectRandomTags(totalTags(), randomSeed()))
 
-  const boardSize = createMemo(() => (spacing() - 1) * tagSize);
-  const marginSize = createMemo(() => tagSize);
-  const gridWidth = createMemo(() => cols() * tagSize + (cols() - 1) * boardSize());
-  const gridHeight = createMemo(() => rows() * tagSize + (rows() - 1) * boardSize());
-  const svgWidth = createMemo(() => gridWidth() + 2 * marginSize());
-  const svgHeight = createMemo(() => gridHeight() + 2 * marginSize());
-  const cellSize = createMemo(() => tagSize / 8); // 6x6 inner + 2 border cells = 8x8 total
+  const boardSize = createMemo(() => (spacing() - 1) * tagSize)
+  const marginSize = createMemo(() => tagSize)
+  const gridWidth = createMemo(() => cols() * tagSize + (cols() - 1) * boardSize())
+  const gridHeight = createMemo(() => rows() * tagSize + (rows() - 1) * boardSize())
+  const svgWidth = createMemo(() => gridWidth() + 2 * marginSize())
+  const svgHeight = createMemo(() => gridHeight() + 2 * marginSize())
+  const cellSize = createMemo(() => tagSize / 8) // 6x6 inner + 2 border cells = 8x8 total
 
   const tagPositions = createMemo(() => {
-    const positions: { x: number; y: number; tagId: number }[] = [];
+    const positions: { x: number; y: number; tagId: number }[] = []
     for (let r = 0; r < rows(); r++) {
       for (let c = 0; c < cols(); c++) {
-        const idx = r * cols() + c;
-        const tagId = tagIds()[idx] ?? idx % TAG36H11_CODES.length;
-        const x = marginSize() + c * (tagSize + boardSize());
-        const y = marginSize() + r * (tagSize + boardSize());
-        positions.push({ x, y, tagId });
+        const idx = r * cols() + c
+        const tagId = tagIds()[idx] ?? idx % TAG36H11_CODES.length
+        const x = marginSize() + c * (tagSize + boardSize())
+        const y = marginSize() + r * (tagSize + boardSize())
+        positions.push({ x, y, tagId })
       }
     }
-    return positions;
-  });
+    return positions
+  })
 
   const checkerPositions = createMemo(() => {
-    if (!checkerboard() || cols() < 2 || rows() < 2) return [] as { x: number; y: number }[];
-    const positions: { x: number; y: number }[] = [];
+    if (!checkerboard() || cols() < 2 || rows() < 2) return [] as { x: number; y: number }[]
+    const positions: { x: number; y: number }[] = []
     for (let r = 0; r < rows() - 1; r++) {
       for (let c = 0; c < cols() - 1; c++) {
-        const x = marginSize() + (c + 1) * tagSize + c * boardSize();
-        const y = marginSize() + (r + 1) * tagSize + r * boardSize();
-        positions.push({ x, y });
+        const x = marginSize() + (c + 1) * tagSize + c * boardSize()
+        const y = marginSize() + (r + 1) * tagSize + r * boardSize()
+        positions.push({ x, y })
       }
     }
-    return positions;
-  });
+    return positions
+  })
 
   const svgContent = createMemo(() => {
-    const w = svgWidth();
-    const h = svgHeight();
-    let content = `<rect width="${w}" height="${h}" fill="white"/>`;
+    const w = svgWidth()
+    const h = svgHeight()
+    let content = `<rect width="${w}" height="${h}" fill="white"/>`
 
     for (const tag of tagPositions()) {
-      const pattern = codeToPattern(TAG36H11_CODES[tag.tagId]);
+      const pattern = codeToPattern(TAG36H11_CODES[tag.tagId])
       for (let row = 0; row < 8; row++) {
         for (let col = 0; col < 8; col++) {
           // Border: outer ring (positions 0 or 7 in either dimension)
-          const isBorder = row === 0 || row === 7 || col === 0 || col === 7;
-          let value = 0;
+          const isBorder = row === 0 || row === 7 || col === 0 || col === 7
+          let value = 0
           if (!isBorder) {
             // Inner 6×6 pattern area: positions 1-6
-            const pRow = row - 1;
-            const pCol = col - 1;
-            value = pattern[pRow * 6 + pCol];
+            const pRow = row - 1
+            const pCol = col - 1
+            value = pattern[pRow * 6 + pCol]
           }
           // Always draw border cells, draw inner cells only if pattern bit is 1
           if (isBorder || value === 1) {
-            const px = tag.x + col * cellSize();
-            const py = tag.y + row * cellSize();
-            content += `<rect x="${px}" y="${py}" width="${cellSize()}" height="${cellSize()}" fill="black"/>`;
+            const px = tag.x + col * cellSize()
+            const py = tag.y + row * cellSize()
+            content += `<rect x="${px}" y="${py}" width="${cellSize()}" height="${cellSize()}" fill="black"/>`
           }
         }
       }
     }
 
     for (const pos of checkerPositions()) {
-      content += `<rect x="${pos.x}" y="${pos.y}" width="${boardSize()}" height="${boardSize()}" fill="black"/>`;
+      content += `<rect x="${pos.x}" y="${pos.y}" width="${boardSize()}" height="${boardSize()}" fill="black"/>`
     }
 
-    return content;
-  });
+    return content
+  })
 
   return (
     <div class={styles.root}>
@@ -159,15 +161,12 @@ export function TargetView() {
           <div
             class={styles.legendList}
             style={{
-              "grid-template-columns": `repeat(${cols()}, minmax(0, 1fr))`,
+              'grid-template-columns': `repeat(${cols()}, minmax(0, 1fr))`,
             }}
           >
             <For each={tagPositions()}>
               {(p) => (
-                <div
-                  class={styles.legendCell}
-                  style={{ "background-color": gridVizFillRgbCss(p().tagId) }}
-                >
+                <div class={styles.legendCell} style={{ 'background-color': gridVizFillRgbCss(p().tagId) }}>
                   {p().tagId}
                 </div>
               )}
@@ -180,5 +179,5 @@ export function TargetView() {
         </div>
       </aside>
     </div>
-  );
+  )
 }

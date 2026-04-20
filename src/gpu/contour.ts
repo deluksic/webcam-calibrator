@@ -1,35 +1,35 @@
 // Contour detection: CPU region extraction + quad fitting (labels from GPU pointer-jump).
 
-import { buildTagGrid, decodeTagPattern } from "../lib/grid";
-import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from "../lib/corners";
-import { Point } from "../lib/geometry";
-import { decodeTag36h11AnyRotation, type TagPattern } from "../lib/tag36h11";
+import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from '@/lib/corners'
+import { Point } from '@/lib/geometry'
+import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
+import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
 
-const { min, max, floor } = Math;
+const { min, max, floor } = Math
 
-export const COMPONENT_LABEL_INVALID = 0xffffffff;
+export const COMPONENT_LABEL_INVALID = 0xffffffff
 
 export interface DetectedQuad {
-  corners: Point[]; // 4 corner points
-  label: number;
-  count: number;
-  aspectRatio: number;
-  area: number;
-  gridCells: ReturnType<typeof buildTagGrid> | null;
-  pattern: TagPattern | null;
-  hasCorners: boolean; // true if detected via corner finding, false if fallback bbox
-  cornerDebug: CornerDebugInfo | null; // debug info from corner detection (null if fallback)
+  corners: Point[] // 4 corner points
+  label: number
+  count: number
+  aspectRatio: number
+  area: number
+  gridCells: ReturnType<typeof buildTagGrid> | null
+  pattern: TagPattern | null
+  hasCorners: boolean // true if detected via corner finding, false if fallback bbox
+  cornerDebug: CornerDebugInfo | null // debug info from corner detection (null if fallback)
   /** Test / viz: random or decoded id for GPU hash + HTML label (omit = unknown/black). */
-  vizTagId?: number;
+  vizTagId?: number
   /** tag36h11 id when `decodeTag36h11AnyRotation` succeeds on `pattern`. */
-  decodedTagId?: number;
+  decodedTagId?: number
   /** Clockwise quarter-turns (0–3) from pattern grid to canonical tag orientation. */
-  decodedRotation?: number;
+  decodedRotation?: number
 }
 
 /** `buildTagGrid` / AprilTag decode need TL,TR,BR,BL; homography uses TL,TR,BL,BR (triangle strip). */
 function cornersForTagGrid(c: [Point, Point, Point, Point]): [Point, Point, Point, Point] {
-  return [c[0], c[1], c[3], c[2]];
+  return [c[0], c[1], c[3], c[2]]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -37,14 +37,14 @@ function cornersForTagGrid(c: [Point, Point, Point, Point]): [Point, Point, Poin
 // ──────────────────────────────────────���──────────────────────────────────────
 
 export interface RegionData {
-  label: number;
-  rootLabel: number;
-  count: number;
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-  pixels: [number, number][];
+  label: number
+  rootLabel: number
+  count: number
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+  pixels: [number, number][]
 }
 
 export function extractRegions(
@@ -53,14 +53,14 @@ export function extractRegions(
   height: number,
   _edgeData: Float32Array,
 ): RegionData[] {
-  const regions = new Map<number, RegionData>();
+  const regions = new Map<number, RegionData>()
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      const label = labelData[idx];
+      const idx = y * width + x
+      const label = labelData[idx]
 
-      if (label === COMPONENT_LABEL_INVALID) continue;
+      if (label === COMPONENT_LABEL_INVALID) continue
 
       if (!regions.has(label)) {
         regions.set(label, {
@@ -72,47 +72,47 @@ export function extractRegions(
           maxX: x,
           maxY: y,
           pixels: [],
-        });
+        })
       }
 
-      const region = regions.get(label)!;
-      region.count++;
-      region.minX = min(region.minX, x);
-      region.minY = min(region.minY, y);
-      region.maxX = max(region.maxX, x);
-      region.maxY = max(region.maxY, y);
+      const region = regions.get(label)!
+      region.count++
+      region.minX = min(region.minX, x)
+      region.minY = min(region.minY, y)
+      region.maxX = max(region.maxX, x)
+      region.maxY = max(region.maxY, y)
 
       if (region.pixels.length < 500) {
-        region.pixels.push([x, y]);
+        region.pixels.push([x, y])
       }
     }
   }
 
-  const result = [...regions.values()];
-  return result;
+  const result = [...regions.values()]
+  return result
 }
 
 export function fitQuadToRegion(region: RegionData): [number, number][] | null {
-  const { minX, minY, maxX, maxY } = region;
+  const { minX, minY, maxX, maxY } = region
 
-  const boundingBoxWidth = maxX - minX;
-  const boundingBoxHeight = maxY - minY;
+  const boundingBoxWidth = maxX - minX
+  const boundingBoxHeight = maxY - minY
 
-  const aspectRatio = boundingBoxWidth / boundingBoxHeight;
+  const aspectRatio = boundingBoxWidth / boundingBoxHeight
   if (aspectRatio < 0.5 || aspectRatio > 2.0) {
-    return null;
+    return null
   }
 
-  let leftEdge = maxX;
-  let rightEdge = minX;
-  let topEdge = maxY;
-  let bottomEdge = minY;
+  let leftEdge = maxX
+  let rightEdge = minX
+  let topEdge = maxY
+  let bottomEdge = minY
 
   for (const [px, py] of region.pixels) {
-    if (px - minX < leftEdge - minX) leftEdge = px;
-    if (maxX - px < maxX - rightEdge) rightEdge = px;
-    if (py - minY < topEdge - minY) topEdge = py;
-    if (maxY - py < maxY - bottomEdge) bottomEdge = py;
+    if (px - minX < leftEdge - minX) leftEdge = px
+    if (maxX - px < maxX - rightEdge) rightEdge = px
+    if (py - minY < topEdge - minY) topEdge = py
+    if (maxY - py < maxY - bottomEdge) bottomEdge = py
   }
 
   return [
@@ -120,7 +120,7 @@ export function fitQuadToRegion(region: RegionData): [number, number][] | null {
     [rightEdge, topEdge],
     [rightEdge, bottomEdge],
     [leftEdge, bottomEdge],
-  ];
+  ]
 }
 
 export function validateAndFilterQuads(
@@ -131,31 +131,31 @@ export function validateAndFilterQuads(
   minArea: number = 400,
   maxArea: number = 200000,
 ): DetectedQuad[] {
-  const quads: DetectedQuad[] = [];
-  const imageHeight = floor(labelData.length / width);
+  const quads: DetectedQuad[] = []
+  const imageHeight = floor(labelData.length / width)
 
   for (const region of regions) {
-    const w = region.maxX - region.minX;
-    const h = region.maxY - region.minY;
-    const area = w * h;
+    const w = region.maxX - region.minX
+    const h = region.maxY - region.minY
+    const area = w * h
 
     if (area < minArea) {
-      continue;
+      continue
     }
     if (area > maxArea) {
-      continue;
+      continue
     }
 
-    const aspectRatio = w / h;
+    const aspectRatio = w / h
     if (aspectRatio < 0.3 || aspectRatio > 3.5) {
-      continue;
+      continue
     }
 
-    const perimeter = 2 * (w + h);
+    const perimeter = 2 * (w + h)
     // Oblique/far tags have fewer edge pixels — relax density threshold
-    const edgeDensity = region.count / perimeter;
+    const edgeDensity = region.count / perimeter
     if (edgeDensity < 0.2 || edgeDensity > 10) {
-      continue;
+      continue
     }
 
     // Try to detect real corners via line intersection
@@ -168,8 +168,8 @@ export function validateAndFilterQuads(
       region.minY,
       region.maxX,
       region.maxY,
-    );
-    const detectedCorners = cornerResult.corners;
+    )
+    const detectedCorners = cornerResult.corners
     const corners: [Point, Point, Point, Point] =
       detectedCorners.length === 4
         ? [detectedCorners[0], detectedCorners[1], detectedCorners[2], detectedCorners[3]]
@@ -178,16 +178,16 @@ export function validateAndFilterQuads(
             { x: region.maxX, y: region.minY },
             { x: region.minX, y: region.maxY },
             { x: region.maxX, y: region.maxY },
-          ];
-    const cornersTuple = corners as [Point, Point, Point, Point];
-    const tagGrid = buildTagGrid(cornersForTagGrid(cornersTuple));
+          ]
+    const cornersTuple = corners as [Point, Point, Point, Point]
+    const tagGrid = buildTagGrid(cornersForTagGrid(cornersTuple))
     if (!tagGrid || !tagGrid.cells || tagGrid.cells.length === 0) {
-      continue;
+      continue
     }
     // Decode uses bilinear Sobel everywhere in the cell; do not gate on a label/mag floor mask —
     // floor(sample) often lands on flat interiors (NMS ≈ 0) while the float bilinear tap still sees edges.
-    const pattern = decodeTagPattern(tagGrid, sobelData, width, undefined, imageHeight);
-    const decoded = decodeTag36h11AnyRotation(pattern, 7);
+    const pattern = decodeTagPattern(tagGrid, sobelData, width, undefined, imageHeight)
+    const decoded = decodeTag36h11AnyRotation(pattern, 7)
     quads.push({
       corners,
       label: region.label,
@@ -199,19 +199,19 @@ export function validateAndFilterQuads(
       hasCorners: detectedCorners.length === 4,
       cornerDebug: cornerResult.debug,
       ...(decoded ? { decodedTagId: decoded.id, decodedRotation: decoded.rotation } : {}),
-    });
+    })
   }
 
-  return quads;
+  return quads
 }
 
 export function filterNestedQuads(quads: DetectedQuad[]): DetectedQuad[] {
   return quads.filter((candidate) => {
     for (const other of quads) {
-      if (other === candidate) continue;
+      if (other === candidate) continue
       if (!other.corners || !candidate.corners) {
-        console.warn("Missing corners in filterNestedQuads", other, candidate);
-        continue;
+        console.warn('Missing corners in filterNestedQuads', other, candidate)
+        continue
       }
       // Discard candidate if it is fully contained inside another box
       if (
@@ -220,9 +220,9 @@ export function filterNestedQuads(quads: DetectedQuad[]): DetectedQuad[] {
         other.corners[0].y <= candidate.corners[0].y &&
         other.corners[2].y >= candidate.corners[2].y
       ) {
-        return false;
+        return false
       }
     }
-    return true;
-  });
+    return true
+  })
 }

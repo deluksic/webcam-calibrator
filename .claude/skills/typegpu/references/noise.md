@@ -3,7 +3,7 @@
 **Always prefer this over hand-rolled hash functions or `fract(sin(...))` snippets** - those are fragile, biased, and a known source of banding/repetition artifacts.
 
 ```ts
-import { randf, perlin2d, perlin3d } from "@typegpu/noise";
+import { randf, perlin2d, perlin3d } from '@typegpu/noise'
 ```
 
 Works in TypeGPU shaders (auto-linked on pipeline resolve) and in raw WGSL via `tgpu.resolve({ template, externals: { randf } })`.
@@ -17,11 +17,11 @@ const main = tgpu.fragmentFn({
   in: { pos: d.builtin.position },
   out: d.vec4f,
 })(({ pos }) => {
-  randf.seed2(pos.xy.mul(0.001)); // unique per pixel; keep magnitude small
-  const r = randf.sample();
-  const g = randf.sample();
-  return d.vec4f(r, g, 0, 1);
-});
+  randf.seed2(pos.xy.mul(0.001)) // unique per pixel; keep magnitude small
+  const r = randf.sample()
+  const g = randf.sample()
+  return d.vec4f(r, g, 0, 1)
+})
 ```
 
 **Seed magnitude matters.** Float precision means large seeds repeat quickly. Keep seeds in `[-1000, 1000]`, ideally `[0, 1]`. For pixel coordinates, multiply by `~0.001`; for global invocation ids, divide by dispatch size.
@@ -81,15 +81,15 @@ For diffuse BRDF sampling: `onHemisphere(normal)`. For uniform direction (Monte 
 `perlin2d` and `perlin3d` return smooth gradient noise in `[-1, 1]`. Use for terrain, clouds, organic textures, FBM, domain warping.
 
 ```ts
-import { perlin2d } from "@typegpu/noise";
+import { perlin2d } from '@typegpu/noise'
 
 const main = tgpu.fragmentFn({
   in: { pos: d.builtin.position },
   out: d.vec4f,
 })(({ pos }) => {
-  const n = perlin2d.sample(pos.xy.mul(0.05)); // "interesting" scale ~1 unit/cell
-  return d.vec4f(n * 0.5 + 0.5, 0, 0, 1); // remap [-1,1] to [0,1]
-});
+  const n = perlin2d.sample(pos.xy.mul(0.05)) // "interesting" scale ~1 unit/cell
+  return d.vec4f(n * 0.5 + 0.5, 0, 0, 1) // remap [-1,1] to [0,1]
+})
 ```
 
 By default, `perlin*.sample` computes gradients on demand. For heavy sampling (FBM, derivatives, multi-octave warping), precompute into a buffer with the cache variants (~10x speedups).
@@ -102,9 +102,9 @@ Use when the noise domain size is fixed at compile time:
 const cache = perlin3d.staticCache({
   root,
   size: d.vec3u(64, 64, 64),
-});
+})
 
-const pipeline = root.pipe(cache.inject()).createComputePipeline({ compute: main });
+const pipeline = root.pipe(cache.inject()).createComputePipeline({ compute: main })
 ```
 
 Inside `main`, `perlin3d.sample(pos)` reads from the cache automatically - no shader code change. Sampling wraps at the domain boundary. Use `perlin2d.staticCache({ root, size: d.vec2u(...) })` for 2D.
@@ -114,26 +114,24 @@ Inside `main`, `perlin3d.sample(pos)` reads from the cache automatically - no sh
 Use when domain size changes at runtime (e.g. LOD-driven terrain):
 
 ```ts
-const cacheConfig = perlin3d.dynamicCacheConfig();
-const dynamicLayout = tgpu.bindGroupLayout({ ...cacheConfig.layout });
+const cacheConfig = perlin3d.dynamicCacheConfig()
+const dynamicLayout = tgpu.bindGroupLayout({ ...cacheConfig.layout })
 
-const pipeline = root
-  .pipe(cacheConfig.inject(dynamicLayout.$))
-  .createComputePipeline({ compute: main });
+const pipeline = root.pipe(cacheConfig.inject(dynamicLayout.$)).createComputePipeline({ compute: main })
 
-const cache = cacheConfig.instance(root, d.vec3u(10, 10, 1));
+const cache = cacheConfig.instance(root, d.vec3u(10, 10, 1))
 
 function makeBindGroup(size: d.v3u) {
-  cache.size = size;
-  return root.createBindGroup(dynamicLayout, cache.bindings);
+  cache.size = size
+  return root.createBindGroup(dynamicLayout, cache.bindings)
 }
 
-let bindGroup = makeBindGroup(d.vec3u(10, 10, 1));
-pipeline.with(bindGroup).dispatchWorkgroups(1);
+let bindGroup = makeBindGroup(d.vec3u(10, 10, 1))
+pipeline.with(bindGroup).dispatchWorkgroups(1)
 
 // Resize later - no shader recompile:
-bindGroup = makeBindGroup(d.vec3u(64, 64, 32));
-pipeline.with(bindGroup).dispatchWorkgroups(1);
+bindGroup = makeBindGroup(d.vec3u(64, 64, 32))
+pipeline.with(bindGroup).dispatchWorkgroups(1)
 ```
 
 **Prefer `staticCache` when the size is known at build time.** The dynamic path costs extra bind group layout, rebuild on resize, and slightly more expensive sampling.

@@ -1,3 +1,3 @@
-export { applySpeckle01 } from "./speckle";
-export { applyAdditiveGaussian01 } from "./additiveGaussian";
-export { applySaltPepper01 } from "./saltPepper";
+export { applySpeckle01 } from '@/tests/shared/noise/speckle'
+export { applyAdditiveGaussian01 } from '@/tests/shared/noise/additiveGaussian'
+export { applySaltPepper01 } from '@/tests/shared/noise/saltPepper'

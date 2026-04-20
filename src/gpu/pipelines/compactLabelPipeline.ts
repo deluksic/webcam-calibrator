@@ -12,30 +12,31 @@
 //   3. Remap: L[i] = canonicalRoot[label] (compact ID), or INVALID if > maxComponents
 //
 // Root index IS the compact ID — this is deterministic, no counter race.
-import { tgpu, d } from "typegpu";
-import { atomicLoad, atomicStore, atomicAdd } from "typegpu/std";
-import { COMPUTE_WORKGROUP_SIZE } from "./constants";
-import { COMPONENT_LABEL_INVALID } from "../contour";
+import { tgpu, d } from 'typegpu'
+import { atomicLoad, atomicStore, atomicAdd } from 'typegpu/std'
 
-export function createCompactLabelLayouts(root: Awaited<ReturnType<typeof tgpu.init>>) {
+import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPUTE_WORKGROUP_SIZE } from '@/gpu/pipelines/constants'
+
+export function createCompactLabelLayouts() {
   const resetLayout = tgpu.bindGroupLayout({
-    compactCounter: { storage: d.atomic(d.u32), access: "mutable" },
-    canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: "mutable" },
-  });
+    compactCounter: { storage: d.atomic(d.u32), access: 'mutable' },
+    canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
+  })
   const claimLayout = tgpu.bindGroupLayout({
-    labelBuffer: { storage: d.arrayOf(d.u32), access: "readonly" },
-    compactCounter: { storage: d.atomic(d.u32), access: "mutable" },
-    canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: "mutable" },
-  });
+    labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
+    compactCounter: { storage: d.atomic(d.u32), access: 'mutable' },
+    canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
+  })
   const remapLayout = tgpu.bindGroupLayout({
-    labelBuffer: { storage: d.arrayOf(d.u32), access: "readonly" },
-    compactLabelBuffer: { storage: d.arrayOf(d.u32), access: "mutable" },
+    labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
+    compactLabelBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
     // Note: atomics in storage address space require 'mutable' (read_write) access.
     // The remap kernel uses atomicLoad which needs mutable, but this is safe since
     // we only read (atomicLoad doesn't modify the value, just reads it atomically).
-    canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: "mutable" },
-  });
-  return { resetLayout, claimLayout, remapLayout };
+    canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
+  })
+  return { resetLayout, claimLayout, remapLayout }
 }
 
 export function createCanonicalResetPipeline(
@@ -47,17 +48,17 @@ export function createCanonicalResetPipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [COMPUTE_WORKGROUP_SIZE, 1, 1],
   })((input) => {
-    "use gpu";
-    const slot = d.u32(input.gid.x);
+    'use gpu'
+    const slot = d.u32(input.gid.x)
     if (slot >= d.u32(area)) {
-      return;
+      return
     }
-    atomicStore(resetLayout.$.canonicalRoot[slot], d.u32(COMPONENT_LABEL_INVALID));
+    atomicStore(resetLayout.$.canonicalRoot[slot], d.u32(COMPONENT_LABEL_INVALID))
     if (slot === d.u32(0)) {
-      atomicStore(resetLayout.$.compactCounter, d.u32(0));
+      atomicStore(resetLayout.$.compactCounter, d.u32(0))
     }
-  });
-  return root.createComputePipeline({ compute: kernel });
+  })
+  return root.createComputePipeline({ compute: kernel })
 }
 
 export function createCanonicalClaimPipeline(
@@ -71,40 +72,40 @@ export function createCanonicalClaimPipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
   })((input) => {
-    "use gpu";
-    const x = d.i32(input.gid.x);
-    const y = d.i32(input.gid.y);
-    const w = d.i32(width);
-    const h = d.i32(height);
+    'use gpu'
+    const x = d.i32(input.gid.x)
+    const y = d.i32(input.gid.y)
+    const w = d.i32(width)
+    const h = d.i32(height)
     if (x >= w || y >= h) {
-      return;
+      return
     }
 
-    const idx = d.u32(y * w + x);
-    const label = claimLayout.$.labelBuffer[idx];
+    const idx = d.u32(y * w + x)
+    const label = claimLayout.$.labelBuffer[idx]
     if (label === d.u32(COMPONENT_LABEL_INVALID)) {
-      return;
+      return
     }
 
     // Only roots (minimal pixel in component) claim a compact ID.
     // A pixel is a root iff label == idx (pointer-jump sets this).
     if (label !== idx) {
-      return;
+      return
     }
     // Only claim if root pixel index fits in canonicalRoot buffer.
-    const area = d.u32(width * height);
+    const area = d.u32(width * height)
     if (label >= area) {
-      return;
+      return
     }
 
     // Atomically claim next compact ID — sequential regardless of root pixel index.
-    const compactId = atomicAdd(claimLayout.$.compactCounter, d.u32(1));
+    const compactId = atomicAdd(claimLayout.$.compactCounter, d.u32(1))
     if (compactId >= d.u32(maxComponents)) {
-      return;
+      return
     }
-    atomicStore(claimLayout.$.canonicalRoot[label], compactId);
-  });
-  return root.createComputePipeline({ compute: kernel });
+    atomicStore(claimLayout.$.canonicalRoot[label], compactId)
+  })
+  return root.createComputePipeline({ compute: kernel })
 }
 
 export function createRemapLabelPipeline(
@@ -117,24 +118,24 @@ export function createRemapLabelPipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
   })((input) => {
-    "use gpu";
-    const x = d.i32(input.gid.x);
-    const y = d.i32(input.gid.y);
-    const w = d.i32(width);
-    const h = d.i32(height);
+    'use gpu'
+    const x = d.i32(input.gid.x)
+    const y = d.i32(input.gid.y)
+    const w = d.i32(width)
+    const h = d.i32(height)
     if (x >= w || y >= h) {
-      return;
+      return
     }
 
-    const idx = d.u32(y * w + x);
-    const label = remapLayout.$.labelBuffer[idx];
+    const idx = d.u32(y * w + x)
+    const label = remapLayout.$.labelBuffer[idx]
     if (label === d.u32(COMPONENT_LABEL_INVALID)) {
-      remapLayout.$.compactLabelBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID);
-      return;
+      remapLayout.$.compactLabelBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID)
+      return
     }
 
-    const compactId = atomicLoad(remapLayout.$.canonicalRoot[label]);
-    remapLayout.$.compactLabelBuffer[idx] = compactId;
-  });
-  return root.createComputePipeline({ compute: kernel });
+    const compactId = atomicLoad(remapLayout.$.canonicalRoot[label])
+    remapLayout.$.compactLabelBuffer[idx] = compactId
+  })
+  return root.createComputePipeline({ compute: kernel })
 }

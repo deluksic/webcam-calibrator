@@ -1,10 +1,10 @@
-export * from "./types";
-export * from "./stripGeometry";
-export * from "./scenes";
-export * from "./raster";
-export * from "./pipeline";
-export * from "./rng";
-export * from "./noise";
-export * from "./distortion";
+export * from '@/tests/shared/types'
+export * from '@/tests/shared/stripGeometry'
+export * from '@/tests/shared/scenes'
+export * from '@/tests/shared/raster'
+export * from '@/tests/shared/pipeline'
+export * from '@/tests/shared/rng'
+export * from '@/tests/shared/noise/index'
+export * from '@/tests/shared/distortion/index'
 
-export { decodeStressSpeckleSeed } from "../../lib/decodeStressHarness";
+export { decodeStressSpeckleSeed } from '@/lib/decodeStressHarness'

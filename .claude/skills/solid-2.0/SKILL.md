@@ -5,10 +5,10 @@
 `createMemo` accepts async functions. The memo value is a Promise while pending.
 
 ```tsx
-const data = createMemo(() => api.fetchData());
+const data = createMemo(() => api.fetchData())
 
 // In JSX - will suspend until resolved
-<Show when={data()}>{(d) => <div>{d()}</div>}</Show>;
+;<Show when={data()}>{(d) => <div>{d()}</div>}</Show>
 ```
 
 ## isPending Utility
@@ -16,7 +16,7 @@ const data = createMemo(() => api.fetchData());
 Check if an async memo is still loading:
 
 ```tsx
-const loading = () => isPending(() => someAsyncMemo());
+const loading = () => isPending(() => someAsyncMemo())
 ```
 
 ## Signal Refs
@@ -24,17 +24,17 @@ const loading = () => isPending(() => someAsyncMemo());
 Use `createSignal` + `ref` callback instead of `let` variables:
 
 ```tsx
-const [el, setEl] = createSignal<HTMLDivElement | undefined>(undefined);
+const [el, setEl] = createSignal<HTMLDivElement | undefined>(undefined)
 
 // In JSX
-<div ref={setEl}>...</div>;
+;<div ref={setEl}>...</div>
 ```
 
 **Wrong:**
 
 ```tsx
-let el: HTMLDivElement;
-<div ref={el}>...</div>; // loses reactivity
+let el: HTMLDivElement
+;<div ref={el}>...</div> // loses reactivity
 ```
 
 ## Error Boundaries
@@ -42,7 +42,7 @@ let el: HTMLDivElement;
 Use `<Errored>` at the app root instead of manual try/catch:
 
 ```tsx
-import { Errored } from "solid-js";
+import { Errored } from 'solid-js'
 
 render(
   () => (
@@ -51,7 +51,7 @@ render(
     </Errored>
   ),
   root,
-);
+)
 ```
 
 Child components can throw and errors bubble up to the nearest Errored boundary.
@@ -61,20 +61,20 @@ Child components can throw and errors bubble up to the nearest Errored boundary.
 2.0 uses functional updaters instead of path-based setters:
 
 ```tsx
-const [store, setStore] = createStore({ count: 0 });
+const [store, setStore] = createStore({ count: 0 })
 
 // Old (v1):
-setStore("count", 5);
+setStore('count', 5)
 
 // New (v2):
 setStore((s) => {
-  s.count = 5;
-});
+  s.count = 5
+})
 
 // With nested objects:
 setStore((s) => {
-  s.user.name = "Alice";
-});
+  s.user.name = 'Alice'
+})
 ```
 
 ## Array Class Syntax
@@ -100,7 +100,7 @@ In Solid 2.0, the render callback receives **accessors** (zero-arg functions), n
 Import directly from `solid-js`:
 
 ```tsx
-import { createStore } from "solid-js";
+import { createStore } from 'solid-js'
 ```
 
 ## onCleanup
@@ -108,7 +108,7 @@ import { createStore } from "solid-js";
 Import from `solid-js` (not `solid-js/web` for non-DOM utilities):
 
 ```tsx
-import { onCleanup } from "solid-js";
+import { onCleanup } from 'solid-js'
 ```
 
 ## createRoot for Effects at Module Level
@@ -116,12 +116,12 @@ import { onCleanup } from "solid-js";
 If you need to set up effects/async outside of component hierarchy:
 
 ```tsx
-import { createRoot } from "solid-js";
+import { createRoot } from 'solid-js'
 
 createRoot(async (dispose) => {
   // async setup here
-  onCleanup(() => dispose());
-});
+  onCleanup(() => dispose())
+})
 ```
 
 Note: With createMemo supporting async, this is often unnecessary now.

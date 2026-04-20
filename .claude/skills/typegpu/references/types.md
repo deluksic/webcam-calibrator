@@ -39,18 +39,18 @@ Comparison sampler: `d.comparisonSampler` / `d.comparisonSampler()`. Bind group 
 ```ts
 // Plain callback — interface types as annotations:
 const sampleColor = (samp: d.sampler, tex: d.texture2d<d.F32>, uv: d.v2f) => {
-  "use gpu";
-  return std.textureSample(tex, samp, uv);
-};
+  'use gpu'
+  return std.textureSample(tex, samp, uv)
+}
 
 // tgpu.fn — factory calls in the schema array:
 const sampleColor = tgpu.fn(
   [d.sampler(), d.texture2d(d.f32), d.vec2f],
   d.vec4f,
 )((samp, tex, uv) => {
-  "use gpu";
-  return std.textureSample(tex, samp, uv);
-});
+  'use gpu'
+  return std.textureSample(tex, samp, uv)
+})
 ```
 
 ---
@@ -64,9 +64,9 @@ Never use `any`. There are two construction paths, each with its own type:
 Returns `TgpuBuffer<TData>`. Call `.$usage()` to add flags; each flag extends the type as an intersection:
 
 ```ts
-import { type TgpuBuffer, type UniformFlag, type StorageFlag, type VertexFlag } from "typegpu";
+import { type TgpuBuffer, type UniformFlag, type StorageFlag, type VertexFlag } from 'typegpu'
 
-const buf: TgpuBuffer<d.F32> & UniformFlag = root.createBuffer(d.f32).$usage("uniform");
+const buf: TgpuBuffer<d.F32> & UniformFlag = root.createBuffer(d.f32).$usage('uniform')
 ```
 
 Available flags (all imported from `'typegpu'`): `UniformFlag`, `StorageFlag`, `VertexFlag`, `IndexFlag`, `IndirectFlag`.
@@ -76,11 +76,13 @@ Available flags (all imported from `'typegpu'`): `UniformFlag`, `StorageFlag`, `
 Return dedicated types. Use these as function parameter types:
 
 ```ts
-import { type TgpuUniform, type TgpuMutable, type TgpuReadonly } from "typegpu";
+import { type TgpuUniform, type TgpuMutable, type TgpuReadonly } from 'typegpu'
 
-const config: TgpuUniform<typeof Config> = root.createUniform(Config, { time: 0 });
-const particles: TgpuMutable<typeof ParticleArray> = root.createMutable(ParticleArray);
-const lut: TgpuReadonly<typeof LutArray> = root.createReadonly(LutArray);
+const config: TgpuUniform<typeof Config> = root.createUniform(Config, {
+  time: 0,
+})
+const particles: TgpuMutable<typeof ParticleArray> = root.createMutable(ParticleArray)
+const lut: TgpuReadonly<typeof LutArray> = root.createReadonly(LutArray)
 ```
 
 `typeof Schema` is the idiomatic generic argument — `Config`, `ParticleArray`, etc. are schema objects created with `d.struct(...)` or `d.arrayOf(...)`.

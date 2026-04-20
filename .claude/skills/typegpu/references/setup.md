@@ -38,24 +38,24 @@ npm install --save-dev unplugin-typegpu
 ### Vite
 
 ```js title="vite.config.js"
-import { defineConfig } from "vite";
-import typegpu from "unplugin-typegpu/vite";
+import { defineConfig } from 'vite'
+import typegpu from 'unplugin-typegpu/vite'
 
 export default defineConfig({
   plugins: [typegpu()],
-});
+})
 ```
 
 ### Babel (React Native / Expo)
 
 ```js title="babel.config.js"
 module.exports = (api) => {
-  api.cache(true);
+  api.cache(true)
   return {
-    presets: ["babel-preset-expo"],
-    plugins: ["unplugin-typegpu/babel"],
-  };
-};
+    presets: ['babel-preset-expo'],
+    plugins: ['unplugin-typegpu/babel'],
+  }
+}
 ```
 
 Other bundlers supported: esbuild, rollup, rolldown, rspack, webpack, farm. Vite and Babel are actively maintained by the TypeGPU team.
@@ -125,7 +125,7 @@ Add `"tsover"` to `lib` in `tsconfig.json`:
 Only needed if you use operators outside `'use gpu'` blocks. Most projects can skip this.
 
 ```js title="vite.config.js"
-import tsoverPlugin from "tsover/plugin/vite";
+import tsoverPlugin from 'tsover/plugin/vite'
 // add to plugins array alongside typegpuPlugin()
 ```
 
@@ -148,12 +148,12 @@ Zed: set `tsdk` in `.zed/settings.json` for `vtsls` or `typescript-language-serv
 ## Minimal `vite.config.js`
 
 ```js
-import { defineConfig } from "vite";
-import typegpu from "unplugin-typegpu/vite";
+import { defineConfig } from 'vite'
+import typegpu from 'unplugin-typegpu/vite'
 
 export default defineConfig({
   plugins: [typegpu()],
-});
+})
 ```
 
 ## Minimal `tsconfig.json`
@@ -183,28 +183,28 @@ npm install --save-dev eslint-plugin-typegpu
 ### ESLint (`eslint.config.js`)
 
 ```ts
-import { defineConfig } from "eslint/config";
-import typegpu from "eslint-plugin-typegpu";
+import { defineConfig } from 'eslint/config'
+import typegpu from 'eslint-plugin-typegpu'
 
 export default defineConfig([
   {
     ...typegpu.configs.recommended,
-    files: ["**/*.{js,mjs,ts,jsx,tsx}"],
+    files: ['**/*.{js,mjs,ts,jsx,tsx}'],
   },
-]);
+])
 ```
 
 ### Oxlint (`oxlint.config.ts`)
 
 ```ts
-import { defineConfig } from "oxlint";
-import typegpu from "eslint-plugin-typegpu";
+import { defineConfig } from 'oxlint'
+import typegpu from 'eslint-plugin-typegpu'
 
 export default defineConfig({
-  jsPlugins: ["eslint-plugin-typegpu"],
+  jsPlugins: ['eslint-plugin-typegpu'],
   rules: {
     ...typegpu.configs.recommended.rules,
   },
-  ignorePatterns: ["node_modules"],
-});
+  ignorePatterns: ['node_modules'],
+})
 ```

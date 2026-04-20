@@ -3,8 +3,8 @@
  *
  *   pnpm run find:decode-stress-speckle
  */
-import { binarySearchMaxPassing } from "../src/lib/decodeStressSearch";
-import { decodeStressSuiteFailuresFromOptions } from "../src/lib/decodeStressSuite";
+import { binarySearchMaxPassing } from '@/lib/decodeStressSearch'
+import { decodeStressSuiteFailuresFromOptions } from '@/lib/decodeStressSuite'
 
 function passes(amp: number): boolean {
   return (
@@ -12,34 +12,34 @@ function passes(amp: number): boolean {
       speckleAmp: amp,
       homographyMismatchScale: 0,
     }).length === 0
-  );
+  )
 }
 
 if (!passes(1e-12)) {
-  console.error("Even tiny speckle fails; check harness.");
-  process.exit(1);
+  console.error('Even tiny speckle fails; check harness.')
+  process.exit(1)
 }
 
 /** Smallest `a` in `(0, maxScan]` with `!passes(a)`, or `null` if none found. */
 function findFirstFailure(maxScan: number): number | null {
-  let a = 0.01;
+  let a = 0.01
   while (a <= maxScan) {
-    if (!passes(a)) return a;
-    const na = Math.min(maxScan, a * 1.2);
-    if (na <= a) return passes(maxScan) ? null : maxScan;
-    a = na;
+    if (!passes(a)) return a
+    const na = Math.min(maxScan, a * 1.2)
+    if (na <= a) return passes(maxScan) ? null : maxScan
+    a = na
   }
-  return null;
+  return null
 }
 
-const firstFail = findFirstFailure(1);
+const firstFail = findFirstFailure(1)
 if (firstFail === null) {
-  console.log(JSON.stringify({ note: "No failure up to amplitude 1.0" }, null, 2));
-  console.log("\nSuggested DECODE_STRESS_SPECKLE_AMP = 1 (no failure up to 1.0)");
-  process.exit(0);
+  console.log(JSON.stringify({ note: 'No failure up to amplitude 1.0' }, null, 2))
+  console.log('\nSuggested DECODE_STRESS_SPECKLE_AMP = 1 (no failure up to 1.0)')
+  process.exit(0)
 }
 
-const { maxPass, failHi } = binarySearchMaxPassing(passes, 0, firstFail, 56);
+const { maxPass, failHi } = binarySearchMaxPassing(passes, 0, firstFail, 56)
 console.log(
   JSON.stringify(
     {
@@ -53,5 +53,5 @@ console.log(
     null,
     2,
   ),
-);
-console.log(`\nSuggested DECODE_STRESS_SPECKLE_AMP in src/lib/decodeStressHarness.ts ≈ ${maxPass}`);
+)
+console.log(`\nSuggested DECODE_STRESS_SPECKLE_AMP in src/lib/decodeStressHarness.ts ≈ ${maxPass}`)

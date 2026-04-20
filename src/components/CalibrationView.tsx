@@ -1,35 +1,37 @@
-import { For, Show, createMemo, createStore, isPending } from "solid-js";
-import { LiveCameraPipeline, type DisplayMode } from "./camera/LiveCameraPipeline";
-import { useCameraStream } from "./camera/CameraStreamContext";
-import type { CalibrationSample } from "../lib/calibrationTypes";
+import { For, Show, createMemo, createStore, isPending } from 'solid-js'
+
+import { useCameraStream } from '@/components/camera/CameraStreamContext'
+import { LiveCameraPipeline, type DisplayMode } from '@/components/camera/LiveCameraPipeline'
+import type { DetectedQuad } from '@/gpu/contour'
 import {
   acceptQuadForCalibration,
   calibrationQuadScore,
   frameHasDuplicateDecodedTagIds,
-} from "../lib/calibrationQuality";
-import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationSamplesTopK } from "../lib/calibrationTopK";
-import type { DetectedQuad } from "../gpu/contour";
-import styles from "./CalibrationView.module.css";
-import pipelineStyles from "./camera/LiveCameraPipeline.module.css";
+} from '@/lib/calibrationQuality'
+import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationSamplesTopK } from '@/lib/calibrationTopK'
+import type { CalibrationSample } from '@/lib/calibrationTypes'
+
+import styles from '@/components/CalibrationView.module.css'
+import pipelineStyles from '@/components/camera/LiveCameraPipeline.module.css'
 
 function deviceScore(d: MediaDeviceInfo): number {
-  const label = d.label.toLowerCase();
-  let score = 0;
-  if (label.includes("back") || label.includes("rear")) score += 100;
-  if (label.includes("wide")) score += 50;
-  if (label.includes("ultra")) score += 30;
-  if (label.includes("tele")) score -= 20;
-  if (label.includes("front") || label.includes("user")) score -= 100;
-  return score;
+  const label = d.label.toLowerCase()
+  let score = 0
+  if (label.includes('back') || label.includes('rear')) score += 100
+  if (label.includes('wide')) score += 50
+  if (label.includes('ultra')) score += 30
+  if (label.includes('tele')) score -= 20
+  if (label.includes('front') || label.includes('user')) score -= 100
+  return score
 }
 
-type Collection = "idle" | "running" | "paused";
+type Collection = 'idle' | 'running' | 'paused'
 
 function CalibrationView() {
-  const cam = useCameraStream();
+  const cam = useCameraStream()
 
   const [store, setStore] = createStore({
-    collection: "idle" as Collection,
+    collection: 'idle' as Collection,
     samples: [] as CalibrationSample[],
     stats: {
       framesProcessed: 0,
@@ -38,101 +40,95 @@ function CalibrationView() {
       quadRejects: 0,
       evictions: 0,
     },
-  });
+  })
 
-  const displayMode = createMemo<DisplayMode>(() => "grid");
-  const showGrid = () => true;
-  const showFallbacks = () => false;
+  const displayMode = createMemo<DisplayMode>(() => 'grid')
+  const showGrid = () => true
+  const showFallbacks = () => false
 
   const devicesSorted = createMemo(async () => {
-    const list = await cam.devices();
-    return [...list].sort((a, b) => deviceScore(b) - deviceScore(a));
-  });
+    const list = await cam.devices()
+    return [...list].sort((a, b) => deviceScore(b) - deviceScore(a))
+  })
 
   const onQuadDetection = (quads: DetectedQuad[], meta: { frameId: number }) => {
     setStore((s) => {
-      s.stats.framesProcessed += 1;
-    });
-    if (store.collection !== "running") return;
+      s.stats.framesProcessed += 1
+    })
+    if (store.collection !== 'running') return
 
-    const decoded = quads.filter((q) => typeof q.decodedTagId === "number");
+    const decoded = quads.filter((q) => typeof q.decodedTagId === 'number')
     if (frameHasDuplicateDecodedTagIds(decoded)) {
       setStore((s) => {
-        s.stats.frameRejections += 1;
-      });
-      return;
+        s.stats.frameRejections += 1
+      })
+      return
     }
 
-    const incoming: CalibrationSample[] = [];
+    const incoming: CalibrationSample[] = []
     for (const q of quads) {
       if (!acceptQuadForCalibration(q)) {
         setStore((s) => {
-          s.stats.quadRejects += 1;
-        });
-        continue;
+          s.stats.quadRejects += 1
+        })
+        continue
       }
-      if (typeof q.decodedTagId !== "number") continue;
-      const rot = q.decodedRotation ?? 0;
-      const inner = q.gridCells!.innerCorners.map((p) => ({ x: p.x, y: p.y }));
+      if (typeof q.decodedTagId !== 'number') continue
+      const rot = q.decodedRotation ?? 0
+      const inner = q.gridCells!.innerCorners.map((p) => ({ x: p.x, y: p.y }))
       incoming.push({
         frameId: meta.frameId,
         tagId: q.decodedTagId,
         rotation: rot,
         innerCorners: inner,
         score: calibrationQuadScore(q),
-      });
+      })
     }
 
     if (incoming.length === 0) {
-      return;
+      return
     }
 
     setStore((s) => {
-      s.stats.framesAccepted += 1;
-    });
-    const { next, evicted } = mergeCalibrationSamplesTopK(
-      store.samples,
-      incoming,
-      DEFAULT_CALIBRATION_TOP_K,
-    );
+      s.stats.framesAccepted += 1
+    })
+    const { next, evicted } = mergeCalibrationSamplesTopK(store.samples, incoming, DEFAULT_CALIBRATION_TOP_K)
     if (evicted > 0) {
       setStore((s) => {
-        s.stats.evictions += evicted;
-      });
+        s.stats.evictions += evicted
+      })
     }
     setStore((s) => {
-      s.samples = next;
-    });
-  };
+      s.samples = next
+    })
+  }
 
   const uniqueTagCount = createMemo(() => {
-    const ids = new Set(store.samples.map((s) => s.tagId));
-    return ids.size;
-  });
+    const ids = new Set(store.samples.map((s) => s.tagId))
+    return ids.size
+  })
 
   return (
     <div class={styles.root}>
       {cam.streamError() ? <p class={styles.error}>Camera: {cam.streamError()}</p> : null}
 
       <p class={styles.hint}>
-        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target. Layout is
-        recovered in bundle adjustment — no grid setup here.
+        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target. Layout is recovered in bundle
+        adjustment — no grid setup here.
       </p>
 
       <div class={styles.cameraBlock}>
         <Show when={() => !isPending(() => devicesSorted())}>
           <select
             class={[pipelineStyles.cameraSelect, styles.calibrateCameraSelect]}
-            value={cam.deviceId() ?? ""}
+            value={cam.deviceId() ?? ''}
             onChange={(e) => cam.setDeviceId(e.currentTarget.value)}
           >
             <Show when={devicesSorted()}>
               {(d) => (
                 <For each={d()}>
                   {(item) => (
-                    <option value={item().deviceId}>
-                      {item().label || `Camera ${item().deviceId.slice(0, 8)}`}
-                    </option>
+                    <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
                   )}
                 </For>
               )}
@@ -153,11 +149,11 @@ function CalibrationView() {
       <div class={styles.controls}>
         <button
           type="button"
-          class={store.collection === "running" ? styles.btnActive : styles.btn}
+          class={store.collection === 'running' ? styles.btnActive : styles.btn}
           onClick={() =>
             setStore((s) => {
-              if (s.collection === "idle" || s.collection === "paused") {
-                s.collection = "running";
+              if (s.collection === 'idle' || s.collection === 'paused') {
+                s.collection = 'running'
               }
             })
           }
@@ -166,11 +162,11 @@ function CalibrationView() {
         </button>
         <button
           type="button"
-          class={[styles.btn, store.collection !== "running" && styles.btnDisabled]}
-          disabled={store.collection !== "running"}
+          class={[styles.btn, store.collection !== 'running' && styles.btnDisabled]}
+          disabled={store.collection !== 'running'}
           onClick={() =>
             setStore((s) => {
-              if (s.collection === "running") s.collection = "paused";
+              if (s.collection === 'running') s.collection = 'paused'
             })
           }
         >
@@ -181,14 +177,14 @@ function CalibrationView() {
           class={styles.btn}
           onClick={() => {
             setStore((s) => {
-              s.collection = "idle";
-              s.samples = [];
-              s.stats.framesProcessed = 0;
-              s.stats.framesAccepted = 0;
-              s.stats.frameRejections = 0;
-              s.stats.quadRejects = 0;
-              s.stats.evictions = 0;
-            });
+              s.collection = 'idle'
+              s.samples = []
+              s.stats.framesProcessed = 0
+              s.stats.framesAccepted = 0
+              s.stats.frameRejections = 0
+              s.stats.quadRejects = 0
+              s.stats.evictions = 0
+            })
           }}
         >
           Reset
@@ -207,7 +203,7 @@ function CalibrationView() {
         <div>Top-K evictions: {store.stats.evictions}</div>
       </div>
     </div>
-  );
+  )
 }
 
-export { CalibrationView };
+export { CalibrationView }

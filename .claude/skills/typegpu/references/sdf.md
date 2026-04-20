@@ -3,9 +3,9 @@
 **Prefer this over hand-porting SDFs.** All functions are typed `tgpu.fn`s, composable with `typegpu/std`.
 
 ```ts
-import * as sdf from "@typegpu/sdf";
+import * as sdf from '@typegpu/sdf'
 // or selectively:
-import { sdDisk, sdRoundedBox2d, opSmoothUnion } from "@typegpu/sdf";
+import { sdDisk, sdRoundedBox2d, opSmoothUnion } from '@typegpu/sdf'
 ```
 
 ## 2D primitives
@@ -61,11 +61,7 @@ Every function is a `tgpu.fn` with pinned types:
 - Non-vector args are plain `f32` - JS `number` literals work.
 
 ```ts
-const mask = std.smoothstep(
-  std.fwidth(uv.x),
-  0,
-  sdf.sdRoundedBox2d(uv - 0.5, d.vec2f(0.3, 0.1), 0.02),
-);
+const mask = std.smoothstep(std.fwidth(uv.x), 0, sdf.sdRoundedBox2d(uv - 0.5, d.vec2f(0.3, 0.1), 0.02))
 ```
 
 `std.smoothstep(fwidth(uv.x), 0, d)` is the idiomatic 1-pixel AA mask from a 2D SDF in a fragment shader.
@@ -78,22 +74,22 @@ When the same SDF is sampled many times per frame (AA + normals + shadows + AO a
 const sdfTex = root
   .createTexture({
     size: [256, 128],
-    format: "rgba16float",
+    format: 'rgba16float',
   })
-  .$usage("storage", "sampled");
+  .$usage('storage', 'sampled')
 
-const writeView = sdfTex.createView(d.textureStorage2d("rgba16float", "write-only"));
+const writeView = sdfTex.createView(d.textureStorage2d('rgba16float', 'write-only'))
 
 const bakePipeline = root.createGuardedComputePipeline((x, y) => {
-  "use gpu";
-  const size = std.textureDimensions(writeView.$);
-  const uv = (d.vec2f(x, y) + 0.5) / d.vec2f(size);
-  const worldPos = uvToWorld(uv);
-  const dist = expensiveSceneSDF(worldPos);
-  std.textureStore(writeView.$, d.vec2u(x, y), d.vec4f(dist, 0, 0, 1));
-});
+  'use gpu'
+  const size = std.textureDimensions(writeView.$)
+  const uv = (d.vec2f(x, y) + 0.5) / d.vec2f(size)
+  const worldPos = uvToWorld(uv)
+  const dist = expensiveSceneSDF(worldPos)
+  std.textureStore(writeView.$, d.vec2u(x, y), d.vec4f(dist, 0, 0, 1))
+})
 
-bakePipeline.dispatchThreads(256, 128);
+bakePipeline.dispatchThreads(256, 128)
 ```
 
 Notes:
@@ -109,13 +105,13 @@ For unions over many sources (particles, agents, instanced obstacles), reject wi
 
 ```ts
 for (let i = d.u32(0); i < activeCount; i++) {
-  const src = sources.$[i];
-  const rough = std.length(point - src.center) - src.radius;
+  const src = sources.$[i]
+  const rough = std.length(point - src.center) - src.radius
   if (rough * k > 7) {
-    continue;
+    continue
   } // exp(-k * rough) < 1e-3 past this
-  const exact = expensiveSourceSDF(point, src);
-  accum += std.exp(-k * exact);
+  const exact = expensiveSourceSDF(point, src)
+  accum += std.exp(-k * exact)
 }
 ```
 

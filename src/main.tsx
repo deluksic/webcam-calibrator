@@ -1,10 +1,12 @@
-import { Loading, render } from "@solidjs/web";
-import { App } from "./components/App";
-import "./styles/global.css";
-import "./version";
+import { Loading, render } from '@solidjs/web'
 
-const root = document.getElementById("root");
-if (!root) throw new Error("#root element not found");
+import { App } from '@/components/App'
+
+import '@/styles/global.css'
+import '@/version'
+
+const root = document.getElementById('root')
+if (!root) throw new Error('#root element not found')
 
 render(
   () => (
@@ -13,4 +15,4 @@ render(
     </Loading>
   ),
   root,
-);
+)

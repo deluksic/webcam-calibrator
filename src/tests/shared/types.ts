@@ -1,50 +1,50 @@
-import type { Point } from "../../lib/geometry";
+import type { Point } from '@/lib/geometry'
 
-export type StripCorners = [Point, Point, Point, Point];
+export type StripCorners = [Point, Point, Point, Point]
 
-export type SceneKind = "perspective" | "axis";
+export type SceneKind = 'perspective' | 'axis'
 
 export interface SceneSpec {
-  kind: SceneKind;
-  width: number;
-  height: number;
+  kind: SceneKind
+  width: number
+  height: number
   /** Tag id for pattern selection. */
-  tagId: number;
-  supersample: number;
-  margin?: number;
+  tagId: number
+  supersample: number
+  margin?: number
   /** For `axis`: square side in px. For `perspective`: ignored. */
-  axisSidePx?: number;
+  axisSidePx?: number
   /** Scale quad so longest edge ≤ this (strict &lt; 20 for small-tag studies). */
-  maxEdgePx?: number;
+  maxEdgePx?: number
   /** Rotate quad around centroid (radians). Default 0. */
-  rotationRad?: number;
-  perspectiveBoost?: number;
+  rotationRad?: number
+  perspectiveBoost?: number
 }
 
 export type NoiseOp =
-  | { type: "speckle"; amplitude: number; seed: number }
-  | { type: "gaussian"; sigma: number; seed: number }
-  | { type: "saltPepper"; rate: number; seed: number };
+  | { type: 'speckle'; amplitude: number; seed: number }
+  | { type: 'gaussian'; sigma: number; seed: number }
+  | { type: 'saltPepper'; rate: number; seed: number }
 
 export interface RadialDistortionSpec {
   /** Brown–Conrady k1 (barrel negative, pincushion positive), applied in normalized image coords. */
-  k1: number;
+  k1: number
   /** Center in pixels; default image center. */
-  cx?: number;
-  cy?: number;
+  cx?: number
+  cy?: number
 }
 
 export interface BuildImageOptions {
-  scene: SceneSpec;
-  noise?: NoiseOp[];
+  scene: SceneSpec
+  noise?: NoiseOp[]
   /** Applied after raster, before noise (in-place remap). */
-  radialDistortion?: RadialDistortionSpec;
+  radialDistortion?: RadialDistortionSpec
 }
 
 export interface RasterPack {
-  width: number;
-  height: number;
-  groundTruthStrip: StripCorners;
-  grayscale: Float32Array;
-  sobel: Float32Array;
+  width: number
+  height: number
+  groundTruthStrip: StripCorners
+  grayscale: Float32Array
+  sobel: Float32Array
 }

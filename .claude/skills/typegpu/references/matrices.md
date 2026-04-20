@@ -9,28 +9,28 @@ These three topics almost always show up together: `wgpu-matrix` as the math lib
 TypeGPU vectors and matrices are indexable (`mat[0]`, `vec.x` / `vec[0]`) exactly the way `wgpu-matrix` expects. Any TypeGPU primitive can be passed as a source **or as the `dst` argument** - the key to avoiding throwaway `Float32Array` allocations.
 
 ```ts
-import { d } from "typegpu";
-import { mat4, vec3 } from "wgpu-matrix";
+import { d } from 'typegpu'
+import { mat4, vec3 } from 'wgpu-matrix'
 
 // Bad - allocates a fresh Float32Array each call:
-const view = mat4.lookAt(eye, target, up);
+const view = mat4.lookAt(eye, target, up)
 
 // Good - writes into a TypeGPU matrix you control:
-const viewM = d.mat4x4f();
-mat4.lookAt(eye, target, up, viewM);
+const viewM = d.mat4x4f()
+mat4.lookAt(eye, target, up, viewM)
 
 // In-place chain (no allocations):
-mat4.identity(viewM);
-mat4.translate(viewM, [tx, ty, tz], viewM);
-mat4.rotateY(viewM, yaw, viewM);
+mat4.identity(viewM)
+mat4.translate(viewM, [tx, ty, tz], viewM)
+mat4.rotateY(viewM, yaw, viewM)
 ```
 
 Same for vectors:
 
 ```ts
-const dir = d.vec3f();
-vec3.subtract(target, eye, dir); // writes into `dir`
-vec3.normalize(dir, dir); // in-place
+const dir = d.vec3f()
+vec3.subtract(target, eye, dir) // writes into `dir`
+vec3.normalize(dir, dir) // in-place
 ```
 
 > Requires `wgpu-matrix >= 3.3.0`.
@@ -66,19 +66,22 @@ A `d.struct` with `view`, `proj` (and optionally their inverses) updated via `.p
 const Camera = d.struct({
   view: d.mat4x4f,
   proj: d.mat4x4f,
-});
+})
 
-const viewMat = new Float32Array(16);
-const projMat = new Float32Array(16);
+const viewMat = new Float32Array(16)
+const projMat = new Float32Array(16)
 
-mat4.perspective(Math.PI / 4, aspect, 0.1, 1000, projMat);
-mat4.lookAt(eye, target, up, viewMat);
+mat4.perspective(Math.PI / 4, aspect, 0.1, 1000, projMat)
+mat4.lookAt(eye, target, up, viewMat)
 
-const cameraUniform = root.createUniform(Camera, { view: viewMat, proj: projMat });
+const cameraUniform = root.createUniform(Camera, {
+  view: viewMat,
+  proj: projMat,
+})
 
 // Per-frame: recompute into the same buffer, write only what changed
-mat4.lookAt(newEye, target, up, viewMat);
-cameraUniform.patch({ view: viewMat });
+mat4.lookAt(newEye, target, up, viewMat)
+cameraUniform.patch({ view: viewMat })
 ```
 
 Add `viewInv`/`projInv` fields when shaders need to go from clip/screen back to world space (ray marching, screen-space effects). Computing inverses once on the CPU beats per-fragment `mat4.inverse`.
@@ -108,24 +111,24 @@ const Camera = d.struct({
   proj: d.mat4x4f,
   viewInv: d.mat4x4f,
   projInv: d.mat4x4f,
-});
+})
 
-const cameraBuffer = root.createBuffer(Camera).$usage("uniform");
+const cameraBuffer = root.createBuffer(Camera).$usage('uniform')
 
 // Single flat buffer, one view per matrix. Allocated ONCE.
-const raw = new Float32Array(d.sizeOf(Camera) / 4); // 64 floats
-const view = raw.subarray(0, 16);
-const proj = raw.subarray(16, 32);
-const viewInv = raw.subarray(32, 48);
-const projInv = raw.subarray(48, 64);
+const raw = new Float32Array(d.sizeOf(Camera) / 4) // 64 floats
+const view = raw.subarray(0, 16)
+const proj = raw.subarray(16, 32)
+const viewInv = raw.subarray(32, 48)
+const projInv = raw.subarray(48, 64)
 
 // Every frame - zero allocations:
 function updateCamera(eye: Float32Array, target: Float32Array, up: Float32Array, aspect: number) {
-  mat4.lookAt(eye, target, up, view);
-  mat4.invert(view, viewInv);
-  mat4.perspective(Math.PI / 4, aspect, 0.1, 1000, proj);
-  mat4.invert(proj, projInv);
-  cameraBuffer.write(raw); // bytes straight through - no serialization
+  mat4.lookAt(eye, target, up, view)
+  mat4.invert(view, viewInv)
+  mat4.perspective(Math.PI / 4, aspect, 0.1, 1000, proj)
+  mat4.invert(proj, projInv)
+  cameraBuffer.write(raw) // bytes straight through - no serialization
 }
 ```
 

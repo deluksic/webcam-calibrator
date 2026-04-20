@@ -1,26 +1,25 @@
-import type { Point } from "../../../lib/geometry";
-import type { StripCorners } from "../../shared/types";
+import type { StripCorners } from '@/tests/shared/types'
 
 export function cornerErrorStats(
   gt: StripCorners,
   test: StripCorners,
 ): {
-  perCornerPx: number[];
-  maxPx: number;
-  rmsePx: number;
+  perCornerPx: number[]
+  maxPx: number
+  rmsePx: number
 } {
-  const perCornerPx: number[] = [];
-  let sumSq = 0;
+  const perCornerPx: number[] = []
+  let sumSq = 0
   for (let i = 0; i < 4; i++) {
-    const d = Math.hypot(test[i]!.x - gt[i]!.x, test[i]!.y - gt[i]!.y);
-    perCornerPx.push(d);
-    sumSq += d * d;
+    const d = Math.hypot(test[i]!.x - gt[i]!.x, test[i]!.y - gt[i]!.y)
+    perCornerPx.push(d)
+    sumSq += d * d
   }
   return {
     perCornerPx,
     maxPx: Math.max(...perCornerPx),
     rmsePx: Math.sqrt(sumSq / 4),
-  };
+  }
 }
 
 /** Rounded for snapshot stability. */
@@ -28,10 +27,10 @@ export function roundCornerStats(
   s: ReturnType<typeof cornerErrorStats>,
   decimals = 4,
 ): Record<string, number | number[]> {
-  const f = (x: number) => Number(x.toFixed(decimals));
+  const f = (x: number) => Number(x.toFixed(decimals))
   return {
     perCornerPx: s.perCornerPx.map(f),
     maxPx: f(s.maxPx),
     rmsePx: f(s.rmsePx),
-  };
+  }
 }

@@ -1,29 +1,23 @@
 // Perspective-correct grid subdivision for AprilTag decode
 // Uses line intersection + proportional subdivision (no bilinear interpolation)
 
-import { imagePixelToUnitSquareUv } from "./aprilTagRaycast";
-import {
-  Point,
-  tryComputeHomography,
-  lineFromPoints,
-  lineIntersection,
-  subdivideSegment,
-} from "./geometry";
-import type { TagPattern } from "./tag36h11";
+import { imagePixelToUnitSquareUv } from '@/lib/aprilTagRaycast'
+import { Point, lineFromPoints, lineIntersection, tryComputeHomography } from '@/lib/geometry'
+import type { TagPattern } from '@/lib/tag36h11'
 
-const { min, max, abs, floor, ceil, hypot } = Math;
+const { min, max, abs, floor, ceil, hypot } = Math
 
 export interface GridCell {
-  row: number;
-  col: number;
-  corners: [Point, Point, Point, Point]; // TL, TR, BR, BL
-  center: Point;
+  row: number
+  col: number
+  corners: [Point, Point, Point, Point] // TL, TR, BR, BL
+  center: Point
 }
 
 export interface GridResult {
-  outerCorners: [Point, Point, Point, Point]; // TL, TR, BR, BL
-  cells: GridCell[]; // 6x6 cells
-  innerCorners: Point[]; // 7x7 grid intersection points
+  outerCorners: [Point, Point, Point, Point] // TL, TR, BR, BL
+  cells: GridCell[] // 6x6 cells
+  innerCorners: Point[] // 7x7 grid intersection points
 }
 
 /**
@@ -37,11 +31,11 @@ export interface GridResult {
  * @param offset Which division point (1 to divisions-1)
  */
 function subdivideEdgeProportional(p1: Point, p2: Point, divisions: number, offset: number): Point {
-  const t = offset / divisions;
+  const t = offset / divisions
   return {
     x: p1.x + t * (p2.x - p1.x),
     y: p1.y + t * (p2.y - p1.y),
-  };
+  }
 }
 
 /**
@@ -51,93 +45,90 @@ function subdivideEdgeProportional(p1: Point, p2: Point, divisions: number, offs
  * @param corners 4 corners in order (TL, TR, BR, BL)
  * @param divisions Number of cell divisions (6 for 6x6 tag)
  */
-export function buildTagGrid(
-  corners: [Point, Point, Point, Point],
-  divisions: number = 6,
-): GridResult {
-  const [tl, tr, br, bl] = corners;
+export function buildTagGrid(corners: [Point, Point, Point, Point], divisions: number = 6): GridResult {
+  const [tl, tr, br, bl] = corners
 
   // Build 7x7 inner corner grid (7 points per edge, 49 total)
   // First, subdivide all 4 edges
-  const topEdge: Point[] = [];
-  const bottomEdge: Point[] = [];
-  const leftEdge: Point[] = [];
-  const rightEdge: Point[] = [];
+  const topEdge: Point[] = []
+  const bottomEdge: Point[] = []
+  const leftEdge: Point[] = []
+  const rightEdge: Point[] = []
 
   for (let i = 0; i <= divisions; i++) {
-    topEdge.push(subdivideEdgeProportional(tl, tr, divisions, i));
-    bottomEdge.push(subdivideEdgeProportional(bl, br, divisions, i));
-    leftEdge.push(subdivideEdgeProportional(tl, bl, divisions, i));
-    rightEdge.push(subdivideEdgeProportional(tr, br, divisions, i));
+    topEdge.push(subdivideEdgeProportional(tl, tr, divisions, i))
+    bottomEdge.push(subdivideEdgeProportional(bl, br, divisions, i))
+    leftEdge.push(subdivideEdgeProportional(tl, bl, divisions, i))
+    rightEdge.push(subdivideEdgeProportional(tr, br, divisions, i))
   }
 
   // Now build inner grid by connecting opposite edge points
-  const innerCorners: Point[] = [];
+  const innerCorners: Point[] = []
 
   // For each intersection point, we need to find where the horizontal
   // and vertical lines from subdivision cross
   for (let row = 0; row <= divisions; row++) {
     for (let col = 0; col <= divisions; col++) {
-      const topPoint = topEdge[col];
-      const bottomPoint = bottomEdge[col];
-      const leftPoint = leftEdge[row];
-      const rightPoint = rightEdge[row];
+      const topPoint = topEdge[col]
+      const bottomPoint = bottomEdge[col]
+      const leftPoint = leftEdge[row]
+      const rightPoint = rightEdge[row]
 
       // Horizontal line: from left edge to right edge at row position
-      const hLine = lineFromPoints(leftPoint, rightPoint);
+      const hLine = lineFromPoints(leftPoint, rightPoint)
       // Vertical line: from top edge to bottom edge at col position
-      const vLine = lineFromPoints(topPoint, bottomPoint);
+      const vLine = lineFromPoints(topPoint, bottomPoint)
 
       // Guard: either line can be null if endpoints are coincident (e.g. at quad corners)
       if (!hLine || !vLine) {
         innerCorners.push({
           x: (topPoint.x + bottomPoint.x) / 2,
           y: (leftPoint.y + rightPoint.y) / 2,
-        });
-        continue;
+        })
+        continue
       }
 
-      const intersection = lineIntersection(hLine, vLine);
+      const intersection = lineIntersection(hLine, vLine)
       if (intersection) {
-        innerCorners.push(intersection);
+        innerCorners.push(intersection)
       } else {
         // Fallback: use midpoint
         innerCorners.push({
           x: (topPoint.x + bottomPoint.x) / 2,
           y: (leftPoint.y + rightPoint.y) / 2,
-        });
+        })
       }
     }
   }
 
   // Build 6x6 cells from inner corners
-  const cells: GridCell[] = [];
+  const cells: GridCell[] = []
 
   for (let row = 0; row < divisions; row++) {
     for (let col = 0; col < divisions; col++) {
-      const tlIdx = row * (divisions + 1) + col;
-      const trIdx = tlIdx + 1;
-      const brIdx = (row + 1) * (divisions + 1) + col + 1;
-      const blIdx = brIdx - 1;
+      const tlIdx = row * (divisions + 1) + col
+      const trIdx = tlIdx + 1
+      const brIdx = (row + 1) * (divisions + 1) + col + 1
+      const blIdx = brIdx - 1
 
       const cellCorners: [Point, Point, Point, Point] = [
         innerCorners[tlIdx],
         innerCorners[trIdx],
         innerCorners[brIdx],
         innerCorners[blIdx],
-      ];
+      ]
 
       const center = {
         x: (cellCorners[0].x + cellCorners[1].x + cellCorners[2].x + cellCorners[3].x) / 4,
         y: (cellCorners[0].y + cellCorners[1].y + cellCorners[2].y + cellCorners[3].y) / 4,
-      };
+      }
 
       cells.push({
         row,
         col,
         corners: cellCorners,
         center,
-      });
+      })
     }
   }
 
@@ -145,16 +136,16 @@ export function buildTagGrid(
     outerCorners: corners,
     cells,
     innerCorners,
-  };
+  }
 }
 
 /** Map cell UV in [0,1]² (TL origin) to image; `cell.corners` are TL, TR, BR, BL. */
 export function cellUvToImage(cell: GridCell, u: number, v: number): Point {
-  const [tl, tr, br, bl] = cell.corners;
+  const [tl, tr, br, bl] = cell.corners
   return {
     x: (1 - u) * (1 - v) * tl.x + u * (1 - v) * tr.x + u * v * br.x + (1 - u) * v * bl.x,
     y: (1 - u) * (1 - v) * tl.y + u * (1 - v) * tr.y + u * v * br.y + (1 - u) * v * bl.y,
-  };
+  }
 }
 
 /**
@@ -168,34 +159,34 @@ export function imageGradToUvGrad(
   gx: number,
   gy: number,
 ): { gu: number; gv: number } {
-  const [tl, tr, br, bl] = cell.corners;
-  const dxdU = -(1 - v) * tl.x + (1 - v) * tr.x + v * br.x - v * bl.x;
-  const dxdV = -(1 - u) * tl.x - u * tr.x + u * br.x + (1 - u) * bl.x;
-  const dydU = -(1 - v) * tl.y + (1 - v) * tr.y + v * br.y - v * bl.y;
-  const dydV = -(1 - u) * tl.y - u * tr.y + u * br.y + (1 - u) * bl.y;
-  const gu = gx * dxdU + gy * dydU;
-  const gv = gx * dxdV + gy * dydV;
-  return { gu, gv };
+  const [tl, tr, br, bl] = cell.corners
+  const dxdU = -(1 - v) * tl.x + (1 - v) * tr.x + v * br.x - v * bl.x
+  const dxdV = -(1 - u) * tl.x - u * tr.x + u * br.x + (1 - u) * bl.x
+  const dydU = -(1 - v) * tl.y + (1 - v) * tr.y + v * br.y - v * bl.y
+  const dydV = -(1 - u) * tl.y - u * tr.y + u * br.y + (1 - u) * bl.y
+  const gu = gx * dxdU + gy * dydU
+  const gv = gx * dxdV + gy * dydV
+  return { gu, gv }
 }
 
 export type CellSobelSample = {
-  mag: number;
-  tangent: number;
-  gx: number;
-  gy: number;
-  u: number;
-  v: number;
-};
+  mag: number
+  tangent: number
+  gx: number
+  gy: number
+  u: number
+  v: number
+}
 
 /** Min |UV − center|² so we ignore the flat interior where radial direction is ill-defined. */
-const DECODE_RADIAL_MIN2 = 0.015 * 0.015;
+const DECODE_RADIAL_MIN2 = 0.015 * 0.015
 /** Dot-product deadband in UV-gradient space (noise). */
-const DECODE_DOT_EPS = 1e-8;
+const DECODE_DOT_EPS = 1e-8
 /**
  * Minimum count of directional votes (pos + neg) before calling black/white vs **no signal** (`-1`).
  * Ties with at least this many votes return **`-2`** (ambiguous, not “missing edges”).
  */
-const DECODE_MIN_VOTE_TOTAL = 3;
+const DECODE_MIN_VOTE_TOTAL = 3
 
 /**
  * Classify a 6×6 cell: **0 = white**, **1 = black**, **-1 = no/weak signal**, **-2 = tie** (enough votes).
@@ -203,37 +194,37 @@ const DECODE_MIN_VOTE_TOTAL = 3;
  * **unweighted** ±1 vote per sample (GPU/NMS is assumed to have already filtered edges).
  */
 export function decodeCell(cell: GridCell, samples: CellSobelSample[]): 0 | 1 | -1 | -2 {
-  const n = samples.length;
-  if (n < 9) return -1;
+  const n = samples.length
+  if (n < 9) return -1
 
-  let pos = 0;
-  let neg = 0;
+  let pos = 0
+  let neg = 0
   for (const s of samples) {
-    if (s.mag <= 1e-12) continue;
-    const ru = s.u - 0.5;
-    const rv = s.v - 0.5;
-    const r2 = ru * ru + rv * rv;
-    if (r2 < DECODE_RADIAL_MIN2) continue;
+    if (s.mag <= 1e-12) continue
+    const ru = s.u - 0.5
+    const rv = s.v - 0.5
+    const r2 = ru * ru + rv * rv
+    if (r2 < DECODE_RADIAL_MIN2) continue
 
-    const { gu, gv } = imageGradToUvGrad(cell, s.u, s.v, s.gx, s.gy);
-    const dot = gu * ru + gv * rv;
-    if (dot > DECODE_DOT_EPS) pos += 1;
-    else if (dot < -DECODE_DOT_EPS) neg += 1;
+    const { gu, gv } = imageGradToUvGrad(cell, s.u, s.v, s.gx, s.gy)
+    const dot = gu * ru + gv * rv
+    if (dot > DECODE_DOT_EPS) pos += 1
+    else if (dot < -DECODE_DOT_EPS) neg += 1
   }
 
-  const sum = pos + neg;
-  if (sum < DECODE_MIN_VOTE_TOTAL) return -1;
-  if (pos > neg) return 1;
-  if (neg > pos) return 0;
-  return -2;
+  const sum = pos + neg
+  if (sum < DECODE_MIN_VOTE_TOTAL) return -1
+  if (pos > neg) return 1
+  if (neg > pos) return 0
+  return -2
 }
 
 /** AprilTag unit square is an 8×8 module grid (black border ring + inner 6×6 data). */
-const TAG_MODULES = 8;
+const TAG_MODULES = 8
 /** 10% of one module side in tag UV — proximity gate for edge-aligned votes. */
-const TAU_MODULE_UV = 0.1 / TAG_MODULES;
+const TAU_MODULE_UV = 0.1 / TAG_MODULES
 /** Floor for shortest quad edge (px) so `2 / L_min` stays finite on degenerate quads. */
-const MIN_QUAD_EDGE_EPS_PX = 1e-6;
+const MIN_QUAD_EDGE_EPS_PX = 1e-6
 
 /**
  * Jacobian **J** = ∂(x,y)/∂(u,v) for `applyHomography` / homography 8-vector `h`.
@@ -261,21 +252,21 @@ const MIN_QUAD_EDGE_EPS_PX = 1e-6;
 function jacobianImageWrtTagUv(h: Float32Array, u: number, v: number) {
   const h0 = h[0],
     h1 = h[1],
-    h2 = h[2];
+    h2 = h[2]
   const h3 = h[3],
     h4 = h[4],
-    h5 = h[5];
+    h5 = h[5]
   const h6 = h[6],
-    h7 = h[7];
-  const xh = h0 * u + h1 * v + h2;
-  const yh = h3 * u + h4 * v + h5;
-  const wh = h6 * u + h7 * v + 1;
-  const wh2 = wh * wh;
-  const xu = (h0 * wh - xh * h6) / wh2;
-  const xv = (h1 * wh - xh * h7) / wh2;
-  const yu = (h3 * wh - yh * h6) / wh2;
-  const yv = (h4 * wh - yh * h7) / wh2;
-  return { xu, xv, yu, yv };
+    h7 = h[7]
+  const xh = h0 * u + h1 * v + h2
+  const yh = h3 * u + h4 * v + h5
+  const wh = h6 * u + h7 * v + 1
+  const wh2 = wh * wh
+  const xu = (h0 * wh - xh * h6) / wh2
+  const xv = (h1 * wh - xh * h7) / wh2
+  const yu = (h3 * wh - yh * h6) / wh2
+  const yv = (h4 * wh - yh * h7) / wh2
+  return { xu, xv, yu, yv }
 }
 
 /**
@@ -289,15 +280,15 @@ export function imageSobelToTagGradient(
   gx: number,
   gy: number,
 ): { gu: number; gv: number } {
-  const { xu, xv, yu, yv } = jacobianImageWrtTagUv(h, u, v);
+  const { xu, xv, yu, yv } = jacobianImageWrtTagUv(h, u, v)
   return {
     gu: gx * xu + gy * yu,
     gv: gx * xv + gy * yv,
-  };
+  }
 }
 
 function quadEdgeLenPx(a: Point, b: Point): number {
-  return hypot(a.x - b.x, a.y - b.y);
+  return hypot(a.x - b.x, a.y - b.y)
 }
 
 /**
@@ -305,35 +296,30 @@ function quadEdgeLenPx(a: Point, b: Point): number {
  * (`2 / L_min`) for decode gating alongside `TAU_MODULE_UV`.
  */
 export function minQuadEdgeLengthPx(outerCorners: [Point, Point, Point, Point]): number {
-  const [tl, tr, br, bl] = outerCorners;
-  const m = min(
-    quadEdgeLenPx(tl, tr),
-    quadEdgeLenPx(tr, br),
-    quadEdgeLenPx(br, bl),
-    quadEdgeLenPx(bl, tl),
-  );
-  return max(MIN_QUAD_EDGE_EPS_PX, m);
+  const [tl, tr, br, bl] = outerCorners
+  const m = min(quadEdgeLenPx(tl, tr), quadEdgeLenPx(tr, br), quadEdgeLenPx(br, bl), quadEdgeLenPx(bl, tl))
+  return max(MIN_QUAD_EDGE_EPS_PX, m)
 }
 
 /** Primary 8×8 bin from tag UV (floor with clamp on the closed unit square). */
 export function primaryModuleFromUv(u: number, v: number): { mx: number; my: number } {
-  const mx = min(TAG_MODULES - 1, max(0, floor(u * TAG_MODULES)));
-  const my = min(TAG_MODULES - 1, max(0, floor(v * TAG_MODULES)));
-  return { mx, my };
+  const mx = min(TAG_MODULES - 1, max(0, floor(u * TAG_MODULES)))
+  const my = min(TAG_MODULES - 1, max(0, floor(v * TAG_MODULES)))
+  return { mx, my }
 }
 
-export type DecodeTriangle = "top" | "bottom" | "left" | "right";
+export type DecodeTriangle = 'top' | 'bottom' | 'left' | 'right'
 
 /** Four wedges meeting at module center `(½,½)` in local `[0,1]²` (center + diagonals). */
 export function decodeTriangleFromLocalUv(fu: number, fv: number): DecodeTriangle {
-  const du = fu - 0.5;
-  const dv = fv - 0.5;
-  const d1 = dv <= du;
-  const d2 = dv <= -du;
-  if (d1 && d2) return "top";
-  if (!d1 && !d2) return "bottom";
-  if (du >= 0) return "right";
-  return "left";
+  const du = fu - 0.5
+  const dv = fv - 0.5
+  const d1 = dv <= du
+  const d2 = dv <= -du
+  if (d1 && d2) return 'top'
+  if (!d1 && !d2) return 'bottom'
+  if (du >= 0) return 'right'
+  return 'left'
 }
 
 /**
@@ -341,7 +327,7 @@ export function decodeTriangleFromLocalUv(fu: number, fv: number): DecodeTriangl
  * (one module spans `1/TAG_MODULES` in `u` and `v`). Same as Chebyshev gap `(0.5 − max|local−½|) / 8`.
  */
 export function decodeEdgeDistanceUv(fu: number, fv: number): number {
-  return (0.5 - max(abs(fu - 0.5), abs(fv - 0.5))) / TAG_MODULES;
+  return (0.5 - max(abs(fu - 0.5), abs(fv - 0.5))) / TAG_MODULES
 }
 
 /**
@@ -349,30 +335,30 @@ export function decodeEdgeDistanceUv(fu: number, fv: number): number {
  * Drops neighbors outside the 8×8 lattice (tag border).
  */
 export function decodeVoteModuleIndices(mx: number, my: number, tri: DecodeTriangle): number[] {
-  const out: number[] = [];
+  const out: number[] = []
   const push = (x: number, y: number) => {
-    if (x < 0 || x >= TAG_MODULES || y < 0 || y >= TAG_MODULES) return;
-    out.push(y * TAG_MODULES + x);
-  };
-  switch (tri) {
-    case "top":
-      push(mx, my - 1);
-      push(mx, my);
-      break;
-    case "bottom":
-      push(mx, my);
-      push(mx, my + 1);
-      break;
-    case "left":
-      push(mx - 1, my);
-      push(mx, my);
-      break;
-    case "right":
-      push(mx, my);
-      push(mx + 1, my);
-      break;
+    if (x < 0 || x >= TAG_MODULES || y < 0 || y >= TAG_MODULES) return
+    out.push(y * TAG_MODULES + x)
   }
-  return out;
+  switch (tri) {
+    case 'top':
+      push(mx, my - 1)
+      push(mx, my)
+      break
+    case 'bottom':
+      push(mx, my)
+      push(mx, my + 1)
+      break
+    case 'left':
+      push(mx - 1, my)
+      push(mx, my)
+      break
+    case 'right':
+      push(mx, my)
+      push(mx + 1, my)
+      break
+  }
+  return out
 }
 
 /**
@@ -390,14 +376,14 @@ export function decodeEdgeAlignedDot(
   gv: number,
 ): number {
   switch (tri) {
-    case "top":
-      return gv * (v - my / TAG_MODULES);
-    case "bottom":
-      return gv * (v - (my + 1) / TAG_MODULES);
-    case "left":
-      return gu * (u - mx / TAG_MODULES);
-    case "right":
-      return gu * (u - (mx + 1) / TAG_MODULES);
+    case 'top':
+      return gv * (v - my / TAG_MODULES)
+    case 'bottom':
+      return gv * (v - (my + 1) / TAG_MODULES)
+    case 'left':
+      return gu * (u - mx / TAG_MODULES)
+    case 'right':
+      return gu * (u - (mx + 1) / TAG_MODULES)
   }
 }
 
@@ -416,12 +402,12 @@ export function decodeVoteBinEdgeChannelDot(
   gv: number,
 ): number {
   switch (tri) {
-    case "top":
-    case "bottom":
-      return gv * (v - cv);
-    case "left":
-    case "right":
-      return gu * (u - cu);
+    case 'top':
+    case 'bottom':
+      return gv * (v - cv)
+    case 'left':
+    case 'right':
+      return gu * (u - cu)
   }
 }
 
@@ -432,37 +418,23 @@ export function decodeVoteBinEdgeChannelDot(
  * **`decodeTagPattern`** accumulates votes with this scalar (see {@link decodeVoteBinEdgeChannelDot} for
  * the older edge‑channel variant, still used in unit tests).
  */
-export function decodeVoteBinRadialDot(
-  u: number,
-  v: number,
-  cu: number,
-  cv: number,
-  gu: number,
-  gv: number,
-): number {
-  return gu * (u - cu) + gv * (v - cv);
+export function decodeVoteBinRadialDot(u: number, v: number, cu: number, cv: number, gu: number, gv: number): number {
+  return gu * (u - cu) + gv * (v - cv)
 }
 
 /** Euclidean distance from (u,v) to the closed axis-aligned rectangle [u0,u1]×[v0,v1]. */
-export function distPointToClosedRectUv(
-  u: number,
-  v: number,
-  u0: number,
-  u1: number,
-  v0: number,
-  v1: number,
-): number {
-  const cu = min(u1, max(u0, u));
-  const cv = min(v1, max(v0, v));
-  return hypot(u - cu, v - cv);
+export function distPointToClosedRectUv(u: number, v: number, u0: number, u1: number, v0: number, v1: number): number {
+  const cu = min(u1, max(u0, u))
+  const cv = min(v1, max(v0, v))
+  return hypot(u - cu, v - cv)
 }
 
 function classifyModuleFromPosNeg(pos: number, neg: number): 0 | 1 | -1 | -2 {
-  const sum = pos + neg;
-  if (sum < DECODE_MIN_VOTE_TOTAL) return -1;
-  if (pos > neg) return 1;
-  if (neg > pos) return 0;
-  return -2;
+  const sum = pos + neg
+  if (sum < DECODE_MIN_VOTE_TOTAL) return -1
+  if (pos > neg) return 1
+  if (neg > pos) return 0
+  return -2
 }
 
 /**
@@ -471,38 +443,38 @@ function classifyModuleFromPosNeg(pos: number, neg: number): 0 | 1 | -1 | -2 {
  * conflicting directional evidence, and dictionary decode already treats **`-2`** as an unknown bit.
  */
 export function fillUnknownNeighbors6(pattern: TagPattern): void {
-  const idx = (r: number, c: number) => r * 6 + c;
-  const next = [...pattern] as TagPattern;
+  const idx = (r: number, c: number) => r * 6 + c
+  const next = [...pattern] as TagPattern
   for (let r = 0; r < 6; r++) {
     for (let c = 0; c < 6; c++) {
-      if (pattern[idx(r, c)] !== -1) continue;
-      const vals: number[] = [];
+      if (pattern[idx(r, c)] !== -1) continue
+      const vals: number[] = []
       if (r > 0) {
-        const v = pattern[idx(r - 1, c)];
-        if (v === 0 || v === 1) vals.push(v);
+        const v = pattern[idx(r - 1, c)]
+        if (v === 0 || v === 1) vals.push(v)
       }
       if (r < 5) {
-        const v = pattern[idx(r + 1, c)];
-        if (v === 0 || v === 1) vals.push(v);
+        const v = pattern[idx(r + 1, c)]
+        if (v === 0 || v === 1) vals.push(v)
       }
       if (c > 0) {
-        const v = pattern[idx(r, c - 1)];
-        if (v === 0 || v === 1) vals.push(v);
+        const v = pattern[idx(r, c - 1)]
+        if (v === 0 || v === 1) vals.push(v)
       }
       if (c < 5) {
-        const v = pattern[idx(r, c + 1)];
-        if (v === 0 || v === 1) vals.push(v);
+        const v = pattern[idx(r, c + 1)]
+        if (v === 0 || v === 1) vals.push(v)
       }
-      if (vals.length === 0) continue;
-      const first = vals[0]!;
-      if (vals.every((x) => x === first)) next[idx(r, c)] = first as 0 | 1;
+      if (vals.length === 0) continue
+      const first = vals[0]!
+      if (vals.every((x) => x === first)) next[idx(r, c)] = first as 0 | 1
     }
   }
-  for (let i = 0; i < 36; i++) pattern[i] = next[i]!;
+  for (let i = 0; i < 36; i++) pattern[i] = next[i]!
 }
 
 /** Same magnitude floor as `extractLabeledEdgePixels` in `corners.ts`. */
-const DECODE_EDGE_MASK_EPS = 1e-6;
+const DECODE_EDGE_MASK_EPS = 1e-6
 
 /**
  * Pixels where **decodeTagPattern** may sample Sobel: same connected-component `regionLabel`,
@@ -521,24 +493,24 @@ export function buildDecodeEdgeMask(
   maxY: number,
   padPx: number = 32,
 ): Uint8Array {
-  const w = imageWidth;
-  const h = imageHeight;
-  const mask = new Uint8Array(w * h);
-  const x0 = max(0, floor(minX) - padPx);
-  const y0 = max(0, floor(minY) - padPx);
-  const x1 = min(w - 1, ceil(maxX) + padPx);
-  const y1 = min(h - 1, ceil(maxY) + padPx);
-  const eps2 = DECODE_EDGE_MASK_EPS * DECODE_EDGE_MASK_EPS;
+  const w = imageWidth
+  const h = imageHeight
+  const mask = new Uint8Array(w * h)
+  const x0 = max(0, floor(minX) - padPx)
+  const y0 = max(0, floor(minY) - padPx)
+  const x1 = min(w - 1, ceil(maxX) + padPx)
+  const y1 = min(h - 1, ceil(maxY) + padPx)
+  const eps2 = DECODE_EDGE_MASK_EPS * DECODE_EDGE_MASK_EPS
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
-      const idx = y * w + x;
-      if (labelData[idx] !== regionLabel) continue;
-      const gx = sobelData[idx * 2];
-      const gy = sobelData[idx * 2 + 1];
-      if (gx * gx + gy * gy >= eps2) mask[idx] = 1;
+      const idx = y * w + x
+      if (labelData[idx] !== regionLabel) continue
+      const gx = sobelData[idx * 2]
+      const gy = sobelData[idx * 2 + 1]
+      if (gx * gx + gy * gy >= eps2) mask[idx] = 1
     }
   }
-  return mask;
+  return mask
 }
 
 /**
@@ -555,14 +527,14 @@ export function buildDecodeEdgeMask(
  * @param edgeMask Optional: skip pixels where mask index is 0.
  */
 export type DecodeTagPatternVoteMaps = {
-  pattern: TagPattern;
+  pattern: TagPattern
   /** Per 8×8 module index: unweighted count of radial dots voting “toward black”. */
-  posM: Float64Array;
+  posM: Float64Array
   /** Per 8×8 module index: unweighted count voting “toward white”. */
-  negM: Float64Array;
+  negM: Float64Array
   /** Same gate as the inner loop: `max(TAU_MODULE_UV, 2/L_min, 0.5/8)` in tag UV. */
-  uvProximityMax: number;
-};
+  uvProximityMax: number
+}
 
 function decodeTagPatternVoteAccumulation(
   grid: GridResult,
@@ -571,69 +543,69 @@ function decodeTagPatternVoteAccumulation(
   imageH: number,
   edgeMask?: Uint8Array,
 ): { posM: Float64Array; negM: Float64Array; uvProximityMax: number } {
-  const oc = grid.outerCorners;
-  const strip: [Point, Point, Point, Point] = [oc[0], oc[1], oc[3], oc[2]];
-  const h = tryComputeHomography([...strip]);
+  const oc = grid.outerCorners
+  const strip: [Point, Point, Point, Point] = [oc[0], oc[1], oc[3], oc[2]]
+  const h = tryComputeHomography([...strip])
 
-  const lMin = minQuadEdgeLengthPx(oc);
-  const uvHalfModule = 0.5 / TAG_MODULES;
-  const uvProximityMax = max(TAU_MODULE_UV, 2 / lMin, uvHalfModule);
+  const lMin = minQuadEdgeLengthPx(oc)
+  const uvHalfModule = 0.5 / TAG_MODULES
+  const uvProximityMax = max(TAU_MODULE_UV, 2 / lMin, uvHalfModule)
 
   if (!h) {
     return {
       posM: new Float64Array(64),
       negM: new Float64Array(64),
       uvProximityMax,
-    };
+    }
   }
 
-  let x0 = min(oc[0].x, oc[1].x, oc[2].x, oc[3].x);
-  let y0 = min(oc[0].y, oc[1].y, oc[2].y, oc[3].y);
-  let x1 = max(oc[0].x, oc[1].x, oc[2].x, oc[3].x);
-  let y1 = max(oc[0].y, oc[1].y, oc[2].y, oc[3].y);
-  const ix0 = max(0, floor(x0));
-  const iy0 = max(0, floor(y0));
-  const ix1 = min(imageWidth - 1, ceil(x1));
-  const iy1 = min(imageH - 1, ceil(y1));
+  let x0 = min(oc[0].x, oc[1].x, oc[2].x, oc[3].x)
+  let y0 = min(oc[0].y, oc[1].y, oc[2].y, oc[3].y)
+  let x1 = max(oc[0].x, oc[1].x, oc[2].x, oc[3].x)
+  let y1 = max(oc[0].y, oc[1].y, oc[2].y, oc[3].y)
+  const ix0 = max(0, floor(x0))
+  const iy0 = max(0, floor(y0))
+  const ix1 = min(imageWidth - 1, ceil(x1))
+  const iy1 = min(imageH - 1, ceil(y1))
 
-  const posM = new Float64Array(64);
-  const negM = new Float64Array(64);
+  const posM = new Float64Array(64)
+  const negM = new Float64Array(64)
 
   for (let iy = iy0; iy <= iy1; iy++) {
     for (let ix = ix0; ix <= ix1; ix++) {
-      if (edgeMask && edgeMask[iy * imageWidth + ix] === 0) continue;
-      const { u, v, inside } = imagePixelToUnitSquareUv(h, ix + 0.5, iy + 0.5);
-      if (!inside) continue;
-      const gx = sobelData[(iy * imageWidth + ix) * 2];
-      const gy = sobelData[(iy * imageWidth + ix) * 2 + 1];
-      const mag = hypot(gx, gy);
-      if (mag <= 1e-12) continue;
+      if (edgeMask && edgeMask[iy * imageWidth + ix] === 0) continue
+      const { u, v, inside } = imagePixelToUnitSquareUv(h, ix + 0.5, iy + 0.5)
+      if (!inside) continue
+      const gx = sobelData[(iy * imageWidth + ix) * 2]
+      const gy = sobelData[(iy * imageWidth + ix) * 2 + 1]
+      const mag = hypot(gx, gy)
+      if (mag <= 1e-12) continue
 
-      const { gu, gv } = imageSobelToTagGradient(h, u, v, gx, gy);
+      const { gu, gv } = imageSobelToTagGradient(h, u, v, gx, gy)
 
-      const { mx, my } = primaryModuleFromUv(u, v);
-      const fu = u * TAG_MODULES - mx;
-      const fv = v * TAG_MODULES - my;
-      const tri = decodeTriangleFromLocalUv(fu, fv);
-      const dEdge = decodeEdgeDistanceUv(fu, fv);
-      if (dEdge > uvProximityMax) continue;
+      const { mx, my } = primaryModuleFromUv(u, v)
+      const fu = u * TAG_MODULES - mx
+      const fv = v * TAG_MODULES - my
+      const tri = decodeTriangleFromLocalUv(fu, fv)
+      const dEdge = decodeEdgeDistanceUv(fu, fv)
+      if (dEdge > uvProximityMax) continue
 
       for (const mi of decodeVoteModuleIndices(mx, my, tri)) {
-        const mx2 = mi % TAG_MODULES;
-        const my2 = (mi / TAG_MODULES) | 0;
-        const cu = (mx2 + 0.5) / TAG_MODULES;
-        const cv = (my2 + 0.5) / TAG_MODULES;
-        const ru = u - cu;
-        const rv = v - cv;
-        if (ru * ru + rv * rv < 1e-10) continue;
-        const dot = decodeVoteBinRadialDot(u, v, cu, cv, gu, gv);
-        if (dot > DECODE_DOT_EPS) posM[mi] += 1;
-        else if (dot < -DECODE_DOT_EPS) negM[mi] += 1;
+        const mx2 = mi % TAG_MODULES
+        const my2 = (mi / TAG_MODULES) | 0
+        const cu = (mx2 + 0.5) / TAG_MODULES
+        const cv = (my2 + 0.5) / TAG_MODULES
+        const ru = u - cu
+        const rv = v - cv
+        if (ru * ru + rv * rv < 1e-10) continue
+        const dot = decodeVoteBinRadialDot(u, v, cu, cv, gu, gv)
+        if (dot > DECODE_DOT_EPS) posM[mi] += 1
+        else if (dot < -DECODE_DOT_EPS) negM[mi] += 1
       }
     }
   }
 
-  return { posM, negM, uvProximityMax };
+  return { posM, negM, uvProximityMax }
 }
 
 /**
@@ -647,29 +619,22 @@ export function decodeTagPatternWithVoteMaps(
   edgeMask?: Uint8Array,
   imageHeight?: number,
 ): DecodeTagPatternVoteMaps {
-  const imageH =
-    imageHeight !== undefined ? imageHeight : floor(sobelData.length / (2 * imageWidth));
-  const { posM, negM, uvProximityMax } = decodeTagPatternVoteAccumulation(
-    grid,
-    sobelData,
-    imageWidth,
-    imageH,
-    edgeMask,
-  );
+  const imageH = imageHeight !== undefined ? imageHeight : floor(sobelData.length / (2 * imageWidth))
+  const { posM, negM, uvProximityMax } = decodeTagPatternVoteAccumulation(grid, sobelData, imageWidth, imageH, edgeMask)
 
-  const pattern: TagPattern = [] as unknown as TagPattern;
+  const pattern: TagPattern = [] as unknown as TagPattern
   for (let row = 0; row < 6; row++) {
     for (let col = 0; col < 6; col++) {
-      const mx = col + 1;
-      const my = row + 1;
-      const mi = my * TAG_MODULES + mx;
-      const cell = classifyModuleFromPosNeg(posM[mi]!, negM[mi]!);
-      pattern.push(cell);
+      const mx = col + 1
+      const my = row + 1
+      const mi = my * TAG_MODULES + mx
+      const cell = classifyModuleFromPosNeg(posM[mi]!, negM[mi]!)
+      pattern.push(cell)
     }
   }
 
-  fillUnknownNeighbors6(pattern);
-  return { pattern, posM, negM, uvProximityMax };
+  fillUnknownNeighbors6(pattern)
+  return { pattern, posM, negM, uvProximityMax }
 }
 
 export function decodeTagPattern(
@@ -679,5 +644,5 @@ export function decodeTagPattern(
   edgeMask?: Uint8Array,
   imageHeight?: number,
 ): TagPattern {
-  return decodeTagPatternWithVoteMaps(grid, sobelData, imageWidth, edgeMask, imageHeight).pattern;
+  return decodeTagPatternWithVoteMaps(grid, sobelData, imageWidth, edgeMask, imageHeight).pattern
 }

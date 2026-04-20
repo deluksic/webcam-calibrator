@@ -1,9 +1,9 @@
 /** Pinhole intrinsics (skew fixed at 0 for v1 solver). */
 export interface CameraIntrinsics {
-  fx: number;
-  fy: number;
-  cx: number;
-  cy: number;
+  fx: number
+  fy: number
+  cx: number
+  cy: number
 }
 
 /**
@@ -19,8 +19,8 @@ export type RationalDistortion8 = readonly [
   k4: number,
   k5: number,
   k6: number,
-];
+]
 
 export function zeroRationalDistortion8(): RationalDistortion8 {
-  return [0, 0, 0, 0, 0, 0, 0, 0];
+  return [0, 0, 0, 0, 0, 0, 0, 0]
 }

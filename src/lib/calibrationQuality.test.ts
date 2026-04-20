@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
-import type { DetectedQuad } from "../gpu/contour";
-import { frameHasDuplicateDecodedTagIds } from "./calibrationQuality";
+import { describe, expect, it } from 'vitest'
+
+import type { DetectedQuad } from '@/gpu/contour'
+import { frameHasDuplicateDecodedTagIds } from '@/lib/calibrationQuality'
 
 function bareQuad(tagId?: number): DetectedQuad {
   return {
@@ -17,17 +18,22 @@ function bareQuad(tagId?: number): DetectedQuad {
     gridCells: null,
     pattern: null,
     hasCorners: true,
-    cornerDebug: { failureCode: 0, edgePixelCount: 100, minR2: 0.99, intersectionCount: 6 },
-    ...(typeof tagId === "number" ? { decodedTagId: tagId } : {}),
-  };
+    cornerDebug: {
+      failureCode: 0,
+      edgePixelCount: 100,
+      minR2: 0.99,
+      intersectionCount: 6,
+    },
+    ...(typeof tagId === 'number' ? { decodedTagId: tagId } : {}),
+  }
 }
 
-describe("frameHasDuplicateDecodedTagIds", () => {
-  it("returns false when all ids unique", () => {
-    expect(frameHasDuplicateDecodedTagIds([bareQuad(1), bareQuad(2)])).toBe(false);
-  });
+describe('frameHasDuplicateDecodedTagIds', () => {
+  it('returns false when all ids unique', () => {
+    expect(frameHasDuplicateDecodedTagIds([bareQuad(1), bareQuad(2)])).toBe(false)
+  })
 
-  it("returns true when same decoded id twice", () => {
-    expect(frameHasDuplicateDecodedTagIds([bareQuad(5), bareQuad(5)])).toBe(true);
-  });
-});
+  it('returns true when same decoded id twice', () => {
+    expect(frameHasDuplicateDecodedTagIds([bareQuad(5), bareQuad(5)])).toBe(true)
+  })
+})
