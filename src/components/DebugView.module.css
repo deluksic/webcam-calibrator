@@ -1,0 +1,41 @@
+.root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-8);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.debugToolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.debugCameraSelect {
+  max-width: min(100%, 320px);
+  width: 100%;
+}
+
+.debugModeRow {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+.logTail {
+  font: 9px monospace;
+  color: #4f8;
+  margin-top: var(--space-2);
+  max-width: 512px;
+}

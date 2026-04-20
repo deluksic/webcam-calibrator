@@ -4,8 +4,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-6);
-  padding: var(--space-8);
+  gap: var(--space-4);
+  padding: var(--space-6);
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -13,225 +13,79 @@
 
 .error {
   color: var(--color-error);
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
   text-align: center;
 }
 
-.loading {
-  color: var(--color-text-muted);
-  font-size: var(--text-base);
-}
-
-.feedRow {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  align-items: stretch;
-  width: 100%;
-  max-width: 100%;
-}
-
-.feedPanel {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.feedPanelMain {
-  width: 100%;
-  min-width: 0;
-}
-
-.feedPanelSide {
-  width: 100%;
-}
-
-.feedHeader {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.feedLabel {
+.hint {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
+  text-align: center;
+  max-width: 42rem;
+  line-height: var(--leading-relaxed);
 }
 
-.modeButtons {
-  display: flex;
-  gap: var(--space-1);
-}
-
-.cameraSelect {
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  color: var(--color-text);
-  font-size: var(--text-xs);
-  max-width: 140px;
-}
-
-.modeButton,
-.modeButtonActive {
-  box-sizing: border-box;
-  padding: var(--space-1) var(--space-3);
-  border-width: 1px;
-  border-style: solid;
-  border-radius: var(--radius-md);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-
-.modeButton {
-  border-color: var(--color-border);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-muted);
-}
-
-.modeButton:hover {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
-}
-
-.modeButtonActive {
-  border-color: var(--color-primary);
-  background: var(--color-primary);
-  color: white;
-}
-
-/* Avoid global focus ring on these (layered box-shadow reads like a second border). */
-.modeButtons button:focus-visible {
-  box-shadow: none;
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.checkboxLabel {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-}
-
-.checkboxLabel:hover {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
-}
-
-.checkboxLabel input[type="checkbox"] {
-  width: 12px;
-  height: 12px;
-  cursor: pointer;
-}
-
-.feedCanvas {
-  display: block;
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 50vh;
-  background: var(--color-bg-secondary);
-}
-
-.histogramCanvas {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: rgba(26, 26, 46, 0.8);
-}
-
-.histogramInfo {
+.cameraBlock {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  margin-top: var(--space-2);
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 100%;
+}
+
+.calibrateCameraSelect {
+  max-width: min(100%, 320px);
+  width: 100%;
 }
 
 .controls {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
-  margin-top: var(--space-4);
+  justify-content: center;
 }
 
-.controls button {
+.btn,
+.btnActive {
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  color: var(--color-text);
-  cursor: pointer;
   font-size: var(--text-sm);
+  cursor: pointer;
 }
 
-.controls button:hover {
+.btn {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.btn:hover {
   background: var(--color-bg-tertiary);
 }
 
-.controls button.active {
+.btnDisabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btnActive {
   background: var(--color-primary);
   color: white;
   border-color: var(--color-primary);
 }
 
-.histogramContainer {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.thresholdLabel {
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--space-2) var(--space-4);
   font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  font-family: monospace;
-}
-
-.thresholdValue {
-  font-size: var(--text-sm);
-  color: var(--color-text);
-  font-family: monospace;
-  font-weight: 600;
-}
-
-.thresholdValue span {
-  color: var(--color-primary);
-}
-
-.bbox {
-  position: absolute;
-  left: var(--bbox-x);
-  top: var(--bbox-y);
-  width: var(--bbox-w);
-  height: var(--bbox-h);
-  pointer-events: none;
-  box-sizing: border-box;
-  border: 1px solid rgba(0, 255, 0, 0.5);
-  background: rgba(0, 255, 0, 0.05);
-}
-
-.tagIdOverlay {
-  position: absolute;
-  left: var(--tag-x);
-  top: var(--tag-y);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
   font-family: ui-monospace, monospace;
-  font-size: 20px;
-  font-weight: 700;
-  color: #000;
-  text-shadow:
-    0 0 3px #fff,
-    0 0 6px #fff,
-    1px 0 0 #fff,
-    -1px 0 0 #fff,
-    0 1px 0 #fff,
-    0 -1px 0 #fff;
+  color: var(--color-text-muted);
+  max-width: 48rem;
+  width: 100%;
+}
+
+.stats div {
   white-space: nowrap;
 }

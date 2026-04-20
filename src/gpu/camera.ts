@@ -47,7 +47,7 @@ import {
   MAX_INSTANCES,
   type GridVizFailInterrogateMode,
 } from './pipelines/gridVizPipeline';
-import { computeHomography, type Point } from '../lib/geometry';
+import { tryComputeHomography } from '../lib/geometry';
 import {
   type DetectedQuad,
   filterNestedQuads,
@@ -806,7 +806,7 @@ export function updateQuadCornersBuffer(
   const data: QuadData[] = [];
   for (let i = 0; i < count; i++) {
     const quad = filtered[i];
-    const H = computeHomography(quad.corners);
+    const H = tryComputeHomography(quad.corners);
     const debug = quad.cornerDebug;
     const tagId =
       quad.vizTagId !== undefined && quad.vizTagId !== null
@@ -814,12 +814,14 @@ export function updateQuadCornersBuffer(
         : DECODED_TAG_ID_UNKNOWN;
 
     data.push({
-      homography: d.mat3x3f(
-        //transpose the matrix
-        H[0], H[3], H[6],
-        H[1], H[4], H[7],
-        H[2], H[5], 1,
-      ),
+      homography: H
+        ? d.mat3x3f(
+            // transpose the matrix
+            H[0], H[3], H[6],
+            H[1], H[4], H[7],
+            H[2], H[5], 1,
+          )
+        : d.mat3x3f(0, 0, 0, 0, 0, 0, 0, 0, 1),
       debug: {
         failureCode: debug ? debug.failureCode : 0,
         edgePixelCount: debug ? debug.edgePixelCount / 100 : 0,

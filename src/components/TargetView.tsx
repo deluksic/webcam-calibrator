@@ -4,7 +4,7 @@ import { selectRandomTags } from '../lib/april-tag-gen';
 import { gridVizFillRgbCss } from '../lib/hashStableColor';
 import styles from './TargetView.module.css';
 
-export default function TargetView() {
+export function TargetView() {
   const [cols, setCols] = createSignal(4);
   const [rows, setRows] = createSignal(3);
   const [spacing, setSpacing] = createSignal(1.5);

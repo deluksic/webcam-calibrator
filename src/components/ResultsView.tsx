@@ -1,6 +1,6 @@
 import styles from './ResultsView.module.css';
 
-export default function ResultsView() {
+export function ResultsView() {
   return (
     <div class={styles.root}>
       <div class={styles.placeholder}>

@@ -13,8 +13,11 @@ Browser-based camera calibration using AprilTag 6×6 grid. Client-side only — 
 | View | Description |
 |------|-------------|
 | **Target** | SVG AprilTag36h11 grid generator for printing |
-| **Calibrate** | Live camera feed, GPU pipeline, display modes |
+| **Calibrate** | Live camera + fixed grid/decode viz; **Start / Pause / Reset**; top‑K observation pool + stats (no print layout form in v1) |
 | **Results** | Calibration output + export (stub) |
+| **Debug** | Full GPU pipeline exploration: grayscale / edges / NMS / labels / grid / debug, histogram UI, fallbacks, dev logs |
+
+**Camera:** [`CameraStreamProvider`](src/components/camera/CameraStreamContext.tsx) at app root — shared `MediaStream`, device pick, `enumerateDevices` refresh on `devicechange`, constraint ladder + `getCapabilities` / `applyConstraints` upgrade (`src/lib/cameraStreamAcquire.ts`). **Live camera:** [`LiveCameraPipeline`](src/components/camera/LiveCameraPipeline.tsx) (Calibrate + Debug).
 
 ---
 
@@ -48,8 +51,8 @@ Step 8 failure ordering: **`ARCHITECTURE.md` → Corner Detection**. Grid + deco
 - [x] CSS design system
 
 ### Phase 2 — UI Shell
-- [x] App with view switching
-- [x] CalibrationView with display modes
+- [x] App with view switching (Target → Calibrate → Results → **Debug**)
+- [x] **Debug** view: display modes + histogram; **Calibrate** view: workflow + fixed grid (modes moved off Calibrate)
 
 ### Phase 3 — Camera + Grayscale
 - [x] Camera access + video display
@@ -113,7 +116,9 @@ See **`ARCHITECTURE.md` → Corner Detection** for the ordered CPU stages (what 
 
 ## Camera Model
 
-Brown-Conrady rational tangential (9 params):
+**Planned solver:** pinhole + **OpenCV rational** distortion (`k1, k2, p1, p2, k3, k4, k5, k6`). Types: [`src/lib/cameraModel.ts`](src/lib/cameraModel.ts).
+
+Legacy note (superseded for BA):
 
 ```
 Intrinsics: fx, fy, cx, cy (4)

@@ -176,11 +176,12 @@ export function cornerAngle(p1: Point, vertex: Point, p2: Point): number {
  *   x = (h1*u + h2*v + h3) / w
  *   y = (h4*u + h5*v + h6) / w
  *
- * Returns Float32Array of 8 values: [h1, h2, h3, h4, h5, h6, h7, h8]
+ * On success: 8 values `[h1, h2, h3, h4, h5, h6, h7, h8]`. Returns `null` if the 8×8 system is
+ * singular (degenerate / collinear corners, or wrong point count).
  */
-export function computeHomography(src: Point[]): Float32Array {
+export function tryComputeHomography(src: Point[]): Float32Array | null {
   if (src.length !== 4) {
-    throw new Error('computeHomography requires exactly 4 source points');
+    return null;
   }
 
   // Corner order: TL(0), TR(1), BL(2), BR(3)
@@ -241,8 +242,7 @@ export function computeHomography(src: Point[]): Float32Array {
 
     const pivot = A[col][col];
     if (Math.abs(pivot) < 1e-10) {
-      // Singular — shouldn't happen with 4 non-collinear corners
-      throw new Error('Singular homography matrix');
+      return null;
     }
 
     // Normalize pivot row
@@ -270,6 +270,20 @@ export function computeHomography(src: Point[]): Float32Array {
   }
 
   return new Float32Array(h);
+}
+
+/**
+ * Same as {@link tryComputeHomography}, but throws if the quad does not admit a unique homography.
+ */
+export function computeHomography(src: Point[]): Float32Array {
+  if (src.length !== 4) {
+    throw new Error('computeHomography requires exactly 4 source points');
+  }
+  const h = tryComputeHomography(src);
+  if (!h) {
+    throw new Error('Singular homography matrix');
+  }
+  return h;
 }
 
 /**

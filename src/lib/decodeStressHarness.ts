@@ -220,9 +220,6 @@ export function decodeStressSyntheticWithHomographyMismatch(
   const { sobel } = decodeStressRasterSobel(w, h, rasterStrip, pattern, supersample, tagId, speckleAmp);
   const grid = buildTagGrid(decodeStressCornersGridOrder(decodeStrip), 6);
   const decodedPattern = decodeTagPattern(grid, sobel, w, undefined, h);
-  if (!decodedPattern) {
-    throw new Error('decodeTagPattern returned null (unexpected in stress harness)');
-  }
   const best = decodeTag36h11Best(decodedPattern, 8);
   const rot = decodeTag36h11AnyRotation(decodedPattern, 8);
   return { best, rot, decodedPattern };

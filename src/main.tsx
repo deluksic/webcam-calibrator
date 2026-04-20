@@ -1,5 +1,5 @@
 import { Loading, render } from "@solidjs/web";
-import App from "./components/App";
+import { App } from "./components/App";
 import "./styles/global.css";
 import "./version";
 

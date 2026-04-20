@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "build": "vite build",
     "ship:watch": "vite build --watch 2>&1 | tee /tmp/ship-watch.log",
     "typecheck:watch": "tsc --noEmit --watch 2>&1 | tee /tmp/tsc-watch.log",
     "check": "tsx scripts/check.ts",

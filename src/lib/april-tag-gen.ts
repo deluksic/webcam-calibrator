@@ -135,7 +135,12 @@ export function generateTagGridSVG(options: Partial<TagGridOptions> = {}): strin
       const pattern = codeToPattern(TAG36H11_CODES[tagId]);
       const tagX = startX + c * (tagSize + boardSize);
       const tagY = startY + r * (tagSize + boardSize);
-      svg += generateTagSVG(tagSize, tagX, tagY, pattern);
+      svg += generateTagSVG(
+        tagSize,
+        tagX,
+        tagY,
+        pattern as (0 | 1 | -1)[],
+      );
     }
   }
 

@@ -7,6 +7,7 @@ import {
   subdivideSegment,
   quadAspectRatio,
   computeHomography,
+  tryComputeHomography,
   applyHomography,
   computeProjectiveWeights,
 } from './geometry';
@@ -268,6 +269,31 @@ describe('geometry', () => {
       expect(applyHomography(H, 0, 1).y).toBeCloseTo(50, 3);
       expect(applyHomography(H, 1, 1).x).toBeCloseTo(640, 3);
       expect(applyHomography(H, 1, 1).y).toBeCloseTo(40, 3);
+    });
+  });
+
+  describe('tryComputeHomography', () => {
+    it('returns null for coincident corners (singular)', () => {
+      const p = { x: 10, y: 20 };
+      expect(tryComputeHomography([p, p, p, p])).toBeNull();
+    });
+
+    it('returns null when point count is not 4', () => {
+      expect(tryComputeHomography([])).toBeNull();
+      expect(tryComputeHomography([{ x: 0, y: 0 }])).toBeNull();
+    });
+
+    it('matches computeHomography for a valid quad', () => {
+      const src = [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 1, y: 1 },
+      ];
+      const a = tryComputeHomography(src);
+      const b = computeHomography(src);
+      expect(a).not.toBeNull();
+      expect([...a!]).toEqual([...b]);
     });
   });
 

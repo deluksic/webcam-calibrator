@@ -2,7 +2,7 @@
 // Uses line intersection + proportional subdivision (no bilinear interpolation)
 
 import { imagePixelToUnitSquareUv } from './aprilTagRaycast';
-import { Point, computeHomography, lineFromPoints, lineIntersection, subdivideSegment } from './geometry';
+import { Point, tryComputeHomography, lineFromPoints, lineIntersection, subdivideSegment } from './geometry';
 import type { TagPattern } from './tag36h11';
 
 const { min, max, abs, floor, ceil, hypot } = Math;
@@ -235,7 +235,7 @@ const TAU_MODULE_UV = 0.1 / TAG_MODULES;
 const MIN_QUAD_EDGE_EPS_PX = 1e-6;
 
 /**
- * Jacobian **J** = ∂(x,y)/∂(u,v) for `applyHomography` / `computeHomography` (same 8-parameter `h`).
+ * Jacobian **J** = ∂(x,y)/∂(u,v) for `applyHomography` / homography 8-vector `h`.
  *
  * Forward map (tag UV → image pixels), with **w = h₆u + h₇v + 1**:
  *
@@ -572,11 +572,19 @@ function decodeTagPatternVoteAccumulation(
 ): { posM: Float64Array; negM: Float64Array; uvProximityMax: number } {
   const oc = grid.outerCorners;
   const strip: [Point, Point, Point, Point] = [oc[0], oc[1], oc[3], oc[2]];
-  const h = computeHomography([...strip]);
+  const h = tryComputeHomography([...strip]);
 
   const lMin = minQuadEdgeLengthPx(oc);
   const uvHalfModule = 0.5 / TAG_MODULES;
   const uvProximityMax = max(TAU_MODULE_UV, 2 / lMin, uvHalfModule);
+
+  if (!h) {
+    return {
+      posM: new Float64Array(64),
+      negM: new Float64Array(64),
+      uvProximityMax,
+    };
+  }
 
   let x0 = min(oc[0].x, oc[1].x, oc[2].x, oc[3].x);
   let y0 = min(oc[0].y, oc[1].y, oc[2].y, oc[3].y);
@@ -671,6 +679,6 @@ export function decodeTagPattern(
   imageWidth: number,
   edgeMask?: Uint8Array,
   imageHeight?: number,
-): TagPattern | null {
+): TagPattern {
   return decodeTagPatternWithVoteMaps(grid, sobelData, imageWidth, edgeMask, imageHeight).pattern;
 }
