@@ -1,10 +1,4 @@
-import {
-  For,
-  Show,
-  createMemo,
-  createSignal,
-  isPending,
-} from "solid-js";
+import { For, Show, createMemo, createSignal, isPending } from "solid-js";
 import {
   LiveCameraPipeline,
   type DisplayMode,
@@ -164,9 +158,9 @@ export function DebugView() {
         toolbar={toolbar}
       />
       <div class={styles.logTail}>
-        {logs().map((line) => (
-          <div>{line}</div>
-        ))}
+        <For each={logs()} keyed={false}>
+          {(line) => <div>{line()}</div>}
+        </For>
       </div>
     </div>
   );

@@ -26,16 +26,22 @@ export async function tryUpgradeVideoTrack(track: MediaStreamTrack): Promise<voi
   const sh = settings.height ?? 0;
   if (sw >= w.max * 0.92 && sh >= h.max * 0.92) return;
 
-  const targetW = Math.min(w.max, 1920);
-  const targetH = Math.min(h.max, 1080);
-  try {
-    await track.applyConstraints({
-      width: { ideal: targetW },
-      height: { ideal: targetH },
-    });
-    await new Promise((r) => setTimeout(r, 120));
-  } catch {
-    /* keep default */
+  const targetW = Math.min(w.max, 1280);
+  const targetH = Math.min(h.max, 720);
+  for (const attempt of [0, 1, 2]) {
+    try {
+      await track.applyConstraints({
+        width: { ideal: targetW },
+        height: { ideal: targetH },
+      });
+      await new Promise((r) => setTimeout(r, 120 + attempt * 100));
+      const after = track.getSettings();
+      const aw = after.width ?? 0;
+      const ah = after.height ?? 0;
+      if (aw >= targetW * 0.85 && ah >= targetH * 0.85) break;
+    } catch {
+      /* keep default */
+    }
   }
 }
 
