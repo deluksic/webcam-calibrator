@@ -1,8 +1,5 @@
 import { For, Show, createMemo, createSignal, isPending } from "solid-js";
-import {
-  LiveCameraPipeline,
-  type DisplayMode,
-} from "./camera/LiveCameraPipeline";
+import { LiveCameraPipeline, type DisplayMode } from "./camera/LiveCameraPipeline";
 import { useCameraStream } from "./camera/CameraStreamContext";
 import styles from "./DebugView.module.css";
 import pipelineStyles from "./camera/LiveCameraPipeline.module.css";
@@ -27,10 +24,7 @@ export function DebugView() {
 
   const log = (msg: string) => {
     Promise.resolve().then(() => {
-      setLogs((prev) => [
-        ...prev.slice(-8),
-        `${new Date().toISOString().slice(11, 19)} ${msg}`,
-      ]);
+      setLogs((prev) => [...prev.slice(-8), `${new Date().toISOString().slice(11, 19)} ${msg}`]);
       console.log(msg);
     });
   };
@@ -76,9 +70,7 @@ export function DebugView() {
         <button
           type="button"
           class={
-            displayMode() === "edges"
-              ? pipelineStyles.modeButtonActive
-              : pipelineStyles.modeButton
+            displayMode() === "edges" ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
           }
           onClick={() => setDisplayMode("edges")}
         >
@@ -87,9 +79,7 @@ export function DebugView() {
         <button
           type="button"
           class={
-            displayMode() === "nms"
-              ? pipelineStyles.modeButtonActive
-              : pipelineStyles.modeButton
+            displayMode() === "nms" ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
           }
           onClick={() => setDisplayMode("nms")}
         >
@@ -98,9 +88,7 @@ export function DebugView() {
         <button
           type="button"
           class={
-            displayMode() === "labels"
-              ? pipelineStyles.modeButtonActive
-              : pipelineStyles.modeButton
+            displayMode() === "labels" ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
           }
           onClick={() => setDisplayMode("labels")}
         >
@@ -109,9 +97,7 @@ export function DebugView() {
         <button
           type="button"
           class={
-            displayMode() === "grid"
-              ? pipelineStyles.modeButtonActive
-              : pipelineStyles.modeButton
+            displayMode() === "grid" ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
           }
           onClick={() => setDisplayMode("grid")}
         >
@@ -128,9 +114,7 @@ export function DebugView() {
         <button
           type="button"
           class={
-            displayMode() === "debug"
-              ? pipelineStyles.modeButtonActive
-              : pipelineStyles.modeButton
+            displayMode() === "debug" ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
           }
           onClick={() => setDisplayMode("debug")}
         >
@@ -143,9 +127,7 @@ export function DebugView() {
   return (
     <div class={styles.root}>
       {cam.streamError() ? (
-        <p style={{ color: "var(--color-error)" }}>
-          Camera: {cam.streamError()}
-        </p>
+        <p style={{ color: "var(--color-error)" }}>Camera: {cam.streamError()}</p>
       ) : null}
       <LiveCameraPipeline
         displayMode={displayMode}

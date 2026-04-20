@@ -9,6 +9,7 @@
 - `pnpm typecheck:watch` — typecheck on file changes.
 
 Watchers log to:
+
 - Typecheck: `/tmp/tsc-watch.log`
 - Build: `/tmp/ship-watch.log`
 

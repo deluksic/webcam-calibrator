@@ -38,8 +38,8 @@ npm install --save-dev unplugin-typegpu
 ### Vite
 
 ```js title="vite.config.js"
-import { defineConfig } from 'vite';
-import typegpu from 'unplugin-typegpu/vite';
+import { defineConfig } from "vite";
+import typegpu from "unplugin-typegpu/vite";
 
 export default defineConfig({
   plugins: [typegpu()],
@@ -52,8 +52,8 @@ export default defineConfig({
 module.exports = (api) => {
   api.cache(true);
   return {
-    presets: ['babel-preset-expo'],
-    plugins: ['unplugin-typegpu/babel'],
+    presets: ["babel-preset-expo"],
+    plugins: ["unplugin-typegpu/babel"],
   };
 };
 ```
@@ -125,7 +125,7 @@ Add `"tsover"` to `lib` in `tsconfig.json`:
 Only needed if you use operators outside `'use gpu'` blocks. Most projects can skip this.
 
 ```js title="vite.config.js"
-import tsoverPlugin from 'tsover/plugin/vite';
+import tsoverPlugin from "tsover/plugin/vite";
 // add to plugins array alongside typegpuPlugin()
 ```
 
@@ -148,8 +148,8 @@ Zed: set `tsdk` in `.zed/settings.json` for `vtsls` or `typescript-language-serv
 ## Minimal `vite.config.js`
 
 ```js
-import { defineConfig } from 'vite';
-import typegpu from 'unplugin-typegpu/vite';
+import { defineConfig } from "vite";
+import typegpu from "unplugin-typegpu/vite";
 
 export default defineConfig({
   plugins: [typegpu()],
@@ -170,8 +170,8 @@ export default defineConfig({
 
 ## Lint plugin - `eslint-plugin-typegpu`
 
-Highlights common pitfalls and unsupported syntax in `'use gpu'` functions. 
-Optional, but highly recommended. 
+Highlights common pitfalls and unsupported syntax in `'use gpu'` functions.
+Optional, but highly recommended.
 Use unless told otherwise, or unless the project uses incompatible linter.
 Include a `lint` script in `package.json`.
 
@@ -183,13 +183,13 @@ npm install --save-dev eslint-plugin-typegpu
 ### ESLint (`eslint.config.js`)
 
 ```ts
-import { defineConfig } from 'eslint/config';
-import typegpu from 'eslint-plugin-typegpu';
+import { defineConfig } from "eslint/config";
+import typegpu from "eslint-plugin-typegpu";
 
 export default defineConfig([
   {
     ...typegpu.configs.recommended,
-    files: ['**/*.{js,mjs,ts,jsx,tsx}'],
+    files: ["**/*.{js,mjs,ts,jsx,tsx}"],
   },
 ]);
 ```
@@ -197,14 +197,14 @@ export default defineConfig([
 ### Oxlint (`oxlint.config.ts`)
 
 ```ts
-import { defineConfig } from 'oxlint';
-import typegpu from 'eslint-plugin-typegpu';
+import { defineConfig } from "oxlint";
+import typegpu from "eslint-plugin-typegpu";
 
 export default defineConfig({
-  jsPlugins: ['eslint-plugin-typegpu'],
+  jsPlugins: ["eslint-plugin-typegpu"],
   rules: {
     ...typegpu.configs.recommended.rules,
   },
-  ignorePatterns: ['node_modules'],
+  ignorePatterns: ["node_modules"],
 });
 ```

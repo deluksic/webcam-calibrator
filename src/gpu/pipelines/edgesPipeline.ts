@@ -1,8 +1,8 @@
 // Edge render pipeline: filteredBuffer + sobelBuffer → edges canvas
 // Colorizes edges by gradient direction using continuous HSV coloring.
-import { tgpu, d, std } from 'typegpu';
-import { common } from 'typegpu';
-import { atan2, clamp, floor, length, max } from 'typegpu/std';
+import { tgpu, d, std } from "typegpu";
+import { common } from "typegpu";
+import { atan2, clamp, floor, length, max } from "typegpu/std";
 
 export function createEdgesPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -15,7 +15,7 @@ export function createEdgesPipeline(
     in: { uv: d.location(0, d.vec2f) },
     out: d.vec4f,
   })((i) => {
-    'use gpu';
+    "use gpu";
     const wi = d.i32(width);
     const hi = d.i32(height);
     const maxPx = d.f32(wi - d.i32(1));
@@ -38,13 +38,19 @@ export function createEdgesPipeline(
 
     // TODO: clean up this angle stuff, avoid if statements
     let angle = atan2(gyn, gxn) / d.f32(6.28318530718) + d.f32(0.5);
-    if (angle < d.f32(0)) { angle = angle + d.f32(1); }
-    if (angle >= d.f32(1)) { angle = angle - d.f32(1); }
+    if (angle < d.f32(0)) {
+      angle = angle + d.f32(1);
+    }
+    if (angle >= d.f32(1)) {
+      angle = angle - d.f32(1);
+    }
 
     let hue = angle + d.f32(0.5);
-    if (hue >= d.f32(1)) { hue = hue - d.f32(1); }
+    if (hue >= d.f32(1)) {
+      hue = hue - d.f32(1);
+    }
 
-    const sat = d.f32(0.90);
+    const sat = d.f32(0.9);
     const val = max(mag, d.f32(0.2));
     const h = hue * d.f32(6);
     const sector = floor(h);
@@ -57,12 +63,31 @@ export function createEdgesPipeline(
     let r = d.f32(0);
     let gV = d.f32(0);
     let b = d.f32(0);
-    if (s === d.f32(0)) { r = val; gV = t; b = p; }
-    else if (s === d.f32(1)) { r = q; gV = val; b = p; }
-    else if (s === d.f32(2)) { r = p; gV = val; b = t; }
-    else if (s === d.f32(3)) { r = p; gV = q; b = val; }
-    else if (s === d.f32(4)) { r = t; gV = p; b = val; }
-    else { r = val; gV = p; b = q; }
+    if (s === d.f32(0)) {
+      r = val;
+      gV = t;
+      b = p;
+    } else if (s === d.f32(1)) {
+      r = q;
+      gV = val;
+      b = p;
+    } else if (s === d.f32(2)) {
+      r = p;
+      gV = val;
+      b = t;
+    } else if (s === d.f32(3)) {
+      r = p;
+      gV = q;
+      b = val;
+    } else if (s === d.f32(4)) {
+      r = t;
+      gV = p;
+      b = val;
+    } else {
+      r = val;
+      gV = p;
+      b = q;
+    }
 
     return d.vec4f(r, gV, b, d.f32(1));
   });

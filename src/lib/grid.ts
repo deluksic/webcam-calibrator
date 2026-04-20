@@ -1,9 +1,15 @@
 // Perspective-correct grid subdivision for AprilTag decode
 // Uses line intersection + proportional subdivision (no bilinear interpolation)
 
-import { imagePixelToUnitSquareUv } from './aprilTagRaycast';
-import { Point, tryComputeHomography, lineFromPoints, lineIntersection, subdivideSegment } from './geometry';
-import type { TagPattern } from './tag36h11';
+import { imagePixelToUnitSquareUv } from "./aprilTagRaycast";
+import {
+  Point,
+  tryComputeHomography,
+  lineFromPoints,
+  lineIntersection,
+  subdivideSegment,
+} from "./geometry";
+import type { TagPattern } from "./tag36h11";
 
 const { min, max, abs, floor, ceil, hypot } = Math;
 
@@ -30,12 +36,7 @@ export interface GridResult {
  * @param divisions Number of segments
  * @param offset Which division point (1 to divisions-1)
  */
-function subdivideEdgeProportional(
-  p1: Point,
-  p2: Point,
-  divisions: number,
-  offset: number,
-): Point {
+function subdivideEdgeProportional(p1: Point, p2: Point, divisions: number, offset: number): Point {
   const t = offset / divisions;
   return {
     x: p1.x + t * (p2.x - p1.x),
@@ -321,7 +322,7 @@ export function primaryModuleFromUv(u: number, v: number): { mx: number; my: num
   return { mx, my };
 }
 
-export type DecodeTriangle = 'top' | 'bottom' | 'left' | 'right';
+export type DecodeTriangle = "top" | "bottom" | "left" | "right";
 
 /** Four wedges meeting at module center `(½,½)` in local `[0,1]²` (center + diagonals). */
 export function decodeTriangleFromLocalUv(fu: number, fv: number): DecodeTriangle {
@@ -329,10 +330,10 @@ export function decodeTriangleFromLocalUv(fu: number, fv: number): DecodeTriangl
   const dv = fv - 0.5;
   const d1 = dv <= du;
   const d2 = dv <= -du;
-  if (d1 && d2) return 'top';
-  if (!d1 && !d2) return 'bottom';
-  if (du >= 0) return 'right';
-  return 'left';
+  if (d1 && d2) return "top";
+  if (!d1 && !d2) return "bottom";
+  if (du >= 0) return "right";
+  return "left";
 }
 
 /**
@@ -354,19 +355,19 @@ export function decodeVoteModuleIndices(mx: number, my: number, tri: DecodeTrian
     out.push(y * TAG_MODULES + x);
   };
   switch (tri) {
-    case 'top':
+    case "top":
       push(mx, my - 1);
       push(mx, my);
       break;
-    case 'bottom':
+    case "bottom":
       push(mx, my);
       push(mx, my + 1);
       break;
-    case 'left':
+    case "left":
       push(mx - 1, my);
       push(mx, my);
       break;
-    case 'right':
+    case "right":
       push(mx, my);
       push(mx + 1, my);
       break;
@@ -389,13 +390,13 @@ export function decodeEdgeAlignedDot(
   gv: number,
 ): number {
   switch (tri) {
-    case 'top':
+    case "top":
       return gv * (v - my / TAG_MODULES);
-    case 'bottom':
+    case "bottom":
       return gv * (v - (my + 1) / TAG_MODULES);
-    case 'left':
+    case "left":
       return gu * (u - mx / TAG_MODULES);
-    case 'right':
+    case "right":
       return gu * (u - (mx + 1) / TAG_MODULES);
   }
 }
@@ -415,11 +416,11 @@ export function decodeVoteBinEdgeChannelDot(
   gv: number,
 ): number {
   switch (tri) {
-    case 'top':
-    case 'bottom':
+    case "top":
+    case "bottom":
       return gv * (v - cv);
-    case 'left':
-    case 'right':
+    case "left":
+    case "right":
       return gu * (u - cu);
   }
 }
@@ -647,9 +648,7 @@ export function decodeTagPatternWithVoteMaps(
   imageHeight?: number,
 ): DecodeTagPatternVoteMaps {
   const imageH =
-    imageHeight !== undefined
-      ? imageHeight
-      : floor(sobelData.length / (2 * imageWidth));
+    imageHeight !== undefined ? imageHeight : floor(sobelData.length / (2 * imageWidth));
   const { posM, negM, uvProximityMax } = decodeTagPatternVoteAccumulation(
     grid,
     sobelData,

@@ -2,15 +2,15 @@
 // Generates SVG with configurable NxM tag grid, spacing, and checkerboard
 // Uses real tag36h11 dictionary from AprilRobotics/apriltag
 
-import { codeToPattern, TAG36H11_CODES, TAG36H11_COUNT } from './tag36h11';
+import { codeToPattern, TAG36H11_CODES, TAG36H11_COUNT } from "./tag36h11";
 
 export interface TagGridOptions {
-  cols: number;      // Number of tags horizontally
-  rows: number;      // Number of tags vertically
-  tagSize: number;   // Tag side length in mm (or any unit)
-  spacing: number;   // Spacing between tags, as multiple of tagSize (e.g., 1.5)
+  cols: number; // Number of tags horizontally
+  rows: number; // Number of tags vertically
+  tagSize: number; // Tag side length in mm (or any unit)
+  spacing: number; // Spacing between tags, as multiple of tagSize (e.g., 1.5)
   checkerboard: boolean; // Include checkerboard squares between tags
-  margin: number;    // Margin around grid, as multiple of tagSize
+  margin: number; // Margin around grid, as multiple of tagSize
   /** Array of tag IDs to display (one per grid cell). If not provided, uses indices. */
   tagIds?: number[];
 }
@@ -49,9 +49,14 @@ const DEFAULT_OPTIONS: TagGridOptions = {
  * Uses real tag36h11 dictionary encoding via codeToPattern.
  * White background with black tag cells.
  */
-function generateTagSVG(tagSize: number, offsetX: number, offsetY: number, pattern: (0 | 1 | -1)[]): string {
+function generateTagSVG(
+  tagSize: number,
+  offsetX: number,
+  offsetY: number,
+  pattern: (0 | 1 | -1)[],
+): string {
   const cellSize = tagSize / 8;
-  let svg = '';
+  let svg = "";
 
   for (let my = 0; my < 8; my++) {
     for (let mx = 0; mx < 8; mx++) {
@@ -89,7 +94,7 @@ function generateCheckerboard(
   const cols_1 = cols - 1;
   const rows_1 = rows - 1;
 
-  let svg = '';
+  let svg = "";
 
   // Squares only at intersections of horizontal and vertical gaps
   for (let r = 0; r < rows_1; r++) {
@@ -135,12 +140,7 @@ export function generateTagGridSVG(options: Partial<TagGridOptions> = {}): strin
       const pattern = codeToPattern(TAG36H11_CODES[tagId]);
       const tagX = startX + c * (tagSize + boardSize);
       const tagY = startY + r * (tagSize + boardSize);
-      svg += generateTagSVG(
-        tagSize,
-        tagX,
-        tagY,
-        pattern as (0 | 1 | -1)[],
-      );
+      svg += generateTagSVG(tagSize, tagX, tagY, pattern as (0 | 1 | -1)[]);
     }
   }
 
@@ -149,7 +149,7 @@ export function generateTagGridSVG(options: Partial<TagGridOptions> = {}): strin
     svg += generateCheckerboard(tagSize, spacing, cols, rows, startX, startY);
   }
 
-  svg += '</svg>';
+  svg += "</svg>";
   return svg;
 }
 
@@ -177,6 +177,6 @@ export function generateSingleTagSVG(tagSize: number, tagId: number = 0): string
     }
   }
 
-  svg += '</svg>';
+  svg += "</svg>";
   return svg;
 }

@@ -12,13 +12,13 @@
  *
  * Inner 6×6 (row=0,col=1) → pattern index 1 → mx=2,my=1 → mi=10.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { PNG } from 'pngjs';
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { PNG } from "pngjs";
 
-import { computeHomography } from '../src/lib/geometry';
-import { imagePixelToUnitSquareUv } from '../src/lib/aprilTagRaycast';
+import { computeHomography } from "../src/lib/geometry";
+import { imagePixelToUnitSquareUv } from "../src/lib/aprilTagRaycast";
 import {
   buildTagGrid,
   decodeEdgeDistanceUv,
@@ -29,15 +29,15 @@ import {
   imageSobelToTagGradient,
   minQuadEdgeLengthPx,
   primaryModuleFromUv,
-} from '../src/lib/grid';
+} from "../src/lib/grid";
 import {
   decodeStressCornersGridOrder,
   decodeStressFitPerspectiveStrip,
   decodeStressHomographyMismatchScaleForMaxAxisPx,
   decodeStressRasterSobel,
   decodeStressStripWithHomographyMismatchOffsetsPx,
-} from '../src/lib/decodeStressHarness';
-import { TAG36H11_CODES, codeToPattern } from '../src/lib/tag36h11';
+} from "../src/lib/decodeStressHarness";
+import { TAG36H11_CODES, codeToPattern } from "../src/lib/tag36h11";
 
 const TAG = 8;
 const DOT_EPS = 1e-8;
@@ -46,10 +46,10 @@ const SPECKLE = 0;
 const TAG_ID = 0;
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const FORENSICS_OUT = join(scriptDir, '..', 'output', 'decode-stress', 'forensics');
+const FORENSICS_OUT = join(scriptDir, "..", "output", "decode-stress", "forensics");
 
 function homoMaxAxisTagForFilename(maxAxisPx: number): string {
-  return String(maxAxisPx).replace(/\./g, 'p');
+  return String(maxAxisPx).replace(/\./g, "p");
 }
 
 function writeVotesOnRasterPng(
@@ -112,12 +112,20 @@ function classify(pos: number, neg: number): string {
   return `-2 tie (pos=${pos} neg=${neg})`;
 }
 
-type Sample = { ix: number; iy: number; u: number; v: number; tri: string; dot: number; sign: 'pos' | 'neg' | 'skip' };
+type Sample = {
+  ix: number;
+  iy: number;
+  u: number;
+  v: number;
+  tri: string;
+  dot: number;
+  sign: "pos" | "neg" | "skip";
+};
 
-function signFromDot(dot: number): Sample['sign'] {
-  if (dot > DOT_EPS) return 'pos';
-  if (dot < -DOT_EPS) return 'neg';
-  return 'skip';
+function signFromDot(dot: number): Sample["sign"] {
+  if (dot > DOT_EPS) return "pos";
+  if (dot < -DOT_EPS) return "neg";
+  return "skip";
 }
 
 function main() {
@@ -144,7 +152,13 @@ function main() {
   );
 
   const grid = buildTagGrid(decodeStressCornersGridOrder(decodeStrip), 6);
-  const { pattern, posM, negM, uvProximityMax } = decodeTagPatternWithVoteMaps(grid, sobel, wh, undefined, wh);
+  const { pattern, posM, negM, uvProximityMax } = decodeTagPatternWithVoteMaps(
+    grid,
+    sobel,
+    wh,
+    undefined,
+    wh,
+  );
 
   const oc = grid.outerCorners;
   const strip = [oc[0], oc[1], oc[3], oc[2]] as const;
@@ -162,18 +176,26 @@ function main() {
   console.log(
     `wh=${wh} homography max-axis≈${hMaxAxisPx}px (scale=${scaleDiag.toFixed(6)}), tagId=${TAG_ID}, ss=${ss}, speckle=${SPECKLE}`,
   );
-  console.log(`uvProximityMax=${uvProximityMax.toFixed(6)} (TAU/Lmin/half) grid lMin≈${lMin.toFixed(2)}px`);
-  console.log('');
+  console.log(
+    `uvProximityMax=${uvProximityMax.toFixed(6)} (TAU/Lmin/half) grid lMin≈${lMin.toFixed(2)}px`,
+  );
+  console.log("");
 
   const pi = row * 6 + col;
-  console.log(`--- inner 6×6 (row=${row},col=${col}) pattern[${pi}] → 8×8 mi=${miInner} (mx=${mxInner},my=${myInner}) ---`);
+  console.log(
+    `--- inner 6×6 (row=${row},col=${col}) pattern[${pi}] → 8×8 mi=${miInner} (mx=${mxInner},my=${myInner}) ---`,
+  );
   console.log(`truth[${pi}]=${truthPat[pi]} decoded[${pi}]=${pattern[pi]}`);
-  console.log(`posM[${miInner}]=${posM[miInner]} negM[${miInner}]=${negM[miInner]} → ${classify(posM[miInner]!, negM[miInner]!)}`);
-  console.log('');
+  console.log(
+    `posM[${miInner}]=${posM[miInner]} negM[${miInner}]=${negM[miInner]} → ${classify(posM[miInner]!, negM[miInner]!)}`,
+  );
+  console.log("");
   if (target !== miInner) {
     console.log(`--- module mi=${target} (mx=${target % TAG}, my=${(target / TAG) | 0}) ---`);
-    console.log(`posM[${target}]=${posM[target]} negM[${target}]=${negM[target]} → ${classify(posM[target]!, negM[target]!)}`);
-    console.log('');
+    console.log(
+      `posM[${target}]=${posM[target]} negM[${target}]=${negM[target]} → ${classify(posM[target]!, negM[target]!)}`,
+    );
+    console.log("");
   }
 
   const samples: Sample[] = [];
@@ -217,10 +239,10 @@ function main() {
         if (ru * ru + rv * rv < 1e-10) continue;
         const dot = decodeVoteBinRadialDot(u, v, cu, cv, gu, gv);
         const sign = signFromDot(dot);
-        if (sign === 'pos') scriptPos++;
-        else if (sign === 'neg') scriptNeg++;
+        if (sign === "pos") scriptPos++;
+        else if (sign === "neg") scriptNeg++;
         const p = iy * wh + ix;
-        voteKind[p] = sign === 'pos' ? 1 : sign === 'neg' ? 2 : 3;
+        voteKind[p] = sign === "pos" ? 1 : sign === "neg" ? 2 : 3;
         samples.push({ ix, iy, u, v, tri, dot, sign });
       }
     }
@@ -230,12 +252,12 @@ function main() {
     console.warn(
       `script tallies mi=${target} pos/neg ${scriptPos}/${scriptNeg} vs decode posM/negM ${posM[target]}/${negM[target]} (should match)`,
     );
-    console.log('');
+    console.log("");
   }
 
   const pngPath = writeVotesOnRasterPng(wh, target, ss, hMaxAxisPx, voteKind, intensity);
   console.log(`Wrote votes on intensity raster: ${pngPath}`);
-  console.log('');
+  console.log("");
 
   samples.sort((a, b) => Math.abs(b.dot) - Math.abs(a.dot));
   console.log(`--- up to 40 strongest radial vote samples into mi=${target} ---`);
@@ -244,10 +266,12 @@ function main() {
       `${s.ix},${s.iy} tri=${s.tri} dot=${s.dot.toExponential(4)} ${s.sign} u=${s.u.toFixed(5)} v=${s.v.toFixed(5)}`,
     );
   }
-  const nPos = samples.filter((s) => s.sign === 'pos').length;
-  const nNeg = samples.filter((s) => s.sign === 'neg').length;
-  const nSkip = samples.filter((s) => s.sign === 'skip').length;
-  console.log(`total pixel-bin contributions into mi=${target}: ${samples.length} (pos ${nPos} neg ${nNeg} deadband ${nSkip})`);
+  const nPos = samples.filter((s) => s.sign === "pos").length;
+  const nNeg = samples.filter((s) => s.sign === "neg").length;
+  const nSkip = samples.filter((s) => s.sign === "skip").length;
+  console.log(
+    `total pixel-bin contributions into mi=${target}: ${samples.length} (pos ${nPos} neg ${nNeg} deadband ${nSkip})`,
+  );
 }
 
 main();

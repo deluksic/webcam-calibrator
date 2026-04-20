@@ -1,7 +1,7 @@
 // Grid visualization pipeline: instanced quad rendering via homography warping
-import { tgpu, d } from 'typegpu';
-import { abs, floor, fract, min, max, dpdx, dpdy, mul } from 'typegpu/std';
-import { stableHashToRgb01 } from '../../lib/hashStableColor';
+import { tgpu, d } from "typegpu";
+import { abs, floor, fract, min, max, dpdx, dpdy, mul } from "typegpu/std";
+import { stableHashToRgb01 } from "../../lib/hashStableColor";
 
 export const GRID_DIVISIONS = 8;
 export const GRID_LINE_WIDTH = 0.06;
@@ -36,7 +36,7 @@ export function createGridVizLayouts(
   _quadCornersBuffer: unknown,
 ) {
   const gridVizLayout = tgpu.bindGroupLayout({
-    quads: { storage: GridDataSchema, access: 'readonly' },
+    quads: { storage: GridDataSchema, access: "readonly" },
     failInterrogate: { uniform: d.u32 },
   });
   return { gridVizLayout };
@@ -57,11 +57,11 @@ export function createGridVizPipeline(
     out: {
       outPos: d.builtin.position,
       uv: d.vec2f,
-      failureCode: d.interpolate('flat', d.u32),
+      failureCode: d.interpolate("flat", d.u32),
       edgeCount: d.f32,
       minR2: d.f32,
       intersectionCount: d.f32,
-      decodedTagId: d.interpolate('flat', d.u32),
+      decodedTagId: d.interpolate("flat", d.u32),
     },
   })(({ vertexIndex, instanceIndex }) => {
     const quad = gridVizLayout.$.quads[instanceIndex];
@@ -77,8 +77,8 @@ export function createGridVizPipeline(
 
     // imgPos is homogeneous (x', y', w'); Cartesian image coords are x'/w', y'/w'.
     // Emit clip so that clip.xy / w = NDC with origin at image center, y flipped.
-    const clipX = 2 * imgX / width - w;
-    const clipY = w - 2 * imgY / height;
+    const clipX = (2 * imgX) / width - w;
+    const clipY = w - (2 * imgY) / height;
 
     return {
       outPos: d.vec4f(clipX, clipY, 0, w),
@@ -92,7 +92,7 @@ export function createGridVizPipeline(
   });
 
   const gridTextureGradBox = (p: d.v2f, ddx: d.v2f, ddy: d.v2f, N: number) => {
-    'use gpu';
+    "use gpu";
     const half = 0.5;
     const epsilon = 0.01;
     const lw = GRID_LINE_WIDTH;
@@ -106,7 +106,12 @@ export function createGridVizPipeline(
     const a = scaledP + wv * half;
     const b = scaledP - wv * half;
 
-    const iv = (floor(a) + min(fract(a) * d.f32(N), d.vec2f(1)) - floor(b) - min(fract(b) * d.f32(N), d.vec2f(1))) / (d.f32(N) * wv);
+    const iv =
+      (floor(a) +
+        min(fract(a) * d.f32(N), d.vec2f(1)) -
+        floor(b) -
+        min(fract(b) * d.f32(N), d.vec2f(1))) /
+      (d.f32(N) * wv);
 
     const inside = (1 - iv.x) * (1 - iv.y);
     return 1 - inside;
@@ -116,8 +121,8 @@ export function createGridVizPipeline(
     in: {
       uv: d.vec2f,
       outPos: d.builtin.position,
-      failureCode: d.interpolate('flat', d.u32),
-      decodedTagId: d.interpolate('flat', d.u32),
+      failureCode: d.interpolate("flat", d.u32),
+      decodedTagId: d.interpolate("flat", d.u32),
     },
     out: d.vec4f,
   })(({ uv, failureCode, decodedTagId }) => {
@@ -153,10 +158,10 @@ export function createGridVizPipeline(
     targets: {
       format: presentationFormat,
       blend: {
-        color: { operation: 'add', srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
-        alpha: { operation: 'add', srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+        color: { operation: "add", srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
+        alpha: { operation: "add", srcFactor: "one", dstFactor: "one-minus-src-alpha" },
       },
     },
-    primitive: { topology: 'triangle-strip' },
+    primitive: { topology: "triangle-strip" },
   });
 }

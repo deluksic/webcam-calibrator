@@ -2,9 +2,9 @@
  * Ideal AprilTag intensity raster + finite-difference Sobel for **tests, stress harnesses, and dev scripts**.
  * Not used by live calibration / GPU decode (`grid.ts` uses `imagePixelToUnitSquareUv` from `aprilTagRaycast.ts`).
  */
-import { computeHomography, type Point } from '../lib/geometry';
-import type { TagPattern } from '../lib/tag36h11';
-import { imagePixelToUnitSquareUv } from '../lib/aprilTagRaycast';
+import { computeHomography, type Point } from "../lib/geometry";
+import type { TagPattern } from "../lib/tag36h11";
+import { imagePixelToUnitSquareUv } from "../lib/aprilTagRaycast";
 
 const { floor, min, max } = Math;
 

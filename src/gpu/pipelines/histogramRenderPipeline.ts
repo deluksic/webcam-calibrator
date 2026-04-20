@@ -1,7 +1,7 @@
 // Histogram render pipeline: histogramBuffer → histogram bars
-import { tgpu, d } from 'typegpu';
-import { atomicLoad, log2 } from 'typegpu/std';
-import { HISTOGRAM_BINS, HIST_WIDTH, HIST_HEIGHT } from './constants';
+import { tgpu, d } from "typegpu";
+import { atomicLoad, log2 } from "typegpu/std";
+import { HISTOGRAM_BINS, HIST_WIDTH, HIST_HEIGHT } from "./constants";
 
 export function createHistogramRenderPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -25,7 +25,7 @@ export function createHistogramRenderPipeline(
       position: d.builtin.position,
     },
   })((i) => {
-    'use gpu';
+    "use gpu";
     // Vertices: 0,1,2 (first triangle) + 3,4,5 (second triangle)
     // Mapping to quad: (0,0), (1,0), (1,1), (0,0), (1,1), (0,1)
     const idx = i.vertexIndex;
@@ -33,19 +33,32 @@ export function createHistogramRenderPipeline(
     let localU = d.f32(0.0);
     let localV = d.f32(0.0);
 
-    if (idx === d.u32(0)) { localU = d.f32(0.0); localV = d.f32(0.0); }
-    else if (idx === d.u32(1)) { localU = d.f32(1.0); localV = d.f32(0.0); }
-    else if (idx === d.u32(2)) { localU = d.f32(1.0); localV = d.f32(1.0); }
-    else if (idx === d.u32(3)) { localU = d.f32(0.0); localV = d.f32(0.0); }
-    else if (idx === d.u32(4)) { localU = d.f32(1.0); localV = d.f32(1.0); }
-    else { localU = d.f32(0.0); localV = d.f32(1.0); }
+    if (idx === d.u32(0)) {
+      localU = d.f32(0.0);
+      localV = d.f32(0.0);
+    } else if (idx === d.u32(1)) {
+      localU = d.f32(1.0);
+      localV = d.f32(0.0);
+    } else if (idx === d.u32(2)) {
+      localU = d.f32(1.0);
+      localV = d.f32(1.0);
+    } else if (idx === d.u32(3)) {
+      localU = d.f32(0.0);
+      localV = d.f32(0.0);
+    } else if (idx === d.u32(4)) {
+      localU = d.f32(1.0);
+      localV = d.f32(1.0);
+    } else {
+      localU = d.f32(0.0);
+      localV = d.f32(1.0);
+    }
 
     const histW = d.f32(HIST_WIDTH);
     const histH = d.f32(HIST_HEIGHT);
     const numBars = d.f32(HISTOGRAM_BINS);
     const barW = histW / numBars;
 
-    const barPxX = (d.f32(i.instanceIndex) * barW) + (localU * barW);
+    const barPxX = d.f32(i.instanceIndex) * barW + localU * barW;
     const barPxY = localV * histH;
     const clipX = (barPxX / histW) * d.f32(2.0) - d.f32(1.0);
     // Clip space: -1 (bottom) to 1 (top)
@@ -62,7 +75,7 @@ export function createHistogramRenderPipeline(
     in: { uv: d.location(0, d.vec2f), barIndex: d.location(1, d.f32) },
     out: d.vec4f,
   })((i) => {
-    'use gpu';
+    "use gpu";
     const bin = d.u32(i.barIndex);
     const countU32 = atomicLoad(histogramDisplayLayout.$.histogram[bin]);
 

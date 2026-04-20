@@ -35,8 +35,9 @@ export function gridMaxPassing(
   opts: { hi: number; step: number },
 ): { best: number; recoveries: number } {
   const { hi, step } = opts;
-  if (step <= 0 || !Number.isFinite(step)) throw new Error('gridMaxPassing: step must be finite and > 0');
-  if (!passes(0)) throw new Error('gridMaxPassing: passes(0) must be true');
+  if (step <= 0 || !Number.isFinite(step))
+    throw new Error("gridMaxPassing: step must be finite and > 0");
+  if (!passes(0)) throw new Error("gridMaxPassing: passes(0) must be true");
 
   let best = 0;
   let prev = true;

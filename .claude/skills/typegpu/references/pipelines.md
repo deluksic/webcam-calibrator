@@ -9,13 +9,18 @@
 const vertexLayout = tgpu.vertexLayout(d.arrayOf(d.vec2f));
 
 // Per-instance:
-const instanceLayout = tgpu.vertexLayout(d.arrayOf(InstanceData), 'instance');
+const instanceLayout = tgpu.vertexLayout(d.arrayOf(InstanceData), "instance");
 
 // Loose layout - compact GPU vertex formats, no WGSL alignment rules:
-const looseLayout = tgpu.vertexLayout(d.disarrayOf(d.unstruct({
-  tilt:  d.f32,
-  color: d.unorm8x4,
-})), 'instance');
+const looseLayout = tgpu.vertexLayout(
+  d.disarrayOf(
+    d.unstruct({
+      tilt: d.f32,
+      color: d.unorm8x4,
+    }),
+  ),
+  "instance",
+);
 ```
 
 ### Compact vertex formats (for `unstruct` / `disarrayOf`)
@@ -53,25 +58,27 @@ Compact-format buffers are restricted to `'vertex'` usage. To share memory with 
 The `attribs` field maps vertex layout attributes to shader `in` parameter names. For struct layouts, use the **spread trick**:
 
 ```ts
-const VertexData   = d.struct({ position: d.vec3f, normal: d.vec3f, uv: d.vec2f });
+const VertexData = d.struct({ position: d.vec3f, normal: d.vec3f, uv: d.vec2f });
 const InstanceData = d.struct({ transform: d.vec4f, color: d.vec4f });
 
-const vertexLayout   = tgpu.vertexLayout(d.arrayOf(VertexData));
-const instanceLayout = tgpu.vertexLayout(d.arrayOf(InstanceData), 'instance');
+const vertexLayout = tgpu.vertexLayout(d.arrayOf(VertexData));
+const instanceLayout = tgpu.vertexLayout(d.arrayOf(InstanceData), "instance");
 
 const pipeline = root.createRenderPipeline({
   attribs: { ...vertexLayout.attrib, ...instanceLayout.attrib }, // spread both
-  vertex:  mainVert,
+  vertex: mainVert,
   fragment: mainFrag,
-  targets: { format: 'rgba8unorm' },
+  targets: { format: "rgba8unorm" },
 });
 ```
 
 For a non-struct layout, `layout.attrib` is a single `TgpuVertexAttrib`:
 
 ```ts
-attribs: vertexLayout.attrib              // name inferred from shader param
-attribs: { pos: vertexLayout.attrib }     // explicit name mapping
+attribs: vertexLayout.attrib; // name inferred from shader param
+attribs: {
+  pos: vertexLayout.attrib;
+} // explicit name mapping
 ```
 
 Pick fields selectively:
@@ -107,21 +114,19 @@ prebound
 Use `@loaders.gl/obj` or `@loaders.gl/gltf` to load meshes. loaders.gl returns separate flat typed arrays per attribute (positions, normals, UVs) — already SoA format. Combine with `common.writeSoA` for zero-copy buffer writes:
 
 ```ts
-import { load } from '@loaders.gl/core';
-import { OBJLoader } from '@loaders.gl/obj';
-import { common } from 'typegpu';
+import { load } from "@loaders.gl/core";
+import { OBJLoader } from "@loaders.gl/obj";
+import { common } from "typegpu";
 
-const mesh = await load('/model.obj', OBJLoader);
+const mesh = await load("/model.obj", OBJLoader);
 const vertexCount = mesh.attributes.POSITION.value.length / 3;
 
-const vertexBuffer = root
-  .createBuffer(vertexLayout.schemaForCount(vertexCount))
-  .$usage('vertex');
+const vertexBuffer = root.createBuffer(vertexLayout.schemaForCount(vertexCount)).$usage("vertex");
 
 common.writeSoA(vertexBuffer, {
-  position: mesh.attributes.POSITION.value,   // Float32Array, packed xyz
-  normal:   mesh.attributes.NORMAL.value,      // Float32Array, packed xyz
-  uv:       mesh.attributes.TEXCOORD_0.value,  // Float32Array, packed uv
+  position: mesh.attributes.POSITION.value, // Float32Array, packed xyz
+  normal: mesh.attributes.NORMAL.value, // Float32Array, packed xyz
+  uv: mesh.attributes.TEXCOORD_0.value, // Float32Array, packed uv
 });
 ```
 
@@ -132,13 +137,9 @@ common.writeSoA(vertexBuffer, {
 ## Index buffers
 
 ```ts
-const indexBuffer = root
-  .createBuffer(d.arrayOf(d.u16, 6), [0, 2, 1, 0, 3, 2])
-  .$usage('index');
+const indexBuffer = root.createBuffer(d.arrayOf(d.u16, 6), [0, 2, 1, 0, 3, 2]).$usage("index");
 
-pipeline
-  .withIndexBuffer(indexBuffer)
-  .drawIndexed(6);
+pipeline.withIndexBuffer(indexBuffer).drawIndexed(6);
 ```
 
 Only `d.u16` and `d.u32` schemas are valid.
@@ -148,17 +149,19 @@ Only `d.u16` and `d.u32` schemas are valid.
 ## Depth / stencil
 
 ```ts
-const depthTex = root.createTexture({
-  size: [width, height],
-  format: 'depth24plus',
-}).$usage('render');
-const depthView = depthTex.createView('render'); // cache at setup
+const depthTex = root
+  .createTexture({
+    size: [width, height],
+    format: "depth24plus",
+  })
+  .$usage("render");
+const depthView = depthTex.createView("render"); // cache at setup
 
 pipeline
   .withDepthStencilAttachment({
-    view:            depthView,
-    depthLoadOp:     'clear',
-    depthStoreOp:    'store',
+    view: depthView,
+    depthLoadOp: "clear",
+    depthStoreOp: "store",
     depthClearValue: 1.0,
   })
   .draw(vertexCount);
@@ -187,11 +190,11 @@ Render pipelines accept a single target shorthand or a **named record**. With mo
 
 ```ts
 const gBufferFrag = tgpu.fragmentFn({
-  in:  { worldPos: d.vec3f, normal: d.vec3f },
+  in: { worldPos: d.vec3f, normal: d.vec3f },
   out: { albedo: d.vec4f, normal: d.vec4f, position: d.vec4f },
 })((input) => ({
-  albedo:   d.vec4f(0.8, 0.2, 0.2, 1),
-  normal:   d.vec4f(input.normal, 0),
+  albedo: d.vec4f(0.8, 0.2, 0.2, 1),
+  normal: d.vec4f(input.normal, 0),
   position: d.vec4f(input.worldPos, 1),
 }));
 
@@ -199,17 +202,17 @@ const pipeline = root.createRenderPipeline({
   vertex: myVertex,
   fragment: gBufferFrag,
   targets: {
-    albedo:   { format: 'rgba8unorm' },
-    normal:   { format: 'rgba16float' },
-    position: { format: 'rgba16float' },
+    albedo: { format: "rgba8unorm" },
+    normal: { format: "rgba16float" },
+    position: { format: "rgba16float" },
   },
 });
 
 pipeline
   .with(bindGroup)
   .withColorAttachment({
-    albedo:   { view: albedoView },
-    normal:   { view: normalView },
+    albedo: { view: albedoView },
+    normal: { view: normalView },
     position: { view: positionView },
   })
   .draw(vertexCount);
@@ -255,7 +258,7 @@ A fragment shader can write its own depth via the `fragDepth` builtin - useful f
 
 ```ts
 const fragMain = tgpu.fragmentFn({
-  in:  { worldPos: d.vec3f },
+  in: { worldPos: d.vec3f },
   out: { color: d.vec4f, depth: d.builtin.fragDepth },
 })((input) => ({
   color: d.vec4f(shade(input.worldPos), 1),
@@ -269,22 +272,22 @@ const pipeline = root.createRenderPipeline({
     color: { format: presentationFormat }, // only `color` - `depth` NOT here
   },
   depthStencil: {
-    format: 'depth24plus',
+    format: "depth24plus",
     depthWriteEnabled: true,
-    depthCompare: 'less',
+    depthCompare: "less",
   },
 });
 
 pipeline
   .with(bindGroup)
   .withColorAttachment({
-    color: { view: context },           // only `color`
+    color: { view: context }, // only `color`
   })
   .withDepthStencilAttachment({
     view: depthView,
     depthClearValue: 1,
-    depthLoadOp: 'clear',
-    depthStoreOp: 'store',
+    depthLoadOp: "clear",
+    depthStoreOp: "store",
   })
   .draw(vertexCount);
 ```
@@ -308,8 +311,9 @@ const luminanceFrag = tgpu.fragmentFn({
 })((input) => d.vec4f(luma(input.uv), 0, 0, 1));
 
 root.createRenderPipeline({
-  vertex, fragment: luminanceFrag,
-  targets: { format: 'r8unorm' }, // only the red channel is written
+  vertex,
+  fragment: luminanceFrag,
+  targets: { format: "r8unorm" }, // only the red channel is written
 });
 ```
 
@@ -322,12 +326,12 @@ This is a WebGPU rule, not a TypeGPU one - but it surprises people used to frame
 A helper for fullscreen post-processing - a single oversized triangle covering the viewport, no vertex buffer needed.
 
 ```ts
-import { common } from 'typegpu';
+import { common } from "typegpu";
 
 const pipeline = root.createRenderPipeline({
   vertex: common.fullScreenTriangle,
   fragment: tgpu.fragmentFn({ in: { uv: d.vec2f }, out: d.vec4f })((input) => {
-    'use gpu';
+    "use gpu";
     return std.textureSample(screenTex.$, sampler.$, input.uv);
   }),
   targets: { format: presentationFormat },

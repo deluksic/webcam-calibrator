@@ -1,0 +1,20 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`subpixel alignment > v1 refiner metrics snapshot (mismatch + speckle) 1`] = `
+{
+  "cornersRounded": {
+    "maxPx": 3.5401,
+    "perCornerPx": [
+      0.2016,
+      1.1319,
+      3.5401,
+      1.135,
+    ],
+    "rmsePx": 1.9457,
+  },
+  "transferRounded": {
+    "maxPx": 3.5401,
+    "rmsePx": 1.3931,
+  },
+}
+`;

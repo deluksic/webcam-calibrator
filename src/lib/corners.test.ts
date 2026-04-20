@@ -1,8 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import {
-  extractLabeledEdgePixels,
-  findCornersFromEdges,
-} from './corners';
+import { describe, it, expect } from "vitest";
+import { extractLabeledEdgePixels, findCornersFromEdges } from "./corners";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: build synthetic Sobel data for a rectangular border.
@@ -29,10 +26,19 @@ function makeRectSobel(
       const onBorder = onLeft || onRight || onTop || onBottom;
       if (!onBorder) continue;
 
-      if (onLeft) { sobelData[idx] = 10; sobelData[idx + 1] = 0; }
-      else if (onRight) { sobelData[idx] = -10; sobelData[idx + 1] = 0; }
-      else if (onTop) { sobelData[idx] = 0; sobelData[idx + 1] = 10; }
-      else if (onBottom) { sobelData[idx] = 0; sobelData[idx + 1] = -10; }
+      if (onLeft) {
+        sobelData[idx] = 10;
+        sobelData[idx + 1] = 0;
+      } else if (onRight) {
+        sobelData[idx] = -10;
+        sobelData[idx + 1] = 0;
+      } else if (onTop) {
+        sobelData[idx] = 0;
+        sobelData[idx + 1] = 10;
+      } else if (onBottom) {
+        sobelData[idx] = 0;
+        sobelData[idx + 1] = -10;
+      }
     }
   }
 
@@ -57,9 +63,10 @@ function makeRectLabel(
   return labelData;
 }
 
-describe('extractLabeledEdgePixels', () => {
-  it('extracts only pixels matching the region label', () => {
-    const w = 20, h = 20;
+describe("extractLabeledEdgePixels", () => {
+  it("extracts only pixels matching the region label", () => {
+    const w = 20,
+      h = 20;
     const sobelData = makeRectSobel(w, h, 5, 5, 15, 15);
     const labelData = makeRectLabel(w, h, 5, 5, 15, 15);
 
@@ -71,8 +78,9 @@ describe('extractLabeledEdgePixels', () => {
     }
   });
 
-  it('ignores pixels with a different label', () => {
-    const w = 10, h = 10;
+  it("ignores pixels with a different label", () => {
+    const w = 10,
+      h = 10;
     const sobelData = new Float32Array(w * h * 2);
     const labelData = new Uint32Array(w * h);
 
@@ -84,8 +92,9 @@ describe('extractLabeledEdgePixels', () => {
     expect(pixels).toHaveLength(0);
   });
 
-  it('returns empty when Sobel magnitude is zero', () => {
-    const w = 10, h = 10;
+  it("returns empty when Sobel magnitude is zero", () => {
+    const w = 10,
+      h = 10;
     const sobelData = new Float32Array(w * h * 2);
     const labelData = makeRectLabel(w, h, 0, 0, 9, 9);
 
@@ -93,8 +102,9 @@ describe('extractLabeledEdgePixels', () => {
     expect(pixels).toHaveLength(0);
   });
 
-  it('stores raw Sobel gradient for clustering', () => {
-    const w = 10, h = 10;
+  it("stores raw Sobel gradient for clustering", () => {
+    const w = 10,
+      h = 10;
     const sobelData = new Float32Array(w * h * 2);
     const labelData = makeRectLabel(w, h, 0, 0, 9, 9);
 
@@ -110,10 +120,10 @@ describe('extractLabeledEdgePixels', () => {
   });
 });
 
-describe('findCornersFromEdges', () => {
-
-  it('returns empty for zero edge pixels', () => {
-    const w = 50, h = 50;
+describe("findCornersFromEdges", () => {
+  it("returns empty for zero edge pixels", () => {
+    const w = 50,
+      h = 50;
     const sobelData = new Float32Array(w * h * 2);
     const labelData = new Uint32Array(w * h);
 
@@ -121,8 +131,9 @@ describe('findCornersFromEdges', () => {
     expect(corners).toHaveLength(0);
   });
 
-  it('detects 4 corners for an axis-aligned rectangle', () => {
-    const w = 100, h = 100;
+  it("detects 4 corners for an axis-aligned rectangle", () => {
+    const w = 100,
+      h = 100;
     const sobelData = makeRectSobel(w, h, 10, 10, 90, 90);
     const labelData = makeRectLabel(w, h, 10, 10, 90, 90);
 
@@ -140,8 +151,9 @@ describe('findCornersFromEdges', () => {
     expect(Math.abs(br.y - 90)).toBeLessThan(10);
   });
 
-  it('returns empty when there are insufficient edge pixels', () => {
-    const w = 20, h = 20;
+  it("returns empty when there are insufficient edge pixels", () => {
+    const w = 20,
+      h = 20;
     const sobelData = new Float32Array(w * h * 2);
     const labelData = makeRectLabel(w, h, 5, 5, 15, 15);
 
@@ -154,8 +166,9 @@ describe('findCornersFromEdges', () => {
     expect(corners).toHaveLength(0);
   });
 
-  it('orders corners as TL, TR, BL, BR', () => {
-    const w = 100, h = 100;
+  it("orders corners as TL, TR, BL, BR", () => {
+    const w = 100,
+      h = 100;
     const sobelData = makeRectSobel(w, h, 10, 10, 90, 90);
     const labelData = makeRectLabel(w, h, 10, 10, 90, 90);
 
@@ -171,8 +184,9 @@ describe('findCornersFromEdges', () => {
     expect(br.x).toBeGreaterThan(bl.x);
   });
 
-  it('returns empty for random noise (no clean line structure)', () => {
-    const w = 50, h = 50;
+  it("returns empty for random noise (no clean line structure)", () => {
+    const w = 50,
+      h = 50;
     const sobelData = new Float32Array(w * h * 2);
     const labelData = new Uint32Array(w * h);
 

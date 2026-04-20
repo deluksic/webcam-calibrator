@@ -1,9 +1,9 @@
 // Merge edge responses only along the local edge tangent (perpendicular to Sobel gradient).
 // Skips neighbors that lie mostly along the gradient normal so the mask does not thicken.
 // Outputs gradient (vec2f) instead of scalar mask.
-import { tgpu, d, std } from 'typegpu';
-import { abs, length, sqrt } from 'typegpu/std';
-import { EDGE_DILATE_THRESHOLD } from './constants';
+import { tgpu, d, std } from "typegpu";
+import { abs, length, sqrt } from "typegpu/std";
+import { EDGE_DILATE_THRESHOLD } from "./constants";
 
 export function createEdgeDilatePipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -15,8 +15,10 @@ export function createEdgeDilatePipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [16, 16, 1],
   })((input) => {
-    'use gpu';
-    if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) { return; }
+    "use gpu";
+    if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) {
+      return;
+    }
 
     const x = d.i32(input.gid.x);
     const y = d.i32(input.gid.y);

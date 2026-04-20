@@ -1,5 +1,5 @@
-import type { DetectedQuad } from '../gpu/contour';
-import type { Point } from './geometry';
+import type { DetectedQuad } from "../gpu/contour";
+import type { Point } from "./geometry";
 
 /** Stub thresholds — tune after BA exists. */
 export const CALIB_MIN_MIN_R2 = 0.75;
@@ -31,7 +31,7 @@ export function calibrationQuadScore(q: DetectedQuad): number {
 }
 
 export function acceptQuadForCalibration(q: DetectedQuad): boolean {
-  if (typeof q.decodedTagId !== 'number') return false;
+  if (typeof q.decodedTagId !== "number") return false;
   if (!q.hasCorners) return false;
   if (q.cornerDebug === null || q.cornerDebug.failureCode !== 0) return false;
   if (!q.gridCells?.innerCorners || q.gridCells.innerCorners.length !== 49) return false;
@@ -49,7 +49,7 @@ export function acceptQuadForCalibration(q: DetectedQuad): boolean {
 export function frameHasDuplicateDecodedTagIds(quads: DetectedQuad[]): boolean {
   const seen = new Set<number>();
   for (const q of quads) {
-    if (typeof q.decodedTagId !== 'number') continue;
+    if (typeof q.decodedTagId !== "number") continue;
     if (seen.has(q.decodedTagId)) return true;
     seen.add(q.decodedTagId);
   }

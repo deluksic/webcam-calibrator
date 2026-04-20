@@ -62,7 +62,8 @@ export function fitLine(points: Point[]): Line | null {
   if (points.length < 2) return null;
 
   // Use orthogonal regression
-  let sumX = 0, sumY = 0;
+  let sumX = 0,
+    sumY = 0;
   for (const p of points) {
     sumX += p.x;
     sumY += p.y;
@@ -72,7 +73,9 @@ export function fitLine(points: Point[]): Line | null {
   const cy = sumY / n;
 
   // Covariance matrix
-  let xx = 0, xy = 0, yy = 0;
+  let xx = 0,
+    xy = 0,
+    yy = 0;
   for (const p of points) {
     const dx = p.x - cx;
     const dy = p.y - cy;
@@ -150,7 +153,7 @@ export function quadAspectRatio(corners: Point[]): number {
 export function areParallel(l1: Line, l2: Line, threshold: number = 0.1): boolean {
   // Parallel if normals are aligned
   const dot = Math.abs(l1.a * l2.a + l1.b * l2.b);
-  return dot > (1 - threshold);
+  return dot > 1 - threshold;
 }
 
 /**
@@ -277,11 +280,11 @@ export function tryComputeHomography(src: Point[]): Float32Array | null {
  */
 export function computeHomography(src: Point[]): Float32Array {
   if (src.length !== 4) {
-    throw new Error('computeHomography requires exactly 4 source points');
+    throw new Error("computeHomography requires exactly 4 source points");
   }
   const h = tryComputeHomography(src);
   if (!h) {
-    throw new Error('Singular homography matrix');
+    throw new Error("Singular homography matrix");
   }
   return h;
 }
@@ -291,9 +294,14 @@ export function computeHomography(src: Point[]): Float32Array {
  * Returns {x, y} in image coordinates.
  */
 export function applyHomography(h: Float32Array, u: number, v: number): Point {
-  const h1 = h[0], h2 = h[1], h3 = h[2];
-  const h4 = h[3], h5 = h[4], h6 = h[5];
-  const h7 = h[6], h8 = h[7];
+  const h1 = h[0],
+    h2 = h[1],
+    h3 = h[2];
+  const h4 = h[3],
+    h5 = h[4],
+    h6 = h[5];
+  const h7 = h[6],
+    h8 = h[7];
 
   const w = h7 * u + h8 * v + 1;
   const x = (h1 * u + h2 * v + h3) / w;
@@ -312,12 +320,16 @@ export function applyHomography(h: Float32Array, u: number, v: number): Point {
  */
 export function computeProjectiveWeights(corners: Point[]): [number, number, number, number] {
   if (corners.length !== 4) {
-    throw new Error('computeProjectiveWeights requires exactly 4 points');
+    throw new Error("computeProjectiveWeights requires exactly 4 points");
   }
-  const x0 = corners[0].x, y0 = corners[0].y; // TL
-  const x1 = corners[1].x, y1 = corners[1].y; // TR
-  const x2 = corners[2].x, y2 = corners[2].y; // BL
-  const x3 = corners[3].x, y3 = corners[3].y; // BR
+  const x0 = corners[0].x,
+    y0 = corners[0].y; // TL
+  const x1 = corners[1].x,
+    y1 = corners[1].y; // TR
+  const x2 = corners[2].x,
+    y2 = corners[2].y; // BL
+  const x3 = corners[3].x,
+    y3 = corners[3].y; // BR
 
   // Solve for h7, h8 from corner correspondences
   // Using: (x3-x1)*h7 + (x3-x2)*h8 = x1 + x2 - x0 - x3

@@ -1,6 +1,6 @@
-import { buildTagGrid } from './grid';
-import type { Point } from './geometry';
-import type { Point3 } from './calibrationTypes';
+import { buildTagGrid } from "./grid";
+import type { Point } from "./geometry";
+import type { Point3 } from "./calibrationTypes";
 
 /** Unit square outer quad: TL, TR, BR, BL — same order as `buildTagGrid`. */
 const UNIT_OUTER: [Point, Point, Point, Point] = [

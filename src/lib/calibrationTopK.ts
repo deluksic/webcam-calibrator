@@ -1,4 +1,4 @@
-import type { CalibrationSample } from './calibrationTypes';
+import type { CalibrationSample } from "./calibrationTypes";
 
 export const DEFAULT_CALIBRATION_TOP_K = 10_000;
 

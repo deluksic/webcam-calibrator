@@ -3,18 +3,20 @@
  *
  *   pnpm run find:decode-stress-speckle
  */
-import { binarySearchMaxPassing } from '../src/lib/decodeStressSearch';
-import { decodeStressSuiteFailuresFromOptions } from '../src/lib/decodeStressSuite';
+import { binarySearchMaxPassing } from "../src/lib/decodeStressSearch";
+import { decodeStressSuiteFailuresFromOptions } from "../src/lib/decodeStressSuite";
 
 function passes(amp: number): boolean {
-  return decodeStressSuiteFailuresFromOptions({
-    speckleAmp: amp,
-    homographyMismatchScale: 0,
-  }).length === 0;
+  return (
+    decodeStressSuiteFailuresFromOptions({
+      speckleAmp: amp,
+      homographyMismatchScale: 0,
+    }).length === 0
+  );
 }
 
 if (!passes(1e-12)) {
-  console.error('Even tiny speckle fails; check harness.');
+  console.error("Even tiny speckle fails; check harness.");
   process.exit(1);
 }
 
@@ -32,8 +34,8 @@ function findFirstFailure(maxScan: number): number | null {
 
 const firstFail = findFirstFailure(1);
 if (firstFail === null) {
-  console.log(JSON.stringify({ note: 'No failure up to amplitude 1.0' }, null, 2));
-  console.log('\nSuggested DECODE_STRESS_SPECKLE_AMP = 1 (no failure up to 1.0)');
+  console.log(JSON.stringify({ note: "No failure up to amplitude 1.0" }, null, 2));
+  console.log("\nSuggested DECODE_STRESS_SPECKLE_AMP = 1 (no failure up to 1.0)");
   process.exit(0);
 }
 

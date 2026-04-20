@@ -2,17 +2,17 @@
  * Writes a synthetic raycast AprilTag (tag36h11) to output/april-tag-raycast.png
  * for visual inspection. Run: pnpm run render:april-tag
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { PNG } from 'pngjs';
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { PNG } from "pngjs";
 
-import { renderAprilTagIntensity } from '../src/test-utils/syntheticAprilTag.ts';
-import { codeToPattern, TAG36H11_CODES } from '../src/lib/tag36h11.ts';
-import type { Point } from '../src/lib/geometry.ts';
+import { renderAprilTagIntensity } from "../src/test-utils/syntheticAprilTag.ts";
+import { codeToPattern, TAG36H11_CODES } from "../src/lib/tag36h11.ts";
+import type { Point } from "../src/lib/geometry.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(__dirname, '..');
+const repoRoot = join(__dirname, "..");
 
 function main() {
   const raw = process.argv[2];
@@ -63,7 +63,7 @@ function main() {
     supersample,
   });
 
-  const outDir = join(repoRoot, 'output');
+  const outDir = join(repoRoot, "output");
   mkdirSync(outDir, { recursive: true });
 
   writeGreyPng(join(outDir, `april-tag-raycast-id${tagId}-axis.png`), w, h, intensityAxis);
@@ -74,7 +74,12 @@ function main() {
   );
 }
 
-function writeGreyPng(filePath: string, width: number, height: number, intensity: Float32Array): void {
+function writeGreyPng(
+  filePath: string,
+  width: number,
+  height: number,
+  intensity: Float32Array,
+): void {
   const data = Buffer.alloc(width * height);
   for (let i = 0; i < intensity.length; i++) {
     const v = Math.round(Math.min(255, Math.max(0, intensity[i]! * 255)));

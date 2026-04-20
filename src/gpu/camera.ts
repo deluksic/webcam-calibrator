@@ -1,6 +1,6 @@
 // Camera pipeline — fully GPU-based, single submit
-import { tgpu, d, std } from 'typegpu';
-import { sqrt, atomicAdd, atomicStore, atomicLoad } from 'typegpu/std';
+import { tgpu, d, std } from "typegpu";
+import { sqrt, atomicAdd, atomicStore, atomicLoad } from "typegpu/std";
 
 import {
   EDGES_VIEW_BINARY_MASK,
@@ -9,20 +9,23 @@ import {
   COMPUTE_WORKGROUP_SIZE,
   computeDispatch2d,
   computeThreshold,
-} from './pipelines/constants';
-import { createLayouts } from './pipelines/layouts';
-import { createCopyPipeline } from './pipelines/copyPipeline';
-import { createGrayPipeline } from './pipelines/grayPipeline';
-import { createSobelPipeline } from './pipelines/sobelPipeline';
-import { createHistogramResetPipeline, createHistogramAccumulatePipeline } from './pipelines/histogramPipelines';
-import { createEdgesPipeline } from './pipelines/edgesPipeline';
-import { createEdgeFilterPipeline } from './pipelines/edgeFilterPipeline';
-import { createHistogramRenderPipeline } from './pipelines/histogramRenderPipeline';
-import { createGrayRenderPipeline } from './pipelines/grayRenderPipeline';
-import { createSobelRenderPipeline } from './pipelines/sobelRenderPipeline';
-import { createFilteredRenderPipeline } from './pipelines/filteredRenderPipeline';
-import { createLabelVizPipeline } from './pipelines/labelVizPipeline';
-import { createEdgeDilatePipeline } from './pipelines/edgeDilatePipeline';
+} from "./pipelines/constants";
+import { createLayouts } from "./pipelines/layouts";
+import { createCopyPipeline } from "./pipelines/copyPipeline";
+import { createGrayPipeline } from "./pipelines/grayPipeline";
+import { createSobelPipeline } from "./pipelines/sobelPipeline";
+import {
+  createHistogramResetPipeline,
+  createHistogramAccumulatePipeline,
+} from "./pipelines/histogramPipelines";
+import { createEdgesPipeline } from "./pipelines/edgesPipeline";
+import { createEdgeFilterPipeline } from "./pipelines/edgeFilterPipeline";
+import { createHistogramRenderPipeline } from "./pipelines/histogramRenderPipeline";
+import { createGrayRenderPipeline } from "./pipelines/grayRenderPipeline";
+import { createSobelRenderPipeline } from "./pipelines/sobelRenderPipeline";
+import { createFilteredRenderPipeline } from "./pipelines/filteredRenderPipeline";
+import { createLabelVizPipeline } from "./pipelines/labelVizPipeline";
+import { createEdgeDilatePipeline } from "./pipelines/edgeDilatePipeline";
 import {
   createPointerJumpLayouts,
   createPointerJumpInitPipeline,
@@ -30,14 +33,19 @@ import {
   createPointerJumpLabelsToAtomicPipeline,
   createPointerJumpParentTightenPipeline,
   createPointerJumpAtomicToLabelsPipeline,
-} from './pipelines/pointerJumpPipeline';
+} from "./pipelines/pointerJumpPipeline";
 import {
   createExtentTrackingLayouts,
   createExtentResetPipeline,
   createExtentTrackPipeline,
   ExtentEntry,
-} from './pipelines/extentTrackingPipeline';
-import { createCompactLabelLayouts, createCanonicalResetPipeline, createCanonicalClaimPipeline, createRemapLabelPipeline } from './pipelines/compactLabelPipeline';
+} from "./pipelines/extentTrackingPipeline";
+import {
+  createCompactLabelLayouts,
+  createCanonicalResetPipeline,
+  createCanonicalClaimPipeline,
+  createRemapLabelPipeline,
+} from "./pipelines/compactLabelPipeline";
 import {
   createGridVizPipeline,
   createGridVizLayouts,
@@ -46,19 +54,19 @@ import {
   QuadData,
   MAX_INSTANCES,
   type GridVizFailInterrogateMode,
-} from './pipelines/gridVizPipeline';
-import { tryComputeHomography } from '../lib/geometry';
+} from "./pipelines/gridVizPipeline";
+import { tryComputeHomography } from "../lib/geometry";
 import {
   type DetectedQuad,
   filterNestedQuads,
   extractRegions,
   validateAndFilterQuads,
-} from './contour';
+} from "./contour";
 
 /** Max quads drawn in grid mode; must match `MAX_INSTANCES` in gridVizPipeline (buffer + draw). */
 export const MAX_DETECTED_TAGS = MAX_INSTANCES;
 
-export type DisplayMode = 'edges' | 'nms' | 'labels' | 'grayscale' | 'debug' | 'grid';
+export type DisplayMode = "edges" | "nms" | "labels" | "grayscale" | "debug" | "grid";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PIPELINE FACTORY
@@ -69,10 +77,10 @@ export function createCameraPipeline(
   histCanvas: HTMLCanvasElement,
   width: number,
   height: number,
-  presentationFormat: GPUTextureFormat
+  presentationFormat: GPUTextureFormat,
 ) {
   // Configure contexts on canvases
-  const context = root.configureContext({ canvas, alphaMode: 'premultiplied' });
+  const context = root.configureContext({ canvas, alphaMode: "premultiplied" });
   const histContext = root.configureContext({ canvas: histCanvas });
   // console.log(`[camera] presentationFormat=${presentationFormat}, canvas=${canvas.width}x${canvas.height}`);
 
@@ -82,22 +90,16 @@ export function createCameraPipeline(
 
   // Intermediate RGBA texture for external → usable format
   const grayTex = root
-    .createTexture({ size: [width, height], format: 'rgba8unorm', dimension: '2d' })
-    .$usage('storage', 'sampled', 'render');
+    .createTexture({ size: [width, height], format: "rgba8unorm", dimension: "2d" })
+    .$usage("storage", "sampled", "render");
 
-  const sampler = root.createSampler({ minFilter: 'linear', magFilter: 'linear' });
+  const sampler = root.createSampler({ minFilter: "linear", magFilter: "linear" });
 
-  const grayBuffer = root
-    .createBuffer(d.arrayOf(d.f32, width * height))
-    .$usage('storage');
+  const grayBuffer = root.createBuffer(d.arrayOf(d.f32, width * height)).$usage("storage");
 
-  const sobelBuffer = root
-    .createBuffer(d.arrayOf(d.vec2f, width * height))
-    .$usage('storage');
+  const sobelBuffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage("storage");
 
-  const filteredBuffer = root
-    .createBuffer(d.arrayOf(d.vec2f, width * height))
-    .$usage('storage');
+  const filteredBuffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage("storage");
 
   // Staging buffer for CPU readback of filtered edge gradients
   const filteredStaging = root.device.createBuffer({
@@ -105,31 +107,21 @@ export function createCameraPipeline(
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
 
-  const dilatedEdgeBuffer = root
-    .createBuffer(d.arrayOf(d.vec2f, width * height))
-    .$usage('storage');
+  const dilatedEdgeBuffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage("storage");
 
-  const thresholdBuffer = root
-    .createBuffer(d.f32)
-    .$usage('uniform');
+  const thresholdBuffer = root.createBuffer(d.f32).$usage("uniform");
 
   const histogramSchema = d.arrayOf(d.atomic(d.u32), HISTOGRAM_BINS);
-  const histogramBuffer = root.createBuffer(histogramSchema).$usage('storage');
+  const histogramBuffer = root.createBuffer(histogramSchema).$usage("storage");
 
-  const thresholdBinBuffer = root
-    .createBuffer(d.u32)
-    .$usage('uniform');
+  const thresholdBinBuffer = root.createBuffer(d.u32).$usage("uniform");
 
-  const pointerJumpBuffer0 = root
-    .createBuffer(d.arrayOf(d.u32, width * height))
-    .$usage('storage');
-  const pointerJumpBuffer1 = root
-    .createBuffer(d.arrayOf(d.u32, width * height))
-    .$usage('storage');
+  const pointerJumpBuffer0 = root.createBuffer(d.arrayOf(d.u32, width * height)).$usage("storage");
+  const pointerJumpBuffer1 = root.createBuffer(d.arrayOf(d.u32, width * height)).$usage("storage");
 
   const pointerJumpAtomicBuffer = root
     .createBuffer(d.arrayOf(d.atomic(d.u32), width * height))
-    .$usage('storage');
+    .$usage("storage");
 
   const {
     initLayout: pointerJumpInitLayout,
@@ -227,13 +219,9 @@ export function createCameraPipeline(
   // extentBuffer: sized for MAX_EXTENT_COMPONENTS entries (compact IDs < MAX_EXTENT_COMPONENTS).
   const area = width * height;
 
-  const canonicalRootBuffer = root
-    .createBuffer(d.arrayOf(d.atomic(d.u32), area))
-    .$usage('storage');
+  const canonicalRootBuffer = root.createBuffer(d.arrayOf(d.atomic(d.u32), area)).$usage("storage");
 
-  const compactLabelBuffer = root
-    .createBuffer(d.arrayOf(d.u32, area))
-    .$usage('storage');
+  const compactLabelBuffer = root.createBuffer(d.arrayOf(d.u32, area)).$usage("storage");
 
   // Staging buffers for CPU readback (requires COPY_DST | MAP_READ)
   const compactLabelStaging = root.device.createBuffer({
@@ -241,19 +229,17 @@ export function createCameraPipeline(
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
 
-  const compactCounterBuffer = root
-    .createBuffer(d.atomic(d.u32))
-    .$usage('storage');
+  const compactCounterBuffer = root.createBuffer(d.atomic(d.u32)).$usage("storage");
 
   const { trackLayout: extentTrackLayout } = createExtentTrackingLayouts(root);
 
   const extentResetLayout = tgpu.bindGroupLayout({
-    extentBuffer: { storage: d.arrayOf(ExtentEntry), access: 'mutable' },
+    extentBuffer: { storage: d.arrayOf(ExtentEntry), access: "mutable" },
   });
 
   const extentBuffer = root
     .createBuffer(d.arrayOf(ExtentEntry, MAX_EXTENT_COMPONENTS))
-    .$usage('storage');
+    .$usage("storage");
 
   const extentResetPipeline = createExtentResetPipeline(
     root,
@@ -287,12 +273,7 @@ export function createCameraPipeline(
     height,
     MAX_EXTENT_COMPONENTS,
   );
-  const compactRemapPipeline = createRemapLabelPipeline(
-    root,
-    remapLayout,
-    width,
-    height,
-  );
+  const compactRemapPipeline = createRemapLabelPipeline(root, remapLayout, width, height);
 
   // compactCounter: single u32 atomic counter for next compact ID
   const compactResetBindGroup = root.createBindGroup(resetLayout, {
@@ -313,13 +294,11 @@ export function createCameraPipeline(
   // compactLabelBuffer is the remapped output used by extent tracking
 
   // ─── Grid visualization (AprilTag grid overlay) ─────────────────────────
-  const quadCornersBuffer = root
-    .createBuffer(GridDataSchema)
-    .$usage('storage');
+  const quadCornersBuffer = root.createBuffer(GridDataSchema).$usage("storage");
 
   const { gridVizLayout } = createGridVizLayouts(root, quadCornersBuffer);
 
-  const gridVizDebugModeBuffer = root.createBuffer(d.u32).$usage('uniform');
+  const gridVizDebugModeBuffer = root.createBuffer(d.u32).$usage("uniform");
   gridVizDebugModeBuffer.write(0);
 
   const gridVizPipeline = createGridVizPipeline(
@@ -360,20 +339,43 @@ export function createCameraPipeline(
   const sobelPipeline = createSobelPipeline(root, sobelLayout, width, height);
   const histogramResetPipeline = createHistogramResetPipeline(root, histogramResetLayout);
   const histogramPipeline = createHistogramAccumulatePipeline(root, histogramLayout, width, height);
-  const edgesPipeline = createEdgesPipeline(
+  const edgesPipeline = createEdgesPipeline(root, edgesLayout, width, height, presentationFormat);
+  const edgeFilterPipeline = createEdgeFilterPipeline(root, edgeFilterLayout, width, height);
+  const edgeDilatePipeline = createEdgeDilatePipeline(root, edgeDilateLayout, width, height);
+  const histogramDisplayPipeline = createHistogramRenderPipeline(
     root,
-    edgesLayout,
+    histogramDisplayLayout,
+    presentationFormat,
+    width * height,
+  );
+  const labelVizPipeline = createLabelVizPipeline(
+    root,
+    labelVizLayout,
     width,
     height,
     presentationFormat,
   );
-  const edgeFilterPipeline = createEdgeFilterPipeline(root, edgeFilterLayout, width, height);
-  const edgeDilatePipeline = createEdgeDilatePipeline(root, edgeDilateLayout, width, height);
-  const histogramDisplayPipeline = createHistogramRenderPipeline(root, histogramDisplayLayout, presentationFormat, width * height);
-  const labelVizPipeline = createLabelVizPipeline(root, labelVizLayout, width, height, presentationFormat);
-  const grayRenderPipeline = createGrayRenderPipeline(root, grayRenderLayout, width, height, presentationFormat);
-  const sobelRenderPipeline = createSobelRenderPipeline(root, sobelRenderLayout, width, height, presentationFormat);
-  const filteredRenderPipeline = createFilteredRenderPipeline(root, filteredRenderLayout, width, height, presentationFormat);
+  const grayRenderPipeline = createGrayRenderPipeline(
+    root,
+    grayRenderLayout,
+    width,
+    height,
+    presentationFormat,
+  );
+  const sobelRenderPipeline = createSobelRenderPipeline(
+    root,
+    sobelRenderLayout,
+    width,
+    height,
+    presentationFormat,
+  );
+  const filteredRenderPipeline = createFilteredRenderPipeline(
+    root,
+    filteredRenderLayout,
+    width,
+    height,
+    presentationFormat,
+  );
 
   // ═══════════════════════════════════════════════════════════════════════
   // BIND GROUPS
@@ -533,7 +535,7 @@ export const MAX_EXTENT_COMPONENTS = 16384;
 export const MAX_COMPONENTS = 16384; // alias for CalibrationView readback
 export const EXTENT_FIELDS = 4; // 4 fields per extent entry: minX, minY, maxX, maxY
 
-export const MAX_U32 = 0xFFFFFFFF;
+export const MAX_U32 = 0xffffffff;
 
 export type CameraPipeline = ReturnType<typeof createCameraPipeline>;
 
@@ -545,7 +547,7 @@ export function processFrame(
   pipeline: CameraPipeline,
   video: HTMLVideoElement,
   threshold: number,
-  displayMode: DisplayMode = 'edges',
+  displayMode: DisplayMode = "edges",
   onError?: (msg: string) => void,
 ) {
   // onError?.(`[camera] processFrame mode=${displayMode}`);
@@ -559,7 +561,7 @@ export function processFrame(
   const thresholdBin = Math.round(threshold * 255);
   pipeline.thresholdBinBuffer.write(thresholdBin);
 
-  const enc = root.device.createCommandEncoder({ label: 'camera frame' });
+  const enc = root.device.createCommandEncoder({ label: "camera frame" });
 
   // RENDER: Copy external → grayTex (MUST happen before compute)
   pipeline.copyPipeline
@@ -571,7 +573,7 @@ export function processFrame(
   // COMPUTE: Gray → Sobel → Histogram + pointer-jump labeling (when Labels/Debug)
   let finalLabelBuffer = pipeline.pointerJumpBuffer0;
   {
-    const computePass = enc.beginComputePass({ label: 'gray + sobel + histogram + filter' });
+    const computePass = enc.beginComputePass({ label: "gray + sobel + histogram + filter" });
     const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height);
     const area = pipeline.width * pipeline.height;
 
@@ -663,7 +665,7 @@ export function processFrame(
 
   // RENDER: Display mode selection + Histogram
   // onError?.(`[camera] render mode=${displayMode}`);
-  if (displayMode === 'edges') {
+  if (displayMode === "edges") {
     try {
       pipeline.sobelRenderPipeline
         .with(enc)
@@ -675,7 +677,7 @@ export function processFrame(
       console.error(msg);
       onError?.(msg);
     }
-  } else if (displayMode === 'nms') {
+  } else if (displayMode === "nms") {
     try {
       pipeline.edgesPipeline
         .with(enc)
@@ -687,7 +689,7 @@ export function processFrame(
       console.error(msg);
       onError?.(msg);
     }
-  } else if (displayMode === 'labels') {
+  } else if (displayMode === "labels") {
     const labelVizBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
       labelBuffer: finalLabelBuffer,
     });
@@ -702,7 +704,7 @@ export function processFrame(
       console.error(msg);
       onError?.(msg);
     }
-  } else if (displayMode === 'debug') {
+  } else if (displayMode === "debug") {
     const labelVizBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
       labelBuffer: finalLabelBuffer,
     });
@@ -717,11 +719,11 @@ export function processFrame(
       console.error(msg);
       onError?.(msg);
     }
-  } else if (displayMode === 'grid') {
+  } else if (displayMode === "grid") {
     // Grayscale base with grid overlay on top (alpha blend)
     pipeline.grayRenderPipeline
       .with(enc)
-      .withColorAttachment({ view: pipeline.context, loadOp: 'load', storeOp: 'store' })
+      .withColorAttachment({ view: pipeline.context, loadOp: "load", storeOp: "store" })
       .with(pipeline.grayRenderBindGroup)
       .draw(3);
 
@@ -729,7 +731,7 @@ export function processFrame(
       // console.log('[camera] gridViz: drawing full-canvas overlay');
       pipeline.gridVizPipeline
         .with(enc)
-        .withColorAttachment({ view: pipeline.context, loadOp: 'load', storeOp: 'store' })
+        .withColorAttachment({ view: pipeline.context, loadOp: "load", storeOp: "store" })
         .with(pipeline.gridVizBindGroup)
         .draw(4, MAX_DETECTED_TAGS); // triangle strip quad per instance
     } catch (e) {
@@ -765,9 +767,7 @@ export function processFrame(
  */
 export type ExtentRow = d.Infer<typeof ExtentEntry>;
 
-export async function readExtentBuffer(
-  pipeline: CameraPipeline,
-): Promise<ExtentRow[]> {
+export async function readExtentBuffer(pipeline: CameraPipeline): Promise<ExtentRow[]> {
   return pipeline.extentBuffer.read();
 }
 
@@ -775,11 +775,9 @@ export async function readExtentBuffer(
  * Read extent buffer and filter to valid quad candidates.
  * Uses the same bboxes that appear in the debug view.
  */
-export async function readExtentDataForQuads(
-  pipeline: CameraPipeline,
-): Promise<ExtentRow[]> {
+export async function readExtentDataForQuads(pipeline: CameraPipeline): Promise<ExtentRow[]> {
   const all = await pipeline.extentBuffer.read();
-  return all.filter(e => e.minX !== MAX_U32);
+  return all.filter((e) => e.minX !== MAX_U32);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -798,9 +796,7 @@ export function updateQuadCornersBuffer(
 ): void {
   const filtered = showFallbacks
     ? quads
-    : quads.filter(
-        q => q.hasCorners && typeof q.decodedTagId === 'number',
-      );
+    : quads.filter((q) => q.hasCorners && typeof q.decodedTagId === "number");
   const count = Math.min(filtered.length, MAX_INSTANCES);
 
   const data: QuadData[] = [];
@@ -817,9 +813,15 @@ export function updateQuadCornersBuffer(
       homography: H
         ? d.mat3x3f(
             // transpose the matrix
-            H[0], H[3], H[6],
-            H[1], H[4], H[7],
-            H[2], H[5], 1,
+            H[0],
+            H[3],
+            H[6],
+            H[1],
+            H[4],
+            H[7],
+            H[2],
+            H[5],
+            1,
           )
         : d.mat3x3f(0, 0, 0, 0, 0, 0, 0, 0, 1),
       debug: {
@@ -857,15 +859,20 @@ export function setGridVizFailInterrogate(
   pipeline.gridVizDebugModeBuffer.write(mode);
 }
 
-export { filterNestedQuads } from './contour';
+export { filterNestedQuads } from "./contour";
 
 export async function detectContours(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
-): Promise<{ quads: DetectedQuad[], extentData: ExtentRow[], dilatedGradients: Float32Array, labelData: Uint32Array }> {
+): Promise<{
+  quads: DetectedQuad[];
+  extentData: ExtentRow[];
+  dilatedGradients: Float32Array;
+  labelData: Uint32Array;
+}> {
   try {
     // Copy storage buffers → staging buffers (staging has MAP_READ, storage does not)
-    const enc = root.device.createCommandEncoder({ label: 'readback' });
+    const enc = root.device.createCommandEncoder({ label: "readback" });
     const labelStorage = pipeline.compactLabelBuffer.buffer as GPUBuffer;
     enc.copyBufferToBuffer(labelStorage, 0, pipeline.compactLabelStaging, 0, labelStorage.size);
     const edgeStorage = pipeline.filteredBuffer.buffer as GPUBuffer;
@@ -887,16 +894,21 @@ export async function detectContours(
     // CPU-side: extract regions and fit quads
     const regions = extractRegions(labelDataCopy, pipeline.width, pipeline.height, dilatedCopy);
     const maxArea = pipeline.width * pipeline.height * 0.5;
-    const quads = validateAndFilterQuads(regions, dilatedCopy, labelDataCopy, pipeline.width, 400, maxArea).filter(
-      (q) => q.area < pipeline.width * pipeline.height * 0.25,
-    );
+    const quads = validateAndFilterQuads(
+      regions,
+      dilatedCopy,
+      labelDataCopy,
+      pipeline.width,
+      400,
+      maxArea,
+    ).filter((q) => q.area < pipeline.width * pipeline.height * 0.25);
 
     // Read extent buffer
     const extentData: ExtentRow[] = await pipeline.extentBuffer.read();
 
     return { quads, extentData, dilatedGradients: dilatedCopy, labelData: labelDataCopy };
   } catch (e) {
-    console.error('[detectContours] Error:', e);
+    console.error("[detectContours] Error:", e);
     throw e;
   }
 }

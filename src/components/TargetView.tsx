@@ -1,8 +1,8 @@
-import { For, createSignal, createMemo } from 'solid-js';
-import { TAG36H11_CODES, codeToPattern } from '../lib/tag36h11';
-import { selectRandomTags } from '../lib/april-tag-gen';
-import { gridVizFillRgbCss } from '../lib/hashStableColor';
-import styles from './TargetView.module.css';
+import { For, createSignal, createMemo } from "solid-js";
+import { TAG36H11_CODES, codeToPattern } from "../lib/tag36h11";
+import { selectRandomTags } from "../lib/april-tag-gen";
+import { gridVizFillRgbCss } from "../lib/hashStableColor";
+import styles from "./TargetView.module.css";
 
 export function TargetView() {
   const [cols, setCols] = createSignal(4);
@@ -22,7 +22,7 @@ export function TargetView() {
   const gridHeight = createMemo(() => rows() * tagSize + (rows() - 1) * boardSize());
   const svgWidth = createMemo(() => gridWidth() + 2 * marginSize());
   const svgHeight = createMemo(() => gridHeight() + 2 * marginSize());
-  const cellSize = createMemo(() => tagSize / 8);  // 6x6 inner + 2 border cells = 8x8 total
+  const cellSize = createMemo(() => tagSize / 8); // 6x6 inner + 2 border cells = 8x8 total
 
   const tagPositions = createMemo(() => {
     const positions: { x: number; y: number; tagId: number }[] = [];
@@ -88,7 +88,10 @@ export function TargetView() {
 
   return (
     <div class={styles.root}>
-      <div class={styles.display} innerHTML={`<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth()}" height="${svgHeight()}" viewBox="0 0 ${svgWidth()} ${svgHeight()}" style="width:100%;height:100%;shape-rendering:crispEdges">${svgContent()}</svg>`} />
+      <div
+        class={styles.display}
+        innerHTML={`<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth()}" height="${svgHeight()}" viewBox="0 0 ${svgWidth()} ${svgHeight()}" style="width:100%;height:100%;shape-rendering:crispEdges">${svgContent()}</svg>`}
+      />
 
       <aside class={styles.controls}>
         <h2 class={styles.title}>Target Settings</h2>
@@ -147,11 +150,7 @@ export function TargetView() {
           </label>
         </div>
 
-        <button
-          type="button"
-          class={styles.randomizeBtn}
-          onClick={() => setRandomSeed(Date.now())}
-        >
+        <button type="button" class={styles.randomizeBtn} onClick={() => setRandomSeed(Date.now())}>
           Randomize Tags
         </button>
 
@@ -160,14 +159,14 @@ export function TargetView() {
           <div
             class={styles.legendList}
             style={{
-              'grid-template-columns': `repeat(${cols()}, minmax(0, 1fr))`,
+              "grid-template-columns": `repeat(${cols()}, minmax(0, 1fr))`,
             }}
           >
             <For each={tagPositions()}>
               {(p) => (
                 <div
                   class={styles.legendCell}
-                  style={{ 'background-color': gridVizFillRgbCss(p().tagId) }}
+                  style={{ "background-color": gridVizFillRgbCss(p().tagId) }}
                 >
                   {p().tagId}
                 </div>

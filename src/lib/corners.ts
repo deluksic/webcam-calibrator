@@ -1,7 +1,7 @@
 // Corner detection: label-filtered edge extraction, Sobel-gradient clustering (cosine),
 // RANSAC + PCA line fit per cluster, and line intersection for robust quad corners.
 
-import { Point } from './geometry';
+import { Point } from "./geometry";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Debug info returned alongside corners (for GPU overlay visualization)
@@ -181,7 +181,9 @@ export interface LineFit {
  * Unit normal from 2D point scatter: eigenvector for the smaller covariance eigenvalue.
  * Returns null if scatter is degenerate or too isotropic for a line.
  */
-function normalFromInlierScatter(points: { x: number; y: number }[]): { nx: number; ny: number } | null {
+function normalFromInlierScatter(
+  points: { x: number; y: number }[],
+): { nx: number; ny: number } | null {
   const n = points.length;
   if (n < 2) return null;
 
@@ -230,10 +232,7 @@ function normalFromInlierScatter(points: { x: number; y: number }[]): { nx: numb
 /**
  * RANSAC line fit on (x,y), then PCA on inliers for the normal. Null if PCA rejects the inlier set.
  */
-function fitLine(
-  points: { x: number; y: number }[],
-  seed: number = 42,
-): LineFit | null {
+function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit | null {
   if (points.length < 3) return null;
 
   const n = points.length;
@@ -241,18 +240,26 @@ function fitLine(
   const THRESH = 3.0;
 
   let rng = (seed * 1664525 + 1013904223) >>> 0;
-  const rand = () => { rng = (rng * 1664525 + 1013904223) >>> 0; return rng / 0xFFFFFFFF; };
+  const rand = () => {
+    rng = (rng * 1664525 + 1013904223) >>> 0;
+    return rng / 0xffffffff;
+  };
   const randInt = (max: number) => Math.floor(rand() * max);
 
-  let bestNx = 0, bestNy = 0, bestD = 0, bestInliers = 0;
+  let bestNx = 0,
+    bestNy = 0,
+    bestD = 0,
+    bestInliers = 0;
 
   for (let iter = 0; iter < ITER; iter++) {
     const i1 = randInt(n);
     let i2 = randInt(n);
     while (i2 === i1) i2 = randInt(n);
 
-    const p1 = points[i1], p2 = points[i2];
-    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const p1 = points[i1],
+      p2 = points[i2];
+    const dx = p2.x - p1.x,
+      dy = p2.y - p1.y;
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len < 1) continue;
 
@@ -282,7 +289,8 @@ function fitLine(
     if (dist < THRESH) inlierPoints.push(points[i]);
   }
 
-  let cx = 0, cy = 0;
+  let cx = 0,
+    cy = 0;
   for (const p of inlierPoints) {
     cx += p.x;
     cy += p.y;
@@ -411,12 +419,7 @@ function findConvexCCWCycle(pts: Point[]): Point[] | null {
 }
 
 function rotateRing(ring: Point[], k: number): [Point, Point, Point, Point] {
-  return [
-    ring[k]!,
-    ring[(k + 1) % 4]!,
-    ring[(k + 2) % 4]!,
-    ring[(k + 3) % 4]!,
-  ];
+  return [ring[k]!, ring[(k + 1) % 4]!, ring[(k + 2) % 4]!, ring[(k + 3) % 4]!];
 }
 
 /**
@@ -436,7 +439,7 @@ function plausibilityCheck(
   minY: number,
   maxX: number,
   maxY: number,
-  minR2: number = 0.80,
+  minR2: number = 0.8,
 ): boolean {
   if (corners.length !== 4) return false;
   if (lines.some((l) => l.r2 < minR2)) return false;
@@ -444,7 +447,7 @@ function plausibilityCheck(
   // Must be convex — all corners must turn the same direction
   const area = signedArea(corners);
   // Use relative tolerance: if |area| < 1e-4 * max(|x|,|y|)^2, shape is degenerate
-  const scale = Math.max(...corners.map(c => Math.max(Math.abs(c.x), Math.abs(c.y))));
+  const scale = Math.max(...corners.map((c) => Math.max(Math.abs(c.x), Math.abs(c.y))));
   if (Math.abs(area) < 1e-4 * scale * scale) return false;
 
   const margin = extentBBoxSlack(minX, minY, maxX, maxY);
@@ -524,13 +527,22 @@ export function findCornersFromEdges(
   minY: number,
   maxX: number,
   maxY: number,
-  minR2: number = 0.70,
+  minR2: number = 0.7,
   minEdgePixels: number = 12,
   seed: number = 42,
 ): Point[] {
   const result = findCornersFromEdgesWithDebug(
-    sobelData, labelData, width, regionLabel,
-    minX, minY, maxX, maxY, minR2, minEdgePixels, seed,
+    sobelData,
+    labelData,
+    width,
+    regionLabel,
+    minX,
+    minY,
+    maxX,
+    maxY,
+    minR2,
+    minEdgePixels,
+    seed,
   );
   return result.corners;
 }
@@ -547,7 +559,7 @@ export function findCornersFromEdgesWithDebug(
   minY: number,
   maxX: number,
   maxY: number,
-  minR2: number = 0.70,
+  minR2: number = 0.7,
   minEdgePixels: number = 12,
   seed: number = 42,
 ): CornerResult {
@@ -559,7 +571,14 @@ export function findCornersFromEdgesWithDebug(
 
   // Step 1: Extract label-filtered edge pixels
   const pixels = extractLabeledEdgePixels(
-    sobelData, labelData, width, regionLabel, minX, minY, maxX, maxY,
+    sobelData,
+    labelData,
+    width,
+    regionLabel,
+    minX,
+    minY,
+    maxX,
+    maxY,
   );
   edgePixelCount = pixels.length;
 
@@ -609,7 +628,10 @@ export function findCornersFromEdgesWithDebug(
 
   if (rawIntersections.length < 4) {
     failureCode |= FAIL_NO_INTERSECTIONS;
-    return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
+    return {
+      corners: [],
+      debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount },
+    };
   }
 
   // Deduplicate: intersections that are very close together belong to the same corner.
@@ -620,30 +642,54 @@ export function findCornersFromEdgesWithDebug(
   }
   if (corners.length < 4) {
     failureCode |= FAIL_NO_INTERSECTIONS;
-    return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
+    return {
+      corners: [],
+      debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount },
+    };
   }
 
   // Step 5: Convex boundary order (consistent turn signs), then label corners by rotation.
   const cycle = findConvexCCWCycle(corners);
   if (!cycle) {
     failureCode |= FAIL_PLAUSIBILITY;
-    return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
+    return {
+      corners: [],
+      debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount },
+    };
   }
 
   const linesNonNull = lines.filter((l) => l !== null) as LineFit[];
   let labeled: [Point, Point, Point, Point] | null = null;
   for (let k = 0; k < 4; k++) {
     const c = rotateRing(cycle, k);
-    if (plausibilityCheck([c[0], c[1], c[2], c[3]], linesNonNull, assignments, pixels, minX, minY, maxX, maxY, minR2)) {
+    if (
+      plausibilityCheck(
+        [c[0], c[1], c[2], c[3]],
+        linesNonNull,
+        assignments,
+        pixels,
+        minX,
+        minY,
+        maxX,
+        maxY,
+        minR2,
+      )
+    ) {
       labeled = c;
       break;
     }
   }
   if (!labeled) {
     failureCode |= FAIL_PLAUSIBILITY;
-    return { corners: [], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
+    return {
+      corners: [],
+      debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount },
+    };
   }
   const [tl, tr, br, bl] = labeled;
 
-  return { corners: [tl, tr, bl, br], debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount } };
+  return {
+    corners: [tl, tr, bl, br],
+    debug: { failureCode, edgePixelCount, minR2: minR2Seen, intersectionCount },
+  };
 }

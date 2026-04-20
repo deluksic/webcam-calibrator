@@ -5,9 +5,7 @@
 Pass an existing `GPUBuffer` as `initialData` to create a TypeGPU buffer aliasing the same GPU memory with a different type. Useful for SSBO-as-vertex-buffer patterns.
 
 ```ts
-const packedBuffer = root
-  .createBuffer(d.arrayOf(d.unorm8x4))
-  .$usage('vertex');
+const packedBuffer = root.createBuffer(d.arrayOf(d.unorm8x4)).$usage("vertex");
 
 // Add STORAGE to the underlying GPUBuffer:
 packedBuffer.$addFlags(GPUBufferUsage.STORAGE);
@@ -19,6 +17,7 @@ const storageView = root.createBuffer(d.arrayOf(d.u32), packedBuffer.buffer);
 Pairs well with WGSL pack/unpack builtins (`std.pack4x8unorm`, `std.unpack4x8unorm`, `std.pack2x16float`, etc.) - reinterpret a buffer as `u32` storage and pack/unpack in the shader for compact vertex data, color encoding, or quantized weights.
 
 **Caveats:**
+
 - The original buffer's lifecycle is NOT transferred - keep it alive while the alias is in use.
 - `$usage()` and `$addFlags()` cannot be called on the aliased buffer.
 - The original must have all needed usage flags before the alias is created.
@@ -31,23 +30,23 @@ Indirect buffers let the GPU determine draw/dispatch counts - foundation of GPU-
 
 ### Required buffer contents
 
-| Call | Layout |
-|---|---|
-| `dispatchWorkgroupsIndirect` | 3x `u32`: x, y, z workgroup counts |
-| `drawIndirect` | 4x `u32`: vertexCount, instanceCount, firstVertex, firstInstance |
-| `drawIndexedIndirect` | indexCount(`u32`), instanceCount(`u32`), firstIndex(`u32`), baseVertex(`i32`), firstInstance(`u32`) |
+| Call                         | Layout                                                                                              |
+| ---------------------------- | --------------------------------------------------------------------------------------------------- |
+| `dispatchWorkgroupsIndirect` | 3x `u32`: x, y, z workgroup counts                                                                  |
+| `drawIndirect`               | 4x `u32`: vertexCount, instanceCount, firstVertex, firstInstance                                    |
+| `drawIndexedIndirect`        | indexCount(`u32`), instanceCount(`u32`), firstIndex(`u32`), baseVertex(`i32`), firstInstance(`u32`) |
 
 All indirect methods have two overloads: `(buffer)` (offset 0) and `(buffer, offsetInfo)`. When the indirect params start at the beginning of the buffer, prefer the no-offset overload - it's cleaner and equally safe.
 
 ```ts
 // Dedicated indirect buffer - no offset needed:
 const IndirectParams = d.struct({
-  vertexCount:   d.u32,
+  vertexCount: d.u32,
   instanceCount: d.u32,
-  firstVertex:   d.u32,
+  firstVertex: d.u32,
   firstInstance: d.u32,
 });
-const indirectBuf = root.createBuffer(IndirectParams).$usage('storage', 'indirect');
+const indirectBuf = root.createBuffer(IndirectParams).$usage("storage", "indirect");
 pipeline.drawIndirect(indirectBuf); // offset 0 implied
 ```
 
@@ -57,14 +56,14 @@ When indirect params are embedded in a larger struct, use `d.memoryLayoutOf` ins
 
 ```ts
 const Schema = d.struct({
-  someData:      d.arrayOf(d.vec3f, 10),
-  vertexCount:   d.u32,
+  someData: d.arrayOf(d.vec3f, 10),
+  vertexCount: d.u32,
   instanceCount: d.u32,
-  firstVertex:   d.u32,
+  firstVertex: d.u32,
   firstInstance: d.u32,
 });
 
-const MyBuffer = root.createBuffer(Schema).$usage('storage', 'indirect');
+const MyBuffer = root.createBuffer(Schema).$usage("storage", "indirect");
 
 const drawOffset = d.memoryLayoutOf(Schema, (s) => s.vertexCount); // compute once
 pipeline.drawIndirect(MyBuffer, drawOffset); // reuse every frame
@@ -76,7 +75,7 @@ pipeline.drawIndirect(MyBuffer, drawOffset); // reuse every frame
 
 ```ts
 const Schema = d.struct({
-  someData:   d.arrayOf(d.vec3f, 10),
+  someData: d.arrayOf(d.vec3f, 10),
   drawParams: d.vec4u, // [vertexCount, instanceCount, firstVertex, firstInstance]
 });
 
@@ -99,12 +98,12 @@ TypeGPU supports passing an existing `GPUCommandEncoder` or active `GPURenderPas
 **Escape hatch.** Returns the underlying raw WebGPU object, letting you pass TypeGPU resources to APIs that require native handles:
 
 ```ts
-const gpuBuffer   = root.unwrap(tgpuBuffer);         // GPUBuffer
-const gpuPipeline = root.unwrap(computePipeline);    // GPUComputePipeline
-const gpuLayout   = root.unwrap(bindGroupLayout);    // GPUBindGroupLayout
-const gpuTexture  = root.unwrap(tgpuTexture);        // GPUTexture
-const gpuView     = root.unwrap(textureView);        // GPUTextureView
-const gpuSampler  = root.unwrap(tgpuSampler);        // GPUSampler
+const gpuBuffer = root.unwrap(tgpuBuffer); // GPUBuffer
+const gpuPipeline = root.unwrap(computePipeline); // GPUComputePipeline
+const gpuLayout = root.unwrap(bindGroupLayout); // GPUBindGroupLayout
+const gpuTexture = root.unwrap(tgpuTexture); // GPUTexture
+const gpuView = root.unwrap(textureView); // GPUTextureView
+const gpuSampler = root.unwrap(tgpuSampler); // GPUSampler
 // also: TgpuRenderPipeline, TgpuBindGroup, TgpuVertexLayout,
 //       TgpuComparisonSampler, TgpuQuerySet
 ```

@@ -1,13 +1,13 @@
 // Contour detection: CPU region extraction + quad fitting (labels from GPU pointer-jump).
 
-import { buildTagGrid, decodeTagPattern } from '../lib/grid';
-import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from '../lib/corners';
-import { Point } from '../lib/geometry';
-import { decodeTag36h11AnyRotation, type TagPattern } from '../lib/tag36h11';
+import { buildTagGrid, decodeTagPattern } from "../lib/grid";
+import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from "../lib/corners";
+import { Point } from "../lib/geometry";
+import { decodeTag36h11AnyRotation, type TagPattern } from "../lib/tag36h11";
 
 const { min, max, floor } = Math;
 
-export const COMPONENT_LABEL_INVALID = 0xFFFFFFFF;
+export const COMPONENT_LABEL_INVALID = 0xffffffff;
 
 export interface DetectedQuad {
   corners: Point[]; // 4 corner points
@@ -158,7 +158,6 @@ export function validateAndFilterQuads(
       continue;
     }
 
-
     // Try to detect real corners via line intersection
     const cornerResult = findCornersFromEdgesWithDebug(
       sobelData,
@@ -199,9 +198,7 @@ export function validateAndFilterQuads(
       pattern,
       hasCorners: detectedCorners.length === 4,
       cornerDebug: cornerResult.debug,
-      ...(decoded
-        ? { decodedTagId: decoded.id, decodedRotation: decoded.rotation }
-        : {}),
+      ...(decoded ? { decodedTagId: decoded.id, decodedRotation: decoded.rotation } : {}),
     });
   }
 
@@ -213,7 +210,7 @@ export function filterNestedQuads(quads: DetectedQuad[]): DetectedQuad[] {
     for (const other of quads) {
       if (other === candidate) continue;
       if (!other.corners || !candidate.corners) {
-        console.warn('Missing corners in filterNestedQuads', other, candidate);
+        console.warn("Missing corners in filterNestedQuads", other, candidate);
         continue;
       }
       // Discard candidate if it is fully contained inside another box

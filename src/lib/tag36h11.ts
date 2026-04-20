@@ -2,10 +2,10 @@
 // https://github.com/AprilRobotics/apriltag/blob/master/tag36h11.c
 // BSD-3-Clause license
 
-import codesRaw from './tag36h11.json';
+import codesRaw from "./tag36h11.json";
 
 // Parse JSON strings as BigInt (needed because JSON can't store 64-bit integers)
-const TAG36H11_CODES: readonly bigint[] = (codesRaw as unknown as string[]).map(s => BigInt(s));
+const TAG36H11_CODES: readonly bigint[] = (codesRaw as unknown as string[]).map((s) => BigInt(s));
 export { TAG36H11_CODES };
 export const TAG36H11_COUNT = TAG36H11_CODES.length;
 
@@ -13,10 +13,12 @@ export const TAG36H11_COUNT = TAG36H11_CODES.length;
 // The 10×10 grid has 8×8 inner data area (coords 1–8). Border = 0 and 9.
 // For tag36h11, the data bits (1-indexed 6×6) are at coords 1–6 in both axes.
 const BIT_X = [
-  1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4, 1, 1, 1, 1, 1, 2, 2, 2, 3,
+  1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4, 1, 1, 1, 1, 1, 2,
+  2, 2, 3,
 ] as const;
 const BIT_Y = [
-  1, 1, 1, 1, 1, 2, 2, 2, 3, 1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4,
+  1, 1, 1, 1, 1, 2, 2, 2, 3, 1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5,
+  4, 3, 4,
 ] as const;
 
 /** `-1` = no / weak directional signal; `-2` = enough votes but pos/neg tie (ambiguous). */
@@ -47,7 +49,10 @@ export function codeToPattern(code: bigint): TagPattern {
  */
 function popcount64(x: bigint): number {
   let count = 0;
-  while (x) { count++; x &= x - 1n; }
+  while (x) {
+    count++;
+    x &= x - 1n;
+  }
   return count;
 }
 
@@ -72,7 +77,7 @@ export function patternToCode(pattern: TagPattern): bigint {
     const row = y - 1;
     const col = x - 1;
     if (pattern[row * 6 + col] === 1) {
-      code |= (1n << BigInt(35 - bit));
+      code |= 1n << BigInt(35 - bit);
     }
   }
   return code;
@@ -112,10 +117,10 @@ export function decodeTag36h11Best(
     const pIdx = pRow * 6 + pCol;
     const val = pattern[pIdx];
     if (val === 1) {
-      code |= (1n << BigInt(35 - bit));
-      knownMask |= (1n << BigInt(35 - bit));
+      code |= 1n << BigInt(35 - bit);
+      knownMask |= 1n << BigInt(35 - bit);
     } else if (val === 0) {
-      knownMask |= (1n << BigInt(35 - bit));
+      knownMask |= 1n << BigInt(35 - bit);
     }
   }
 
@@ -142,10 +147,7 @@ export function decodeTag36h11Best(
  * Match detected pattern against tag36h11 dictionary.
  * Returns tag ID if found within error threshold, or -1 if no match.
  */
-export function decodeTag36h11(
-  pattern: TagPattern | null,
-  maxError: number = 5,
-): number {
+export function decodeTag36h11(pattern: TagPattern | null, maxError: number = 5): number {
   return decodeTag36h11Best(pattern, maxError).id;
 }
 
@@ -181,11 +183,7 @@ export function decodeTag36h11AnyRotation(
   for (let r = 0; r < 4; r++) {
     const { id, dist } = decodeTag36h11Best(currentPattern, maxError);
     if (id !== -1) {
-      if (
-        !best ||
-        dist < best.dist ||
-        (dist === best.dist && id < best.id)
-      ) {
+      if (!best || dist < best.dist || (dist === best.dist && id < best.id)) {
         best = { id, rotation: r, dist };
       }
     }

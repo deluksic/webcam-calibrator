@@ -61,21 +61,21 @@ GPU-only. One reset + one track dispatch. Atomically tracks (minX, minY, maxX, m
 
 ## Display Modes
 
-| Mode | GPU Compute | Render | CPU Readback |
-|------|-------------|--------|--------------|
-| `grayscale` | Gray | grayscale | histogram |
-| `edges` | Sobel | edges | histogram |
-| `nms` | Sobel + NMS | edges | histogram |
-| `labels` | Sobel + pointer-jump + compact | labels (hash-based colors) | none |
-| `debug` | Sobel + pointer-jump + extent | labels + bbox overlay | extent buffer |
-| `grid` | Sobel + pointer-jump + extent | grayscale + homography-warped quad grid | throttled `detectContours` (compact labels + **filtered** Sobel readback → corners + **CPU AprilTag decode**) |
+| Mode        | GPU Compute                    | Render                                  | CPU Readback                                                                                                  |
+| ----------- | ------------------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `grayscale` | Gray                           | grayscale                               | histogram                                                                                                     |
+| `edges`     | Sobel                          | edges                                   | histogram                                                                                                     |
+| `nms`       | Sobel + NMS                    | edges                                   | histogram                                                                                                     |
+| `labels`    | Sobel + pointer-jump + compact | labels (hash-based colors)              | none                                                                                                          |
+| `debug`     | Sobel + pointer-jump + extent  | labels + bbox overlay                   | extent buffer                                                                                                 |
+| `grid`      | Sobel + pointer-jump + extent  | grayscale + homography-warped quad grid | throttled `detectContours` (compact labels + **filtered** Sobel readback → corners + **CPU AprilTag decode**) |
 
 ## CPU Readbacks
 
-| Function | When | What |
-|---------|------|------|
-| `readExtentBuffer()` | Every frame in debug mode | Extent entries (320 KB) |
-| `detectContours()` | Every ~30 frames in grid mode | Full label + gradient buffers (~11 MB) |
+| Function             | When                          | What                                   |
+| -------------------- | ----------------------------- | -------------------------------------- |
+| `readExtentBuffer()` | Every frame in debug mode     | Extent entries (320 KB)                |
+| `detectContours()`   | Every ~30 frames in grid mode | Full label + gradient buffers (~11 MB) |
 
 ## Corner Detection (grid mode, CPU)
 
@@ -85,16 +85,16 @@ GPU-only. One reset + one track dispatch. Atomically tracks (minX, minY, maxX, m
 
 **On the GPU (same frame submit as grid mode):** grayscale → Sobel → histogram/threshold → edge filter (NMS) → pointer-jump labeling → compact remap → extent tracking. CPU readback then gets **per-pixel compact labels** and **filtered Sobel buffer** `(gx, gy)` per pixel.
 
-**Per region on the CPU** (`src/lib/corners.ts`), stages run **strictly in this order**. Anything that fails **through step 5** (before four deduped intersection points exist) means intersection geometry never stabilizes — so a `failureCode` that *looks* like “intersections” can still be rooted in clustering or line fit.
+**Per region on the CPU** (`src/lib/corners.ts`), stages run **strictly in this order**. Anything that fails **through step 5** (before four deduped intersection points exist) means intersection geometry never stabilizes — so a `failureCode` that _looks_ like “intersections” can still be rooted in clustering or line fit.
 
-| Step | What happens | Typical failure / debug |
-|------|----------------|-------------------------|
-| 1 | **Labeled edge pixels** — pixels inside the region’s bbox whose compact label matches the region; each stores raw **Sobel** `(gx, gy)` and magnitude. | `FAIL_INSUFFICIENT_EDGES` (bit 0) if count &lt; `minEdgePixels` (default 12). |
-| 2 | **K-means (k=4)** on gradient vectors using **cosine dissimilarity** \(1 - \cos\theta\); cluster **reference direction** = normalized sum of member gradients (not a spatial centroid). | Poor splits → weak lines later; no dedicated bit here. |
-| 3 | **Line per cluster** — `fitLine`: RANSAC on `(x,y)` inliers, then **PCA** on inliers for the line normal; returns `null` if PCA rejects scatter. | `FAIL_LINE_FIT_FAILED` (bit 2) for that cluster; **fewer than four lines** reduces how many intersection pairs exist. |
-| 4 | **Line–line intersections** — all pairs of **non-null** lines; `lineIntersection` (parallel pairs yield no point); clip to region extent bbox ± **`extentBBoxSlack`** = `max(6px, 0.5 × max(bboxW, bboxH))`. | `FAIL_NO_INTERSECTIONS` (bit 4) if **&lt;4** raw hits pass the clip (often because step 3 left missing lines, parallel lines, or hits fall outside slack). |
-| 5 | **Deduplicate** intersections closer than **5 px**. | Same bit 4 if **&lt;4** distinct points remain (many hits collapsed to one corner). |
-| 6 | **Order + plausibility** — among permutations of the four points, require a **strictly convex CCW** cycle (consistent turn signs; largest valid signed area); **rotate** that cycle to label **TL, TR, BR, BL** and run **plausibility** until one passes: `R²`, corners inside extent bbox ± **the same `extentBBoxSlack`** as step 4, opposite-edge length ratios, cluster inlier counts. Emit `[TL, TR, BL, BR]` for homography. | `FAIL_PLAUSIBILITY` (bit 3) if no convex cycle, no rotation passes plausibility, or a check fails (e.g. `R²`, edge ratio, sparse cluster). |
+| Step | What happens                                                                                                                                                                                                                                                                                                                                                                                                                        | Typical failure / debug                                                                                                                                    |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | **Labeled edge pixels** — pixels inside the region’s bbox whose compact label matches the region; each stores raw **Sobel** `(gx, gy)` and magnitude.                                                                                                                                                                                                                                                                               | `FAIL_INSUFFICIENT_EDGES` (bit 0) if count &lt; `minEdgePixels` (default 12).                                                                              |
+| 2    | **K-means (k=4)** on gradient vectors using **cosine dissimilarity** \(1 - \cos\theta\); cluster **reference direction** = normalized sum of member gradients (not a spatial centroid).                                                                                                                                                                                                                                             | Poor splits → weak lines later; no dedicated bit here.                                                                                                     |
+| 3    | **Line per cluster** — `fitLine`: RANSAC on `(x,y)` inliers, then **PCA** on inliers for the line normal; returns `null` if PCA rejects scatter.                                                                                                                                                                                                                                                                                    | `FAIL_LINE_FIT_FAILED` (bit 2) for that cluster; **fewer than four lines** reduces how many intersection pairs exist.                                      |
+| 4    | **Line–line intersections** — all pairs of **non-null** lines; `lineIntersection` (parallel pairs yield no point); clip to region extent bbox ± **`extentBBoxSlack`** = `max(6px, 0.5 × max(bboxW, bboxH))`.                                                                                                                                                                                                                        | `FAIL_NO_INTERSECTIONS` (bit 4) if **&lt;4** raw hits pass the clip (often because step 3 left missing lines, parallel lines, or hits fall outside slack). |
+| 5    | **Deduplicate** intersections closer than **5 px**.                                                                                                                                                                                                                                                                                                                                                                                 | Same bit 4 if **&lt;4** distinct points remain (many hits collapsed to one corner).                                                                        |
+| 6    | **Order + plausibility** — among permutations of the four points, require a **strictly convex CCW** cycle (consistent turn signs; largest valid signed area); **rotate** that cycle to label **TL, TR, BR, BL** and run **plausibility** until one passes: `R²`, corners inside extent bbox ± **the same `extentBBoxSlack`** as step 4, opposite-edge length ratios, cluster inlier counts. Emit `[TL, TR, BL, BR]` for homography. | `FAIL_PLAUSIBILITY` (bit 3) if no convex cycle, no rotation passes plausibility, or a check fails (e.g. `R²`, edge ratio, sparse cluster).                 |
 
 If `contour.ts` does not get four corners, it still builds a quad from the **region bounding box** for grid/homography, but `cornerDebug.failureCode` reflects the CPU attempt above.
 
@@ -127,14 +127,14 @@ Vertex shader passes `w` in `outPos.w` for automatic perspective-correct interpo
 
 ## GPU Buffers
 
-| Buffer | Size | Type |
-|--------|------|------|
-| `sobelBuffer` | W×H×vec2f | gradient (gx, gy) |
-| `filteredBuffer` | W×H×vec2f | NMS-suppressed gradient |
-| `pointerJumpBuffer0/1` | W×H×u32 | labels (ping-pong) |
-| `pointerJumpAtomicBuffer` | W×H×atomic u32 | atomic labels |
-| `compactLabelBuffer` | W×H×u32 | compact labels |
-| `canonicalRootBuffer` | area×atomic u32 | canonical root IDs |
-| `histogramBuffer` | 256×atomic u32 | edge histogram |
-| `extentBuffer` | MAX_EXTENT_COMPONENTS×ExtentEntry | bounding boxes |
-| `quadCornersBuffer` | `MAX_INSTANCES` × (`GridDataSchema` in `gridVizPipeline.ts`: `mat3x3f` homography + `QuadDebug` + `decodedTagId` u32) | instanced grid viz (`MAX_INSTANCES` in that file, e.g. 1024) |
+| Buffer                    | Size                                                                                                                  | Type                                                         |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `sobelBuffer`             | W×H×vec2f                                                                                                             | gradient (gx, gy)                                            |
+| `filteredBuffer`          | W×H×vec2f                                                                                                             | NMS-suppressed gradient                                      |
+| `pointerJumpBuffer0/1`    | W×H×u32                                                                                                               | labels (ping-pong)                                           |
+| `pointerJumpAtomicBuffer` | W×H×atomic u32                                                                                                        | atomic labels                                                |
+| `compactLabelBuffer`      | W×H×u32                                                                                                               | compact labels                                               |
+| `canonicalRootBuffer`     | area×atomic u32                                                                                                       | canonical root IDs                                           |
+| `histogramBuffer`         | 256×atomic u32                                                                                                        | edge histogram                                               |
+| `extentBuffer`            | MAX_EXTENT_COMPONENTS×ExtentEntry                                                                                     | bounding boxes                                               |
+| `quadCornersBuffer`       | `MAX_INSTANCES` × (`GridDataSchema` in `gridVizPipeline.ts`: `mat3x3f` homography + `QuadDebug` + `decodedTagId` u32) | instanced grid viz (`MAX_INSTANCES` in that file, e.g. 1024) |

@@ -1,22 +1,22 @@
-import { describe, it, expect } from 'vitest';
-import { applyHomography, computeHomography, type Point } from './geometry';
-import { imagePixelToUnitSquareUv, invertMat3RowMajor } from './aprilTagRaycast';
+import { describe, it, expect } from "vitest";
+import { applyHomography, computeHomography, type Point } from "./geometry";
+import { imagePixelToUnitSquareUv, invertMat3RowMajor } from "./aprilTagRaycast";
 import {
   finiteDifferenceSobelFromIntensity,
   intensityAtTagUv,
   renderAprilTagIntensity,
   renderAprilTagSobelFiniteDifference,
-} from '../test-utils/syntheticAprilTag';
-import { TAG36H11_CODES, codeToPattern, decodeTag36h11AnyRotation } from './tag36h11';
-import { buildTagGrid, decodeTagPattern } from './grid';
+} from "../test-utils/syntheticAprilTag";
+import { TAG36H11_CODES, codeToPattern, decodeTag36h11AnyRotation } from "./tag36h11";
+import { buildTagGrid, decodeTagPattern } from "./grid";
 
 /** TL, TR, BR, BL for `buildTagGrid` from homography strip TL, TR, BL, BR. */
 function cornersGridOrder(strip: [Point, Point, Point, Point]): [Point, Point, Point, Point] {
   return [strip[0], strip[1], strip[3], strip[2]];
 }
 
-describe('aprilTagRaycast', () => {
-  it('invertMat3RowMajor * M ≈ I', () => {
+describe("aprilTagRaycast", () => {
+  it("invertMat3RowMajor * M ≈ I", () => {
     const M = [2, 0, 1, 0, 3, 0, 0, 0, 1];
     const inv = invertMat3RowMajor(M)!;
     const mul = (A: number[], B: number[]) => {
@@ -38,7 +38,7 @@ describe('aprilTagRaycast', () => {
     expect(I[3]).toBeCloseTo(0, 5);
   });
 
-  it('imagePixelToUnitSquareUv round-trips forward homography on a square', () => {
+  it("imagePixelToUnitSquareUv round-trips forward homography on a square", () => {
     const strip: [Point, Point, Point, Point] = [
       { x: 20, y: 20 },
       { x: 220, y: 30 },
@@ -55,7 +55,7 @@ describe('aprilTagRaycast', () => {
     expect(back.v).toBeCloseTo(v0, 5);
   });
 
-  it('intensityAtTagUv: black 1/8 border + inner 6×6 from pattern', () => {
+  it("intensityAtTagUv: black 1/8 border + inner 6×6 from pattern", () => {
     const pattern = codeToPattern(TAG36H11_CODES[0]);
     expect(intensityAtTagUv(0.04, 0.04, pattern)).toBe(0);
     expect(intensityAtTagUv(0.96, 0.96, pattern)).toBe(0);
@@ -69,7 +69,7 @@ describe('aprilTagRaycast', () => {
     expect(intensityAtTagUv(lastU, lastV, pattern)).toBe(bitBr === 1 ? 0 : 1);
   });
 
-  it('renderAprilTagIntensity matches UV law at each cell center (forward projection)', () => {
+  it("renderAprilTagIntensity matches UV law at each cell center (forward projection)", () => {
     const pattern = codeToPattern(TAG36H11_CODES[42]);
     const strip: [Point, Point, Point, Point] = [
       { x: 40, y: 40 },
@@ -96,7 +96,7 @@ describe('aprilTagRaycast', () => {
     }
   });
 
-  it('finiteDifferenceSobelFromIntensity has strong response on a vertical black/white edge', () => {
+  it("finiteDifferenceSobelFromIntensity has strong response on a vertical black/white edge", () => {
     const w = 64;
     const h = 64;
     const I = new Float32Array(w * h).fill(1);
@@ -112,7 +112,7 @@ describe('aprilTagRaycast', () => {
     expect(Math.abs(s[o])).toBeGreaterThan(0.2);
   });
 
-  it('buildTagGrid cell centers: UV indices match row/col; raster matches tag law (nearest pixel)', () => {
+  it("buildTagGrid cell centers: UV indices match row/col; raster matches tag law (nearest pixel)", () => {
     const tagId = 7;
     const pattern = codeToPattern(TAG36H11_CODES[tagId]);
     const size = 360;
@@ -144,7 +144,7 @@ describe('aprilTagRaycast', () => {
     }
   });
 
-  it('decodeTagPattern recovers dictionary id from synthetic raycast + finite-difference Sobel', () => {
+  it("decodeTagPattern recovers dictionary id from synthetic raycast + finite-difference Sobel", () => {
     const tagId = 0;
     const pattern = codeToPattern(TAG36H11_CODES[tagId]);
     const size = 360;

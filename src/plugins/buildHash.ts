@@ -1,6 +1,6 @@
-import type { Plugin } from 'vite';
+import type { Plugin } from "vite";
 
-const VERSION = '1.2';
+const VERSION = "1.2";
 
 // Compute a short hash from chunk content (base64 of first 12 chars, stripped of special chars)
 function contentHash(code: string): string {
@@ -13,11 +13,11 @@ function contentHash(code: string): string {
 
 export function buildHashPlugin(): Plugin {
   return {
-    name: 'vite-build-hash',
+    name: "vite-build-hash",
 
     renderChunk(code, chunk) {
       // Only inject into the main entry chunk
-      if (chunk.isEntry && chunk.fileName.includes('index-')) {
+      if (chunk.isEntry && chunk.fileName.includes("index-")) {
         const hash = contentHash(code);
         return `window.__BUILD_HASH__ = "${VERSION}-${hash}";\n${code}`;
       }

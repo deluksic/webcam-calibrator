@@ -6,8 +6,8 @@
 //
 // Output: filteredBuffer[i] = suppressed gradient (vec2f; zero if not a local max or below threshold).
 // The edges display pipeline computes magnitude from length() on-the-fly.
-import { tgpu, d, std } from 'typegpu';
-import { abs, length, select } from 'typegpu/std';
+import { tgpu, d, std } from "typegpu";
+import { abs, length, select } from "typegpu/std";
 
 export function createEdgeFilterPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -19,8 +19,10 @@ export function createEdgeFilterPipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [16, 16, 1],
   })((input) => {
-    'use gpu';
-    if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) { return; }
+    "use gpu";
+    if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) {
+      return;
+    }
 
     const x = d.i32(input.gid.x);
     const y = d.i32(input.gid.y);

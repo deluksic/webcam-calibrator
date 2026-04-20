@@ -14,7 +14,7 @@ export async function tryUpgradeVideoTrack(track: MediaStreamTrack): Promise<voi
   const vt = track as MediaStreamTrack & {
     getCapabilities?: () => MediaTrackCapabilities;
   };
-  if (typeof vt.getCapabilities !== 'function') return;
+  if (typeof vt.getCapabilities !== "function") return;
 
   const caps = vt.getCapabilities();
   const w = caps.width;
@@ -81,5 +81,5 @@ export async function primeCameraPermission(): Promise<void> {
 
 export async function listVideoInputDevices(): Promise<MediaDeviceInfo[]> {
   const all = await navigator.mediaDevices.enumerateDevices();
-  return all.filter((d) => d.kind === 'videoinput');
+  return all.filter((d) => d.kind === "videoinput");
 }

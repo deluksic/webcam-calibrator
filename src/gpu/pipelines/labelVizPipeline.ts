@@ -1,8 +1,8 @@
-import { tgpu, d } from 'typegpu';
-import { common } from 'typegpu';
-import { clamp, floor } from 'typegpu/std';
-import { COMPONENT_LABEL_INVALID } from '../contour';
-import { stableHashToRgb01 } from '../../lib/hashStableColor';
+import { tgpu, d } from "typegpu";
+import { common } from "typegpu";
+import { clamp, floor } from "typegpu/std";
+import { COMPONENT_LABEL_INVALID } from "../contour";
+import { stableHashToRgb01 } from "../../lib/hashStableColor";
 
 export function createLabelVizPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -15,19 +15,15 @@ export function createLabelVizPipeline(
     in: { uv: d.location(0, d.vec2f) },
     out: d.vec4f,
   })((i) => {
-    'use gpu';
+    "use gpu";
     // i32 for last-index: (u32)width - 1 wraps at 0; clamp max uses signed last index → f32.
     const wi = d.i32(width);
     const hi = d.i32(height);
     const maxPx = d.f32(wi - d.i32(1));
     const maxPy = d.f32(hi - d.i32(1));
     // Plain u32(uv * size) is unstable at column/row boundaries (float error → wrong neighbor sample → 1px streaks).
-    const px = d.u32(
-      floor(clamp(i.uv.x * d.f32(wi), d.f32(0), maxPx)),
-    );
-    const py = d.u32(
-      floor(clamp(i.uv.y * d.f32(hi), d.f32(0), maxPy)),
-    );
+    const px = d.u32(floor(clamp(i.uv.x * d.f32(wi), d.f32(0), maxPx)));
+    const py = d.u32(floor(clamp(i.uv.y * d.f32(hi), d.f32(0), maxPy)));
     const idx = py * d.u32(wi) + px;
     const label = labelVizLayout.$.labelBuffer[idx];
 

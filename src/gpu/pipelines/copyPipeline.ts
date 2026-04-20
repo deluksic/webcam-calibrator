@@ -1,5 +1,5 @@
 // Copy pipeline: external texture → grayTex
-import { tgpu, d, std, common } from 'typegpu';
+import { tgpu, d, std, common } from "typegpu";
 
 export function createCopyPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -9,13 +9,13 @@ export function createCopyPipeline(
     in: { uv: d.location(0, d.vec2f) },
     out: d.vec4f,
   })((i) => {
-    'use gpu';
+    "use gpu";
     return std.textureSampleBaseClampToEdge(copyLayout.$.cameraTex, copyLayout.$.sampler, i.uv);
   });
 
   return root.createRenderPipeline({
     vertex: common.fullScreenTriangle,
     fragment: copyFrag,
-    targets: { format: 'rgba8unorm' },
+    targets: { format: "rgba8unorm" },
   });
 }

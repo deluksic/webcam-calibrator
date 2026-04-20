@@ -2,19 +2,20 @@
  * Shared synthetic decode stress: perspective quad, optional speckle, FD Sobel.
  * Used by `decodeStress.test.ts` and `scripts/find-decode-stress-speckle-limit.ts`.
  */
-import type { Point } from './geometry';
-import { buildTagGrid, decodeTagPattern } from './grid';
+import type { Point } from "./geometry";
+import { buildTagGrid, decodeTagPattern } from "./grid";
 import {
   finiteDifferenceSobelFromIntensity,
   renderAprilTagIntensity,
-} from '../test-utils/syntheticAprilTag';
+} from "../test-utils/syntheticAprilTag";
 import {
   TAG36H11_CODES,
   codeToPattern,
   decodeTag36h11AnyRotation,
   decodeTag36h11Best,
   type TagPattern,
-} from './tag36h11';
+} from "./tag36h11";
+import { xorshift32U01 } from "./seededRng";
 
 export const DECODE_STRESS_SUPERSAMPLE_DEFAULT = 4;
 export const DECODE_STRESS_SIZES = [200, 160, 120, 96, 80, 72, 64, 56, 48, 40] as const;
@@ -30,7 +31,12 @@ export const DECODE_STRESS_SPECKLE_AMP = 0.492;
  * `raster + scale * template`. Re-tune `DECODE_STRESS_HOMOGRAPHY_MISMATCH_SCALE` with
  * `pnpm run find:decode-stress-homography` (grid scan — `passes(scale)` is not monotone).
  */
-export const DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX: readonly [Point, Point, Point, Point] = [
+export const DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX: readonly [
+  Point,
+  Point,
+  Point,
+  Point,
+] = [
   { x: 0.35, y: -0.2 },
   { x: -0.25, y: 0.25 },
   { x: 0.2, y: 0.3 },
@@ -44,7 +50,8 @@ export const DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX: readonly [Poi
 export const DECODE_STRESS_HOMOGRAPHY_MISMATCH_SCALE = 1;
 
 /** @deprecated Use `DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX` + scale. */
-export const DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSETS_PX = DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX;
+export const DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSETS_PX =
+  DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX;
 
 /** `max |Δx|, |Δy|` over the offset template (pixels before scale). */
 export function decodeStressHomographyMismatchTemplateMaxAxisPx(): number {
@@ -61,7 +68,8 @@ export function decodeStressHomographyMismatchTemplateMaxAxisPx(): number {
  */
 export function decodeStressHomographyMismatchScaleForMaxAxisPx(maxAxisPx: number): number {
   const denom = decodeStressHomographyMismatchTemplateMaxAxisPx();
-  if (denom <= 0) throw new Error('decodeStressHomographyMismatchScaleForMaxAxisPx: empty template');
+  if (denom <= 0)
+    throw new Error("decodeStressHomographyMismatchScaleForMaxAxisPx: empty template");
   return maxAxisPx / denom;
 }
 
@@ -87,16 +95,6 @@ const REF_STRIP: [Point, Point, Point, Point] = [
 const REF_CX = (20 + 280 + 35 + 275) / 4;
 const REF_CY = (20 + 45 + 260 + 265) / 4;
 
-/** In-place xorshift32 on `stateRef.s`; returns `[0,1)`. */
-function xorshift32U01(stateRef: { s: number }): number {
-  let x = stateRef.s >>> 0;
-  x ^= x << 13;
-  x ^= x >>> 17;
-  x ^= x << 5;
-  stateRef.s = x >>> 0;
-  return stateRef.s / 0x1_0000_0000;
-}
-
 /** Deterministic speckle: uniform in `[-amplitude, amplitude]`, clamped to `[0,1]`. */
 export function decodeStressAddSpeckle01(
   intensity: Float32Array,
@@ -104,7 +102,7 @@ export function decodeStressAddSpeckle01(
   seed: number,
 ): void {
   if (amplitude <= 0) return;
-  const st = { s: (seed >>> 0) || 1 };
+  const st = { s: seed >>> 0 || 1 };
   for (let i = 0; i < intensity.length; i++) {
     const n = (xorshift32U01(st) * 2 - 1) * amplitude;
     intensity[i] = Math.min(1, Math.max(0, intensity[i]! + n));
@@ -112,7 +110,9 @@ export function decodeStressAddSpeckle01(
 }
 
 export function decodeStressSpeckleSeed(w: number, h: number, tagId: number): number {
-  return (Math.imul(w, 1_664_525) ^ Math.imul(h, 1_013_904_223) ^ Math.imul(tagId, 747_796_405)) >>> 0;
+  return (
+    (Math.imul(w, 1_664_525) ^ Math.imul(h, 1_013_904_223) ^ Math.imul(tagId, 747_796_405)) >>> 0
+  );
 }
 
 /** TL, TR, BR, BL for `buildTagGrid` from homography strip TL, TR, BL, BR. */
@@ -217,11 +217,18 @@ export function decodeStressSyntheticWithHomographyMismatch(
   speckleAmp: number,
 ) {
   const pattern = codeToPattern(TAG36H11_CODES[tagId]);
-  const { sobel } = decodeStressRasterSobel(w, h, rasterStrip, pattern, supersample, tagId, speckleAmp);
+  const { sobel } = decodeStressRasterSobel(
+    w,
+    h,
+    rasterStrip,
+    pattern,
+    supersample,
+    tagId,
+    speckleAmp,
+  );
   const grid = buildTagGrid(decodeStressCornersGridOrder(decodeStrip), 6);
   const decodedPattern = decodeTagPattern(grid, sobel, w, undefined, h);
   const best = decodeTag36h11Best(decodedPattern, 8);
   const rot = decodeTag36h11AnyRotation(decodedPattern, 8);
   return { best, rot, decodedPattern };
 }
-

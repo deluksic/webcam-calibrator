@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { canonicalInnerCornersTagPlane } from './canonicalTagGeometry';
-import { buildTagGrid } from './grid';
-import type { Point } from './geometry';
+import { describe, expect, it } from "vitest";
+import { canonicalInnerCornersTagPlane } from "./canonicalTagGeometry";
+import { buildTagGrid } from "./grid";
+import type { Point } from "./geometry";
 
-describe('canonicalInnerCornersTagPlane', () => {
-  it('matches buildTagGrid on unit square with 49 points', () => {
+describe("canonicalInnerCornersTagPlane", () => {
+  it("matches buildTagGrid on unit square with 49 points", () => {
     const unit: [Point, Point, Point, Point] = [
       { x: 0, y: 0 },
       { x: 1, y: 0 },

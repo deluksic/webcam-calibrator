@@ -1,14 +1,5 @@
-import {
-  For,
-  Show,
-  createMemo,
-  createStore,
-  isPending,
-} from "solid-js";
-import {
-  LiveCameraPipeline,
-  type DisplayMode,
-} from "./camera/LiveCameraPipeline";
+import { For, Show, createMemo, createStore, isPending } from "solid-js";
+import { LiveCameraPipeline, type DisplayMode } from "./camera/LiveCameraPipeline";
 import { useCameraStream } from "./camera/CameraStreamContext";
 import type { CalibrationSample } from "../lib/calibrationTypes";
 import {
@@ -16,10 +7,7 @@ import {
   calibrationQuadScore,
   frameHasDuplicateDecodedTagIds,
 } from "../lib/calibrationQuality";
-import {
-  DEFAULT_CALIBRATION_TOP_K,
-  mergeCalibrationSamplesTopK,
-} from "../lib/calibrationTopK";
+import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationSamplesTopK } from "../lib/calibrationTopK";
 import type { DetectedQuad } from "../gpu/contour";
 import styles from "./CalibrationView.module.css";
 import pipelineStyles from "./camera/LiveCameraPipeline.module.css";
@@ -124,13 +112,11 @@ function CalibrationView() {
 
   return (
     <div class={styles.root}>
-      {cam.streamError() ? (
-        <p class={styles.error}>Camera: {cam.streamError()}</p>
-      ) : null}
+      {cam.streamError() ? <p class={styles.error}>Camera: {cam.streamError()}</p> : null}
 
       <p class={styles.hint}>
-        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static
-        target. Layout is recovered in bundle adjustment — no grid setup here.
+        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target. Layout is
+        recovered in bundle adjustment — no grid setup here.
       </p>
 
       <div class={styles.cameraBlock}>
@@ -180,10 +166,7 @@ function CalibrationView() {
         </button>
         <button
           type="button"
-          class={[
-            styles.btn,
-            store.collection !== "running" && styles.btnDisabled,
-          ]}
+          class={[styles.btn, store.collection !== "running" && styles.btnDisabled]}
           disabled={store.collection !== "running"}
           onClick={() =>
             setStore((s) => {
@@ -213,7 +196,9 @@ function CalibrationView() {
       </div>
 
       <div class={styles.stats}>
-        <div>Pool: {store.samples.length} / {DEFAULT_CALIBRATION_TOP_K}</div>
+        <div>
+          Pool: {store.samples.length} / {DEFAULT_CALIBRATION_TOP_K}
+        </div>
         <div>Unique tag IDs: {uniqueTagCount()}</div>
         <div>Frames processed: {store.stats.framesProcessed}</div>
         <div>Frames accepted: {store.stats.framesAccepted}</div>

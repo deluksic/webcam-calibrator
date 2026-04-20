@@ -1,4 +1,4 @@
-declare module 'pngjs' {
+declare module "pngjs" {
   // pngjs ships without types; sync API only used in tests + scripts.
   export const PNG: {
     new (opts: { width: number; height: number; colorType?: number }): { data: Buffer };

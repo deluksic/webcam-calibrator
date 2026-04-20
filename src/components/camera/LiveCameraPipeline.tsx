@@ -22,10 +22,7 @@ import {
   MAX_U32,
   MAX_DETECTED_TAGS,
 } from "../../gpu/camera";
-import {
-  computeThreshold,
-  THRESHOLD_PERCENTILE,
-} from "../../gpu/pipelines/constants";
+import { computeThreshold, THRESHOLD_PERCENTILE } from "../../gpu/pipelines/constants";
 import type { DetectedQuad } from "../../gpu/contour";
 import styles from "./LiveCameraPipeline.module.css";
 
@@ -39,11 +36,7 @@ interface Bbox {
   area: number;
 }
 
-function QuadCandidateOverlay(props: {
-  bboxes: Bbox[];
-  sx: number;
-  sy: number;
-}) {
+function QuadCandidateOverlay(props: { bboxes: Bbox[]; sx: number; sy: number }) {
   const candidates = createMemo(() => {
     const MIN_AREA = 400;
     const MAX_AREA = 200000;
@@ -78,11 +71,7 @@ function QuadCandidateOverlay(props: {
   );
 }
 
-function TagIdGridOverlay(props: {
-  quads: DetectedQuad[];
-  sx: number;
-  sy: number;
-}) {
+function TagIdGridOverlay(props: { quads: DetectedQuad[]; sx: number; sy: number }) {
   return (
     <For each={props.quads}>
       {(quad) => {
@@ -144,20 +133,15 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
   const [renderedH, setRenderedH] = createSignal(720, { ownedWrite: true });
 
   /** Set when pipeline attaches real `video.videoWidth` / `video.videoHeight`. */
-  const [bufferSize, setBufferSize] = createSignal<
-    { w: number; h: number } | undefined
-  >(undefined, { ownedWrite: true });
-
-  const intrinsic = createMemo(
-    () => bufferSize() ?? props.trackSize(),
+  const [bufferSize, setBufferSize] = createSignal<{ w: number; h: number } | undefined>(
+    undefined,
+    { ownedWrite: true },
   );
 
-  const scaleX = createMemo(() =>
-    canvasEl() ? renderedW() / intrinsic().w : 1,
-  );
-  const scaleY = createMemo(() =>
-    canvasEl() ? renderedH() / intrinsic().h : 1,
-  );
+  const intrinsic = createMemo(() => bufferSize() ?? props.trackSize());
+
+  const scaleX = createMemo(() => (canvasEl() ? renderedW() / intrinsic().w : 1));
+  const scaleY = createMemo(() => (canvasEl() ? renderedH() / intrinsic().h : 1));
 
   createTrackedEffect(() => {
     const canvas = canvasEl();
@@ -174,9 +158,9 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
 
   const [threshold, setThreshold] = createSignal(0, { ownedWrite: true });
   const [bboxes, setBboxes] = createSignal<Bbox[]>([], { ownedWrite: true });
-  const [gridOverlayQuads, setGridOverlayQuads] = createSignal<
-    DetectedQuad[]
-  >([], { ownedWrite: true });
+  const [gridOverlayQuads, setGridOverlayQuads] = createSignal<DetectedQuad[]>([], {
+    ownedWrite: true,
+  });
 
   const log = (msg: string) => {
     props.onLog?.(msg);
@@ -228,10 +212,8 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     await video.play().catch(() => {});
     if (disposed) return undefined;
 
-    const vw =
-      video.videoWidth > 0 ? video.videoWidth : Math.max(1, size.w);
-    const vh =
-      video.videoHeight > 0 ? video.videoHeight : Math.max(1, size.h);
+    const vw = video.videoWidth > 0 ? video.videoWidth : Math.max(1, size.w);
+    const vh = video.videoHeight > 0 ? video.videoHeight : Math.max(1, size.h);
     canvas.width = vw;
     canvas.height = vh;
     setBufferSize({ w: vw, h: vh });
@@ -299,31 +281,19 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           if (disposed) return;
           quadDetectionPending = false;
           const { quads } = result;
-          const validQuads = quads.filter(
-            (q) => q != null && typeof q.count === "number",
-          );
+          const validQuads = quads.filter((q) => q != null && typeof q.count === "number");
           validQuads.sort((a, b) => b.count - a.count);
           const top = validQuads.slice(0, MAX_DETECTED_TAGS);
           const tagged = top.map((q) => {
-            const ok =
-              q.hasCorners &&
-              q.cornerDebug !== null &&
-              q.cornerDebug.failureCode === 0;
+            const ok = q.hasCorners && q.cornerDebug !== null && q.cornerDebug.failureCode === 0;
             return {
               ...q,
-              vizTagId:
-                ok && typeof q.decodedTagId === "number"
-                  ? q.decodedTagId
-                  : undefined,
+              vizTagId: ok && typeof q.decodedTagId === "number" ? q.decodedTagId : undefined,
             };
           });
           setGridOverlayQuads(
             tagged.filter((q) => {
-              if (
-                !q.hasCorners ||
-                q.cornerDebug === null ||
-                q.cornerDebug.failureCode !== 0
-              ) {
+              if (!q.hasCorners || q.cornerDebug === null || q.cornerDebug.failureCode !== 0) {
                 return false;
               }
               if (sf) return true;
@@ -353,8 +323,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       }
       void pip.histogramBuffer.read().then((bins: Uint32Array | number[]) => {
         if (disposed) return;
-        const data =
-          bins instanceof Uint32Array ? bins : new Uint32Array(bins);
+        const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins);
         setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE));
       });
       rafHandle = cameraVideo.requestVideoFrameCallback(loop);
@@ -383,18 +352,10 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         <div style={{ position: "relative" }}>
           <canvas ref={setCanvasEl} class={styles.feedCanvas} />
           <Show when={props.displayMode() === "debug"}>
-            <QuadCandidateOverlay
-              bboxes={bboxes()}
-              sx={scaleX()}
-              sy={scaleY()}
-            />
+            <QuadCandidateOverlay bboxes={bboxes()} sx={scaleX()} sy={scaleY()} />
           </Show>
           <Show when={props.displayMode() === "grid" && props.showGrid()}>
-            <TagIdGridOverlay
-              quads={gridOverlayQuads()}
-              sx={scaleX()}
-              sy={scaleY()}
-            />
+            <TagIdGridOverlay quads={gridOverlayQuads()} sx={scaleX()} sy={scaleY()} />
           </Show>
         </div>
       </div>

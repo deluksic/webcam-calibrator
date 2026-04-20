@@ -1,4 +1,4 @@
-import type { Point } from './geometry';
+import type { Point } from "./geometry";
 
 /** One decoded tag observation for BA (image space). */
 export interface CalibrationSample {

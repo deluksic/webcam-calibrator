@@ -1,0 +1,86 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`decode accuracy snapshots > perspective + speckle characterization table (tag 0) 1`] = `
+[
+  {
+    "cellErr": 1,
+    "dist": 1,
+    "id": 0,
+    "rotation": 0,
+    "unknowns": 0,
+    "wh": 200,
+  },
+  {
+    "cellErr": 0,
+    "dist": 0,
+    "id": 0,
+    "rotation": 0,
+    "unknowns": 0,
+    "wh": 160,
+  },
+  {
+    "cellErr": 0,
+    "dist": 0,
+    "id": 0,
+    "rotation": 0,
+    "unknowns": 0,
+    "wh": 120,
+  },
+  {
+    "cellErr": 1,
+    "dist": 1,
+    "id": 0,
+    "rotation": 0,
+    "unknowns": 0,
+    "wh": 96,
+  },
+  {
+    "cellErr": 0,
+    "dist": 0,
+    "id": 0,
+    "rotation": 0,
+    "unknowns": 0,
+    "wh": 80,
+  },
+  {
+    "cellErr": 1,
+    "dist": 1,
+    "id": 0,
+    "rotation": 0,
+    "unknowns": 0,
+    "wh": 72,
+  },
+  {
+    "cellErr": 1,
+    "dist": 1,
+    "id": 0,
+    "rotation": 0,
+    "unknowns": 0,
+    "wh": 64,
+  },
+  {
+    "cellErr": 0,
+    "dist": 0,
+    "id": 0,
+    "rotation": 0,
+    "unknowns": 0,
+    "wh": 56,
+  },
+  {
+    "cellErr": 0,
+    "dist": 0,
+    "id": 0,
+    "rotation": 0,
+    "unknowns": 1,
+    "wh": 48,
+  },
+  {
+    "cellErr": 2,
+    "dist": 2,
+    "id": 0,
+    "rotation": 0,
+    "unknowns": 0,
+    "wh": 40,
+  },
+]
+`;

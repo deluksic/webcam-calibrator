@@ -5,19 +5,21 @@
  *
  *   pnpm run find:decode-stress-homography
  */
-import { DECODE_STRESS_SPECKLE_AMP } from '../src/lib/decodeStressHarness';
-import { gridMaxPassing } from '../src/lib/decodeStressSearch';
-import { decodeStressSuiteFailuresFromOptions } from '../src/lib/decodeStressSuite';
+import { DECODE_STRESS_SPECKLE_AMP } from "../src/lib/decodeStressHarness";
+import { gridMaxPassing } from "../src/lib/decodeStressSearch";
+import { decodeStressSuiteFailuresFromOptions } from "../src/lib/decodeStressSuite";
 
 function passes(scale: number): boolean {
-  return decodeStressSuiteFailuresFromOptions({
-    speckleAmp: DECODE_STRESS_SPECKLE_AMP,
-    homographyMismatchScale: scale,
-  }).length === 0;
+  return (
+    decodeStressSuiteFailuresFromOptions({
+      speckleAmp: DECODE_STRESS_SPECKLE_AMP,
+      homographyMismatchScale: scale,
+    }).length === 0
+  );
 }
 
 if (!passes(0)) {
-  console.error('Scale 0 (matched homography) fails; check speckle / suite.');
+  console.error("Scale 0 (matched homography) fails; check speckle / suite.");
   process.exit(1);
 }
 
@@ -35,8 +37,8 @@ console.log(
       nonMonotoneRecoveriesAfterFail: recoveries,
       note:
         recoveries > 0
-          ? '`passes(scale)` was not monotone on this grid; `best` is the largest passing sampled scale.'
-          : 'No fail→pass jump on this grid (locally monotone sampling).',
+          ? "`passes(scale)` was not monotone on this grid; `best` is the largest passing sampled scale."
+          : "No fail→pass jump on this grid (locally monotone sampling).",
     },
     null,
     2,

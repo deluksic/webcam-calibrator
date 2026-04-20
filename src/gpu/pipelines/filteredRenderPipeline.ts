@@ -1,7 +1,7 @@
 // Debug render pipeline: filtered edge buffer → canvas
-import { tgpu, d } from 'typegpu';
-import { common } from 'typegpu';
-import { clamp, floor, length } from 'typegpu/std';
+import { tgpu, d } from "typegpu";
+import { common } from "typegpu";
+import { clamp, floor, length } from "typegpu/std";
 
 export function createFilteredRenderPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -14,7 +14,7 @@ export function createFilteredRenderPipeline(
     in: { uv: d.location(0, d.vec2f) },
     out: d.vec4f,
   })((i) => {
-    'use gpu';
+    "use gpu";
     const wi = d.i32(width);
     const hi = d.i32(height);
     const maxPx = d.f32(wi - d.i32(1));

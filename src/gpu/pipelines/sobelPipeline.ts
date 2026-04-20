@@ -1,6 +1,6 @@
 // Sobel pipeline: grayBuffer → sobelBuffer
-import { tgpu, d } from 'typegpu';
-import { clamp } from 'typegpu/std';
+import { tgpu, d } from "typegpu";
+import { clamp } from "typegpu/std";
 
 export function createSobelPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
@@ -9,7 +9,7 @@ export function createSobelPipeline(
   height: number,
 ) {
   function sobelLoad(px: number, py: number, w: number, h: number) {
-    'use gpu';
+    "use gpu";
     const wi = d.i32(w);
     const hi = d.i32(h);
     const pxi = d.i32(px);
@@ -23,8 +23,10 @@ export function createSobelPipeline(
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [16, 16, 1],
   })((input) => {
-    'use gpu';
-    if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) { return; }
+    "use gpu";
+    if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) {
+      return;
+    }
 
     const x = d.i32(input.gid.x);
     const y = d.i32(input.gid.y);
@@ -40,8 +42,8 @@ export function createSobelPipeline(
     const b = sobelLoad(x, y + 1, w, h);
     const br = sobelLoad(x + 1, y + 1, w, h);
 
-    const gx = (tr + 2 * mr + br) - (tl + 2 * ml + bl);
-    const gy = (bl + 2 * b + br) - (tl + 2 * t + tr);
+    const gx = tr + 2 * mr + br - (tl + 2 * ml + bl);
+    const gy = bl + 2 * b + br - (tl + 2 * t + tr);
     sobelLayout.$.sobelBuffer[d.u32(y * w + x)] = d.vec2f(gx, gy);
   });
 

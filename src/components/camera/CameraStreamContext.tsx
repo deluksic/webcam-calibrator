@@ -47,14 +47,10 @@ export function useCameraStream(): CameraStreamContextValue {
 
 export function CameraStreamProvider(props: ParentProps) {
   const [deviceId, setDeviceId] = createSignal<string | undefined>();
-  const [streamError, setStreamError] = createSignal<string | undefined>(
-    undefined,
-    { ownedWrite: true },
-  );
-  const [trackSize, setTrackSize] = createSignal(
-    { w: 1280, h: 720 },
-    { ownedWrite: true },
-  );
+  const [streamError, setStreamError] = createSignal<string | undefined>(undefined, {
+    ownedWrite: true,
+  });
+  const [trackSize, setTrackSize] = createSignal({ w: 1280, h: 720 }, { ownedWrite: true });
   const [deviceListEpoch, setDeviceListEpoch] = createSignal(0);
 
   const devices = createMemo(async () => {
@@ -96,9 +92,7 @@ export function CameraStreamProvider(props: ParentProps) {
 
   if (typeof navigator !== "undefined" && navigator.mediaDevices?.addEventListener) {
     navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
-    onCleanup(() =>
-      navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange),
-    );
+    onCleanup(() => navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange));
   }
 
   const value: CameraStreamContextValue = {

@@ -45,10 +45,7 @@ export const EDGES_VIEW_BINARY_MASK = true;
  * (threads with x ≥ width or y ≥ height exit early in the shader).
  */
 export function computeDispatch2d(width: number, height: number): [number, number] {
-  return [
-    Math.ceil(width / COMPUTE_WORKGROUP_SIZE),
-    Math.ceil(height / COMPUTE_WORKGROUP_SIZE),
-  ];
+  return [Math.ceil(width / COMPUTE_WORKGROUP_SIZE), Math.ceil(height / COMPUTE_WORKGROUP_SIZE)];
 }
 
 // GPU note: keep `u32` for label storage / INVALID / bit hashes / atomics / bin indices.
@@ -57,7 +54,10 @@ export function computeDispatch2d(width: number, height: number): [number, numbe
 /** Compute adaptive threshold from histogram */
 export const THRESHOLD_PERCENTILE = 0.95;
 
-export function computeThreshold(histogramData: number[], percentile: number = THRESHOLD_PERCENTILE): number {
+export function computeThreshold(
+  histogramData: number[],
+  percentile: number = THRESHOLD_PERCENTILE,
+): number {
   const totalPixels = histogramData.reduce((a, b) => a + b, 0);
   const targetCount = totalPixels * percentile;
 

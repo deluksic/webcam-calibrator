@@ -1,4 +1,4 @@
-import styles from './ResultsView.module.css';
+import styles from "./ResultsView.module.css";
 
 export function ResultsView() {
   return (
