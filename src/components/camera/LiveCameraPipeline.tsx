@@ -28,7 +28,7 @@ import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/constant
 
 import styles from '@/components/camera/LiveCameraPipeline.module.css'
 
-export type { DisplayMode }
+const { navigator } = globalThis
 
 interface Bbox {
   minX: number

@@ -8,7 +8,9 @@ import {
   useContext,
 } from 'solid-js'
 
-import { acquireVideoStream, listVideoInputDevices, primeCameraPermission } from '@/lib/cameraStreamAcquire'
+import { acquireVideoStream, listVideoInputDevices, primeCameraPermission } from './cameraStreamAcquire'
+
+const { navigator } = globalThis
 
 function deviceScore(d: MediaDeviceInfo): number {
   const label = d.label.toLowerCase()

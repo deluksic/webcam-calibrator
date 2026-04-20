@@ -1,11 +1,11 @@
 // 2D geometry utilities for quad fitting
 
-export interface Point {
+export type Point = {
   x: number
   y: number
 }
 
-export interface Line {
+export type Line = {
   a: number
   b: number
   c: number // ax + by + c = 0

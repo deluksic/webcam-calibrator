@@ -1,8 +1,9 @@
 // Contour detection: CPU region extraction + quad fitting (labels from GPU pointer-jump).
 
 import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from '@/lib/corners'
-import { Point } from '@/lib/geometry'
-import { buildTagGrid, decodeTagPattern, GridResult } from '@/lib/grid'
+import type { Point } from '@/lib/geometry'
+import type { GridResult } from '@/lib/grid'
+import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
 import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
 
 const { min, max, floor } = Math

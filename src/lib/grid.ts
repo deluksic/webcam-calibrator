@@ -2,7 +2,8 @@
 // Uses line intersection + proportional subdivision (no bilinear interpolation)
 
 import { imagePixelToUnitSquareUv } from '@/lib/aprilTagRaycast'
-import { Point, lineFromPoints, lineIntersection, tryComputeHomography } from '@/lib/geometry'
+import { lineFromPoints, lineIntersection, tryComputeHomography } from '@/lib/geometry'
+import type { Point } from '@/lib/geometry'
 import type { TagPattern } from '@/lib/tag36h11'
 
 const { min, max, abs, floor, ceil, hypot } = Math

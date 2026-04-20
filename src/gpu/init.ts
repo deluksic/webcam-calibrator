@@ -1,6 +1,8 @@
 // TypeGPU initialization — singleton GPU root
 import { tgpu } from 'typegpu'
 
+const { navigator } = globalThis
+
 let rootPromise: Promise<Awaited<ReturnType<typeof tgpu.init>>> | null = null
 
 export async function initGPU(): Promise<Awaited<ReturnType<typeof tgpu.init>>> {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { Point, applyHomography, computeHomography } from '@/lib/geometry'
+import { type Point, applyHomography, computeHomography } from '@/lib/geometry'
 import {
   buildDecodeEdgeMask,
   buildTagGrid,

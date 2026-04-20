@@ -1,3 +1,5 @@
+const { navigator } = globalThis
+
 /**
  * Production-oriented `getUserMedia` + `applyConstraints` upgrade.
  * Browsers often start at 640×480; climb via constraint ladder + capabilities.

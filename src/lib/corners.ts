@@ -1,7 +1,7 @@
 // Corner detection: label-filtered edge extraction, Sobel-gradient clustering (cosine),
 // RANSAC + PCA line fit per cluster, and line intersection for robust quad corners.
 
-import { Point } from '@/lib/geometry'
+import type { Point } from '@/lib/geometry'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Debug info returned alongside corners (for GPU overlay visualization)

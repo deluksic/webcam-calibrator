@@ -32,7 +32,7 @@ import {
   createGridVizLayouts,
   DECODED_TAG_ID_UNKNOWN,
   GridDataSchema,
-  QuadData,
+  type QuadData,
   MAX_INSTANCES,
   type GridVizFailInterrogateMode,
 } from '@/gpu/pipelines/gridVizPipeline'
