@@ -52,6 +52,8 @@ import { createSobelPipeline } from '@/gpu/pipelines/sobelPipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
 import { tryComputeHomography } from '@/lib/geometry'
 
+const { min, ceil, round } = Math
+
 /** Max quads drawn in grid mode; must match `MAX_INSTANCES` in gridVizPipeline (buffer + draw). */
 export const MAX_DETECTED_TAGS = MAX_INSTANCES
 
@@ -499,7 +501,7 @@ export function processFrame(
 
   // Update uniforms
   pipeline.thresholdBuffer.write(threshold)
-  const thresholdBin = Math.round(threshold * 255)
+  const thresholdBin = round(threshold * 255)
   pipeline.thresholdBinBuffer.write(thresholdBin)
 
   const enc = root.device.createCommandEncoder({ label: 'camera frame' })
@@ -566,7 +568,7 @@ export function processFrame(
     pipeline.compactResetPipeline
       .with(computePass)
       .with(pipeline.compactResetBindGroup)
-      .dispatchWorkgroups(Math.ceil(area / COMPUTE_WORKGROUP_SIZE))
+      .dispatchWorkgroups(ceil(area / COMPUTE_WORKGROUP_SIZE))
     // 2. Claim: each root (label == pixel idx) stores its own index as compact ID
     pipeline.compactClaimPipeline.with(computePass).with(pipeline.compactClaimBindGroup).dispatchWorkgroups(wgX, wgY)
     // 3. Remap: L[i] = canonicalRoot[label] (compact ID, fits in extent buffer)
@@ -579,7 +581,7 @@ export function processFrame(
     pipeline.extentResetPipeline
       .with(computePass)
       .with(pipeline.extentResetBindGroup)
-      .dispatchWorkgroups(Math.ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE))
+      .dispatchWorkgroups(ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE))
     pipeline.extentTrackPipeline.with(computePass).with(pipeline.extentTrackBindGroup).dispatchWorkgroups(wgX, wgY)
 
     computePass.end()
@@ -724,7 +726,7 @@ export function updateQuadCornersBuffer(
   showFallbacks: boolean = true,
 ): void {
   const filtered = showFallbacks ? quads : quads.filter((q) => q.hasCorners && typeof q.decodedTagId === 'number')
-  const count = Math.min(filtered.length, MAX_INSTANCES)
+  const count = min(filtered.length, MAX_INSTANCES)
 
   const data: QuadData[] = []
   for (let i = 0; i < count; i++) {
@@ -779,8 +781,6 @@ export function updateQuadCornersBuffer(
 export function setGridVizFailInterrogate(pipeline: CameraPipeline, mode: GridVizFailInterrogateMode): void {
   pipeline.gridVizDebugModeBuffer.write(mode)
 }
-
-export { filterNestedQuads } from '@/gpu/contour'
 
 export async function detectContours(
   root: Awaited<ReturnType<typeof tgpu.init>>,

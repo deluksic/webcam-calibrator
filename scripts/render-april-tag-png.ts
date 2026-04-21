@@ -12,6 +12,7 @@ import type { Point } from '@/lib/geometry'
 import { codeToPattern, TAG36H11_CODES } from '@/lib/tag36h11'
 import { renderAprilTagIntensity } from '@/tests/utils/syntheticAprilTag'
 
+const { min, max, round } = Math
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(__dirname, '..')
 
@@ -78,7 +79,7 @@ function main() {
 function writeGreyPng(filePath: string, width: number, height: number, intensity: Float32Array): void {
   const data = Buffer.alloc(width * height)
   for (let i = 0; i < intensity.length; i++) {
-    const v = Math.round(Math.min(255, Math.max(0, intensity[i]! * 255)))
+    const v = round(min(255, max(0, intensity[i]! * 255)))
     data[i] = v
   }
 

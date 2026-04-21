@@ -1,5 +1,7 @@
 import type { DetectedQuad } from '@/gpu/contour'
-import type { Point } from '@/lib/geometry'
+import { length, type Point } from '@/lib/geometry'
+
+const { min, max, abs } = Math
 
 /** Stub thresholds — tune after BA exists. */
 export const CALIB_MIN_MIN_R2 = 0.75
@@ -13,13 +15,13 @@ function quadMinEdgePx(corners: readonly Point[]): number {
   const e = (i: number, j: number) => {
     const a = corners[i]!
     const b = corners[j]!
-    return Math.sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y))
+    return length(b.x - a.x, b.y - a.y)
   }
-  return Math.min(e(0, 1), e(1, 2), e(2, 3), e(3, 0))
+  return min(e(0, 1), e(1, 2), e(2, 3), e(3, 0))
 }
 
 export function quadAreaPx(corners: [Point, Point, Point, Point]): number {
-  return Math.abs(
+  return abs(
     (corners[0].x * (corners[1].y - corners[2].y) +
       corners[1].x * (corners[2].y - corners[3].y) +
       corners[2].x * (corners[3].y - corners[0].y) +
@@ -31,7 +33,7 @@ export function quadAreaPx(corners: [Point, Point, Point, Point]): number {
 export function calibrationQuadScore(q: DetectedQuad): number {
   const minR2 = q.cornerDebug?.minR2 ?? 0
   const minEdge = quadMinEdgePx(q.corners)
-  return minR2 * Math.max(minEdge, 1e-6)
+  return minR2 * max(minEdge, 1e-6)
 }
 
 export function acceptQuadForCalibration(q: DetectedQuad): boolean {

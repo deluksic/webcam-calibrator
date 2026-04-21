@@ -4,6 +4,8 @@
 
 import { codeToPattern, TAG36H11_CODES, TAG36H11_COUNT } from '@/lib/tag36h11'
 
+const { floor } = Math
+
 export interface TagGridOptions {
   cols: number // Number of tags horizontally
   rows: number // Number of tags vertically
@@ -16,12 +18,12 @@ export interface TagGridOptions {
 }
 
 /** Select N unique random tag IDs from the dictionary. */
-export function selectRandomTags(count: number, seed?: number): number[] {
+export function selectRandomTags(count: number, seed: number): number[] {
   // Simple deterministic shuffle using seed
-  const rng = seed !== undefined ? seededRng(seed) : Math.random
+  const rng = seededRng(seed)
   const indices = Array.from({ length: TAG36H11_COUNT }, (_, i) => i)
   for (let i = indices.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
+    const j = floor(rng() * (i + 1))
     ;[indices[i], indices[j]] = [indices[j], indices[i]]
   }
   return indices.slice(0, count)

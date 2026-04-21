@@ -6,6 +6,7 @@ export const WB = 0.0722
 export const HISTOGRAM_BINS = 256
 export const HIST_WIDTH = 512
 export const HIST_HEIGHT = 120
+export const ALLOWED_ERROR_COUNT = 1
 
 /**
  * Must match every `computeFn` that uses `workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1]`.
@@ -35,12 +36,14 @@ export const GRADIENT_COS_THRESHOLD = -0.5
  */
 export const EDGE_DILATE_THRESHOLD = 0.3
 
+const { ceil } = Math
+
 /**
  * WebGPU: `dispatchWorkgroups(wgX, wgY)` so that global_invocation_id covers every pixel in width×height
  * (threads with x ≥ width or y ≥ height exit early in the shader).
  */
 export function computeDispatch2d(width: number, height: number): [number, number] {
-  return [Math.ceil(width / COMPUTE_WORKGROUP_SIZE), Math.ceil(height / COMPUTE_WORKGROUP_SIZE)]
+  return [ceil(width / COMPUTE_WORKGROUP_SIZE), ceil(height / COMPUTE_WORKGROUP_SIZE)]
 }
 
 // GPU note: keep `u32` for label storage / INVALID / bit hashes / atomics / bin indices.

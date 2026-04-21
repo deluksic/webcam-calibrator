@@ -4,6 +4,8 @@ import { atomicLoad, log2 } from 'typegpu/std'
 
 import { HISTOGRAM_BINS, HIST_WIDTH, HIST_HEIGHT } from '@/gpu/pipelines/constants'
 
+const { floor } = Math
+
 export function createHistogramRenderPipeline(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   histogramDisplayLayout: ReturnType<typeof tgpu.bindGroupLayout>,
@@ -12,7 +14,7 @@ export function createHistogramRenderPipeline(
 ) {
   // Log-scale histogram with max referring to fraction of total pixels
   // Pre-compute the divisor: log2(maxCount + 1)
-  const maxCount = Math.floor(totalPixels * 0.1)
+  const maxCount = floor(totalPixels * 0.1)
 
   // ── Pass: render histogram bars using instanceIndex ───────────────────
   // 256 instances, each bar renders as a vertical rectangle

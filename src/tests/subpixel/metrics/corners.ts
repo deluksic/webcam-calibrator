@@ -1,6 +1,8 @@
 import { length } from '@/lib/geometry'
 import type { StripCorners } from '@/tests/shared/types'
 
+const { max } = Math
+
 export function cornerErrorStats(
   gt: StripCorners,
   test: StripCorners,
@@ -18,8 +20,8 @@ export function cornerErrorStats(
   }
   return {
     perCornerPx,
-    maxPx: Math.max(...perCornerPx),
-    rmsePx: Math.sqrt(sumSq / 4),
+    maxPx: max(...perCornerPx),
+    rmsePx: sqrt(sumSq / 4),
   }
 }
 

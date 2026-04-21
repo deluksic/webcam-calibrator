@@ -14,6 +14,8 @@ import {
 } from '@/lib/tag36h11'
 import { finiteDifferenceSobelFromIntensity, renderAprilTagIntensity } from '@/tests/utils/syntheticAprilTag'
 
+const { abs, imul, max, min } = Math
+
 export const DECODE_STRESS_SUPERSAMPLE_DEFAULT = 4
 export const DECODE_STRESS_SIZES = [200, 160, 120, 96, 80, 72, 64, 56, 48, 40] as const
 
@@ -48,7 +50,7 @@ export const DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSETS_PX = DECODE_STRESS_HOMOGR
 export function decodeStressHomographyMismatchTemplateMaxAxisPx(): number {
   let m = 0
   for (const p of DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX) {
-    m = Math.max(m, Math.abs(p.x), Math.abs(p.y))
+    m = max(m, abs(p.x), abs(p.y))
   }
   return m
 }
@@ -95,12 +97,12 @@ export function decodeStressAddSpeckle01(intensity: Float32Array, amplitude: num
   const st = { s: seed >>> 0 || 1 }
   for (let i = 0; i < intensity.length; i++) {
     const n = (xorshift32U01(st) * 2 - 1) * amplitude
-    intensity[i] = Math.min(1, Math.max(0, intensity[i]! + n))
+    intensity[i] = min(1, max(0, intensity[i]! + n))
   }
 }
 
 export function decodeStressSpeckleSeed(w: number, h: number, tagId: number): number {
-  return (Math.imul(w, 1_664_525) ^ Math.imul(h, 1_013_904_223) ^ Math.imul(tagId, 747_796_405)) >>> 0
+  return (imul(w, 1_664_525) ^ imul(h, 1_013_904_223) ^ imul(tagId, 747_796_405)) >>> 0
 }
 
 /** TL, TR, BR, BL for `buildTagGrid` from homography strip TL, TR, BL, BR. */
@@ -119,12 +121,12 @@ export function decodeStressFitPerspectiveStrip(
   const cw = w - 2 * margin
   const ch = h - 2 * margin
   const spanX =
-    Math.max(REF_STRIP[0].x, REF_STRIP[1].x, REF_STRIP[2].x, REF_STRIP[3].x) -
-    Math.min(REF_STRIP[0].x, REF_STRIP[1].x, REF_STRIP[2].x, REF_STRIP[3].x)
+    max(REF_STRIP[0].x, REF_STRIP[1].x, REF_STRIP[2].x, REF_STRIP[3].x) -
+    min(REF_STRIP[0].x, REF_STRIP[1].x, REF_STRIP[2].x, REF_STRIP[3].x)
   const spanY =
-    Math.max(REF_STRIP[0].y, REF_STRIP[1].y, REF_STRIP[2].y, REF_STRIP[3].y) -
-    Math.min(REF_STRIP[0].y, REF_STRIP[1].y, REF_STRIP[2].y, REF_STRIP[3].y)
-  const s = Math.min(cw / spanX, ch / spanY) * boost
+    max(REF_STRIP[0].y, REF_STRIP[1].y, REF_STRIP[2].y, REF_STRIP[3].y) -
+    min(REF_STRIP[0].y, REF_STRIP[1].y, REF_STRIP[2].y, REF_STRIP[3].y)
+  const s = min(cw / spanX, ch / spanY) * boost
   const cx = margin + cw / 2
   const cy = margin + ch / 2
   return REF_STRIP.map((p) => ({

@@ -1,5 +1,7 @@
-import type { Point } from '@/lib/geometry';
+import type { Point } from '@/lib/geometry'
 import { applyHomography, length } from '@/lib/geometry'
+
+const { max } = Math
 
 function dist(a: Point, b: Point): number {
   return length(a.x - b.x, a.y - b.y)
@@ -13,7 +15,7 @@ export function homographyTransferStats(
   H_test: Float32Array,
   gridN = 9,
 ): { rmsePx: number; maxPx: number } {
-  const n = Math.max(2, gridN)
+  const n = max(2, gridN)
   let sumSq = 0
   let maxD = 0
   let count = 0
@@ -25,11 +27,11 @@ export function homographyTransferStats(
       const p1 = applyHomography(H_test, u, v)
       const d = dist(p0, p1)
       sumSq += d * d
-      maxD = Math.max(maxD, d)
+      maxD = max(maxD, d)
       count++
     }
   }
-  return { rmsePx: Math.sqrt(sumSq / count), maxPx: maxD }
+  return { rmsePx: sqrt(sumSq / count), maxPx: maxD }
 }
 
 export function roundTransferStats(

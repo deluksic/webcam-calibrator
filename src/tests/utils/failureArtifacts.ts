@@ -18,6 +18,7 @@ import { onTestFailed } from 'vitest'
 import { length } from '@/lib/geometry'
 import type { TagPattern } from '@/lib/tag36h11'
 
+const { round, min, max } = Math
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(__dirname, '..', '..', '..')
 export const TEST_FAILURE_OUTPUT_ROOT = join(REPO_ROOT, 'output', 'test-failures')
@@ -64,7 +65,7 @@ export function attachFailureArtifacts(testFileUrl: string, write: (dir: string)
 export function writeGreyPng(path: string, width: number, height: number, grey01: Float32Array): void {
   const data = Buffer.alloc(width * height)
   for (let i = 0; i < grey01.length; i++) {
-    data[i] = Math.round(Math.min(255, Math.max(0, grey01[i]! * 255)))
+    data[i] = round(min(255, max(0, grey01[i]! * 255)))
   }
   const png = PNG.sync.write(
     { width, height, data },
@@ -81,12 +82,12 @@ export function writeSobelMagPng(path: string, width: number, height: number, so
     const gx = sobel[i * 2]
     const gy = sobel[i * 2 + 1]
     mag[i] = length(gx, gy)
-    m = Math.max(m, mag[i]!)
+    m = max(m, mag[i]!)
   }
   const inv = m > 1e-12 ? 1 / m : 1
   const data = Buffer.alloc(width * height)
   for (let i = 0; i < mag.length; i++) {
-    data[i] = Math.round(Math.min(255, Math.max(0, mag[i]! * inv * 255)))
+    data[i] = round(min(255, max(0, mag[i]! * inv * 255)))
   }
   const png = PNG.sync.write(
     { width, height, data },

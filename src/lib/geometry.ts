@@ -1,6 +1,6 @@
 // 2D geometry utilities for quad fitting
 
-const { sqrt } = Math
+const { sqrt, abs, cos, sin, atan2, max, min } = Math
 
 export function length(x: number, y: number): number {
   return sqrt(x * x + y * y)
@@ -24,11 +24,11 @@ export type Line = {
 export function lineFromPoints(p1: Point, p2: Point): Line | null {
   const dx = p2.x - p1.x
   const dy = p2.y - p1.y
-  if (Math.abs(dx) < 1e-10 && Math.abs(dy) < 1e-10) {
+  if (abs(dx) < 1e-10 && abs(dy) < 1e-10) {
     return null // coincident points
   }
   // Normalize: a² + b² = 1
-  const len = Math.sqrt(dx * dx + dy * dy)
+  const len = sqrt(dx * dx + dy * dy)
   return {
     a: -dy / len,
     b: dx / len,
@@ -42,7 +42,7 @@ export function lineFromPoints(p1: Point, p2: Point): Line | null {
  */
 export function lineIntersection(l1: Line, l2: Line): Point | null {
   const det = l1.a * l2.b - l1.b * l2.a
-  if (Math.abs(det) < 1e-10) {
+  if (abs(det) < 1e-10) {
     return null // parallel or coincident
   }
   // Lines are a x + b y + c = 0 (same as a x + b y = −c). Cramer gives:
@@ -57,7 +57,7 @@ export function lineIntersection(l1: Line, l2: Line): Point | null {
  * Compute distance from point to line.
  */
 export function pointLineDistance(p: Point, l: Line): number {
-  return Math.abs(l.a * p.x + l.b * p.y + l.c)
+  return abs(l.a * p.x + l.b * p.y + l.c)
 }
 
 /**
@@ -94,9 +94,9 @@ export function fitLine(points: Point[]): Line | null {
 
   // The line direction (tangent) is the eigenvector of the covariance matrix
   // For a line, we want the direction of max variance
-  const theta = 0.5 * Math.atan2(2 * xy, xx - yy)
-  const cosT = Math.cos(theta)
-  const sinT = Math.sin(theta)
+  const theta = 0.5 * atan2(2 * xy, xx - yy)
+  const cosT = cos(theta)
+  const sinT = sin(theta)
 
   // The line coefficients (a,b,c) need the NORMAL to the line, not the direction.
   // Direction is [cosT, sinT], so normal is [-sinT, cosT]
@@ -124,19 +124,6 @@ export function subdivideSegment(p1: Point, p2: Point, divisions: number): Point
 }
 
 /**
- * Compute angle between two vectors (in radians).
- */
-export function angleBetween(v1: Point, v2: Point): number {
-  const dot = v1.x * v2.x + v1.y * v2.y
-  const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y)
-  const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y)
-  if (mag1 < 1e-10 || mag2 < 1e-10) {
-    return 0
-  }
-  return Math.acos(Math.max(-1, Math.min(1, dot / (mag1 * mag2))))
-}
-
-/**
  * Check if four points form a valid quad (roughly).
  * Returns aspect ratio of the quad.
  */
@@ -154,8 +141,8 @@ export function quadAspectRatio(corners: Point[]): number {
   ]
 
   // Use max/min for aspect ratio check
-  const maxD = Math.max(...dists)
-  const minD = Math.min(...dists)
+  const maxD = max(...dists)
+  const minD = min(...dists)
   return maxD / minD
 }
 
@@ -164,17 +151,8 @@ export function quadAspectRatio(corners: Point[]): number {
  */
 export function areParallel(l1: Line, l2: Line, threshold: number = 0.1): boolean {
   // Parallel if normals are aligned
-  const dot = Math.abs(l1.a * l2.a + l1.b * l2.b)
+  const dot = abs(l1.a * l2.a + l1.b * l2.b)
   return dot > 1 - threshold
-}
-
-/**
- * Compute corner angle at vertex (middle of 3 points).
- */
-export function cornerAngle(p1: Point, vertex: Point, p2: Point): number {
-  const v1 = { x: p1.x - vertex.x, y: p1.y - vertex.y }
-  const v2 = { x: p2.x - vertex.x, y: p2.y - vertex.y }
-  return angleBetween(v1, v2)
 }
 
 /**
@@ -246,7 +224,7 @@ export function tryComputeHomography(src: Point[]): Float32Array | null {
     // Find pivot
     let maxRow = col
     for (let row = col + 1; row < N; row++) {
-      if (Math.abs(A[row][col]) > Math.abs(A[maxRow][col])) {
+      if (abs(A[row][col]) > abs(A[maxRow][col])) {
         maxRow = row
       }
     }
@@ -256,7 +234,7 @@ export function tryComputeHomography(src: Point[]): Float32Array | null {
     ;[b[col], b[maxRow]] = [b[maxRow], b[col]]
 
     const pivot = A[col][col]
-    if (Math.abs(pivot) < 1e-10) {
+    if (abs(pivot) < 1e-10) {
       return null
     }
 
@@ -355,7 +333,7 @@ export function computeProjectiveWeights(corners: Point[]): [number, number, num
 
   const det = A * E - B * D
 
-  if (Math.abs(det) < 1e-10) {
+  if (abs(det) < 1e-10) {
     // Degenerate case - parallelogram or axis-aligned
     return [1, 1, 1, 1]
   }
@@ -407,7 +385,7 @@ export function verifyProjectiveWeights(corners: Point[]): {
   const errors = blended.map((b, i) => {
     const ex = expected[i].x - b.x
     const ey = expected[i].y - b.y
-    return Math.sqrt(ex * ex + ey * ey)
+    return sqrt(ex * ex + ey * ey)
   })
 
   return { blended, errors }

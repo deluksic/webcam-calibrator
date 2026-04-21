@@ -4,6 +4,8 @@
 import type { Point } from '@/lib/geometry'
 import { length } from '@/lib/geometry'
 
+const { cos, sin, PI, floor, sqrt, max, min, abs, sign } = Math
+
 export interface CornerDebugInfo {
   /** Failure code: 0 = success, or bitmask of failure reasons */
   failureCode: number
@@ -37,10 +39,10 @@ export function extractLabeledEdgePixels(
   const pixels: LabeledEdgePixel[] = []
   const EPS = 1e-6
 
-  const x0 = Math.floor(minX)
-  const y0 = Math.floor(minY)
-  const x1 = Math.floor(maxX)
-  const y1 = Math.floor(maxY)
+  const x0 = floor(minX)
+  const y0 = floor(minY)
+  const x1 = floor(maxX)
+  const y1 = floor(maxY)
 
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
@@ -52,7 +54,7 @@ export function extractLabeledEdgePixels(
       const idx = y * width + x
       const gx = sobelData[idx * 2]
       const gy = sobelData[idx * 2 + 1]
-      const mag = Math.sqrt(gx * gx + gy * gy)
+      const mag = sqrt(gx * gx + gy * gy)
       if (mag < EPS) {
         continue
       }
@@ -79,8 +81,8 @@ function dot2(a: { x: number; y: number }, b: { x: number; y: number }): number 
 
 /** Directed cosine dissimilarity: 1 − cos θ = 1 − (u·v)/(‖u‖‖v‖). No unit pre-normalize required. */
 function cosineDissimilarity(u: { x: number; y: number }, v: { x: number; y: number }): number {
-  const mu = Math.sqrt(u.x * u.x + u.y * u.y)
-  const mv = Math.sqrt(v.x * v.x + v.y * v.y)
+  const mu = sqrt(u.x * u.x + u.y * u.y)
+  const mv = sqrt(v.x * v.x + v.y * v.y)
   if (mu < 1e-14 || mv < 1e-14) {
     return 1
   }
@@ -102,11 +104,11 @@ function kMeansGradientDirections(pixels: LabeledEdgePixel[], k: number = 4, max
 
   for (let restart = 0; restart < maxRestarts; restart++) {
     const centroids: { x: number; y: number }[] = []
-    const spacing = (2 * Math.PI) / k
+    const spacing = (2 * PI) / k
     const base = (restart / maxRestarts) * spacing
     for (let i = 0; i < k; i++) {
       const t = i * spacing + base
-      centroids.push({ x: Math.cos(t), y: Math.sin(t) })
+      centroids.push({ x: cos(t), y: sin(t) })
     }
 
     let assignments = new Int32Array(n)
@@ -216,8 +218,8 @@ function normalFromInlierScatter(points: { x: number; y: number }[]): { nx: numb
 
   const tr = sxx + syy
   const det = sxx * syy - sxy * sxy
-  const disc = Math.max(0, tr * tr - 4 * det)
-  const root = Math.sqrt(disc)
+  const disc = max(0, tr * tr - 4 * det)
+  const root = sqrt(disc)
   const lamMax = (tr + root) * 0.5
   const lamMin = (tr - root) * 0.5
 
@@ -259,7 +261,7 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
     rng = (rng * 1664525 + 1013904223) >>> 0
     return rng / 0xffffffff
   }
-  const randInt = (max: number) => Math.floor(rand() * max)
+  const randInt = (max: number) => floor(rand() * max)
 
   let bestNx = 0,
     bestNy = 0,
@@ -277,7 +279,7 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
       p2 = points[i2]
     const dx = p2.x - p1.x,
       dy = p2.y - p1.y
-    const len = Math.sqrt(dx * dx + dy * dy)
+    const len = sqrt(dx * dx + dy * dy)
     if (len < 1) {
       continue
     }
@@ -288,7 +290,7 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
 
     let inliers = 0
     for (let i = 0; i < n; i++) {
-      const dist = Math.abs(nx * points[i].x + ny * points[i].y - d)
+      const dist = abs(nx * points[i].x + ny * points[i].y - d)
       if (dist < THRESH) {
         inliers++
       }
@@ -308,7 +310,7 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
 
   const inlierPoints: { x: number; y: number }[] = []
   for (let i = 0; i < n; i++) {
-    const dist = Math.abs(bestNx * points[i].x + bestNy * points[i].y - bestD)
+    const dist = abs(bestNx * points[i].x + bestNy * points[i].y - bestD)
     if (dist < THRESH) {
       inlierPoints.push(points[i])
     }
@@ -352,7 +354,7 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
  */
 function lineIntersection(l1: LineFit, l2: LineFit): Point | null {
   const det = l1.normal.x * l2.normal.y - l2.normal.x * l1.normal.y
-  if (Math.abs(det) < 1e-10) {
+  if (abs(det) < 1e-10) {
     return null
   } // parallel or coincident lines
   const invDet = 1 / det
@@ -371,7 +373,7 @@ function lineIntersection(l1: LineFit, l2: LineFit): Point | null {
  * then rejected in plausibility solely for sitting just past the bbox.
  */
 function extentBBoxSlack(minX: number, minY: number, maxX: number, maxY: number): number {
-  return Math.max(6, 0.5 * Math.max(maxX - minX, maxY - minY))
+  return max(6, 0.5 * max(maxX - minX, maxY - minY))
 }
 
 /** Signed area of a polygon (positive = CCW, negative = CW). */
@@ -398,19 +400,19 @@ function isStrictConvexQuadCycle(order: Point[]): boolean {
     return false
   }
   const area = signedArea(order)
-  if (Math.abs(area) < 1e-12) {
+  if (abs(area) < 1e-12) {
     return false
   }
-  const s = Math.sign(area)
+  const s = sign(area)
   for (let i = 0; i < 4; i++) {
     const a = order[i]!
     const b = order[(i + 1) % 4]!
     const c = order[(i + 2) % 4]!
     const t = crossTurn(a, b, c)
-    if (Math.abs(t) < 1e-10) {
+    if (abs(t) < 1e-10) {
       return false
     }
-    if (Math.sign(t) !== s) {
+    if (sign(t) !== s) {
       return false
     }
   }
@@ -500,8 +502,8 @@ function plausibilityCheck(
   // Must be convex — all corners must turn the same direction
   const area = signedArea(corners)
   // Use relative tolerance: if |area| < 1e-4 * max(|x|,|y|)^2, shape is degenerate
-  const scale = Math.max(...corners.map((c) => Math.max(Math.abs(c.x), Math.abs(c.y))))
-  if (Math.abs(area) < 1e-4 * scale * scale) {
+  const scale = max(...corners.map((c) => max(abs(c.x), abs(c.y))))
+  if (abs(area) < 1e-4 * scale * scale) {
     return false
   }
 
@@ -659,7 +661,7 @@ export function findCornersFromEdgesWithDebug(
     const line = fitLine(clusterPoints, seed + c)
     lines.push(line)
     if (line) {
-      minR2Seen = Math.min(minR2Seen, line.r2)
+      minR2Seen = min(minR2Seen, line.r2)
     }
     if (!line) {
       failureCode |= FAIL_LINE_FIT_FAILED

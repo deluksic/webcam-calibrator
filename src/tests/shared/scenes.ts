@@ -2,11 +2,13 @@ import { decodeStressAxisStrip, decodeStressFitPerspectiveStrip } from '@/lib/de
 import { rotateStripAroundCentroid, scaleStripToMaxEdgePx } from '@/tests/shared/stripGeometry'
 import type { SceneSpec, StripCorners } from '@/tests/shared/types'
 
+const { min } = Math
+
 /** Build canonical strip for scene (before optional max-edge scaling / rotation). */
 export function buildBaseStrip(spec: SceneSpec): StripCorners {
   const margin = spec.margin ?? 6
   if (spec.kind === 'axis') {
-    const side = spec.axisSidePx ?? Math.min(spec.width, spec.height) - 2 * margin
+    const side = spec.axisSidePx ?? min(spec.width, spec.height) - 2 * margin
     return decodeStressAxisStrip(spec.width, spec.height, margin, side)
   }
   return decodeStressFitPerspectiveStrip(spec.width, spec.height, {

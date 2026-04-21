@@ -2,6 +2,8 @@ import type { Point } from '@/lib/geometry'
 import { length } from '@/lib/geometry'
 import type { StripCorners } from '@/tests/shared/types'
 
+const { max, cos, sin } = Math
+
 function dist(a: Point, b: Point): number {
   return length(a.x - b.x, a.y - b.y)
 }
@@ -13,7 +15,7 @@ export function quadMaxEdgePx(strip: StripCorners): number {
   const e1 = dist(tr, br)
   const e2 = dist(br, bl)
   const e3 = dist(bl, tl)
-  return Math.max(e0, e1, e2, e3)
+  return max(e0, e1, e2, e3)
 }
 
 function stripCentroid(strip: StripCorners): Point {
@@ -29,14 +31,14 @@ function stripCentroid(strip: StripCorners): Point {
 /** Rotate each corner around centroid by `rad` (CCW). */
 export function rotateStripAroundCentroid(strip: StripCorners, rad: number): StripCorners {
   const c = stripCentroid(strip)
-  const cos = Math.cos(rad)
-  const sin = Math.sin(rad)
+  const cosTheta = cos(rad)
+  const sinTheta = sin(rad)
   return strip.map((p) => {
     const dx = p.x - c.x
     const dy = p.y - c.y
     return {
-      x: c.x + dx * cos - dy * sin,
-      y: c.y + dx * sin + dy * cos,
+      x: c.x + dx * cosTheta - dy * sinTheta,
+      y: c.y + dx * sinTheta + dy * cosTheta,
     }
   }) as StripCorners
 }

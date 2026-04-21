@@ -2,6 +2,7 @@ import type { Plugin } from 'vite'
 
 import packageJson from '../../package.json' with { type: 'json' }
 
+const { abs } = Math
 const BASE_VERSION = packageJson.version
 
 // Compute a short hash from chunk content (base64 of first 12 chars, stripped of special chars)
@@ -10,7 +11,7 @@ function contentHash(code: string): string {
   for (let i = 0; i < code.length; i++) {
     h = ((h << 5) - h + code.charCodeAt(i)) | 0
   }
-  return Math.abs(h).toString(16).slice(0, 8)
+  return abs(h).toString(16).slice(0, 8)
 }
 
 export function buildHashPlugin(): Plugin {

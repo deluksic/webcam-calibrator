@@ -1,11 +1,13 @@
 import { length } from '@/lib/geometry'
 import type { RadialDistortionSpec } from '@/tests/shared/types'
 
+const { floor, min, max } = Math
+
 function sampleBilinear(buf: Float32Array, width: number, height: number, x: number, y: number): number {
-  const x0 = Math.floor(x)
-  const y0 = Math.floor(y)
-  const x1 = Math.min(width - 1, x0 + 1)
-  const y1 = Math.min(height - 1, y0 + 1)
+  const x0 = floor(x)
+  const y0 = floor(y)
+  const x1 = min(width - 1, x0 + 1)
+  const y1 = min(height - 1, y0 + 1)
   const tx = x - x0
   const ty = y - y0
   const i00 = y0 * width + x0
@@ -29,14 +31,14 @@ export function applyRadialDistortion01(
 ): Float32Array {
   const cx = spec.cx ?? width * 0.5
   const cy = spec.cy ?? height * 0.5
-  const ref = 0.5 * Math.min(width, height)
+  const ref = 0.5 * min(width, height)
   const k1 = spec.k1
   const out = new Float32Array(width * height)
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const dx = x - cx
       const dy = y - cy
-      const rn = length(dx, dy) / Math.max(ref, 1e-6)
+      const rn = length(dx, dy) / max(ref, 1e-6)
       const s = 1 + k1 * rn * rn
       const sx = cx + dx / s
       const sy = cy + dy / s

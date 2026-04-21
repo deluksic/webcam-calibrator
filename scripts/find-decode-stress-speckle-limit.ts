@@ -6,6 +6,8 @@
 import { binarySearchMaxPassing } from '@/lib/decodeStressSearch'
 import { decodeStressSuiteFailuresFromOptions } from '@/lib/decodeStressSuite'
 
+const { min } = Math
+
 function passes(amp: number): boolean {
   return (
     decodeStressSuiteFailuresFromOptions({
@@ -27,7 +29,7 @@ function findFirstFailure(maxScan: number): number | undefined {
     if (!passes(a)) {
       return a
     }
-    const na = Math.min(maxScan, a * 1.2)
+    const na = min(maxScan, a * 1.2)
     if (na <= a) {
       return passes(maxScan) ? undefined : maxScan
     }

@@ -45,6 +45,7 @@ import {
   writeSobelMagPng,
 } from '@/tests/utils/failureArtifacts'
 
+const { max, floor } = Math
 const THIS_FILE = import.meta.url
 
 /** See file header: avoid ss=2 + FD-Sobel resonance when characterizing decode. */
@@ -100,7 +101,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
       writeGreyPng(join(dir, 'intensity.png'), w, h, intensity)
       writeSobelMagPng(join(dir, 'sobelMag.png'), w, h, sobel)
       if (decodedPattern) {
-        writeCellLegendPng(join(dir, 'cells-rgb.png'), decodedPattern, truthPat, Math.max(12, Math.floor(240 / 6)))
+        writeCellLegendPng(join(dir, 'cells-rgb.png'), decodedPattern, truthPat, max(12, floor(240 / 6)))
       }
     })
     const { rot, best } = decodeSynthetic(w, h, strip, tagId, STRESS_SUPERSAMPLE)
@@ -131,7 +132,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
       writeGreyPng(join(dir, 'intensity.png'), w, h, intensity)
       writeSobelMagPng(join(dir, 'sobelMag.png'), w, h, sobel)
       if (decodedPattern) {
-        writeCellLegendPng(join(dir, 'cells-rgb.png'), decodedPattern, truth, Math.max(12, Math.floor(240 / 6)))
+        writeCellLegendPng(join(dir, 'cells-rgb.png'), decodedPattern, truth, max(12, floor(240 / 6)))
       }
     })
     const { rot, best, decodedPattern: dp } = decodeSynthetic(w, h, strip, tagId, STRESS_SUPERSAMPLE)
@@ -162,7 +163,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
       writeGreyPng(join(dir, 'intensity.png'), w, h, intensity)
       writeSobelMagPng(join(dir, 'sobelMag.png'), w, h, sobel)
       if (decodedPattern) {
-        writeCellLegendPng(join(dir, 'cells-rgb.png'), decodedPattern, truth, Math.max(12, Math.floor(240 / 6)))
+        writeCellLegendPng(join(dir, 'cells-rgb.png'), decodedPattern, truth, max(12, floor(240 / 6)))
       }
     })
     const { rot, best, decodedPattern: dp } = decodeSynthetic(w, h, strip, tagId, STRESS_SUPERSAMPLE)
@@ -194,7 +195,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
           writeGreyPng(join(dir, 'intensity.png'), wh, wh, intensity)
           writeSobelMagPng(join(dir, 'sobelMag.png'), wh, wh, sobel)
           if (decodedPattern) {
-            writeCellLegendPng(join(dir, 'cells-rgb.png'), decodedPattern, truth, Math.max(12, Math.floor(240 / 6)))
+            writeCellLegendPng(join(dir, 'cells-rgb.png'), decodedPattern, truth, max(12, floor(240 / 6)))
           }
         })
         const {
@@ -270,12 +271,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
         const tag = `w${wh}-cellErr${cellErr}-unk${unknowns}-ham${dist}`
         writeGreyPng(join(dir, `${tag}-intensity.png`), wh, wh, intensity)
         writeSobelMagPng(join(dir, `${tag}-sobelMag.png`), wh, wh, sobel)
-        writeCellLegendPng(
-          join(dir, `${tag}-cells-rgb.png`),
-          decodedPattern,
-          truthPat,
-          Math.max(12, Math.floor(240 / 6)),
-        )
+        writeCellLegendPng(join(dir, `${tag}-cells-rgb.png`), decodedPattern, truthPat, max(12, floor(240 / 6)))
       }
     })
     expect(table).toMatchInlineSnapshot(`

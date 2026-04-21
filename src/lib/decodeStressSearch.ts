@@ -5,6 +5,8 @@
 /** `true` iff the suite still passes at parameter `t`. */
 export type DecodeStressPassPredicate = (t: number) => boolean
 
+const { floor, round } = Math
+
 /**
  * Largest `t` with `passes(t)` in `[loPass, hiFail]`, assuming `passes(loPass)` and `!passes(hiFail)`.
  * Monotone cliff in between.
@@ -48,9 +50,9 @@ export function gridMaxPassing(
   let best = 0
   let prev = true
   let recoveries = 0
-  const n = Math.floor(hi / step + 1e-9)
+  const n = floor(hi / step + 1e-9)
   for (let k = 1; k <= n; k++) {
-    const s = Math.round(k * step * 1_000_000) / 1_000_000
+    const s = round(k * step * 1_000_000) / 1_000_000
     const ok = passes(s)
     if (ok) {
       best = s

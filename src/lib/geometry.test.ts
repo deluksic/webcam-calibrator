@@ -13,6 +13,8 @@ import {
   computeProjectiveWeights,
 } from '@/lib/geometry'
 
+const { abs, max, min } = Math
+
 describe('geometry', () => {
   describe('lineFromPoints', () => {
     it('computes line from two points', () => {
@@ -167,10 +169,10 @@ describe('geometry', () => {
       const H = computeHomography(src)
 
       // Unit square corners should map to scaled positions
-      expect(Math.abs(applyHomography(H, 0, 0).x - 0) < 0.01).toBe(true)
-      expect(Math.abs(applyHomography(H, 0, 0).y - 0) < 0.01).toBe(true)
-      expect(Math.abs(applyHomography(H, 0.5, 0.5).x - 1) < 0.01).toBe(true)
-      expect(Math.abs(applyHomography(H, 0.5, 0.5).y - 1) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 0, 0).x - 0) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 0, 0).y - 0) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 0.5, 0.5).x - 1) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 0.5, 0.5).y - 1) < 0.01).toBe(true)
     })
 
     it('perspective skew: trapezoid shape', () => {
@@ -184,14 +186,14 @@ describe('geometry', () => {
       const H = computeHomography(src)
 
       // Verify corners map correctly
-      expect(Math.abs(applyHomography(H, 0, 0).x - 40) < 0.01).toBe(true)
-      expect(Math.abs(applyHomography(H, 0, 0).y - 0) < 0.01).toBe(true)
-      expect(Math.abs(applyHomography(H, 1, 0).x - 60) < 0.01).toBe(true)
-      expect(Math.abs(applyHomography(H, 1, 0).y - 0) < 0.01).toBe(true)
-      expect(Math.abs(applyHomography(H, 0, 1).x - 0) < 0.01).toBe(true)
-      expect(Math.abs(applyHomography(H, 0, 1).y - 100) < 0.01).toBe(true)
-      expect(Math.abs(applyHomography(H, 1, 1).x - 100) < 0.01).toBe(true)
-      expect(Math.abs(applyHomography(H, 1, 1).y - 100) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 0, 0).x - 40) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 0, 0).y - 0) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 1, 0).x - 60) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 1, 0).y - 0) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 0, 1).x - 0) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 0, 1).y - 100) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 1, 1).x - 100) < 0.01).toBe(true)
+      expect(abs(applyHomography(H, 1, 1).y - 100) < 0.01).toBe(true)
     })
 
     it('rotated 90 degrees', () => {
@@ -349,7 +351,7 @@ describe('geometry', () => {
       ]
       const [w0, w1, w2, w3] = computeProjectiveWeights(corners)
       // All weights should be similar
-      const ratio = Math.max(w0, w1, w2, w3) / Math.min(w0, w1, w2, w3)
+      const ratio = max(w0, w1, w2, w3) / min(w0, w1, w2, w3)
       expect(ratio < 1.1).toBe(true)
     })
 
@@ -363,7 +365,7 @@ describe('geometry', () => {
       ]
       const [w0, w1, w2, w3] = computeProjectiveWeights(corners)
       // At least one weight should be positive
-      expect(Math.max(w0, w1, w2, w3) > 0).toBe(true)
+      expect(max(w0, w1, w2, w3) > 0).toBe(true)
     })
 
     it('real camera quad', () => {
@@ -375,7 +377,7 @@ describe('geometry', () => {
       ]
       const [w0, w1, w2, w3] = computeProjectiveWeights(corners)
       // At least one weight should be positive
-      expect(Math.max(w0, w1, w2, w3) > 0).toBe(true)
+      expect(max(w0, w1, w2, w3) > 0).toBe(true)
     })
   })
 })

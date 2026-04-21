@@ -24,6 +24,7 @@ import {
   writeSobelMagPng,
 } from '@/tests/utils/failureArtifacts'
 
+const { max, floor } = Math
 const STRESS_SUPERSAMPLE = 4
 const THIS_FILE = import.meta.url
 
@@ -68,12 +69,7 @@ describe('decode accuracy snapshots', () => {
         const tag = `w${wh}-cellErr${cellErr}-unk${unknowns}-ham${dist}`
         writeGreyPng(join(dir, `${tag}-intensity.png`), wh, wh, pack.grayscale)
         writeSobelMagPng(join(dir, `${tag}-sobelMag.png`), wh, wh, pack.sobel)
-        writeCellLegendPng(
-          join(dir, `${tag}-cells-rgb.png`),
-          decodedPattern,
-          truthPat,
-          Math.max(12, Math.floor(240 / 6)),
-        )
+        writeCellLegendPng(join(dir, `${tag}-cells-rgb.png`), decodedPattern, truthPat, max(12, floor(240 / 6)))
       }
     })
     expect(table).toMatchSnapshot()

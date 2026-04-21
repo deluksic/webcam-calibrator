@@ -208,8 +208,8 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       return undefined
     }
 
-    const vw = video.videoWidth > 0 ? video.videoWidth : Math.max(1, size.width)
-    const vh = video.videoHeight > 0 ? video.videoHeight : Math.max(1, size.height)
+    const vw = video.videoWidth > 0 ? video.videoWidth : max(1, size.width)
+    const vh = video.videoHeight > 0 ? video.videoHeight : max(1, size.height)
     canvas.width = vw
     canvas.height = vh
 

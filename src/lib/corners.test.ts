@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 
 import { extractLabeledEdgePixels, findCornersFromEdges } from '@/lib/corners'
 
+const { abs, random } = Math
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: build synthetic Sobel data for a rectangular border.
 // Generates gx/gy along the edges of a rectangle (minX,minY,maxX,maxY).
@@ -144,14 +146,14 @@ describe('findCornersFromEdges', () => {
     expect(corners).toHaveLength(4)
 
     const [tl, tr, bl, br] = corners
-    expect(Math.abs(tl.x - 10)).toBeLessThan(10)
-    expect(Math.abs(tl.y - 10)).toBeLessThan(10)
-    expect(Math.abs(tr.x - 90)).toBeLessThan(10)
-    expect(Math.abs(tr.y - 10)).toBeLessThan(10)
-    expect(Math.abs(bl.x - 10)).toBeLessThan(10)
-    expect(Math.abs(bl.y - 90)).toBeLessThan(10)
-    expect(Math.abs(br.x - 90)).toBeLessThan(10)
-    expect(Math.abs(br.y - 90)).toBeLessThan(10)
+    expect(abs(tl.x - 10)).toBeLessThan(10)
+    expect(abs(tl.y - 10)).toBeLessThan(10)
+    expect(abs(tr.x - 90)).toBeLessThan(10)
+    expect(abs(tr.y - 10)).toBeLessThan(10)
+    expect(abs(bl.x - 10)).toBeLessThan(10)
+    expect(abs(bl.y - 90)).toBeLessThan(10)
+    expect(abs(br.x - 90)).toBeLessThan(10)
+    expect(abs(br.y - 90)).toBeLessThan(10)
   })
 
   it('returns empty when there are insufficient edge pixels', () => {
@@ -195,9 +197,9 @@ describe('findCornersFromEdges', () => {
 
     for (let y = 5; y < 45; y++) {
       for (let x = 5; x < 45; x++) {
-        if (Math.random() < 0.3) {
-          sobelData[(y * w + x) * 2] = Math.random() * 10
-          sobelData[(y * w + x) * 2 + 1] = Math.random() * 10
+        if (random() < 0.3) {
+          sobelData[(y * w + x) * 2] = random() * 10
+          sobelData[(y * w + x) * 2 + 1] = random() * 10
           labelData[y * w + x] = 1
         }
       }

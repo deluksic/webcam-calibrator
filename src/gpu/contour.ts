@@ -7,6 +7,8 @@ import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
 import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
 import { hasExactlyFourElements } from '@/utils/assertArray'
 
+import { ALLOWED_ERROR_COUNT } from './pipelines/constants'
+
 const { min, max, floor } = Math
 
 export const COMPONENT_LABEL_INVALID = 0xffffffff
@@ -187,8 +189,8 @@ export function validateAndFilterQuads(
       : [
           { x: region.minX, y: region.minY },
           { x: region.maxX, y: region.minY },
-          { x: region.maxX, y: region.maxY },
           { x: region.minX, y: region.maxY },
+          { x: region.maxX, y: region.maxY },
         ]
     const tagGrid = buildTagGrid(cornersForTagGrid(corners))
     if (!tagGrid || !tagGrid.cells || tagGrid.cells.length === 0) {
@@ -197,7 +199,7 @@ export function validateAndFilterQuads(
     // Decode uses bilinear Sobel everywhere in the cell; do not gate on a label/mag floor mask —
     // floor(sample) often lands on flat interiors (NMS ≈ 0) while the float bilinear tap still sees edges.
     const pattern = decodeTagPattern(tagGrid, sobelData, width, undefined, imageHeight)
-    const decoded = decodeTag36h11AnyRotation(pattern, 0)
+    const decoded = decodeTag36h11AnyRotation(pattern, ALLOWED_ERROR_COUNT)
     quads.push({
       corners,
       label: region.label,
@@ -213,28 +215,4 @@ export function validateAndFilterQuads(
   }
 
   return quads
-}
-
-export function filterNestedQuads(quads: DetectedQuad[]): DetectedQuad[] {
-  return quads.filter((candidate) => {
-    for (const other of quads) {
-      if (other === candidate) {
-        continue
-      }
-      if (!other.corners || !candidate.corners) {
-        console.warn('Missing corners in filterNestedQuads', other, candidate)
-        continue
-      }
-      // Discard candidate if it is fully contained inside another box
-      if (
-        other.corners[0].x <= candidate.corners[0].x &&
-        other.corners[2].x >= candidate.corners[2].x &&
-        other.corners[0].y <= candidate.corners[0].y &&
-        other.corners[2].y >= candidate.corners[2].y
-      ) {
-        return false
-      }
-    }
-    return true
-  })
 }

@@ -40,6 +40,8 @@ import {
 } from '@/lib/grid'
 import { TAG36H11_CODES, codeToPattern } from '@/lib/tag36h11'
 
+const { min, max, floor, ceil, abs, round } = Math
+
 const TAG = 8
 const DOT_EPS = 1e-8
 const MIN_VOTE_TOTAL = 3
@@ -67,7 +69,7 @@ function writeVotesOnRasterPng(
   for (let i = 0; i < wh * wh; i++) {
     const o = i * 4
     const k = voteKind[i]!
-    const grey = Math.round(Math.min(255, Math.max(0, intensity[i]! * 255)))
+    const grey = round(min(255, max(0, intensity[i]! * 255)))
     if (k === 0) {
       rgba[o] = grey
       rgba[o + 1] = grey
@@ -93,9 +95,9 @@ function writeVotesOnRasterPng(
     }
     const a = voteAlpha
     const ia = 1 - a
-    rgba[o] = Math.round(vr * a + grey * ia)
-    rgba[o + 1] = Math.round(vg * a + grey * ia)
-    rgba[o + 2] = Math.round(vb * a + grey * ia)
+    rgba[o] = round(vr * a + grey * ia)
+    rgba[o + 1] = round(vg * a + grey * ia)
+    rgba[o + 2] = round(vb * a + grey * ia)
     rgba[o + 3] = 255
   }
   const hTag = homoMaxAxisTagForFilename(hMaxAxisPx)
@@ -144,9 +146,9 @@ function main() {
   const miArg = process.argv[3] !== undefined ? Number(process.argv[3]) : NaN
   const target = Number.isFinite(miArg) ? miArg : 10
   const ssArg = process.argv[4] !== undefined ? Number(process.argv[4]) : NaN
-  const ss = Number.isFinite(ssArg) ? Math.max(1, Math.min(16, Math.floor(ssArg))) : 4
+  const ss = Number.isFinite(ssArg) ? max(1, min(16, floor(ssArg))) : 4
   const hMaxArg = process.argv[5] !== undefined ? Number(process.argv[5]) : NaN
-  const hMaxAxisPx = Number.isFinite(hMaxArg) ? Math.max(0, hMaxArg) : 3
+  const hMaxAxisPx = Number.isFinite(hMaxArg) ? max(0, hMaxArg) : 3
 
   const truthPat = codeToPattern(TAG36H11_CODES[TAG_ID]!)
   const scaleDiag = decodeStressHomographyMismatchScaleForMaxAxisPx(hMaxAxisPx)
@@ -168,7 +170,7 @@ function main() {
   const h = computeHomography([...strip])
   const lMin = minQuadEdgeLengthPx(oc)
   const uvHalf = 0.5 / TAG
-  const uvMax = Math.max(0.1 / TAG, 2 / lMin, uvHalf)
+  const uvMax = max(0.1 / TAG, 2 / lMin, uvHalf)
 
   const row = 0
   const col = 1
@@ -200,14 +202,14 @@ function main() {
   }
 
   const samples: Sample[] = []
-  let x0 = Math.min(oc[0].x, oc[1].x, oc[2].x, oc[3].x)
-  let y0 = Math.min(oc[0].y, oc[1].y, oc[2].y, oc[3].y)
-  let x1 = Math.max(oc[0].x, oc[1].x, oc[2].x, oc[3].x)
-  let y1 = Math.max(oc[0].y, oc[1].y, oc[2].y, oc[3].y)
-  const ix0 = Math.max(0, Math.floor(x0))
-  const iy0 = Math.max(0, Math.floor(y0))
-  const ix1 = Math.min(wh - 1, Math.ceil(x1))
-  const iy1 = Math.min(wh - 1, Math.ceil(y1))
+  let x0 = min(oc[0].x, oc[1].x, oc[2].x, oc[3].x)
+  let y0 = min(oc[0].y, oc[1].y, oc[2].y, oc[3].y)
+  let x1 = max(oc[0].x, oc[1].x, oc[2].x, oc[3].x)
+  let y1 = max(oc[0].y, oc[1].y, oc[2].y, oc[3].y)
+  const ix0 = max(0, floor(x0))
+  const iy0 = max(0, floor(y0))
+  const ix1 = min(wh - 1, ceil(x1))
+  const iy1 = min(wh - 1, ceil(y1))
 
   const voteKind = new Uint8Array(wh * wh)
   let scriptWhite = 0
@@ -249,13 +251,13 @@ function main() {
         }
         const dot = decodeVoteBinRadialDot(u, v, cu, cv, gu, gv)
         const sign = signFromDot(dot)
-        if (sign === 'pos') {
+        if (sign === 'black') {
           scriptBlack++
-        } else if (sign === 'neg') {
+        } else if (sign === 'white') {
           scriptWhite++
         }
         const p = iy * wh + ix
-        voteKind[p] = sign === 'pos' ? 1 : sign === 'neg' ? 2 : 3
+        voteKind[p] = sign === 'black' ? 1 : sign === 'white' ? 2 : 3
         samples.push({ ix, iy, u, v, tri, dot, sign })
       }
     }
@@ -272,7 +274,7 @@ function main() {
   console.log(`Wrote votes on intensity raster: ${pngPath}`)
   console.log('')
 
-  samples.sort((a, b) => Math.abs(b.dot) - Math.abs(a.dot))
+  samples.sort((a, b) => abs(b.dot) - abs(a.dot))
   console.log(`--- up to 40 strongest radial vote samples into mi=${target} ---`)
   for (const s of samples.slice(0, 40)) {
     console.log(

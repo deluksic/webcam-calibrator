@@ -11,6 +11,8 @@ import {
   renderAprilTagSobelFiniteDifference,
 } from '@/tests/utils/syntheticAprilTag'
 
+const { max, min, floor, round, abs } = Math
+
 /** TL, TR, BR, BL for `buildTagGrid` from homography strip TL, TR, BL, BR. */
 function cornersGridOrder(strip: [Point, Point, Point, Point]): [Point, Point, Point, Point] {
   return [strip[0], strip[1], strip[3], strip[2]]
@@ -94,8 +96,8 @@ describe('aprilTagRaycast', () => {
         const v = (row + 1.5) / 8
         const want = intensityAtTagUv(u, v, pattern)
         const p = applyHomography(h8, u, v)
-        const xi = Math.max(0, Math.min(w - 1, Math.round(p.x)))
-        const yi = Math.max(0, Math.min(h - 1, Math.round(p.y)))
+        const xi = max(0, min(w - 1, round(p.x)))
+        const yi = max(0, min(h - 1, round(p.y)))
         const got = intensity[yi * w + xi]
         expect(got).toBe(want)
       }
@@ -115,7 +117,7 @@ describe('aprilTagRaycast', () => {
     const cx = 32
     const cy = 32
     const o = (cy * w + cx) * 2
-    expect(Math.abs(s[o])).toBeGreaterThan(0.2)
+    expect(abs(s[o])).toBeGreaterThan(0.2)
   })
 
   it('buildTagGrid cell centers: UV indices match row/col; raster matches tag law (nearest pixel)', () => {
@@ -142,14 +144,14 @@ describe('aprilTagRaycast', () => {
     for (const cell of grid.cells) {
       const { u, v, inside } = imagePixelToUnitSquareUv(h8, cell.center.x, cell.center.y)
       expect(inside).toBe(true)
-      const col = Math.min(5, Math.max(0, Math.floor(u * 6 - 1e-9)))
-      const row = Math.min(5, Math.max(0, Math.floor(v * 6 - 1e-9)))
+      const col = min(5, max(0, floor(u * 6 - 1e-9)))
+      const row = min(5, max(0, floor(v * 6 - 1e-9)))
       expect(row).toBe(cell.row)
       expect(col).toBe(cell.col)
 
       const analytical = intensityAtTagUv(u, v, pattern)
-      const xi = Math.max(0, Math.min(w - 1, Math.round(cell.center.x)))
-      const yi = Math.max(0, Math.min(h - 1, Math.round(cell.center.y)))
+      const xi = max(0, min(w - 1, round(cell.center.x)))
+      const yi = max(0, min(h - 1, round(cell.center.y)))
       const pix = intensity[yi * w + xi]
       expect(pix).toBeCloseTo(analytical, 4)
     }
