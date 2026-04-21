@@ -105,18 +105,18 @@ function writeVotesOnRasterPng(
   return path
 }
 
-function classify(pos: number, neg: number): string {
-  const sum = pos + neg
+function classify(blackCount: number, whiteCount: number): string {
+  const sum = whiteCount + blackCount
   if (sum < MIN_VOTE_TOTAL) {
     return `-1 (sum=${sum} < ${MIN_VOTE_TOTAL})`
   }
-  if (pos > neg) {
-    return `1 black (pos ${pos} > neg ${neg})`
+  if (blackCount > whiteCount) {
+    return `0 black (blackCount ${blackCount} > whiteCount ${whiteCount})`
   }
-  if (neg > pos) {
-    return `0 white (neg ${neg} > pos ${pos})`
+  if (whiteCount > blackCount) {
+    return `1 white (whiteCount ${whiteCount} > blackCount ${blackCount})`
   }
-  return `-2 tie (pos=${pos} neg=${neg})`
+  return `-2 tie (whiteCount=${whiteCount} blackCount=${blackCount})`
 }
 
 type Sample = {
@@ -126,15 +126,15 @@ type Sample = {
   v: number
   tri: string
   dot: number
-  sign: 'pos' | 'neg' | 'skip'
+  sign: 'black' | 'white' | 'skip'
 }
 
 function signFromDot(dot: number): Sample['sign'] {
   if (dot > DOT_EPS) {
-    return 'pos'
+    return 'black'
   }
   if (dot < -DOT_EPS) {
-    return 'neg'
+    return 'white'
   }
   return 'skip'
 }
@@ -155,7 +155,13 @@ function main() {
   const { intensity, sobel } = decodeStressRasterSobel(wh, wh, rasterStrip, truthPat, ss, TAG_ID, SPECKLE)
 
   const grid = buildTagGrid(decodeStressCornersGridOrder(decodeStrip), 6)
-  const { pattern, posM, negM, uvProximityMax } = decodeTagPatternWithVoteMaps(grid, sobel, wh, undefined, wh)
+  const { pattern, whiteModuleCount, blackModuleCount, uvProximityMax } = decodeTagPatternWithVoteMaps(
+    grid,
+    sobel,
+    wh,
+    undefined,
+    wh,
+  )
 
   const oc = grid.outerCorners
   const strip = [oc[0], oc[1], oc[3], oc[2]] as const
@@ -182,13 +188,13 @@ function main() {
   )
   console.log(`truth[${pi}]=${truthPat[pi]} decoded[${pi}]=${pattern[pi]}`)
   console.log(
-    `posM[${miInner}]=${posM[miInner]} negM[${miInner}]=${negM[miInner]} → ${classify(posM[miInner]!, negM[miInner]!)}`,
+    `blackModuleCount[${miInner}]=${blackModuleCount[miInner]} whiteModuleCount[${miInner}]=${whiteModuleCount[miInner]} → ${classify(blackModuleCount[miInner]!, whiteModuleCount[miInner]!)}`,
   )
   console.log('')
   if (target !== miInner) {
     console.log(`--- module mi=${target} (mx=${target % TAG}, my=${(target / TAG) | 0}) ---`)
     console.log(
-      `posM[${target}]=${posM[target]} negM[${target}]=${negM[target]} → ${classify(posM[target]!, negM[target]!)}`,
+      `blackModuleCount[${target}]=${blackModuleCount[target]} whiteModuleCount[${target}]=${whiteModuleCount[target]} → ${classify(blackModuleCount[target]!, whiteModuleCount[target]!)}`,
     )
     console.log('')
   }
@@ -204,8 +210,8 @@ function main() {
   const iy1 = Math.min(wh - 1, Math.ceil(y1))
 
   const voteKind = new Uint8Array(wh * wh)
-  let scriptPos = 0
-  let scriptNeg = 0
+  let scriptWhite = 0
+  let scriptBlack = 0
 
   for (let iy = iy0; iy <= iy1; iy++) {
     for (let ix = ix0; ix <= ix1; ix++) {
@@ -244,9 +250,9 @@ function main() {
         const dot = decodeVoteBinRadialDot(u, v, cu, cv, gu, gv)
         const sign = signFromDot(dot)
         if (sign === 'pos') {
-          scriptPos++
+          scriptBlack++
         } else if (sign === 'neg') {
-          scriptNeg++
+          scriptWhite++
         }
         const p = iy * wh + ix
         voteKind[p] = sign === 'pos' ? 1 : sign === 'neg' ? 2 : 3
@@ -255,9 +261,9 @@ function main() {
     }
   }
 
-  if (scriptPos !== posM[target] || scriptNeg !== negM[target]) {
+  if (scriptWhite !== whiteModuleCount[target] || scriptBlack !== blackModuleCount[target]) {
     console.warn(
-      `script tallies mi=${target} pos/neg ${scriptPos}/${scriptNeg} vs decode posM/negM ${posM[target]}/${negM[target]} (should match)`,
+      `script tallies mi=${target} white/black ${scriptWhite}/${scriptBlack} vs decode whiteModuleCount/blackModuleCount ${whiteModuleCount[target]}/${blackModuleCount[target]} (should match)`,
     )
     console.log('')
   }

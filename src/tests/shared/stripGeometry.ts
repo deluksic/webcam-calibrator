@@ -1,6 +1,6 @@
 import type { Point } from '@/lib/geometry'
-import type { StripCorners } from '@/tests/shared/types'
 import { length } from '@/lib/geometry'
+import type { StripCorners } from '@/tests/shared/types'
 
 function dist(a: Point, b: Point): number {
   return length(a.x - b.x, a.y - b.y)

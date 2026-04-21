@@ -78,8 +78,8 @@ export function writeSobelMagPng(path: string, width: number, height: number, so
   let m = 0
   const mag = new Float32Array(width * height)
   for (let i = 0; i < width * height; i++) {
-    const gx = sobel[i * 2]!
-    const gy = sobel[i * 2 + 1]!
+    const gx = sobel[i * 2]
+    const gy = sobel[i * 2 + 1]
     mag[i] = length(gx, gy)
     m = Math.max(m, mag[i]!)
   }

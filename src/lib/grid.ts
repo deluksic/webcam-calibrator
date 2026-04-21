@@ -353,7 +353,7 @@ export function decodeEdgeDistanceUv(fu: number, fv: number): number {
 }
 
 /**
- * Linear indices `my*8+mx` into `posM`/`negM` for the two modules sharing the chosen edge.
+ * Linear indices `my*8+mx` into `whiteModuleCount`/`blackModuleCount` for the two modules sharing the chosen edge.
  * Drops neighbors outside the 8×8 lattice (tag border).
  */
 export function decodeVoteModuleIndices(mx: number, my: number, tri: DecodeTriangle): number[] {
@@ -412,7 +412,7 @@ export function decodeEdgeAlignedDot(
 }
 
 /**
- * Same sign convention as `decodeCell`: **positive** ⇒ vote **toward black** (`posM`).
+ * Same sign convention as `decodeCell`: **positive** ⇒ vote **toward black** (`blackModuleCount`).
  * Horizontal lattice edges (tri **top** / **bottom**): **`gv * (v − cv)`** for that bin’s center **`cv`**.
  * Vertical edges (**left** / **right**): **`gu * (u − cu)`**.
  */
@@ -453,16 +453,16 @@ export function distPointToClosedRectUv(u: number, v: number, u0: number, u1: nu
   return length(u - cu, v - cv)
 }
 
-function classifyModuleFromPosNeg(pos: number, neg: number): 0 | 1 | -1 | -2 {
-  const sum = pos + neg
+function classifyModuleFromPosNeg(whiteCount: number, blackCount: number): 0 | 1 | -1 | -2 {
+  const sum = whiteCount + blackCount
   if (sum < DECODE_MIN_VOTE_TOTAL) {
     return -1
   }
-  if (pos > neg) {
-    return 0 // pos votes toward black
+  if (blackCount > whiteCount) {
+    return 0
   }
-  if (neg > pos) {
-    return 1 // neg votes toward white
+  if (whiteCount > blackCount) {
+    return 1
   }
   return -2
 }
@@ -579,9 +579,9 @@ export function buildDecodeEdgeMask(
 export type DecodeTagPatternVoteMaps = {
   pattern: TagPattern
   /** Per 8×8 module index: unweighted count of radial dots voting “toward black”. */
-  posM: Uint32Array
+  whiteModuleCount: Uint32Array
   /** Per 8×8 module index: unweighted count voting “toward white”. */
-  negM: Uint32Array
+  blackModuleCount: Uint32Array
   /** Same gate as the inner loop: `max(TAU_MODULE_UV, 2/L_min, 0.5/8)` in tag UV. */
   uvProximityMax: number
 }
@@ -592,7 +592,7 @@ function decodeTagPatternVoteAccumulation(
   imageWidth: number,
   imageH: number,
   edgeMask?: Uint8Array,
-): { posM: Uint32Array; negM: Uint32Array; uvProximityMax: number } {
+): { whiteModuleCount: Uint32Array; blackModuleCount: Uint32Array; uvProximityMax: number } {
   const oc = grid.outerCorners
   const strip: [Point, Point, Point, Point] = [oc[0], oc[1], oc[3], oc[2]]
   const h = tryComputeHomography([...strip])
@@ -603,8 +603,8 @@ function decodeTagPatternVoteAccumulation(
 
   if (!h) {
     return {
-      posM: new Uint32Array(36),
-      negM: new Uint32Array(36),
+      whiteModuleCount: new Uint32Array(64),
+      blackModuleCount: new Uint32Array(64),
       uvProximityMax,
     }
   }
@@ -618,8 +618,8 @@ function decodeTagPatternVoteAccumulation(
   const ix1 = min(imageWidth - 1, ceil(x1))
   const iy1 = min(imageH - 1, ceil(y1))
 
-  const posM = new Uint32Array(64)
-  const negM = new Uint32Array(64)
+  const whiteModuleCount = new Uint32Array(64)
+  const blackModuleCount = new Uint32Array(64)
 
   for (let iy = iy0; iy <= iy1; iy++) {
     for (let ix = ix0; ix <= ix1; ix++) {
@@ -660,19 +660,19 @@ function decodeTagPatternVoteAccumulation(
         }
         const dot = decodeVoteBinRadialDot(u, v, cu, cv, gu, gv)
         if (dot > DECODE_DOT_EPS) {
-          posM[mi] += 1
+          blackModuleCount[mi] += 1
         } else if (dot < -DECODE_DOT_EPS) {
-          negM[mi] += 1
+          whiteModuleCount[mi] += 1
         }
       }
     }
   }
 
-  return { posM, negM, uvProximityMax }
+  return { whiteModuleCount, blackModuleCount, uvProximityMax }
 }
 
 /**
- * Same decode as {@link decodeTagPattern}, plus raw **posM** / **negM** tallies (for tooling / stress forensics).
+ * Same decode as {@link decodeTagPattern}, plus raw **whiteModuleCount** / **blackModuleCount** tallies (for tooling / stress forensics).
  * Each contributing pixel adds **±1** to **at most two** 8×8 bins per {@link decodeVoteBinRadialDot}.
  */
 export function decodeTagPatternWithVoteMaps(
@@ -683,7 +683,13 @@ export function decodeTagPatternWithVoteMaps(
   imageHeight?: number,
 ): DecodeTagPatternVoteMaps {
   const imageH = imageHeight !== undefined ? imageHeight : floor(sobelData.length / (2 * imageWidth))
-  const { posM, negM, uvProximityMax } = decodeTagPatternVoteAccumulation(grid, sobelData, imageWidth, imageH, edgeMask)
+  const { whiteModuleCount, blackModuleCount, uvProximityMax } = decodeTagPatternVoteAccumulation(
+    grid,
+    sobelData,
+    imageWidth,
+    imageH,
+    edgeMask,
+  )
 
   const pattern: TagPattern = [] as unknown as TagPattern
   for (let row = 0; row < 6; row++) {
@@ -691,13 +697,13 @@ export function decodeTagPatternWithVoteMaps(
       const mx = col + 1
       const my = row + 1
       const mi = my * TAG_MODULES + mx
-      const cell = classifyModuleFromPosNeg(posM[mi]!, negM[mi]!)
+      const cell = classifyModuleFromPosNeg(whiteModuleCount[mi], blackModuleCount[mi])
       pattern.push(cell)
     }
   }
 
   fillUnknownNeighbors6(pattern)
-  return { pattern, posM, negM, uvProximityMax }
+  return { pattern, whiteModuleCount, blackModuleCount, uvProximityMax }
 }
 
 export function decodeTagPattern(
