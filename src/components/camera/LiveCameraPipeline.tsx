@@ -114,7 +114,7 @@ export type LiveCameraPipelineProps = {
   onLog?: (msg: string) => void
   onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number }) => void
   /** Extra controls (camera select, mode buttons, …). */
-  toolbar?: () => JSX.Element
+  toolbar?: JSX.Element
 }
 
 export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
@@ -364,7 +364,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           <span class={styles.feedLabel}>
             Camera Feed — {props.trackSize?.width ?? '-'}×{props.trackSize?.height ?? '-'}
           </span>
-          {props.toolbar?.()}
+          {props.toolbar}
         </div>
         <div class={styles.feedContainer}>
           <canvas ref={setCanvasEl} class={styles.feedCanvas} />

@@ -5,8 +5,6 @@
 
 import { tgpu, d, common, std } from 'typegpu'
 
-import { computeDispatch2d } from '@/gpu/pipelines/constants'
-
 const WR = 0.2126
 const WG = 0.7152
 const WB = 0.0722
@@ -135,26 +133,3 @@ export function createGrayscalePipeline(
 }
 
 export type GrayscalePipeline = ReturnType<typeof createGrayscalePipeline>
-
-// ─── Per-frame processing ────────────────────────────────────────────────────
-export function processFrame(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
-  pipeline: GrayscalePipeline,
-  video: HTMLVideoElement,
-) {
-  // Create external texture bind group per-frame
-  const copyBindGroup = root.createBindGroup(pipeline.copyLayout, {
-    cameraTex: root.device.importExternalTexture({ source: video }),
-    sampler: pipeline.sampler,
-  })
-
-  // ── Pass 1: render external → rgba ──────────────────────────────────────
-  pipeline.copyPipeline.withColorAttachment({ view: pipeline.rgbaTex.createView() }).with(copyBindGroup).draw(3)
-
-  // ── Pass 2: compute rgba → grayscale ────────────────────────────────────
-  const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height)
-  pipeline.grayPipeline.with(pipeline.grayBindGroup).dispatchWorkgroups(wgX, wgY)
-
-  // ── Pass 3: display grayscale → canvas ──────────────────────────────────
-  pipeline.displayPipeline.withColorAttachment({ view: pipeline.context }).with(pipeline.displayBindGroup).draw(3)
-}

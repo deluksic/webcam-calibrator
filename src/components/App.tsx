@@ -18,22 +18,28 @@ export function App() {
     <CameraStreamProvider>
       <div class={styles.root}>
         <nav class={styles.nav}>
-          <button class={[styles.navBtn, view() === 'target' && styles.navBtnActive]} onClick={() => setView('target')}>
+          <button
+            class={[styles.navBtn, { [styles.navBtnActive]: view() === 'target' }]}
+            onClick={() => setView('target')}
+          >
             Target
           </button>
           <button
-            class={[styles.navBtn, view() === 'calibrate' && styles.navBtnActive]}
+            class={[styles.navBtn, { [styles.navBtnActive]: view() === 'calibrate' }]}
             onClick={() => setView('calibrate')}
           >
             Calibrate
           </button>
           <button
-            class={[styles.navBtn, view() === 'results' && styles.navBtnActive]}
+            class={[styles.navBtn, { [styles.navBtnActive]: view() === 'results' }]}
             onClick={() => setView('results')}
           >
             Results
           </button>
-          <button class={[styles.navBtn, view() === 'debug' && styles.navBtnActive]} onClick={() => setView('debug')}>
+          <button
+            class={[styles.navBtn, { [styles.navBtnActive]: view() === 'debug' }]}
+            onClick={() => setView('debug')}
+          >
             Debug
           </button>
           <span class={styles.version}>{VERSION}</span>

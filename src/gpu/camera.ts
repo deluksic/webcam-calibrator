@@ -492,7 +492,6 @@ export function processFrame(
   displayMode: DisplayMode = 'edges',
   onError?: (msg: string) => void,
 ) {
-  // onError?.(`[camera] processFrame mode=${displayMode}`);
   const copyBindGroup = root.createBindGroup(pipeline.copyLayoutTemplate, {
     cameraTex: root.device.importExternalTexture({ source: video }),
     sampler: pipeline.sampler,

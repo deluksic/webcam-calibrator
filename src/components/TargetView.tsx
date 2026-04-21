@@ -10,7 +10,7 @@ export function TargetView() {
   const [cols, setCols] = createSignal(4)
   const [rows, setRows] = createSignal(3)
   const [spacing, setSpacing] = createSignal(1.5)
-  const [checkerboard, setCheckerboard] = createSignal(true)
+  const [checkerboard, setCheckerboard] = createSignal(false)
   const [randomSeed, setRandomSeed] = createSignal(Date.now())
 
   const tagSize = 40
@@ -40,9 +40,9 @@ export function TargetView() {
     return positions
   })
 
-  const checkerPositions = createMemo(() => {
+  const checkerPositions = createMemo<{ x: number; y: number }[]>(() => {
     if (!checkerboard() || cols() < 2 || rows() < 2) {
-      return [] as { x: number; y: number }[]
+      return []
     }
     const positions: { x: number; y: number }[] = []
     for (let r = 0; r < rows() - 1; r++) {
@@ -125,6 +125,7 @@ export function TargetView() {
               <option value="3">3</option>
               <option value="4">4</option>
               <option value="5">5</option>
+              <option value="6">6</option>
             </select>
           </div>
         </div>

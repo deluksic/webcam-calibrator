@@ -1,4 +1,4 @@
-import { Errored, For, Show, createMemo, createStore, isPending } from 'solid-js'
+import { Errored, For, createMemo, createStore } from 'solid-js'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
@@ -11,6 +11,9 @@ import {
 } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationSamplesTopK } from '@/lib/calibrationTopK'
 import type { CalibrationSample } from '@/lib/calibrationTypes'
+
+import type { Resolution} from './camera/cameraStreamAcquire';
+import { RESOLUTION_LADDER } from './camera/cameraStreamAcquire'
 
 import styles from '@/components/CalibrationView.module.css'
 import pipelineStyles from '@/components/camera/LiveCameraPipeline.module.css'
@@ -131,23 +134,25 @@ function CalibrationView() {
       </p>
       <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
         <div class={styles.cameraBlock}>
-          <Show when={!isPending(devicesSorted)}>
-            <select
-              class={[pipelineStyles.cameraSelect, styles.calibrateCameraSelect]}
-              value={cam.deviceId() ?? ''}
-              onChange={(e) => cam.setDeviceId(e.currentTarget.value)}
-            >
-              <Show when={devicesSorted()}>
-                {(d) => (
-                  <For each={d()}>
-                    {(item) => (
-                      <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
-                    )}
-                  </For>
-                )}
-              </Show>
-            </select>
-          </Show>
+          <select
+            class={[pipelineStyles.cameraSelect, styles.calibrateCameraSelect]}
+            value={cam.deviceId() ?? ''}
+            onChange={(e) => cam.setDeviceId(e.currentTarget.value)}
+          >
+            <For each={devicesSorted()}>
+              {(item) => (
+                <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
+              )}
+            </For>
+          </select>
+          <select
+            class={pipelineStyles.cameraSelect}
+            onChange={(e) => cam.setSelectedResolution(e.currentTarget.value as Resolution)}
+          >
+            <For each={Object.keys(RESOLUTION_LADDER)} keyed={false}>
+              {(resolution) => <option value={resolution()}>{resolution()}</option>}
+            </For>
+          </select>
           <LiveCameraPipeline
             displayMode={displayMode()}
             showGrid={showGrid()}

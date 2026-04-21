@@ -1,3 +1,4 @@
+import type { Setter } from 'solid-js'
 import {
   type Accessor,
   type ParentProps,
@@ -9,6 +10,7 @@ import {
 } from 'solid-js'
 
 import { cameraDeviceScore } from './cameraDeviceScore'
+import type { Resolution } from './cameraStreamAcquire'
 import { acquireVideoStream, listVideoInputDevices, primeCameraPermission } from './cameraStreamAcquire'
 
 const { navigator } = globalThis
@@ -20,6 +22,7 @@ export type CameraStreamContextValue = {
   setDeviceId: (id: string) => void
   stream: Accessor<MediaStream | undefined>
   trackSize: Accessor<{ width: number; height: number } | undefined>
+  setSelectedResolution: Setter<Resolution | undefined>
 }
 
 const CameraStreamContext = createContext<CameraStreamContextValue>()
@@ -34,6 +37,7 @@ export function useCameraStream(): CameraStreamContextValue {
 
 export function CameraStreamProvider(props: ParentProps) {
   const [selectedCameraDeviceId, setSelectedCameraDeviceId] = createSignal<string>()
+  const [selectedResolution, setSelectedResolution] = createSignal<Resolution>()
   const [deviceListEpoch, setDeviceListEpoch] = createSignal(0)
 
   const devices = createMemo(async () => {
@@ -50,9 +54,11 @@ export function CameraStreamProvider(props: ParentProps) {
       return undefined
     }
     onCleanup(() => {
-      stream?.getTracks().forEach((t) => t.stop())
+      for (const track of stream?.getTracks() ?? []) {
+        track.stop()
+      }
     })
-    const stream = await acquireVideoStream(id)
+    const stream = await acquireVideoStream(id, selectedResolution())
     return stream
   })
 
@@ -62,6 +68,7 @@ export function CameraStreamProvider(props: ParentProps) {
     if (width === undefined || height === undefined) {
       return undefined
     }
+    console.log(width, height)
     return { width, height }
   })
 
@@ -74,12 +81,13 @@ export function CameraStreamProvider(props: ParentProps) {
     onCleanup(() => navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange))
   }
 
-  const value: CameraStreamContextValue = {
+  const value = {
     devices,
     deviceId: selectedCameraDeviceId,
     setDeviceId: setSelectedCameraDeviceId,
     stream,
     trackSize,
+    setSelectedResolution,
   }
 
   return <CameraStreamContext value={value}>{props.children}</CameraStreamContext>

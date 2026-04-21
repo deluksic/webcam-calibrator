@@ -1,7 +1,8 @@
-import { For, Show, createMemo, createSignal, isPending } from 'solid-js'
+import { Errored, For, Show, createMemo, createSignal, isPending } from 'solid-js'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
-import { LiveCameraPipeline, type DisplayMode } from '@/components/camera/LiveCameraPipeline'
+import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
+import type { DisplayMode } from '@/gpu/camera'
 
 import pipelineStyles from '@/components/camera/LiveCameraPipeline.module.css'
 import styles from '@/components/DebugView.module.css'
@@ -122,17 +123,18 @@ export function DebugView() {
 
   return (
     <div class={styles.root}>
-      {cam.streamError() ? <p style={{ color: 'var(--color-error)' }}>Camera: {cam.streamError()}</p> : null}
-      <LiveCameraPipeline
-        displayMode={displayMode}
-        showGrid={showGrid}
-        showFallbacks={showFallbacks}
-        showHistogramCanvas={() => true}
-        stream={cam.stream}
-        trackSize={cam.trackSize}
-        onLog={log}
-        toolbar={toolbar}
-      />
+      <Errored fallback={(err) => <p style={{ color: 'var(--color-error)' }}>Camera: {String(err)}</p>}>
+        <LiveCameraPipeline
+          displayMode={displayMode()}
+          showGrid={showGrid()}
+          showFallbacks={showFallbacks()}
+          showHistogramCanvas
+          stream={cam.stream()}
+          trackSize={cam.trackSize()}
+          onLog={log}
+          toolbar={toolbar()}
+        />
+      </Errored>
       <div class={styles.logTail}>
         <For each={logs()} keyed={false}>
           {(line) => <div>{line()}</div>}

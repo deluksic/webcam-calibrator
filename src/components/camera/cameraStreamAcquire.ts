@@ -4,11 +4,12 @@ const { navigator } = globalThis
 const { min } = Math
 const ACCEPT_THRESHOLD = 0.9
 
-const SIZE_LADDER: MediaTrackConstraints[] = [
-  { width: { ideal: 1280 }, height: { ideal: 720 } },
-  { width: { ideal: 640 }, height: { ideal: 480 } },
-  {},
-]
+export type Resolution = 'high' | 'medium' | 'low'
+export const RESOLUTION_LADDER = {
+  high: { width: { ideal: 1280 }, height: { ideal: 720 } },
+  medium: { width: { ideal: 640 }, height: { ideal: 480 } },
+  low: {},
+} satisfies Record<string, MediaTrackConstraints>
 
 export async function tryUpgradeVideoTrack(track: MediaStreamTrack): Promise<void> {
   const caps = track.getCapabilities()
@@ -48,9 +49,9 @@ export async function tryUpgradeVideoTrack(track: MediaStreamTrack): Promise<voi
 /**
  * Open a video-only stream for `deviceId` (exact), trying size ideals then falling back.
  */
-export async function acquireVideoStream(deviceId: string): Promise<MediaStream> {
+export async function acquireVideoStream(deviceId: string, resolution: Resolution | undefined): Promise<MediaStream> {
   let lastErr: unknown
-  for (const size of SIZE_LADDER) {
+  for (const size of resolution ? [RESOLUTION_LADDER[resolution]] : Object.values(RESOLUTION_LADDER)) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
