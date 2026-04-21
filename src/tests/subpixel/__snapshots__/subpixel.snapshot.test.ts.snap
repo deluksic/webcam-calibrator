@@ -3,18 +3,18 @@
 exports[`subpixel alignment > v1 refiner metrics snapshot (mismatch + speckle) 1`] = `
 {
   "cornersRounded": {
-    "maxPx": 3.5401,
+    "maxPx": 2.7987,
     "perCornerPx": [
       0.2016,
-      1.1319,
-      3.5401,
-      1.135,
+      0.1768,
+      2.7987,
+      0.1953,
     ],
-    "rmsePx": 1.9457,
+    "rmsePx": 1.4091,
   },
   "transferRounded": {
-    "maxPx": 3.5401,
-    "rmsePx": 1.3931,
+    "maxPx": 2.7987,
+    "rmsePx": 0.8718,
   },
 }
 `;

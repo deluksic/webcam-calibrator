@@ -197,7 +197,7 @@ export function validateAndFilterQuads(
     // Decode uses bilinear Sobel everywhere in the cell; do not gate on a label/mag floor mask —
     // floor(sample) often lands on flat interiors (NMS ≈ 0) while the float bilinear tap still sees edges.
     const pattern = decodeTagPattern(tagGrid, sobelData, width, undefined, imageHeight)
-    const decoded = decodeTag36h11AnyRotation(pattern, 7)
+    const decoded = decodeTag36h11AnyRotation(pattern, 0)
     quads.push({
       corners,
       label: region.label,

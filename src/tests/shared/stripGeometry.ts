@@ -1,8 +1,9 @@
 import type { Point } from '@/lib/geometry'
 import type { StripCorners } from '@/tests/shared/types'
+import { length } from '@/lib/geometry'
 
 function dist(a: Point, b: Point): number {
-  return Math.hypot(a.x - b.x, a.y - b.y)
+  return length(a.x - b.x, a.y - b.y)
 }
 
 /** Longest edge of quad TL, TR, BL, BR (triangle-strip order). */

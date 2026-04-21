@@ -68,7 +68,7 @@ export function hammingDistance(code1: bigint, code2: bigint): number {
  */
 export function patternToCode(pattern: TagPattern): bigint {
   if (pattern.length !== 36) {
-    return -1 as unknown as bigint
+    return -1n
   }
   let code = 0n
   for (let bit = 0; bit < 36; bit++) {
@@ -177,7 +177,7 @@ export function rotatePattern(pattern: TagPattern): TagPattern {
  */
 export function decodeTag36h11AnyRotation(
   pattern: TagPattern | undefined,
-  maxError: number = 5,
+  maxError: number,
 ): { id: number; rotation: number } | undefined {
   if (!pattern) {
     return undefined

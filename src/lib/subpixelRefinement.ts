@@ -1,5 +1,8 @@
-import { applyHomography, computeHomography, type Point } from '@/lib/geometry'
+import type { Point } from '@/lib/geometry';
+import { applyHomography, computeHomography, length } from '@/lib/geometry'
 import { finiteDifferenceSobelFromIntensity } from '@/tests/utils/syntheticAprilTag'
+
+const { min, max, floor } = Math
 
 export interface SubpixelRefineInput {
   width: number
@@ -19,12 +22,12 @@ function stripCornersFromHomography(h: Float32Array): [Point, Point, Point, Poin
 }
 
 function sobelMagnitudeAt(sobel: Float32Array, width: number, height: number, x: number, y: number): number {
-  const xi = Math.max(0, Math.min(width - 1, Math.round(x)))
-  const yi = Math.max(0, Math.min(height - 1, Math.round(y)))
+  const xi = max(0, min(width - 1, floor(x)))
+  const yi = max(0, min(height - 1, floor(y)))
   const o = (yi * width + xi) * 2
   const gx = sobel[o]!
   const gy = sobel[o + 1]!
-  return Math.hypot(gx, gy)
+  return length(gx, gy)
 }
 
 /**

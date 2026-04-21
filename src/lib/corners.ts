@@ -2,10 +2,7 @@
 // RANSAC + PCA line fit per cluster, and line intersection for robust quad corners.
 
 import type { Point } from '@/lib/geometry'
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Debug info returned alongside corners (for GPU overlay visualization)
-// ─────────────────────────────────────────────────────────────────────────────
+import { length } from '@/lib/geometry'
 
 export interface CornerDebugInfo {
   /** Failure code: 0 = success, or bitmask of failure reasons */
@@ -148,7 +145,7 @@ function kMeansGradientDirections(pixels: LabeledEdgePixel[], k: number = 4, max
           sx += pixels[i].gx
           sy += pixels[i].gy
         }
-        const len = Math.hypot(sx, sy)
+        const len = length(sx, sy)
         if (len > 1e-8) {
           centroids[c] = { x: sx / len, y: sy / len }
         }
@@ -233,11 +230,11 @@ function normalFromInlierScatter(points: { x: number; y: number }[]): { nx: numb
 
   let nx = sxy
   let ny = lamMin - sxx
-  let len = Math.hypot(nx, ny)
+  let len = length(nx, ny)
   if (len < 1e-10) {
     nx = lamMin - syy
     ny = sxy
-    len = Math.hypot(nx, ny)
+    len = length(nx, ny)
   }
   if (len < 1e-10) {
     return null
@@ -523,7 +520,7 @@ function plausibilityCheck(
   for (let i = 0; i < 4; i++) {
     const c1 = corners[i]
     const c2 = corners[(i + 1) % 4]
-    edges.push(Math.hypot(c2.x - c1.x, c2.y - c1.y))
+    edges.push(length(c2.x - c1.x, c2.y - c1.y))
   }
 
   // All edges must be non-zero
@@ -562,7 +559,6 @@ function plausibilityCheck(
 export interface CornerResult {
   /** 4 corners ordered [TL, TR, BL, BR], or empty if detection failed */
   corners: Point[]
-  /** Debug info for shader visualization (always populated, even on failure) */
   debug: CornerDebugInfo
 }
 
@@ -631,7 +627,6 @@ export function findCornersFromEdgesWithDebug(
   minEdgePixels: number = 12,
   seed: number = 42,
 ): CornerResult {
-  // Debug state accumulated as we go
   let failureCode = 0
   let edgePixelCount = 0
   let minR2Seen = 1.0
@@ -714,7 +709,7 @@ export function findCornersFromEdgesWithDebug(
   // Deduplicate: intersections that are very close together belong to the same corner.
   const corners: Point[] = []
   for (const p of rawIntersections) {
-    const tooClose = corners.some((c) => Math.hypot(p.x - c.x, p.y - c.y) < 5)
+    const tooClose = corners.some((c) => length(p.x - c.x, p.y - c.y) < 5)
     if (!tooClose) {
       corners.push(p)
     }

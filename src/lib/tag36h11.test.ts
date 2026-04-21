@@ -48,7 +48,7 @@ describe('tag36h11', () => {
     })
 
     it('rejects wrong-length patterns', () => {
-      expect(patternToCode([1, 0, 1] as unknown as (0 | 1 | -1)[])).toBe(-1)
+      expect(patternToCode([1, 0, 1])).toBe(-1n)
     })
 
     it('encodes valid tag patterns correctly', () => {

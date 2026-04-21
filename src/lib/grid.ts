@@ -2,11 +2,11 @@
 // Uses line intersection + proportional subdivision (no bilinear interpolation)
 
 import { imagePixelToUnitSquareUv } from '@/lib/aprilTagRaycast'
-import { lineFromPoints, lineIntersection, tryComputeHomography } from '@/lib/geometry'
+import { length, lineFromPoints, lineIntersection, tryComputeHomography } from '@/lib/geometry'
 import type { Point } from '@/lib/geometry'
 import type { TagPattern } from '@/lib/tag36h11'
 
-const { min, max, abs, floor, ceil, hypot } = Math
+const { min, max, abs, floor, ceil } = Math
 
 export interface GridCell {
   row: number
@@ -304,7 +304,7 @@ export function imageSobelToTagGradient(
 }
 
 function quadEdgeLenPx(a: Point, b: Point): number {
-  return hypot(a.x - b.x, a.y - b.y)
+  return length(a.x - b.x, a.y - b.y)
 }
 
 /**
@@ -450,7 +450,7 @@ export function decodeVoteBinRadialDot(u: number, v: number, cu: number, cv: num
 export function distPointToClosedRectUv(u: number, v: number, u0: number, u1: number, v0: number, v1: number): number {
   const cu = min(u1, max(u0, u))
   const cv = min(v1, max(v0, v))
-  return hypot(u - cu, v - cv)
+  return length(u - cu, v - cv)
 }
 
 function classifyModuleFromPosNeg(pos: number, neg: number): 0 | 1 | -1 | -2 {
@@ -459,10 +459,10 @@ function classifyModuleFromPosNeg(pos: number, neg: number): 0 | 1 | -1 | -2 {
     return -1
   }
   if (pos > neg) {
-    return 1
+    return 0 // pos votes toward black
   }
   if (neg > pos) {
-    return 0
+    return 1 // neg votes toward white
   }
   return -2
 }
@@ -579,9 +579,9 @@ export function buildDecodeEdgeMask(
 export type DecodeTagPatternVoteMaps = {
   pattern: TagPattern
   /** Per 8×8 module index: unweighted count of radial dots voting “toward black”. */
-  posM: Float64Array
+  posM: Uint32Array
   /** Per 8×8 module index: unweighted count voting “toward white”. */
-  negM: Float64Array
+  negM: Uint32Array
   /** Same gate as the inner loop: `max(TAU_MODULE_UV, 2/L_min, 0.5/8)` in tag UV. */
   uvProximityMax: number
 }
@@ -592,7 +592,7 @@ function decodeTagPatternVoteAccumulation(
   imageWidth: number,
   imageH: number,
   edgeMask?: Uint8Array,
-): { posM: Float64Array; negM: Float64Array; uvProximityMax: number } {
+): { posM: Uint32Array; negM: Uint32Array; uvProximityMax: number } {
   const oc = grid.outerCorners
   const strip: [Point, Point, Point, Point] = [oc[0], oc[1], oc[3], oc[2]]
   const h = tryComputeHomography([...strip])
@@ -603,8 +603,8 @@ function decodeTagPatternVoteAccumulation(
 
   if (!h) {
     return {
-      posM: new Float64Array(64),
-      negM: new Float64Array(64),
+      posM: new Uint32Array(36),
+      negM: new Uint32Array(36),
       uvProximityMax,
     }
   }
@@ -618,8 +618,8 @@ function decodeTagPatternVoteAccumulation(
   const ix1 = min(imageWidth - 1, ceil(x1))
   const iy1 = min(imageH - 1, ceil(y1))
 
-  const posM = new Float64Array(64)
-  const negM = new Float64Array(64)
+  const posM = new Uint32Array(64)
+  const negM = new Uint32Array(64)
 
   for (let iy = iy0; iy <= iy1; iy++) {
     for (let ix = ix0; ix <= ix1; ix++) {
@@ -632,7 +632,7 @@ function decodeTagPatternVoteAccumulation(
       }
       const gx = sobelData[(iy * imageWidth + ix) * 2]
       const gy = sobelData[(iy * imageWidth + ix) * 2 + 1]
-      const mag = hypot(gx, gy)
+      const mag = length(gx, gy)
       if (mag <= 1e-12) {
         continue
       }

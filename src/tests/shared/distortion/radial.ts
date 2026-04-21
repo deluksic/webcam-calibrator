@@ -1,3 +1,4 @@
+import { length } from '@/lib/geometry'
 import type { RadialDistortionSpec } from '@/tests/shared/types'
 
 function sampleBilinear(buf: Float32Array, width: number, height: number, x: number, y: number): number {
@@ -35,7 +36,7 @@ export function applyRadialDistortion01(
     for (let x = 0; x < width; x++) {
       const dx = x - cx
       const dy = y - cy
-      const rn = Math.hypot(dx, dy) / Math.max(ref, 1e-6)
+      const rn = length(dx, dy) / Math.max(ref, 1e-6)
       const s = 1 + k1 * rn * rn
       const sx = cx + dx / s
       const sy = cy + dy / s

@@ -1,5 +1,11 @@
 // 2D geometry utilities for quad fitting
 
+const { sqrt } = Math
+
+export function length(x: number, y: number): number {
+  return sqrt(x * x + y * y)
+}
+
 export type Point = {
   x: number
   y: number
@@ -141,10 +147,10 @@ export function quadAspectRatio(corners: Point[]): number {
 
   // Compute approximate side lengths
   const dists = [
-    Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y),
-    Math.hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y),
-    Math.hypot(corners[3].x - corners[2].x, corners[3].y - corners[2].y),
-    Math.hypot(corners[0].x - corners[3].x, corners[0].y - corners[3].y),
+    length(corners[1].x - corners[0].x, corners[1].y - corners[0].y),
+    length(corners[2].x - corners[1].x, corners[2].y - corners[1].y),
+    length(corners[3].x - corners[2].x, corners[3].y - corners[2].y),
+    length(corners[0].x - corners[3].x, corners[0].y - corners[3].y),
   ]
 
   // Use max/min for aspect ratio check

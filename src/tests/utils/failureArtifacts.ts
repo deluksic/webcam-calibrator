@@ -15,10 +15,11 @@ import { fileURLToPath } from 'node:url'
 import { PNG } from 'pngjs'
 import { onTestFailed } from 'vitest'
 
+import { length } from '@/lib/geometry'
 import type { TagPattern } from '@/lib/tag36h11'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const REPO_ROOT = join(__dirname, '..', '..')
+const REPO_ROOT = join(__dirname, '..', '..', '..')
 export const TEST_FAILURE_OUTPUT_ROOT = join(REPO_ROOT, 'output', 'test-failures')
 
 export interface FailureTask {
@@ -79,7 +80,7 @@ export function writeSobelMagPng(path: string, width: number, height: number, so
   for (let i = 0; i < width * height; i++) {
     const gx = sobel[i * 2]!
     const gy = sobel[i * 2 + 1]!
-    mag[i] = Math.hypot(gx, gy)
+    mag[i] = length(gx, gy)
     m = Math.max(m, mag[i]!)
   }
   const inv = m > 1e-12 ? 1 / m : 1

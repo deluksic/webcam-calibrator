@@ -1,6 +1,8 @@
 import type { Plugin } from 'vite'
 
-const VERSION = '1.2'
+import packageJson from '../../package.json' with { type: 'json' }
+
+const BASE_VERSION = packageJson.version
 
 // Compute a short hash from chunk content (base64 of first 12 chars, stripped of special chars)
 function contentHash(code: string): string {
@@ -19,7 +21,7 @@ export function buildHashPlugin(): Plugin {
       // Only inject into the main entry chunk
       if (chunk.isEntry && chunk.fileName.includes('index-')) {
         const hash = contentHash(code)
-        return `window.__BUILD_HASH__ = "${VERSION}-${hash}";\n${code}`
+        return `window.__BUILD_HASH__ = "${BASE_VERSION}-${hash}";\n${code}`
       }
     },
   }

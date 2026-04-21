@@ -1,3 +1,4 @@
+import { length } from '@/lib/geometry'
 import type { StripCorners } from '@/tests/shared/types'
 
 export function cornerErrorStats(
@@ -11,7 +12,7 @@ export function cornerErrorStats(
   const perCornerPx: number[] = []
   let sumSq = 0
   for (let i = 0; i < 4; i++) {
-    const d = Math.hypot(test[i]!.x - gt[i]!.x, test[i]!.y - gt[i]!.y)
+    const d = length(test[i].x - gt[i].x, test[i].y - gt[i].y)
     perCornerPx.push(d)
     sumSq += d * d
   }

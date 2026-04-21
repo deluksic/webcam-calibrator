@@ -11,7 +11,7 @@ const { floor, min, max } = Math
 /**
  * Intensity in [0, 1] inside the tag’s unit square: **1 = white**, **0 = black**.
  * **8×8** canonical layout in UV: one **black** border cell on each side (`u`/`v` outside `(1/8, 7/8)`),
- * inner **6×6** uses `pattern` (**1 = black**, **0 = white**). Matches decode’s 8×8 module lattice.
+ * inner **6×6** uses `pattern` (**1 = white**, **0 = black**). Matches decode’s 8×8 module lattice.
  */
 export function intensityAtTagUv(u: number, v: number, pattern: TagPattern): number {
   if (u < 0 || u > 1 || v < 0 || v > 1) {
@@ -28,7 +28,7 @@ export function intensityAtTagUv(u: number, v: number, pattern: TagPattern): num
   const row = min(5, max(0, floor(vv * 6 - 1e-9)))
 
   const v_ = pattern[row * 6 + col]
-  if (v_ === 1) {
+  if (v_ === 0) {
     return 0
   }
   // `-1` / `-2` (decode unknowns) render as white cell interior for synthetic views.

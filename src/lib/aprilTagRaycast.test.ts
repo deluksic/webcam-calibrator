@@ -63,11 +63,11 @@ describe('aprilTagRaycast', () => {
     const innerU = 3.5 / 8
     const innerV = 3.5 / 8
     const bit = pattern[2 * 6 + 2]
-    expect(intensityAtTagUv(innerU, innerV, pattern)).toBe(bit === 1 ? 0 : 1)
+    expect(intensityAtTagUv(innerU, innerV, pattern)).toBe(bit)
     const lastU = 6.5 / 8
     const lastV = 6.5 / 8
     const bitBr = pattern[5 * 6 + 5]
-    expect(intensityAtTagUv(lastU, lastV, pattern)).toBe(bitBr === 1 ? 0 : 1)
+    expect(intensityAtTagUv(lastU, lastV, pattern)).toBe(bitBr)
   })
 
   it('renderAprilTagIntensity matches UV law at each cell center (forward projection)', () => {
