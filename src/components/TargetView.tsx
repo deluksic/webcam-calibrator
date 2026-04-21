@@ -66,13 +66,9 @@ export function TargetView() {
         for (let col = 0; col < 8; col++) {
           // Border: outer ring (positions 0 or 7 in either dimension)
           const isBorder = row === 0 || row === 7 || col === 0 || col === 7
-          let value = isBorder ? 0 : 1
-          if (!isBorder) {
-            // Inner 6×6 pattern area: positions 1-6
-            const pRow = row - 1
-            const pCol = col - 1
-            value = pattern[pRow * 6 + pCol]
-          }
+          const pRow = row - 1
+          const pCol = col - 1
+          let value = isBorder ? 0 : pattern[pRow * 6 + pCol]
           // background is white, only draw black modules
           if (value === 0) {
             const px = tag.x + col * cellSize()
@@ -164,7 +160,7 @@ export function TargetView() {
           <div
             class={styles.legendList}
             style={{
-              'grid-template-columns': `repeat(${cols()}, minmax(0, 1fr))`,
+              '--columns': cols(),
             }}
           >
             <For each={tagPositions()}>
