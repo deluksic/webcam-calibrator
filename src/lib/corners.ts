@@ -82,8 +82,8 @@ function dot2(a: { x: number; y: number }, b: { x: number; y: number }): number 
 
 /** Directed cosine dissimilarity: 1 − cos θ = 1 − (u·v)/(‖u‖‖v‖). No unit pre-normalize required. */
 function cosineDissimilarity(u: { x: number; y: number }, v: { x: number; y: number }): number {
-  const mu = Math.hypot(u.x, u.y)
-  const mv = Math.hypot(v.x, v.y)
+  const mu = Math.sqrt(u.x * u.x + u.y * u.y)
+  const mv = Math.sqrt(v.x * v.x + v.y * v.y)
   if (mu < 1e-14 || mv < 1e-14) {
     return 1
   }

@@ -1,7 +1,8 @@
-import { For, Show, createMemo, createStore, isPending } from 'solid-js'
+import { Errored, For, Show, createMemo, createStore, isPending } from 'solid-js'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
-import { LiveCameraPipeline, type DisplayMode } from '@/components/camera/LiveCameraPipeline'
+import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
+import type { DisplayMode } from '@/gpu/camera'
 import type { DetectedQuad } from '@/gpu/contour'
 import {
   acceptQuadForCalibration,
@@ -124,43 +125,40 @@ function CalibrationView() {
 
   return (
     <div class={styles.root}>
-      <Show when={cam.streamError()}>
-        <p class={styles.error}>Camera: {cam.streamError()}</p>
-      </Show>
-
       <p class={styles.hint}>
         Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target. Layout is recovered in bundle
         adjustment — no grid setup here.
       </p>
-
-      <div class={styles.cameraBlock}>
-        <Show when={!isPending(devicesSorted)}>
-          <select
-            class={[pipelineStyles.cameraSelect, styles.calibrateCameraSelect]}
-            value={cam.deviceId() ?? ''}
-            onChange={(e) => cam.setDeviceId(e.currentTarget.value)}
-          >
-            <Show when={devicesSorted()}>
-              {(d) => (
-                <For each={d()}>
-                  {(item) => (
-                    <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
-                  )}
-                </For>
-              )}
-            </Show>
-          </select>
-        </Show>
-        <LiveCameraPipeline
-          displayMode={displayMode}
-          showGrid={showGrid}
-          showFallbacks={showFallbacks}
-          showHistogramCanvas={() => false}
-          stream={cam.stream}
-          trackSize={cam.trackSize}
-          onQuadDetection={onQuadDetection}
-        />
-      </div>
+      <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
+        <div class={styles.cameraBlock}>
+          <Show when={!isPending(devicesSorted)}>
+            <select
+              class={[pipelineStyles.cameraSelect, styles.calibrateCameraSelect]}
+              value={cam.deviceId() ?? ''}
+              onChange={(e) => cam.setDeviceId(e.currentTarget.value)}
+            >
+              <Show when={devicesSorted()}>
+                {(d) => (
+                  <For each={d()}>
+                    {(item) => (
+                      <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
+                    )}
+                  </For>
+                )}
+              </Show>
+            </select>
+          </Show>
+          <LiveCameraPipeline
+            displayMode={displayMode()}
+            showGrid={showGrid()}
+            showFallbacks={showFallbacks()}
+            showHistogramCanvas={false}
+            stream={cam.stream()}
+            trackSize={cam.trackSize()}
+            onQuadDetection={onQuadDetection}
+          />
+        </div>
+      </Errored>
 
       <div class={styles.controls}>
         <button

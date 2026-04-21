@@ -1,3 +1,8 @@
+.feedContainer {
+  position: relative;
+  overflow: hidden;
+}
+
 .feedRow {
   display: flex;
   flex-direction: column;
@@ -104,7 +109,7 @@
   color: var(--color-text);
 }
 
-.checkboxLabel input[type='checkbox'] {
+.checkboxLabel input[type="checkbox"] {
   width: 12px;
   height: 12px;
   cursor: pointer;
@@ -168,7 +173,7 @@
   transform: translate(-50%, -50%);
   pointer-events: none;
   font-family: ui-monospace, monospace;
-  font-size: 20px;
+  font-size: calc(var(--tag-size) * 0.5);
   font-weight: 700;
   color: #000;
   text-shadow:

@@ -13,17 +13,19 @@ function quadMinEdgePx(corners: readonly Point[]): number {
   const e = (i: number, j: number) => {
     const a = corners[i]!
     const b = corners[j]!
-    return Math.hypot(b.x - a.x, b.y - a.y)
+    return Math.sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y))
   }
   return Math.min(e(0, 1), e(1, 2), e(2, 3), e(3, 0))
 }
 
-export function quadAreaPx(corners: readonly Point[]): number {
-  if (corners.length < 4) {
-    return 0
-  }
-  const [a, b, c, d] = corners
-  return Math.abs((a.x * (b.y - c.y) + b.x * (c.y - d.y) + c.x * (d.y - a.y) + d.x * (a.y - b.y)) / 2)
+export function quadAreaPx(corners: [Point, Point, Point, Point]): number {
+  return Math.abs(
+    (corners[0].x * (corners[1].y - corners[2].y) +
+      corners[1].x * (corners[2].y - corners[3].y) +
+      corners[2].x * (corners[3].y - corners[0].y) +
+      corners[3].x * (corners[0].y - corners[1].y)) /
+      2,
+  )
 }
 
 export function calibrationQuadScore(q: DetectedQuad): number {

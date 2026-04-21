@@ -1,5 +1,7 @@
-const { navigator } = globalThis
+import { sleep } from '@/utils/sleep'
 
+const { navigator } = globalThis
+const { min } = Math
 const ACCEPT_THRESHOLD = 0.9
 
 const SIZE_LADDER: MediaTrackConstraints[] = [
@@ -22,23 +24,23 @@ export async function tryUpgradeVideoTrack(track: MediaStreamTrack): Promise<voi
     return
   }
 
-  const targetW = Math.min(width.max, 1280)
-  const targetH = Math.min(height.max, 720)
+  const targetW = min(width.max, 1280)
+  const targetH = min(height.max, 720)
   for (const attempt of [0, 1, 2]) {
     try {
       await track.applyConstraints({
         width: { ideal: targetW },
         height: { ideal: targetH },
       })
-      await new Promise((r) => setTimeout(r, 120 + attempt * 100))
+      await sleep(120 + attempt * 100)
       const after = track.getSettings()
       const aw = after.width ?? 0
       const ah = after.height ?? 0
-      if (aw >= targetW * 0.85 && ah >= targetH * 0.85) {
+      if (aw >= targetW * ACCEPT_THRESHOLD && ah >= targetH * ACCEPT_THRESHOLD) {
         break
       }
     } catch {
-      /* keep default */
+      // keep default
     }
   }
 }
@@ -76,9 +78,11 @@ export async function primeCameraPermission(): Promise<void> {
       video: true,
       audio: false,
     })
-    s.getTracks().forEach((t) => t.stop())
+    for (const track of s.getTracks()) {
+      track.stop()
+    }
   } catch {
-    /* user denied or no device — enumeration may still work */
+    // user denied or no device — enumeration may still work
   }
 }
 

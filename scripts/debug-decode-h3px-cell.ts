@@ -215,8 +215,7 @@ function main() {
       }
       const gx = sobel[(iy * wh + ix) * 2]!
       const gy = sobel[(iy * wh + ix) * 2 + 1]!
-      const mag = Math.hypot(gx, gy)
-      if (mag <= 1e-12) {
+      if (gx * gx + gy * gy <= 1e-12) {
         continue
       }
       const { gu, gv } = imageSobelToTagGradient(h, u, v, gx, gy)

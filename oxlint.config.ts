@@ -11,6 +11,8 @@ export default defineConfig({
     eqeqeq: 'error',
     '@typescript-eslint/consistent-type-imports': 'error',
     '@typescript-eslint/strict-boolean-expressions': 'error',
+    '@typescript-eslint/no-unused-expressions': 'error',
+    '@typescript-eslint/prefer-optional-chain': 'error',
     ...typegpu.configs.recommended.rules,
 
     'no-restricted-globals': [

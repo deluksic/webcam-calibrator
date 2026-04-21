@@ -1,34 +1,25 @@
-import {
-  For,
-  Show,
-  type Accessor,
-  type JSX,
-  createEffect,
-  createMemo,
-  createSignal,
-  createTrackedEffect,
-  onCleanup,
-} from 'solid-js'
+import type { JSX } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 
+import type { CameraPipeline, DisplayMode, ExtentRow } from '@/gpu/camera'
 import {
   createCameraPipeline,
   processFrame,
   readExtentBuffer,
   updateQuadCornersBuffer,
   detectContours,
-  type CameraPipeline,
-  type DisplayMode,
-  type ExtentRow,
   MAX_U32,
   MAX_DETECTED_TAGS,
 } from '@/gpu/camera'
 import type { DetectedQuad } from '@/gpu/contour'
 import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/constants'
+import { createElementSize } from '@/utils/createElementSize'
 
 import styles from '@/components/camera/LiveCameraPipeline.module.css'
 
 const { navigator } = globalThis
+const { max, abs } = Math
 
 interface Bbox {
   minX: number
@@ -38,7 +29,7 @@ interface Bbox {
   area: number
 }
 
-function QuadCandidateOverlay(props: { bboxes: Bbox[]; sx: number; sy: number }) {
+function QuadCandidateOverlay(props: { bboxes: Bbox[]; scale: { x: number; y: number } }) {
   const candidates = createMemo(() => {
     const MIN_AREA = 400
     const MAX_AREA = 200000
@@ -68,10 +59,10 @@ function QuadCandidateOverlay(props: { bboxes: Bbox[]; sx: number; sy: number })
         <div
           class={styles.bbox}
           style={{
-            '--bbox-x': `${box().minX * props.sx}px`,
-            '--bbox-y': `${box().minY * props.sy}px`,
-            '--bbox-w': `${(box().maxX - box().minX) * props.sx}px`,
-            '--bbox-h': `${(box().maxY - box().minY) * props.sy}px`,
+            '--bbox-x': `${box().minX * props.scale.x}px`,
+            '--bbox-y': `${box().minY * props.scale.y}px`,
+            '--bbox-w': `${(box().maxX - box().minX) * props.scale.x}px`,
+            '--bbox-h': `${(box().maxY - box().minY) * props.scale.y}px`,
           }}
         />
       )}
@@ -79,13 +70,16 @@ function QuadCandidateOverlay(props: { bboxes: Bbox[]; sx: number; sy: number })
   )
 }
 
-function TagIdGridOverlay(props: { quads: DetectedQuad[]; sx: number; sy: number }) {
+function TagIdGridOverlay(props: { quads: DetectedQuad[]; scale: { x: number; y: number } }) {
   return (
-    <For each={props.quads}>
+    <For each={props.quads} keyed={false}>
       {(quad) => {
         const c = () => quad().corners
-        const cx = () => (c()[0]!.x + c()[1]!.x + c()[2]!.x + c()[3]!.x) / 4
-        const cy = () => (c()[0]!.y + c()[1]!.y + c()[2]!.y + c()[3]!.y) / 4
+        const cx = () => (c()[0].x + c()[1].x + c()[2].x + c()[3].x) / 4
+        const cy = () => (c()[0].y + c()[1].y + c()[2].y + c()[3].y) / 4
+        const height = () =>
+          max(abs(c()[0].y - c()[1].y), abs(c()[1].y - c()[2].y), abs(c()[2].y - c()[3].y), abs(c()[3].y - c()[0].y))
+
         const label = () => {
           const q = quad()
           if (typeof q.decodedTagId === 'number') {
@@ -97,8 +91,9 @@ function TagIdGridOverlay(props: { quads: DetectedQuad[]; sx: number; sy: number
           <div
             class={styles.tagIdOverlay}
             style={{
-              '--tag-x': `${cx() * props.sx}px`,
-              '--tag-y': `${cy() * props.sy}px`,
+              '--tag-x': `${cx() * props.scale.x}px`,
+              '--tag-y': `${cy() * props.scale.y}px`,
+              '--tag-size': `${height() * props.scale.y}px`,
             }}
           >
             {label()}
@@ -110,12 +105,12 @@ function TagIdGridOverlay(props: { quads: DetectedQuad[]; sx: number; sy: number
 }
 
 export type LiveCameraPipelineProps = {
-  displayMode: Accessor<DisplayMode>
-  showGrid: Accessor<boolean>
-  showFallbacks: Accessor<boolean>
-  showHistogramCanvas: Accessor<boolean>
-  stream: Accessor<Promise<MediaStream | undefined>>
-  trackSize: Accessor<{ w: number; h: number }>
+  displayMode: DisplayMode
+  showGrid: boolean
+  showFallbacks: boolean
+  showHistogramCanvas: boolean
+  stream: MediaStream | undefined
+  trackSize: { width: number; height: number } | undefined
   onLog?: (msg: string) => void
   onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number }) => void
   /** Extra controls (camera select, mode buttons, …). */
@@ -137,38 +132,21 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
 
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>()
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement>()
-  const [renderedW, setRenderedW] = createSignal(1280, { ownedWrite: true })
-  const [renderedH, setRenderedH] = createSignal(720, { ownedWrite: true })
-
-  /** Set when pipeline attaches real `video.videoWidth` / `video.videoHeight`. */
-  const [bufferSize, setBufferSize] = createSignal<{ w: number; h: number } | undefined>(undefined, {
-    ownedWrite: true,
-  })
-
-  const intrinsic = createMemo(() => bufferSize() ?? props.trackSize())
-
-  const scaleX = createMemo(() => (canvasEl() ? renderedW() / intrinsic().w : 1))
-  const scaleY = createMemo(() => (canvasEl() ? renderedH() / intrinsic().h : 1))
-
-  createTrackedEffect(() => {
-    const canvas = canvasEl()
-    if (!canvas) {
-      return
-    }
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setRenderedW(entry.contentRect.width)
-        setRenderedH(entry.contentRect.height)
-      }
-    })
-    ro.observe(canvas)
-    return () => ro.disconnect()
-  })
 
   const [threshold, setThreshold] = createSignal(0, { ownedWrite: true })
   const [bboxes, setBboxes] = createSignal<Bbox[]>([], { ownedWrite: true })
   const [gridOverlayQuads, setGridOverlayQuads] = createSignal<DetectedQuad[]>([], {
     ownedWrite: true,
+  })
+
+  const canvasSize = createElementSize(canvasEl)
+  const scale = createMemo(() => {
+    const canvasSize_ = canvasSize()
+    const { trackSize } = props
+    if (!canvasSize_ || !trackSize) {
+      return { x: 0, y: 0 }
+    }
+    return { x: canvasSize_.width / trackSize.width, y: canvasSize_.height / trackSize.height }
   })
 
   const log = (msg: string) => {
@@ -188,7 +166,11 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
   })
 
   const cameraPipeline = createMemo(async (_prev: CameraPipeline | undefined) => {
-    const size = props.trackSize()
+    const size = props.trackSize
+    if (!size) {
+      return undefined
+    }
+
     const g = gpu()
     const canvas = canvasEl()
     const histCanvas = histCanvasEl()
@@ -208,11 +190,10 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       }
       video.pause()
       video.srcObject = null
-      setBufferSize(undefined)
       log('Pipeline cleanup')
     })
 
-    const stream = await props.stream()
+    const stream = props.stream
     if (!g || !canvas || !histCanvas || !stream) {
       log('Pipeline: missing deps')
       return undefined
@@ -227,11 +208,10 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       return undefined
     }
 
-    const vw = video.videoWidth > 0 ? video.videoWidth : Math.max(1, size.w)
-    const vh = video.videoHeight > 0 ? video.videoHeight : Math.max(1, size.h)
+    const vw = video.videoWidth > 0 ? video.videoWidth : Math.max(1, size.width)
+    const vh = video.videoHeight > 0 ? video.videoHeight : Math.max(1, size.height)
     canvas.width = vw
     canvas.height = vh
-    setBufferSize({ w: vw, h: vh })
 
     log('Creating pipeline...')
     const pip = createCameraPipeline(g, canvas, histCanvas, vw, vh, navigator.gpu.getPreferredCanvasFormat())
@@ -348,13 +328,13 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       if (!gpuNow) {
         return
       }
-      const dm = props.displayMode()
+      const dm = props.displayMode
       processFrame(gpuNow, pip, cameraVideo, threshold(), dm, (_err) => {})
       if (dm === 'debug') {
         scheduleExtentRead()
       }
-      if (dm === 'grid' && props.showGrid()) {
-        scheduleQuadDetection(props.showFallbacks())
+      if (dm === 'grid' && props.showGrid) {
+        scheduleQuadDetection(props.showFallbacks)
       }
       void pip.histogramBuffer.read().then((bins: Uint32Array | number[]) => {
         if (disposed) {
@@ -382,22 +362,22 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       <div class={[styles.feedPanel, styles.feedPanelMain]}>
         <div class={styles.feedHeader}>
           <span class={styles.feedLabel}>
-            Camera Feed — {intrinsic().w}×{intrinsic().h}
+            Camera Feed — {props.trackSize?.width ?? '-'}×{props.trackSize?.height ?? '-'}
           </span>
           {props.toolbar?.()}
         </div>
-        <div style={{ position: 'relative' }}>
+        <div class={styles.feedContainer}>
           <canvas ref={setCanvasEl} class={styles.feedCanvas} />
-          <Show when={props.displayMode() === 'debug'}>
-            <QuadCandidateOverlay bboxes={bboxes()} sx={scaleX()} sy={scaleY()} />
+          <Show when={props.displayMode === 'debug'}>
+            <QuadCandidateOverlay bboxes={bboxes()} scale={scale()} />
           </Show>
-          <Show when={props.displayMode() === 'grid' && props.showGrid()}>
-            <TagIdGridOverlay quads={gridOverlayQuads()} sx={scaleX()} sy={scaleY()} />
+          <Show when={props.displayMode === 'grid' && props.showGrid}>
+            <TagIdGridOverlay quads={gridOverlayQuads()} scale={scale()} />
           </Show>
         </div>
       </div>
       <div class={[styles.feedPanel, styles.feedPanelSide]}>
-        <Show when={props.showHistogramCanvas()}>
+        <Show when={props.showHistogramCanvas}>
           <span class={styles.feedLabel}>Edge Detection</span>
           <canvas ref={setHistCanvasEl} class={styles.histogramCanvas} style={{ width: '512px', height: '120px' }} />
           <div class={styles.histogramInfo}>
@@ -407,7 +387,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
             </span>
           </div>
         </Show>
-        <Show when={!props.showHistogramCanvas()}>
+        <Show when={!props.showHistogramCanvas}>
           <canvas ref={setHistCanvasEl} class={styles.histogramHidden} width={512} height={120} aria-hidden="true" />
         </Show>
       </div>

@@ -12,6 +12,7 @@
     "esModuleInterop": true,
     "noEmit": true,
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "jsx": "preserve",
     "jsxImportSource": "solid-js",
     "lib": ["ESNext", "DOM", "tsover"],

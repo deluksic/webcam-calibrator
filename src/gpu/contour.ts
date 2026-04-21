@@ -5,13 +5,14 @@ import type { Point } from '@/lib/geometry'
 import type { GridResult } from '@/lib/grid'
 import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
 import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
+import { hasExactlyFourElements } from '@/utils/assertArray'
 
 const { min, max, floor } = Math
 
 export const COMPONENT_LABEL_INVALID = 0xffffffff
 
 export interface DetectedQuad {
-  corners: Point[] // 4 corner points
+  corners: [Point, Point, Point, Point]
   label: number
   count: number
   aspectRatio: number
@@ -61,7 +62,7 @@ export function extractRegions(
       const idx = y * width + x
       const label = labelData[idx]
 
-      if (label === COMPONENT_LABEL_INVALID) {
+      if (label === undefined || label === COMPONENT_LABEL_INVALID) {
         continue
       }
 
@@ -181,17 +182,15 @@ export function validateAndFilterQuads(
       region.maxY,
     )
     const detectedCorners = cornerResult.corners
-    const corners: [Point, Point, Point, Point] =
-      detectedCorners.length === 4
-        ? [detectedCorners[0], detectedCorners[1], detectedCorners[2], detectedCorners[3]]
-        : [
-            { x: region.minX, y: region.minY },
-            { x: region.maxX, y: region.minY },
-            { x: region.minX, y: region.maxY },
-            { x: region.maxX, y: region.maxY },
-          ]
-    const cornersTuple = corners as [Point, Point, Point, Point]
-    const tagGrid = buildTagGrid(cornersForTagGrid(cornersTuple))
+    const corners: [Point, Point, Point, Point] = hasExactlyFourElements(detectedCorners)
+      ? detectedCorners
+      : [
+          { x: region.minX, y: region.minY },
+          { x: region.maxX, y: region.minY },
+          { x: region.maxX, y: region.maxY },
+          { x: region.minX, y: region.maxY },
+        ]
+    const tagGrid = buildTagGrid(cornersForTagGrid(corners))
     if (!tagGrid || !tagGrid.cells || tagGrid.cells.length === 0) {
       continue
     }

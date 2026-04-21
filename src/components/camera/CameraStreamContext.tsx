@@ -8,40 +8,18 @@ import {
   useContext,
 } from 'solid-js'
 
+import { cameraDeviceScore } from './cameraDeviceScore'
 import { acquireVideoStream, listVideoInputDevices, primeCameraPermission } from './cameraStreamAcquire'
 
 const { navigator } = globalThis
 
-function deviceScore(d: MediaDeviceInfo): number {
-  const label = d.label.toLowerCase()
-  let score = 0
-  if (label.includes('back') || label.includes('rear')) {
-    score += 100
-  }
-  if (label.includes('wide')) {
-    score += 50
-  }
-  if (label.includes('ultra')) {
-    score += 30
-  }
-  if (label.includes('tele')) {
-    score -= 20
-  }
-  if (label.includes('front') || label.includes('user')) {
-    score -= 100
-  }
-  return score
-}
-
 export type CameraStreamContextValue = {
   /** Sorted videoinput devices (async memo — `await devices()` in `<Show>`). */
-  devices: Accessor<Promise<MediaDeviceInfo[]>>
+  devices: Accessor<MediaDeviceInfo[]>
   deviceId: Accessor<string | undefined>
   setDeviceId: (id: string) => void
-  stream: Accessor<Promise<MediaStream | undefined>>
-  streamError: Accessor<string | undefined>
-  /** Last known intrinsic size from `getSettings()` after open/upgrade. */
-  trackSize: Accessor<{ w: number; h: number }>
+  stream: Accessor<MediaStream | undefined>
+  trackSize: Accessor<{ width: number; height: number } | undefined>
 }
 
 const CameraStreamContext = createContext<CameraStreamContextValue>()
@@ -55,46 +33,36 @@ export function useCameraStream(): CameraStreamContextValue {
 }
 
 export function CameraStreamProvider(props: ParentProps) {
-  const [deviceId, setDeviceId] = createSignal<string>()
-  const [streamError, setStreamError] = createSignal<string | undefined>(undefined, {
-    ownedWrite: true,
-  })
-  const [trackSize, setTrackSize] = createSignal({ w: 1280, h: 720 }, { ownedWrite: true })
+  const [selectedCameraDeviceId, setSelectedCameraDeviceId] = createSignal<string>()
   const [deviceListEpoch, setDeviceListEpoch] = createSignal(0)
 
   const devices = createMemo(async () => {
     deviceListEpoch()
     await primeCameraPermission()
     const list = await listVideoInputDevices()
-    return [...list].sort((a, b) => deviceScore(b) - deviceScore(a))
+    return [...list].sort((a, b) => cameraDeviceScore(b) - cameraDeviceScore(a))
   })
 
   const stream = createMemo(async () => {
-    let acquired: MediaStream | undefined
-    onCleanup(() => {
-      acquired?.getTracks().forEach((t) => t.stop())
-    })
-
-    setStreamError(undefined)
-    const list = await devices()
-    const id = deviceId() ?? list[0]?.deviceId
+    const list = devices()
+    const id = selectedCameraDeviceId() ?? list[0]?.deviceId
     if (!id) {
       return undefined
     }
+    onCleanup(() => {
+      stream?.getTracks().forEach((t) => t.stop())
+    })
+    const stream = await acquireVideoStream(id)
+    return stream
+  })
 
-    try {
-      const s = await acquireVideoStream(id)
-      acquired = s
-      const track = s.getVideoTracks()[0]
-      const st = track?.getSettings()
-      if (st?.width && st?.height) {
-        setTrackSize({ w: st.width, h: st.height })
-      }
-      return s
-    } catch (e) {
-      setStreamError(e instanceof Error ? e.message : String(e))
+  const trackSize = createMemo(() => {
+    const settings = stream()?.getVideoTracks()[0]?.getSettings()
+    const { width, height } = settings ?? {}
+    if (width === undefined || height === undefined) {
       return undefined
     }
+    return { width, height }
   })
 
   const onDeviceChange = () => {
@@ -107,11 +75,10 @@ export function CameraStreamProvider(props: ParentProps) {
   }
 
   const value: CameraStreamContextValue = {
-    devices: devices as unknown as Accessor<Promise<MediaDeviceInfo[]>>,
-    deviceId,
-    setDeviceId,
+    devices,
+    deviceId: selectedCameraDeviceId,
+    setDeviceId: setSelectedCameraDeviceId,
     stream,
-    streamError,
     trackSize,
   }
 
