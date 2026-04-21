@@ -173,7 +173,7 @@
   transform: translate(-50%, -50%);
   pointer-events: none;
   font-family: ui-monospace, monospace;
-  font-size: calc(var(--tag-size) * 0.5);
+  font-size: clamp(12px, calc(var(--tag-size) * 0.5), 28px);
   font-weight: 700;
   color: #000;
   text-shadow:

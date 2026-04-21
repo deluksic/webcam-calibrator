@@ -4,11 +4,10 @@ const { navigator } = globalThis
 const { min } = Math
 const ACCEPT_THRESHOLD = 0.9
 
-export type Resolution = 'high' | 'medium' | 'low'
+export type Resolution = keyof typeof RESOLUTION_LADDER
 export const RESOLUTION_LADDER = {
-  high: { width: { ideal: 1280 }, height: { ideal: 720 } },
-  medium: { width: { ideal: 640 }, height: { ideal: 480 } },
-  low: {},
+  medium: { width: { ideal: 1280 }, height: { ideal: 720 } },
+  low: { width: { ideal: 640 }, height: { ideal: 480 } },
 } satisfies Record<string, MediaTrackConstraints>
 
 export async function tryUpgradeVideoTrack(track: MediaStreamTrack): Promise<void> {

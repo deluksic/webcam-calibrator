@@ -1,8 +1,11 @@
-import { Errored, For, Show, createMemo, createSignal, isPending } from 'solid-js'
+import { Errored, For, createMemo, createSignal } from 'solid-js'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
 import type { DisplayMode } from '@/gpu/camera'
+
+import type { Resolution } from './camera/cameraStreamAcquire'
+import { RESOLUTION_LADDER } from './camera/cameraStreamAcquire'
 
 import pipelineStyles from '@/components/camera/LiveCameraPipeline.module.css'
 import styles from '@/components/DebugView.module.css'
@@ -49,23 +52,23 @@ export function DebugView() {
 
   const toolbar = () => (
     <div class={styles.debugToolbar}>
-      <Show when={() => !isPending(() => devicesSorted())}>
-        <select
-          class={[pipelineStyles.cameraSelect, styles.debugCameraSelect]}
-          value={cam.deviceId() ?? ''}
-          onChange={(e) => cam.setDeviceId(e.currentTarget.value)}
-        >
-          <Show when={devicesSorted()}>
-            {(d) => (
-              <For each={d()}>
-                {(item) => (
-                  <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
-                )}
-              </For>
-            )}
-          </Show>
-        </select>
-      </Show>
+      <select
+        class={[pipelineStyles.cameraSelect, styles.debugCameraSelect]}
+        value={cam.deviceId() ?? ''}
+        onChange={(e) => cam.setDeviceId(e.currentTarget.value)}
+      >
+        <For each={devicesSorted()}>
+          {(item) => <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>}
+        </For>
+      </select>
+      <select
+        class={pipelineStyles.cameraSelect}
+        onChange={(e) => cam.setSelectedResolution(e.currentTarget.value as Resolution)}
+      >
+        <For each={Object.keys(RESOLUTION_LADDER)} keyed={false}>
+          {(resolution) => <option value={resolution()}>{resolution()}</option>}
+        </For>
+      </select>
       <div class={styles.debugModeRow}>
         <button
           type="button"

@@ -1,17 +1,14 @@
-import type { Setter } from 'solid-js'
-import {
-  type Accessor,
-  type ParentProps,
-  createContext,
-  createMemo,
-  createSignal,
-  onCleanup,
-  useContext,
-} from 'solid-js'
+import type { Setter , Accessor, ParentProps} from 'solid-js'
+import { createContext, createMemo, createSignal, onCleanup, useContext } from 'solid-js'
 
 import { cameraDeviceScore } from './cameraDeviceScore'
 import type { Resolution } from './cameraStreamAcquire'
-import { acquireVideoStream, listVideoInputDevices, primeCameraPermission } from './cameraStreamAcquire'
+import {
+  acquireVideoStream,
+  listVideoInputDevices,
+  primeCameraPermission,
+  RESOLUTION_LADDER,
+} from './cameraStreamAcquire'
 
 const { navigator } = globalThis
 
@@ -47,19 +44,31 @@ export function CameraStreamProvider(props: ParentProps) {
     return [...list].sort((a, b) => cameraDeviceScore(b) - cameraDeviceScore(a))
   })
 
-  const stream = createMemo(async () => {
-    const list = devices()
-    const id = selectedCameraDeviceId() ?? list[0]?.deviceId
-    if (!id) {
-      return undefined
-    }
-    onCleanup(() => {
-      for (const track of stream?.getTracks() ?? []) {
-        track.stop()
+  const stream = createMemo<MediaStream | undefined>(
+    async (prev) => {
+      const list = devices()
+      const id = selectedCameraDeviceId() ?? list[0]?.deviceId
+      if (!id) {
+        return undefined
       }
-    })
-    const stream = await acquireVideoStream(id, selectedResolution())
-    return stream
+
+      const resolution = selectedResolution()
+      if (prev && resolution) {
+        const res = RESOLUTION_LADDER[resolution]
+        await prev.getVideoTracks()[0]?.applyConstraints({ width: res.width, height: res.height })
+        return prev
+      }
+
+      const stream = await acquireVideoStream(id, resolution)
+      return stream
+    },
+    { equals: false },
+  )
+
+  onCleanup(() => {
+    stream()
+      ?.getTracks()
+      ?.forEach((t) => t.stop())
   })
 
   const trackSize = createMemo(() => {
