@@ -133,7 +133,7 @@ describe('findCornersFromEdges', () => {
     const labelData = new Uint32Array(w * h)
 
     const corners = findCornersFromEdges(sobelData, labelData, w, 1, 0, 0, 49, 49)
-    expect(corners).toHaveLength(0)
+    expect(corners).toBeUndefined()
   })
 
   it('detects 4 corners for an axis-aligned rectangle', () => {
@@ -143,9 +143,10 @@ describe('findCornersFromEdges', () => {
     const labelData = makeRectLabel(w, h, 10, 10, 90, 90)
 
     const corners = findCornersFromEdges(sobelData, labelData, w, 1, 10, 10, 90, 90)
+    expect(corners).toBeDefined()
     expect(corners).toHaveLength(4)
 
-    const [tl, tr, bl, br] = corners
+    const [tl, tr, bl, br] = corners!
     expect(abs(tl.x - 10)).toBeLessThan(10)
     expect(abs(tl.y - 10)).toBeLessThan(10)
     expect(abs(tr.x - 90)).toBeLessThan(10)
@@ -168,7 +169,7 @@ describe('findCornersFromEdges', () => {
     labelData[5 * w + 5] = 1
 
     const corners = findCornersFromEdges(sobelData, labelData, w, 1, 5, 5, 15, 15)
-    expect(corners).toHaveLength(0)
+    expect(corners).toBeUndefined()
   })
 
   it('orders corners as TL, TR, BL, BR', () => {
@@ -178,9 +179,9 @@ describe('findCornersFromEdges', () => {
     const labelData = makeRectLabel(w, h, 10, 10, 90, 90)
 
     const corners = findCornersFromEdges(sobelData, labelData, w, 1, 10, 10, 90, 90)
-    expect(corners).toHaveLength(4)
+    expect(corners).toBeDefined()
 
-    const [tl, tr, bl, br] = corners
+    const [tl, tr, bl, br] = corners!
     // TL above BL and left of TR
     expect(tl.y).toBeLessThan(bl.y)
     expect(tl.x).toBeLessThan(tr.x)
@@ -207,6 +208,6 @@ describe('findCornersFromEdges', () => {
 
     const corners = findCornersFromEdges(sobelData, labelData, w, 1, 5, 5, 45, 45)
     // Random noise should not produce a valid quad
-    expect(corners).toHaveLength(0)
+    expect(corners).toBeUndefined()
   })
 })

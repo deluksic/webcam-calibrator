@@ -20,7 +20,6 @@ import { PNG } from 'pngjs'
 
 import { imagePixelToUnitSquareUv } from '@/lib/aprilTagRaycast'
 import {
-  decodeStressCornersGridOrder,
   decodeStressFitPerspectiveStrip,
   decodeStressHomographyMismatchScaleForMaxAxisPx,
   decodeStressRasterSobel,
@@ -156,9 +155,9 @@ function main() {
   const decodeStrip = decodeStressStripWithHomographyMismatchOffsetsPx(rasterStrip, scaleDiag)
   const { intensity, sobel } = decodeStressRasterSobel(wh, wh, rasterStrip, truthPat, ss, TAG_ID, SPECKLE)
 
-  const grid = buildTagGrid(decodeStressCornersGridOrder(decodeStrip), 6)
+  const grid = buildTagGrid(decodeStrip, 6)
   const { pattern, whiteModuleCount, blackModuleCount, uvProximityMax } = decodeTagPatternWithVoteMaps(
-    grid,
+    decodeStrip,
     sobel,
     wh,
     undefined,
@@ -166,8 +165,7 @@ function main() {
   )
 
   const oc = grid.outerCorners
-  const strip = [oc[0], oc[1], oc[3], oc[2]] as const
-  const h = computeHomography([...strip])
+  const h = computeHomography(decodeStrip)
   const lMin = minQuadEdgeLengthPx(oc)
   const uvHalf = 0.5 / TAG
   const uvMax = max(0.1 / TAG, 2 / lMin, uvHalf)

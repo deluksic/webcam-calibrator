@@ -2,16 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationSamplesTopK } from '@/lib/calibrationTopK'
 import type { CalibrationSample } from '@/lib/calibrationTypes'
-import type { Point } from '@/lib/geometry'
-
-const corners = (): Point[] => Array.from({ length: 49 }, (_, i) => ({ x: i, y: 0 }))
-
 function sample(frameId: number, tagId: number, score: number): CalibrationSample {
   return {
     frameId,
     tagId,
     rotation: 0,
-    innerCorners: corners(),
     score,
   }
 }

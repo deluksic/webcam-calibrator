@@ -2,8 +2,8 @@
  * Shared synthetic decode stress: perspective quad, optional speckle, FD Sobel.
  * Used by `decodeStress.test.ts` and `scripts/find-decode-stress-speckle-limit.ts`.
  */
-import type { Point } from '@/lib/geometry'
-import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
+import type { Corners } from '@/lib/geometry'
+import { decodeTagPattern } from '@/lib/grid'
 import { xorshift32U01 } from '@/lib/seededRng'
 import {
   TAG36H11_CODES,
@@ -30,7 +30,7 @@ export const DECODE_STRESS_SPECKLE_AMP = 0.492
  * `raster + scale * template`. Re-tune `DECODE_STRESS_HOMOGRAPHY_MISMATCH_SCALE` with
  * `pnpm run find:decode-stress-homography` (grid scan — `passes(scale)` is not monotone).
  */
-export const DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX: readonly [Point, Point, Point, Point] = [
+export const DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX: Corners = [
   { x: 0.35, y: -0.2 },
   { x: -0.25, y: 0.25 },
   { x: 0.2, y: 0.3 },
@@ -69,17 +69,17 @@ export function decodeStressHomographyMismatchScaleForMaxAxisPx(maxAxisPx: numbe
 
 /** Decode strip = raster strip + `scale *` template offsets (recompute H via `buildTagGrid`). */
 export function decodeStressStripWithHomographyMismatchOffsetsPx(
-  rasterStrip: [Point, Point, Point, Point],
+  rasterStrip: Corners,
   scale: number = DECODE_STRESS_HOMOGRAPHY_MISMATCH_SCALE,
-): [Point, Point, Point, Point] {
+): Corners {
   return rasterStrip.map((p, i) => ({
     x: p.x + DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX[i]!.x * scale,
     y: p.y + DECODE_STRESS_HOMOGRAPHY_MISMATCH_OFFSET_TEMPLATE_PX[i]!.y * scale,
-  })) as [Point, Point, Point, Point]
+  })) as Corners
 }
 
 /** Strong-perspective quad in ~320px space (same family as aprilTagRaycast tests). */
-const REF_STRIP: [Point, Point, Point, Point] = [
+const REF_STRIP: Corners = [
   { x: 20, y: 20 },
   { x: 280, y: 45 },
   { x: 35, y: 260 },
@@ -105,17 +105,12 @@ export function decodeStressSpeckleSeed(w: number, h: number, tagId: number): nu
   return (imul(w, 1_664_525) ^ imul(h, 1_013_904_223) ^ imul(tagId, 747_796_405)) >>> 0
 }
 
-/** TL, TR, BR, BL for `buildTagGrid` from homography strip TL, TR, BL, BR. */
-export function decodeStressCornersGridOrder(strip: [Point, Point, Point, Point]): [Point, Point, Point, Point] {
-  return [strip[0], strip[1], strip[3], strip[2]]
-}
-
 /** Scale + center REF_STRIP into `[margin, w-margin] × [margin, h-margin]`. */
 export function decodeStressFitPerspectiveStrip(
   w: number,
   h: number,
   opts?: { margin?: number; perspectiveBoost?: number },
-): [Point, Point, Point, Point] {
+): Corners {
   const margin = opts?.margin ?? 6
   const boost = opts?.perspectiveBoost ?? 1
   const cw = w - 2 * margin
@@ -132,15 +127,10 @@ export function decodeStressFitPerspectiveStrip(
   return REF_STRIP.map((p) => ({
     x: cx + (p.x - REF_CX) * s,
     y: cy + (p.y - REF_CY) * s,
-  })) as [Point, Point, Point, Point]
+  })) as Corners
 }
 
-export function decodeStressAxisStrip(
-  w: number,
-  h: number,
-  margin: number,
-  side: number,
-): [Point, Point, Point, Point] {
+export function decodeStressAxisStrip(w: number, h: number, margin: number, side: number): Corners {
   const x0 = margin
   const y0 = margin
   return [
@@ -154,7 +144,7 @@ export function decodeStressAxisStrip(
 export function decodeStressRasterSobel(
   w: number,
   h: number,
-  strip: [Point, Point, Point, Point],
+  strip: Corners,
   pattern: TagPattern,
   supersample: number,
   tagId: number,
@@ -177,7 +167,7 @@ export function decodeStressRasterSobel(
 export function decodeStressSynthetic(
   w: number,
   h: number,
-  strip: [Point, Point, Point, Point],
+  strip: Corners,
   tagId: number,
   supersample: number,
   speckleAmp: number,
@@ -192,8 +182,8 @@ export function decodeStressSynthetic(
 export function decodeStressSyntheticWithHomographyMismatch(
   w: number,
   h: number,
-  rasterStrip: [Point, Point, Point, Point],
-  decodeStrip: [Point, Point, Point, Point],
+  rasterStrip: Corners,
+  decodeStrip: Corners,
   tagId: number,
   supersample: number,
   speckleAmp: number,

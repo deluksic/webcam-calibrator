@@ -3,7 +3,7 @@
 
 import { imagePixelToUnitSquareUv } from '@/lib/aprilTagRaycast'
 import { length, lineFromPoints, lineIntersection, tryComputeHomography } from '@/lib/geometry'
-import type { Point } from '@/lib/geometry'
+import type { Corners, Point } from '@/lib/geometry'
 import type { TagPattern } from '@/lib/tag36h11'
 
 const { min, max, abs, floor, ceil } = Math
@@ -11,12 +11,12 @@ const { min, max, abs, floor, ceil } = Math
 export interface GridCell {
   row: number
   col: number
-  corners: [Point, Point, Point, Point] // TL, TR, BR, BL
+  corners: Corners // TL, TR, BL, BR
   center: Point
 }
 
 export interface GridResult {
-  outerCorners: [Point, Point, Point, Point] // TL, TR, BR, BL
+  outerCorners: Corners // TL, TR, BL, BR
   cells: GridCell[] // 6x6 cells
   innerCorners: Point[] // 7x7 grid intersection points
 }
@@ -43,11 +43,11 @@ function subdivideEdgeProportional(p1: Point, p2: Point, divisions: number, offs
  * Build perspective-correct grid inside a quadrilateral.
  * Divides each edge into 6 segments and creates inner grid lines.
  *
- * @param corners 4 corners in order (TL, TR, BR, BL)
+ * @param corners 4 corners in order (TL, TR, BL, BR)
  * @param divisions Number of cell divisions (6 for 6x6 tag)
  */
-export function buildTagGrid(corners: [Point, Point, Point, Point], divisions: number = 6): GridResult {
-  const [tl, tr, br, bl] = corners
+export function buildTagGrid(corners: Corners, divisions: number = 6): GridResult {
+  const [tl, tr, bl, br] = corners
 
   // Build 7x7 inner corner grid (7 points per edge, 49 total)
   // First, subdivide all 4 edges
@@ -112,12 +112,7 @@ export function buildTagGrid(corners: [Point, Point, Point, Point], divisions: n
       const brIdx = (row + 1) * (divisions + 1) + col + 1
       const blIdx = brIdx - 1
 
-      const cellCorners: [Point, Point, Point, Point] = [
-        innerCorners[tlIdx],
-        innerCorners[trIdx],
-        innerCorners[brIdx],
-        innerCorners[blIdx],
-      ]
+      const cellCorners: Corners = [innerCorners[tlIdx], innerCorners[trIdx], innerCorners[blIdx], innerCorners[brIdx]]
 
       const center = {
         x: (cellCorners[0].x + cellCorners[1].x + cellCorners[2].x + cellCorners[3].x) / 4,
@@ -140,12 +135,12 @@ export function buildTagGrid(corners: [Point, Point, Point, Point], divisions: n
   }
 }
 
-/** Map cell UV in [0,1]² (TL origin) to image; `cell.corners` are TL, TR, BR, BL. */
+/** Map cell UV in [0,1]² (TL origin) to image; `cell.corners` are TL, TR, BL, BR. */
 export function cellUvToImage(cell: GridCell, u: number, v: number): Point {
-  const [tl, tr, br, bl] = cell.corners
+  const [tl, tr, bl, br] = cell.corners
   return {
-    x: (1 - u) * (1 - v) * tl.x + u * (1 - v) * tr.x + u * v * br.x + (1 - u) * v * bl.x,
-    y: (1 - u) * (1 - v) * tl.y + u * (1 - v) * tr.y + u * v * br.y + (1 - u) * v * bl.y,
+    x: (1 - u) * (1 - v) * tl.x + u * (1 - v) * tr.x + (1 - u) * v * bl.x + u * v * br.x,
+    y: (1 - u) * (1 - v) * tl.y + u * (1 - v) * tr.y + (1 - u) * v * bl.y + u * v * br.y,
   }
 }
 
@@ -160,11 +155,11 @@ export function imageGradToUvGrad(
   gx: number,
   gy: number,
 ): { gu: number; gv: number } {
-  const [tl, tr, br, bl] = cell.corners
-  const dxdU = -(1 - v) * tl.x + (1 - v) * tr.x + v * br.x - v * bl.x
-  const dxdV = -(1 - u) * tl.x - u * tr.x + u * br.x + (1 - u) * bl.x
-  const dydU = -(1 - v) * tl.y + (1 - v) * tr.y + v * br.y - v * bl.y
-  const dydV = -(1 - u) * tl.y - u * tr.y + u * br.y + (1 - u) * bl.y
+  const [tl, tr, bl, br] = cell.corners
+  const dxdU = -(1 - v) * tl.x + (1 - v) * tr.x - v * bl.x + v * br.x
+  const dxdV = -(1 - u) * tl.x - u * tr.x + (1 - u) * bl.x + u * br.x
+  const dydU = -(1 - v) * tl.y + (1 - v) * tr.y - v * bl.y + v * br.y
+  const dydV = -(1 - u) * tl.y - u * tr.y + (1 - u) * bl.y + u * br.y
   const gu = gx * dxdU + gy * dydU
   const gv = gx * dxdV + gy * dydV
   return { gu, gv }
@@ -253,11 +248,11 @@ function quadEdgeLenPx(a: Point, b: Point): number {
 }
 
 /**
- * Shortest side of the outer quad (TL→TR→BR→BL) in pixels. Used to coarsely map ~2px to UV
+ * Shortest side of the outer quad (TL→TR→BR→BL polygon walk) in pixels. Used to coarsely map ~2px to UV
  * (`2 / L_min`) for decode gating alongside `TAU_MODULE_UV`.
  */
-export function minQuadEdgeLengthPx(outerCorners: [Point, Point, Point, Point]): number {
-  const [tl, tr, br, bl] = outerCorners
+export function minQuadEdgeLengthPx(outerCorners: Corners): number {
+  const [tl, tr, bl, br] = outerCorners
   const m = min(quadEdgeLenPx(tl, tr), quadEdgeLenPx(tr, br), quadEdgeLenPx(br, bl), quadEdgeLenPx(bl, tl))
   return max(MIN_QUAD_EDGE_EPS_PX, m)
 }
@@ -494,8 +489,8 @@ export function buildDecodeEdgeMask(
  * Then inner **6×6** + neighbor fill for **`-1`** only
  * (**`-2`** unchanged). Outcomes: `0`/`1`/`-1`/`-2`.
  *
- * @param grid Grid from `buildTagGrid` (uses `outerCorners` TL,TR,BR,BL; homography uses TL,TR,BL,BR strip order).
- * @param edgeMask Optional: skip pixels where mask index is 0.
+ * @param corners Quad corners
+ * @param edgeMask Optional: skip pixels where mask index is 0
  */
 export type DecodeTagPatternVoteMaps = {
   pattern: TagPattern
@@ -508,13 +503,13 @@ export type DecodeTagPatternVoteMaps = {
 }
 
 function decodeTagPatternVoteAccumulation(
-  corners: [Point, Point, Point, Point],
+  corners: Corners,
   sobelData: Float32Array,
   imageWidth: number,
   imageH: number,
   edgeMask?: Uint8Array,
 ): { whiteModuleCount: Uint32Array; blackModuleCount: Uint32Array; uvProximityMax: number } {
-  const [tl, tr, br, bl] = corners
+  const [tl, tr, bl, br] = corners
   const h = tryComputeHomography(corners)
 
   const lMin = minQuadEdgeLengthPx(corners)
@@ -596,7 +591,7 @@ function decodeTagPatternVoteAccumulation(
  * Each contributing pixel adds **±1** to **at most two** 8×8 bins per {@link decodeVoteBinRadialDot}.
  */
 export function decodeTagPatternWithVoteMaps(
-  corners: [Point, Point, Point, Point],
+  corners: Corners,
   sobelData: Float32Array,
   imageWidth: number,
   edgeMask?: Uint8Array,
@@ -627,7 +622,7 @@ export function decodeTagPatternWithVoteMaps(
 }
 
 export function decodeTagPattern(
-  corners: [Point, Point, Point, Point],
+  corners: Corners,
   sobelData: Float32Array,
   imageWidth: number,
   edgeMask?: Uint8Array,

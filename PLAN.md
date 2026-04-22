@@ -39,4 +39,4 @@ Full roadmap and phase checkboxes: **`docs/plan.md`**. Product-wide architecture
 
 ### Note — corner order
 
-Homography uses quad corners **TL, TR, BL, BR**. `buildTagGrid` expects **TL, TR, BR, BL**; the CPU remaps before building the 6×6 cell mesh (see `contour.ts`).
+Everything uses quad corners in **TL, TR, BL, BR** order (`Corners` in `geometry.ts`).

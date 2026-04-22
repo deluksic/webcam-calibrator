@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { imagePixelToUnitSquareUv, invertMat3RowMajor } from '@/lib/aprilTagRaycast'
-import { applyHomography, computeHomography, type Point } from '@/lib/geometry'
+import { applyHomography, computeHomography, type Corners } from '@/lib/geometry'
 import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
 import { TAG36H11_CODES, codeToPattern, decodeTag36h11AnyRotation } from '@/lib/tag36h11'
 import {
@@ -12,11 +12,6 @@ import {
 } from '@/tests/utils/syntheticAprilTag'
 
 const { max, min, floor, round, abs } = Math
-
-/** TL, TR, BR, BL for `buildTagGrid` from homography strip TL, TR, BL, BR. */
-function cornersGridOrder(strip: [Point, Point, Point, Point]): [Point, Point, Point, Point] {
-  return [strip[0], strip[1], strip[3], strip[2]]
-}
 
 describe('aprilTagRaycast', () => {
   it('invertMat3RowMajor * M ≈ I', () => {
@@ -42,13 +37,13 @@ describe('aprilTagRaycast', () => {
   })
 
   it('imagePixelToUnitSquareUv round-trips forward homography on a square', () => {
-    const strip: [Point, Point, Point, Point] = [
+    const strip: Corners = [
       { x: 20, y: 20 },
       { x: 220, y: 30 },
       { x: 10, y: 200 },
       { x: 210, y: 210 },
     ]
-    const h = computeHomography([...strip])
+    const h = computeHomography(strip)
     const u0 = 0.37
     const v0 = 0.52
     const p = applyHomography(h, u0, v0)
@@ -74,7 +69,7 @@ describe('aprilTagRaycast', () => {
 
   it('renderAprilTagIntensity matches UV law at each cell center (forward projection)', () => {
     const pattern = codeToPattern(TAG36H11_CODES[42])
-    const strip: [Point, Point, Point, Point] = [
+    const strip: Corners = [
       { x: 40, y: 40 },
       { x: 280, y: 45 },
       { x: 35, y: 260 },
@@ -88,7 +83,7 @@ describe('aprilTagRaycast', () => {
       corners: strip,
       pattern,
     })
-    const h8 = computeHomography([...strip])
+    const h8 = computeHomography(strip)
 
     for (let row = 0; row < 6; row++) {
       for (let col = 0; col < 6; col++) {
@@ -124,7 +119,7 @@ describe('aprilTagRaycast', () => {
     const tagId = 7
     const pattern = codeToPattern(TAG36H11_CODES[tagId])
     const size = 360
-    const strip: [Point, Point, Point, Point] = [
+    const strip: Corners = [
       { x: 20, y: 20 },
       { x: 20 + size, y: 20 },
       { x: 20, y: 20 + size },
@@ -138,7 +133,7 @@ describe('aprilTagRaycast', () => {
       corners: strip,
       pattern,
     })
-    const grid = buildTagGrid(cornersGridOrder(strip), 6)
+    const grid = buildTagGrid(strip, 6)
     const h8 = computeHomography(strip)
 
     for (const cell of grid.cells) {
@@ -161,7 +156,7 @@ describe('aprilTagRaycast', () => {
     const tagId = 0
     const pattern = codeToPattern(TAG36H11_CODES[tagId])
     const size = 360
-    const strip: [Point, Point, Point, Point] = [
+    const strip: Corners = [
       { x: 20, y: 20 },
       { x: 20 + size, y: 20 },
       { x: 20, y: 20 + size },

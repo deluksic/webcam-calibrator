@@ -3,7 +3,7 @@ import { imagePixelToUnitSquareUv } from '@/lib/aprilTagRaycast'
  * Ideal AprilTag intensity raster + finite-difference Sobel for **tests, stress harnesses, and dev scripts**.
  * Not used by live calibration / GPU decode (`grid.ts` uses `imagePixelToUnitSquareUv` from `aprilTagRaycast.ts`).
  */
-import { computeHomography, type Point } from '@/lib/geometry'
+import { computeHomography, type Corners } from '@/lib/geometry'
 import type { TagPattern } from '@/lib/tag36h11'
 
 const { floor, min, max } = Math
@@ -39,7 +39,7 @@ export interface RenderAprilTagIntensityOptions {
   width: number
   height: number
   /** TL, TR, BL, BR — same as `computeHomography`. */
-  corners: [Point, Point, Point, Point]
+  corners: Corners
   pattern: TagPattern
   /**
    * Supersampling factor per axis (e.g. `4` ⇒ 4×4 = 16 stratified taps per pixel, box-averaged).
@@ -56,7 +56,7 @@ export interface RenderAprilTagIntensityOptions {
 export function renderAprilTagIntensity(opts: RenderAprilTagIntensityOptions): Float32Array {
   const { width, height, corners, pattern } = opts
   const ss = max(1, min(16, floor(opts.supersample ?? 1)))
-  const h8 = computeHomography([...corners])
+  const h8 = computeHomography(corners)
   const buf = new Float32Array(width * height)
   const inv = 1 / (ss * ss)
 

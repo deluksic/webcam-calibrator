@@ -1,5 +1,5 @@
 import type { DetectedQuad } from '@/gpu/contour'
-import { length, type Point } from '@/lib/geometry'
+import { length, type Corners } from '@/lib/geometry'
 
 const { min, max, abs } = Math
 
@@ -8,24 +8,20 @@ export const CALIB_MIN_MIN_R2 = 0.75
 export const CALIB_MIN_MIN_EDGE_PX = 12
 export const CALIB_MIN_AREA_PX = 400
 
-function quadMinEdgePx(corners: readonly Point[]): number {
-  if (corners.length < 4) {
-    return 0
-  }
-  const e = (i: number, j: number) => {
-    const a = corners[i]!
-    const b = corners[j]!
-    return length(b.x - a.x, b.y - a.y)
-  }
-  return min(e(0, 1), e(1, 2), e(2, 3), e(3, 0))
+function quadMinEdgePx(corners: Corners): number {
+  const [tl, tr, bl, br] = corners
+  const e = (a: { x: number; y: number }, b: { x: number; y: number }) => length(b.x - a.x, b.y - a.y)
+  return min(e(tl, tr), e(tr, br), e(br, bl), e(bl, tl))
 }
 
-export function quadAreaPx(corners: [Point, Point, Point, Point]): number {
+export function quadAreaPx(corners: Corners): number {
+  const [tl, tr, bl, br] = corners
+  // Shoelace on convex walk TL → TR → BR → BL → TL (strip order is not a polygon walk)
   return abs(
-    (corners[0].x * (corners[1].y - corners[2].y) +
-      corners[1].x * (corners[2].y - corners[3].y) +
-      corners[2].x * (corners[3].y - corners[0].y) +
-      corners[3].x * (corners[0].y - corners[1].y)) /
+    (tl.x * (tr.y - bl.y) +
+      tr.x * (br.y - tl.y) +
+      br.x * (bl.y - tr.y) +
+      bl.x * (tl.y - br.y)) /
       2,
   )
 }

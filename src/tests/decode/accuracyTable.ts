@@ -1,9 +1,5 @@
-import {
-  DECODE_STRESS_SPECKLE_AMP,
-  decodeStressCornersGridOrder,
-  decodeStressSpeckleSeed,
-} from '@/lib/decodeStressHarness'
-import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
+import { DECODE_STRESS_SPECKLE_AMP, decodeStressSpeckleSeed } from '@/lib/decodeStressHarness'
+import { decodeTagPattern } from '@/lib/grid'
 import {
   codeToPattern,
   decodeTag36h11AnyRotation,
@@ -60,8 +56,7 @@ export function perspectiveDecodeAccuracyRow(
       },
     ],
   })
-  const grid = buildTagGrid(decodeStressCornersGridOrder(pack.groundTruthStrip), 6)
-  const decodedPattern = decodeTagPattern(grid, pack.sobel, wh, undefined, wh)
+  const decodedPattern = decodeTagPattern(pack.groundTruthStrip, pack.sobel, wh, undefined, wh)
   if (!decodedPattern) {
     return { wh, id: -1, dist: -1, rotation: -1, cellErr: -1, unknowns: -1 }
   }

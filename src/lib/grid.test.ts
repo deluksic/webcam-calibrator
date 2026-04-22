@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { type Point, applyHomography, computeHomography } from '@/lib/geometry'
+import { type Corners, applyHomography, computeHomography } from '@/lib/geometry'
 import {
   buildDecodeEdgeMask,
   buildTagGrid,
@@ -63,11 +63,11 @@ function linearImageFieldPartialV(h: Float32Array, u: number, v: number, a: numb
 describe('grid', () => {
   describe('buildTagGrid', () => {
     it('builds 6x6 grid from square corners', () => {
-      const corners: [Point, Point, Point, Point] = [
+      const corners: Corners = [
         { x: 0, y: 0 }, // TL
         { x: 100, y: 0 }, // TR
-        { x: 100, y: 100 }, // BR
         { x: 0, y: 100 }, // BL
+        { x: 100, y: 100 }, // BR
       ]
 
       const grid = buildTagGrid(corners, 6)
@@ -79,11 +79,11 @@ describe('grid', () => {
 
     it('builds grid from perspective quad', () => {
       // Simulate perspective view of square
-      const corners: [Point, Point, Point, Point] = [
+      const corners: Corners = [
         { x: 10, y: 0 }, // TL (shifted left)
         { x: 90, y: 0 }, // TR (shifted right)
-        { x: 100, y: 100 }, // BR
         { x: 0, y: 100 }, // BL
+        { x: 100, y: 100 }, // BR
       ]
 
       const grid = buildTagGrid(corners, 6)
@@ -94,11 +94,11 @@ describe('grid', () => {
     })
 
     it('has correct number of cells', () => {
-      const corners: [Point, Point, Point, Point] = [
+      const corners: Corners = [
         { x: 0, y: 0 },
         { x: 100, y: 0 },
-        { x: 100, y: 100 },
         { x: 0, y: 100 },
+        { x: 100, y: 100 },
       ]
 
       const grid = buildTagGrid(corners, 6)
@@ -133,18 +133,18 @@ describe('grid', () => {
     })
 
     it('minQuadEdgeLengthPx returns shortest side', () => {
-      const sq: [Point, Point, Point, Point] = [
+      const sq: Corners = [
         { x: 0, y: 0 },
         { x: 100, y: 0 },
-        { x: 100, y: 100 },
         { x: 0, y: 100 },
+        { x: 100, y: 100 },
       ]
       expect(minQuadEdgeLengthPx(sq)).toBe(100)
-      const thin: [Point, Point, Point, Point] = [
+      const thin: Corners = [
         { x: 0, y: 0 },
         { x: 10, y: 0 },
-        { x: 10, y: 100 },
         { x: 0, y: 100 },
+        { x: 10, y: 100 },
       ]
       expect(minQuadEdgeLengthPx(thin)).toBe(10)
     })
@@ -232,13 +232,13 @@ describe('grid', () => {
 
   describe('imageSobelToTagGradient (Jᵀ pullback)', () => {
     it('matches Jᵀ·g from finite-difference Jacobian on a projective homography', () => {
-      const src: [Point, Point, Point, Point] = [
+      const src: Corners = [
         { x: 120, y: 80 },
         { x: 540, y: 100 },
         { x: 100, y: 420 },
         { x: 520, y: 400 },
       ]
-      const h = computeHomography([...src])
+      const h = computeHomography(src)
       const probes: [number, number][] = [
         [0.12, 0.37],
         [0.55, 0.55],
@@ -323,26 +323,26 @@ describe('grid', () => {
 
   describe('grid cell access', () => {
     it('cells are indexed row by row', () => {
-      const corners: [Point, Point, Point, Point] = [
+      const corners: Corners = [
         { x: 0, y: 0 },
         { x: 100, y: 0 },
-        { x: 100, y: 100 },
         { x: 0, y: 100 },
+        { x: 100, y: 100 },
       ]
 
       const grid = buildTagGrid(corners, 6)
 
       // First row, first column
-      expect(grid.cells[0].row).toBe(0)
-      expect(grid.cells[0].col).toBe(0)
+      expect(grid.cells[0]!.row).toBe(0)
+      expect(grid.cells[0]!.col).toBe(0)
 
       // First row, second column
-      expect(grid.cells[1].row).toBe(0)
-      expect(grid.cells[1].col).toBe(1)
+      expect(grid.cells[1]!.row).toBe(0)
+      expect(grid.cells[1]!.col).toBe(1)
 
       // Second row, first column
-      expect(grid.cells[6].row).toBe(1)
-      expect(grid.cells[6].col).toBe(0)
+      expect(grid.cells[6]!.row).toBe(1)
+      expect(grid.cells[6]!.col).toBe(0)
     })
   })
 })

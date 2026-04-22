@@ -10,6 +10,7 @@ import {
   tryComputeHomography,
   applyHomography,
   computeProjectiveWeights,
+  type Corners,
 } from '@/lib/geometry'
 
 const { abs, max, min } = Math
@@ -84,25 +85,21 @@ describe('geometry', () => {
   })
 
   describe('quadAspectRatio', () => {
-    it('computes aspect ratio of square', () => {
-      const corners = [
+    it('computes aspect ratio of square (strip order TL, TR, BL, BR)', () => {
+      const corners: Corners = [
         { x: 0, y: 0 },
         { x: 100, y: 0 },
-        { x: 100, y: 100 },
         { x: 0, y: 100 },
+        { x: 100, y: 100 },
       ]
       expect(quadAspectRatio(corners)).toBeCloseTo(1, 2)
-    })
-
-    it('returns 0 for non-quad', () => {
-      expect(quadAspectRatio([{ x: 0, y: 0 }])).toBe(0)
     })
   })
 
   describe('computeHomography', () => {
     it('identity: maps unit square to same square', () => {
       // Unit square corners → same corners (no transform)
-      const src = [
+      const src: Corners = [
         { x: 0, y: 0 }, // TL
         { x: 1, y: 0 }, // TR
         { x: 0, y: 1 }, // BL
@@ -119,7 +116,7 @@ describe('geometry', () => {
     })
 
     it('translation: moves all corners by (10, 20)', () => {
-      const src = [
+      const src: Corners = [
         { x: 10, y: 20 }, // TL
         { x: 110, y: 20 }, // TR
         { x: 10, y: 120 }, // BL
@@ -139,7 +136,7 @@ describe('geometry', () => {
     })
 
     it('scale: doubles the size', () => {
-      const src = [
+      const src: Corners = [
         { x: 0, y: 0 },
         { x: 2, y: 0 },
         { x: 0, y: 2 },
@@ -156,7 +153,7 @@ describe('geometry', () => {
 
     it('perspective skew: trapezoid shape', () => {
       // Narrower at top, wider at bottom
-      const src = [
+      const src: Corners = [
         { x: 40, y: 0 }, // TL (shifted right)
         { x: 60, y: 0 }, // TR (shifted left from 100)
         { x: 0, y: 100 }, // BL
@@ -177,7 +174,7 @@ describe('geometry', () => {
 
     it('rotated 90 degrees', () => {
       // Rotate unit square 90 degrees around center
-      const src = [
+      const src: Corners = [
         { x: 0, y: 1 }, // TL → BL
         { x: 0, y: 0 }, // TR → TL
         { x: 1, y: 1 }, // BL → BR
@@ -193,7 +190,7 @@ describe('geometry', () => {
     it('edge midpoints preserve straight lines under perspective', () => {
       // This is the key test: under perspective transform, collinear points
       // on a line in the source should map to collinear points in destination
-      const src = [
+      const src: Corners = [
         { x: 0, y: 0 },
         { x: 100, y: 0 },
         { x: 0, y: 100 },
@@ -214,7 +211,7 @@ describe('geometry', () => {
 
     it('handles real camera coordinates', () => {
       // Typical webcam resolution with a detected quad
-      const src = [
+      const src: Corners = [
         { x: 100, y: 80 }, // TL
         { x: 540, y: 100 }, // TR
         { x: 120, y: 420 }, // BL
@@ -234,7 +231,7 @@ describe('geometry', () => {
     })
 
     it('horizontal bar: wide but short', () => {
-      const src = [
+      const src: Corners = [
         { x: 0, y: 0 },
         { x: 640, y: 10 },
         { x: 0, y: 50 },
@@ -257,16 +254,11 @@ describe('geometry', () => {
   describe('tryComputeHomography', () => {
     it('returns null for coincident corners (singular)', () => {
       const p = { x: 10, y: 20 }
-      expect(tryComputeHomography([p, p, p, p])).toBeNull()
-    })
-
-    it('returns null when point count is not 4', () => {
-      expect(tryComputeHomography([])).toBeNull()
-      expect(tryComputeHomography([{ x: 0, y: 0 }])).toBeNull()
+      expect(tryComputeHomography([p, p, p, p] as Corners)).toBeNull()
     })
 
     it('matches computeHomography for a valid quad', () => {
-      const src = [
+      const src: Corners = [
         { x: 0, y: 0 },
         { x: 1, y: 0 },
         { x: 0, y: 1 },
@@ -306,7 +298,7 @@ describe('geometry', () => {
 
   describe('computeProjectiveWeights', () => {
     it('unit square: weights are non-zero', () => {
-      const corners = [
+      const corners: Corners = [
         { x: 0, y: 0 }, // TL
         { x: 1, y: 0 }, // TR
         { x: 0, y: 1 }, // BL
@@ -322,7 +314,7 @@ describe('geometry', () => {
 
     it('parallelogram: still gives uniform weights', () => {
       // Sheared but still a parallelogram
-      const corners = [
+      const corners: Corners = [
         { x: 10, y: 20 }, // TL
         { x: 110, y: 20 }, // TR
         { x: 20, y: 120 }, // BL
@@ -336,7 +328,7 @@ describe('geometry', () => {
 
     it('trapezoid: weights differ for perspective', () => {
       // Narrower at top (perspective effect)
-      const corners = [
+      const corners: Corners = [
         { x: 40, y: 0 }, // TL
         { x: 60, y: 0 }, // TR
         { x: 0, y: 100 }, // BL
@@ -348,7 +340,7 @@ describe('geometry', () => {
     })
 
     it('real camera quad', () => {
-      const corners = [
+      const corners: Corners = [
         { x: 100, y: 80 }, // TL
         { x: 540, y: 100 }, // TR
         { x: 120, y: 420 }, // BL

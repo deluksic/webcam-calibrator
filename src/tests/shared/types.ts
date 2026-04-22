@@ -1,7 +1,3 @@
-import type { Point } from '@/lib/geometry'
-
-export type StripCorners = [Point, Point, Point, Point]
-
 export type SceneKind = 'perspective' | 'axis'
 
 export interface SceneSpec {

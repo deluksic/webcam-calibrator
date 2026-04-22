@@ -1,10 +1,9 @@
 // Contour detection: CPU region extraction + quad fitting (labels from GPU pointer-jump).
 
 import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from '@/lib/corners'
-import type { Point } from '@/lib/geometry'
+import type { Corners } from '@/lib/geometry'
 import { decodeTagPattern } from '@/lib/grid'
 import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
-import { hasExactlyFourElements } from '@/utils/assertArray'
 
 import { ALLOWED_ERROR_COUNT } from './pipelines/constants'
 
@@ -13,7 +12,7 @@ const { min, max, floor } = Math
 export const COMPONENT_LABEL_INVALID = 0xffffffff
 
 export interface DetectedQuad {
-  corners: [Point, Point, Point, Point]
+  corners: Corners
   label: number
   count: number
   aspectRatio: number
@@ -177,7 +176,7 @@ export function validateAndFilterQuads(
       region.maxY,
     )
 
-    if (!hasExactlyFourElements(corners)) {
+    if (corners === undefined) {
       quads.push({
         corners: [
           { x: region.minX, y: region.minY },

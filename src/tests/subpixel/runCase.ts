@@ -37,9 +37,9 @@ export function runSubpixelAlignmentCase(args: RunSubpixelCaseArgs): SubpixelCas
     radialDistortion: args.radialDistortion,
   })
   const gtStrip = pack.groundTruthStrip
-  const H_gt = computeHomography([...gtStrip])
+  const H_gt = computeHomography(gtStrip)
   const roughStrip = applyInitialRoughStrip(gtStrip, args.initial)
-  const H_init = computeHomography([...roughStrip])
+  const H_init = computeHomography(roughStrip)
 
   const refineIn: SubpixelRefineInput = {
     width: pack.width,

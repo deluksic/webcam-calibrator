@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 import { PNG } from 'pngjs'
 
-import type { Point } from '@/lib/geometry'
+import type { Corners } from '@/lib/geometry'
 import { codeToPattern, TAG36H11_CODES } from '@/lib/tag36h11'
 import { renderAprilTagIntensity } from '@/tests/utils/syntheticAprilTag'
 
@@ -30,7 +30,7 @@ function main() {
   const pattern = codeToPattern(TAG36H11_CODES[tagId])
   const size = 360
   const margin = 20
-  const strip: [Point, Point, Point, Point] = [
+  const strip: Corners = [
     { x: margin, y: margin },
     { x: margin + size, y: margin },
     { x: margin, y: margin + size },
@@ -38,7 +38,7 @@ function main() {
   ]
 
   // Mild perspective (same spirit as grid tests)
-  const perspective: [Point, Point, Point, Point] = [
+  const perspective: Corners = [
     { x: 40, y: 30 },
     { x: 380, y: 20 },
     { x: 30, y: 360 },

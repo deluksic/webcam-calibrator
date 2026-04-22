@@ -1,13 +1,13 @@
 import type { Point3 } from '@/lib/calibrationTypes'
-import type { Point } from '@/lib/geometry'
+import type { Corners } from '@/lib/geometry'
 import { buildTagGrid } from '@/lib/grid'
 
-/** Unit square outer quad: TL, TR, BR, BL — same order as `buildTagGrid`. */
-const UNIT_OUTER: [Point, Point, Point, Point] = [
+/** Unit square outer quad: TL, TR, BL, BR — same order as `buildTagGrid`. */
+const UNIT_OUTER: Corners = [
   { x: 0, y: 0 },
   { x: 1, y: 0 },
-  { x: 1, y: 1 },
   { x: 0, y: 1 },
+  { x: 1, y: 1 },
 ]
 
 /**
