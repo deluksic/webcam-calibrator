@@ -19,6 +19,9 @@ const BIT_Y = [
   1, 1, 1, 1, 1, 2, 2, 2, 3, 1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4,
 ] as const
 
+// Precompute base code patterns (no rotations) for wildcard search
+const BASE_CODE_PATTERNS: readonly bigint[] = TAG36H11_CODES
+
 /** `-1` = no / weak directional signal; `-2` = enough votes but pos/neg tie (ambiguous). */
 export type TagPattern = (0 | 1 | -1 | -2)[]
 
@@ -103,47 +106,66 @@ export function decodeTag36h11Best(pattern: TagPattern | undefined, maxError: nu
     return { id: -1, dist: maxError + 1 }
   }
 
-  let code = 0n
-  let knownMask = 0n
+  // Collect positions of unknown bits (-1) for wildcard optimization
+  const unknownPositions: number[] = []
   for (let bit = 0; bit < 36; bit++) {
     const x = BIT_X[bit]
     const y = BIT_Y[bit]
     const pRow = y - 1
     const pCol = x - 1
-    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) {
-      continue
+    if (pRow >= 0 && pRow <= 5 && pCol >= 0 && pCol <= 5) {
+      const pIdx = pRow * 6 + pCol
+      if (pattern[pIdx] === -1) {
+        unknownPositions.push(bit)
+      }
     }
+  }
+
+  const u = unknownPositions.length
+
+  // Generate all 2^U combinations of unknown bits
+  function generateMasks(pos: number, mask: bigint): void {
+    if (pos >= u) {
+      wildcardMasks.push(mask)
+      return
+    }
+    const bitIndex = unknownPositions[pos]
+    generateMasks(pos + 1, mask) // 0
+    generateMasks(pos + 1, mask | (1n << BigInt(bitIndex))) // 1
+  }
+
+  const wildcardMasks: bigint[] = []
+  generateMasks(0, 0n)
+
+  // Pre-compute pattern bits that are known (0 or 1)
+  let patternKnown = 0n
+  for (let bit = 0; bit < 36; bit++) {
+    const x = BIT_X[bit]
+    const y = BIT_Y[bit]
+    const pRow = y - 1
+    const pCol = x - 1
+    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) continue
     const pIdx = pRow * 6 + pCol
-    const val = pattern[pIdx]
-    if (val === 1) {
-      code |= 1n << BigInt(35 - bit)
-      knownMask |= 1n << BigInt(35 - bit)
-    } else if (val === 0) {
-      knownMask |= 1n << BigInt(35 - bit)
-    }
+    if (pattern[pIdx] === 1) patternKnown |= 1n << BigInt(35 - bit)
   }
 
   let bestId = -1
   let bestDist = maxError + 1
 
-  for (let id = 0; id < TAG36H11_COUNT; id++) {
-    const dictCode = TAG36H11_CODES[id]
-    const diff = (code ^ dictCode) & knownMask
-    const dist = popcount64(diff)
-
-    if (dist < bestDist) {
-      bestDist = dist
-      bestId = id
-      if (bestDist === 0) {
-        break
+  for (const baseCode of BASE_CODE_PATTERNS) {
+    for (const wildMask of wildcardMasks) {
+      const diff = (patternKnown ^ (baseCode ^ wildMask)) & 0xFFFFFFFFn
+      const dist = popcount64(diff)
+      if (dist < bestDist) {
+        bestDist = dist
+        bestId = TAG36H11_CODES.indexOf(baseCode)
+        if (bestDist === 0) break
       }
     }
+    if (bestDist === 0) break
   }
 
-  if (bestDist > maxError) {
-    return { id: -1, dist: bestDist }
-  }
-  return { id: bestId, dist: bestDist }
+  return bestDist > maxError ? { id: -1, dist: bestDist } : { id: bestId, dist: bestDist }
 }
 
 /**

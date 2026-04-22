@@ -1,6 +1,6 @@
 // Contour detection: CPU region extraction + quad fitting (labels from GPU pointer-jump).
 
-import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from '@/lib/corners'
+import { findCornersFromEdgesWithDebug, type CornerDebugInfo, rotateRing } from '@/lib/corners'
 import type { Corners } from '@/lib/geometry'
 import { decodeTagPattern } from '@/lib/grid'
 import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
@@ -165,7 +165,7 @@ export function validateAndFilterQuads(
     }
 
     // Try to detect real corners via line intersection
-    const { corners, debug } = findCornersFromEdgesWithDebug(
+    let { corners, debug } = findCornersFromEdgesWithDebug(
       sobelData,
       labelData,
       width,
@@ -196,6 +196,9 @@ export function validateAndFilterQuads(
     }
     const pattern = decodeTagPattern(corners, sobelData, width, undefined, imageHeight)
     const decoded = decodeTag36h11AnyRotation(pattern, ALLOWED_ERROR_COUNT)
+    if (decoded) {
+      corners = rotateRing(corners, decoded.rotation)
+    }
     quads.push({
       corners,
       label: region.label,

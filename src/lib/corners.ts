@@ -464,8 +464,9 @@ function findConvexCCWCycle(pts: Corners): Corners | undefined {
   return best
 }
 
-function rotateRing(ring: Corners, k: number): Corners {
-  return [ring[k]!, ring[(k + 1) % 4]!, ring[(k + 2) % 4]!, ring[(k + 3) % 4]!]
+export function rotateRing(ring: Corners, k: number): Corners {
+  const indices = [[0, 1, 2, 3], [2, 0, 3, 1], [3, 2, 1, 0], [1, 3, 0, 2]][k % 4]
+  return [ring[indices[0]]!, ring[indices[1]]!, ring[indices[2]]!, ring[indices[3]]!]
 }
 
 /**
