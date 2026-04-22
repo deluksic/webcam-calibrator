@@ -52,7 +52,7 @@ function refineCornerInDisk(
       }
     }
   }
-  return { x: base.x + bestDx, y: base.y + bestDy }
+  return { x: Math.floor(base.x + bestDx) + 0.5, y: Math.floor(base.y + bestDy) + 0.5 }
 }
 
 /**

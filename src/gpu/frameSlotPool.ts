@@ -1,7 +1,7 @@
 import type { tgpu, TgpuRoot } from 'typegpu';
 import { d } from 'typegpu'
 
-import type { CameraPipeline } from '@/gpu/camera'
+import type { CameraPipeline } from '@/gpu/cameraPipeline'
 
 export type FrameSlotState = 'free' | 'inflight' | 'display'
 

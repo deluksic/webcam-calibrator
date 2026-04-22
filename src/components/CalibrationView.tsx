@@ -2,7 +2,7 @@ import { Errored, For, createMemo, createStore } from 'solid-js'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
-import type { DisplayMode } from '@/gpu/camera'
+import type { DisplayMode } from '@/gpu/cameraPipeline'
 import type { DetectedQuad } from '@/gpu/contour'
 import {
   acceptQuadForCalibration,

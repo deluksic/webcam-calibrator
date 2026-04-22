@@ -60,7 +60,7 @@ export function extractLabeledEdgePixels(
         continue
       }
 
-      pixels.push({ x, y, gx, gy, magnitude: mag })
+      pixels.push({ x: x + 0.5, y: y + 0.5, gx, gy, magnitude: mag })
     }
   }
 

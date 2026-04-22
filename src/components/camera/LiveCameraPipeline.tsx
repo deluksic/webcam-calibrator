@@ -1,18 +1,12 @@
 import type { JSX } from 'solid-js'
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 
-import type { CameraPipeline, DisplayMode, ExtentRow, NonGridDisplayMode } from '@/gpu/camera'
-import {
-  createCameraPipeline,
-  detectForSlot,
-  presentFrame,
-  presentGridFrame,
-  readExtentBuffer,
-  runCompute,
-  updateQuadCornersBuffer,
-  MAX_U32,
-  MAX_DETECTED_TAGS,
-} from '@/gpu/camera'
+import { detectForSlot, readExtentBuffer } from '@/gpu/cameraDetection'
+import type { ExtentRow } from '@/gpu/cameraDetection'
+import { presentFrame, presentGridFrame, runCompute, updateQuadCornersBuffer } from '@/gpu/cameraFrame'
+import type { NonGridDisplayMode } from '@/gpu/cameraFrame'
+import { createCameraPipeline, MAX_U32, MAX_DETECTED_TAGS } from '@/gpu/cameraPipeline'
+import type { CameraPipeline, DisplayMode } from '@/gpu/cameraPipeline'
 import type { DetectedQuad } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'

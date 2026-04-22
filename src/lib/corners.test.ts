@@ -79,7 +79,9 @@ describe('extractLabeledEdgePixels', () => {
     expect(pixels.length).toBeGreaterThan(0)
 
     for (const p of pixels) {
-      expect(labelData[p.y * w + p.x]).toBe(1)
+      const xi = Math.floor(p.x)
+      const yi = Math.floor(p.y)
+      expect(labelData[yi * w + xi]).toBe(1)
     }
   })
 

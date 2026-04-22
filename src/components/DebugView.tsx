@@ -2,7 +2,7 @@ import { Errored, For, createMemo, createSignal } from 'solid-js'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
-import type { DisplayMode } from '@/gpu/camera'
+import type { DisplayMode } from '@/gpu/cameraPipeline'
 
 import type { Resolution } from './camera/cameraStreamAcquire'
 import { RESOLUTION_LADDER } from './camera/cameraStreamAcquire'
