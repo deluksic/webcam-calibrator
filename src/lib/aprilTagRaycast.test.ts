@@ -139,7 +139,7 @@ describe('aprilTagRaycast', () => {
       pattern,
     })
     const grid = buildTagGrid(cornersGridOrder(strip), 6)
-    const h8 = computeHomography([...strip])
+    const h8 = computeHomography(strip)
 
     for (const cell of grid.cells) {
       const { u, v, inside } = imagePixelToUnitSquareUv(h8, cell.center.x, cell.center.y)
@@ -173,8 +173,7 @@ describe('aprilTagRaycast', () => {
       { width: w, height: h, corners: strip, pattern, supersample: 4 },
       { gradientScale: 4 },
     )
-    const grid = buildTagGrid(cornersGridOrder(strip), 6)
-    const decodedPattern = decodeTagPattern(grid, sobel, w, undefined, h)
+    const decodedPattern = decodeTagPattern(strip, sobel, w, undefined, h)
     const match = decodeTag36h11AnyRotation(decodedPattern, 8)
     expect(match).not.toBeNull()
     expect(match!.id).toBe(tagId)

@@ -12,7 +12,7 @@ import {
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationSamplesTopK } from '@/lib/calibrationTopK'
 import type { CalibrationSample } from '@/lib/calibrationTypes'
 
-import type { Resolution} from './camera/cameraStreamAcquire';
+import type { Resolution } from './camera/cameraStreamAcquire'
 import { RESOLUTION_LADDER } from './camera/cameraStreamAcquire'
 
 import styles from '@/components/CalibrationView.module.css'
@@ -93,12 +93,10 @@ function CalibrationView() {
         continue
       }
       const rot = q.decodedRotation ?? 0
-      const inner = q.gridCells!.innerCorners.map((p) => ({ x: p.x, y: p.y }))
       incoming.push({
         frameId: meta.frameId,
         tagId: q.decodedTagId,
         rotation: rot,
-        innerCorners: inner,
         score: calibrationQuadScore(q),
       })
     }

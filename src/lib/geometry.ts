@@ -1,6 +1,6 @@
 // 2D geometry utilities for quad fitting
 
-const { sqrt, abs, cos, sin, atan2, max, min } = Math
+const { sqrt, abs, max, min } = Math
 
 export function length(x: number, y: number): number {
   return sqrt(x * x + y * y)
@@ -58,53 +58,6 @@ export function lineIntersection(l1: Line, l2: Line): Point | null {
  */
 export function pointLineDistance(p: Point, l: Line): number {
   return abs(l.a * p.x + l.b * p.y + l.c)
-}
-
-/**
- * Fit a line to a set of points using least squares.
- * Returns line coefficients or null if insufficient points.
- */
-export function fitLine(points: Point[]): Line | null {
-  if (points.length < 2) {
-    return null
-  }
-
-  // Use orthogonal regression
-  let sumX = 0,
-    sumY = 0
-  for (const p of points) {
-    sumX += p.x
-    sumY += p.y
-  }
-  const n = points.length
-  const cx = sumX / n
-  const cy = sumY / n
-
-  // Covariance matrix
-  let xx = 0,
-    xy = 0,
-    yy = 0
-  for (const p of points) {
-    const dx = p.x - cx
-    const dy = p.y - cy
-    xx += dx * dx
-    xy += dx * dy
-    yy += dy * dy
-  }
-
-  // The line direction (tangent) is the eigenvector of the covariance matrix
-  // For a line, we want the direction of max variance
-  const theta = 0.5 * atan2(2 * xy, xx - yy)
-  const cosT = cos(theta)
-  const sinT = sin(theta)
-
-  // The line coefficients (a,b,c) need the NORMAL to the line, not the direction.
-  // Direction is [cosT, sinT], so normal is [-sinT, cosT]
-  const a = -sinT
-  const b = cosT
-  const c = -(a * cx + b * cy)
-
-  return { a, b, c }
 }
 
 /**
@@ -218,7 +171,7 @@ export function tryComputeHomography(src: Point[]): Float32Array | null {
   }
 
   // Gaussian elimination with partial pivoting
-  const h = Array.from({ length: N }, () => 0)
+  const h: number[] = []
 
   for (let col = 0; col < N; col++) {
     // Find pivot

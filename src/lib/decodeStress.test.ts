@@ -2,7 +2,7 @@
  * Characterizes `decodeTagPattern` + dictionary decode under **perspective** and **low resolution**.
  * Tightening these numbers documents the cliff; adjust if pipeline changes.
  *
- * **Supersampling:** each output pixel averages `ss×ss` tag samples on a regular subpixel grid inside the
+ * **Supersampling:** each output pixel averages `ssxss` tag samples on a regular subpixel grid inside the
  * pixel square (`(sx+0.5)/ss` offsets), inverse‑warped through the quad homography—so `ss` is purely a
  * nicer antialiased intensity raster, then **central-difference Sobel** runs on that grid. `ss === 2` can
  * resonate badly with FD Sobel; this file uses **4** (same spirit as other decode tests here).
@@ -17,7 +17,7 @@
  * Re-tune scale with `pnpm run find:decode-stress-homography` (grid scan; `passes(scale)` is not
  * guaranteed monotone).
  *
- * **Failed tests** write PNGs under `output/test-failures/` (intensity, Sobel magnitude, 6×6 cell legend when applicable).
+ * **Failed tests** write PNGs under `output/test-failures/` (intensity, Sobel magnitude, 6x6 cell legend when applicable).
  * Topic harness: `src/tests/decode/` — `pnpm test:decode`.
  */
 import { join } from 'node:path'
@@ -28,7 +28,6 @@ import {
   DECODE_STRESS_SIZES,
   DECODE_STRESS_SPECKLE_AMP,
   decodeStressAxisStrip,
-  decodeStressCornersGridOrder,
   decodeStressFitPerspectiveStrip,
   decodeStressRasterSobel,
   decodeStressStripWithHomographyMismatchOffsetsPx,
@@ -36,7 +35,7 @@ import {
   decodeStressSyntheticWithHomographyMismatch,
 } from '@/lib/decodeStressHarness'
 import type { Point } from '@/lib/geometry'
-import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
+import { decodeTagPattern } from '@/lib/grid'
 import { TAG36H11_CODES, codeToPattern, decodeTag36h11Best, type TagPattern } from '@/lib/tag36h11'
 import {
   attachFailureArtifacts,
@@ -61,7 +60,7 @@ function decodeSynthetic(
   return decodeStressSynthetic(w, h, strip, tagId, supersample, DECODE_STRESS_SPECKLE_AMP)
 }
 
-/** Count 6×6 cells where decoded disagrees with ground-truth pattern (ignores unknowns `-1`/`-2`). */
+/** Count 6x6 cells where decoded disagrees with ground-truth pattern (ignores unknowns `-1`/`-2`). */
 function cellErrorsVsTruth(decoded: (0 | 1 | -1 | -2)[], truth: TagPattern): number {
   let err = 0
   for (let i = 0; i < 36; i++) {
@@ -79,7 +78,7 @@ function cellErrorsVsTruth(decoded: (0 | 1 | -1 | -2)[], truth: TagPattern): num
 describe('decodeTagPattern stress (perspective + low resolution)', () => {
   const tagId = 0
 
-  it('axis-aligned tag decodes at 48×48 (baseline low-res)', () => {
+  it('axis-aligned tag decodes at 48x48 (baseline low-res)', () => {
     const w = 48
     const h = 48
     const side = 32
@@ -94,8 +93,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
       tagId,
       DECODE_STRESS_SPECKLE_AMP,
     )
-    const grid = buildTagGrid(decodeStressCornersGridOrder(strip), 6)
-    const decodedPattern = decodeTagPattern(grid, sobel, w, undefined, h)
+    const decodedPattern = decodeTagPattern(strip, sobel, w, undefined, h)
 
     attachFailureArtifacts(THIS_FILE, (dir) => {
       writeGreyPng(join(dir, 'intensity.png'), w, h, intensity)
@@ -111,7 +109,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
     expect(best.dist).toBe(1)
   })
 
-  it('strong perspective at 120×120: exact pattern + dictionary', () => {
+  it('strong perspective at 120x120: exact pattern + dictionary', () => {
     const w = 120
     const h = 120
     const strip = decodeStressFitPerspectiveStrip(w, h)
@@ -125,8 +123,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
       tagId,
       DECODE_STRESS_SPECKLE_AMP,
     )
-    const grid = buildTagGrid(decodeStressCornersGridOrder(strip), 6)
-    const decodedPattern = decodeTagPattern(grid, sobel, w, undefined, h)
+    const decodedPattern = decodeTagPattern(strip, sobel, w, undefined, h)
 
     attachFailureArtifacts(THIS_FILE, (dir) => {
       writeGreyPng(join(dir, 'intensity.png'), w, h, intensity)
@@ -142,7 +139,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
     expect(cellErrorsVsTruth(dp, truth)).toBe(0)
   })
 
-  it('strong perspective at 72×72: exact pattern + dictionary', () => {
+  it('strong perspective at 72x72: exact pattern + dictionary', () => {
     const w = 72
     const h = 72
     const strip = decodeStressFitPerspectiveStrip(w, h)
@@ -156,8 +153,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
       tagId,
       DECODE_STRESS_SPECKLE_AMP,
     )
-    const grid = buildTagGrid(decodeStressCornersGridOrder(strip), 6)
-    const decodedPattern = decodeTagPattern(grid, sobel, w, undefined, h)
+    const decodedPattern = decodeTagPattern(strip, sobel, w, undefined, h)
 
     attachFailureArtifacts(THIS_FILE, (dir) => {
       writeGreyPng(join(dir, 'intensity.png'), w, h, intensity)
@@ -175,7 +171,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
 
   describe('homography mismatch (perturbed decode corners, H recomputed)', () => {
     for (const wh of DECODE_STRESS_SIZES) {
-      it(`decode at ${wh}×${wh} (id 0; exact or one-cell slack)`, () => {
+      it(`decode at ${wh}x${wh} (id 0; exact or one-cell slack)`, () => {
         const truth = codeToPattern(TAG36H11_CODES[tagId])
         const rasterStrip = decodeStressFitPerspectiveStrip(wh, wh)
         const decodeStrip = decodeStressStripWithHomographyMismatchOffsetsPx(rasterStrip)
@@ -188,8 +184,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
           tagId,
           DECODE_STRESS_SPECKLE_AMP,
         )
-        const grid = buildTagGrid(decodeStressCornersGridOrder(decodeStrip), 6)
-        const decodedPattern = decodeTagPattern(grid, sobel, wh, undefined, wh)
+        const decodedPattern = decodeTagPattern(decodeStrip, sobel, wh, undefined, wh)
 
         attachFailureArtifacts(THIS_FILE, (dir) => {
           writeGreyPng(join(dir, 'intensity.png'), wh, wh, intensity)
@@ -221,7 +216,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
 
   /**
    * Snapshot table: same **strong perspective** quad scaled into square canvases.
-   * `dist` = Hamming vs best codeword (known bits); `cellErr` = wrong 6×6 cells vs raster truth (excl. `-1`);
+   * `dist` = Hamming vs best codeword (known bits); `cellErr` = wrong 6x6 cells vs raster truth (excl. `-1`);
    * `unknowns` = count of `-1` (few votes) and `-2` (tie) from `classifyModuleFromPosNeg`. Rising `unknowns` / `dist` at low `wh` marks where decode starts to slip for this raster settings.
    */
   it('matches perspective + resolution characterization table', () => {
@@ -256,8 +251,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
           tagId,
           DECODE_STRESS_SPECKLE_AMP,
         )
-        const grid = buildTagGrid(decodeStressCornersGridOrder(strip), 6)
-        const decodedPattern = decodeTagPattern(grid, sobel, wh, undefined, wh)
+        const decodedPattern = decodeTagPattern(strip, sobel, wh, undefined, wh)
         if (!decodedPattern) {
           continue
         }

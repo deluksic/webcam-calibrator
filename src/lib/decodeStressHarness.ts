@@ -200,8 +200,7 @@ export function decodeStressSyntheticWithHomographyMismatch(
 ) {
   const pattern = codeToPattern(TAG36H11_CODES[tagId])
   const { sobel } = decodeStressRasterSobel(w, h, rasterStrip, pattern, supersample, tagId, speckleAmp)
-  const grid = buildTagGrid(decodeStressCornersGridOrder(decodeStrip), 6)
-  const decodedPattern = decodeTagPattern(grid, sobel, w, undefined, h)
+  const decodedPattern = decodeTagPattern(decodeStrip, sobel, w, undefined, h)
   const best = decodeTag36h11Best(decodedPattern, 8)
   const rot = decodeTag36h11AnyRotation(decodedPattern, 8)
   return { best, rot, decodedPattern }

@@ -253,7 +253,7 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
   }
 
   const n = points.length
-  const ITER = 80
+  const ITER = 50
   const THRESH = 3.0
 
   let rng = (seed * 1664525 + 1013904223) >>> 0

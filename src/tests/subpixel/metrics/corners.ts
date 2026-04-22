@@ -1,7 +1,7 @@
 import { length } from '@/lib/geometry'
 import type { StripCorners } from '@/tests/shared/types'
 
-const { max } = Math
+const { max, sqrt } = Math
 
 export function cornerErrorStats(
   gt: StripCorners,

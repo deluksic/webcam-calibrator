@@ -31,7 +31,7 @@ interface Bbox {
 
 function QuadCandidateOverlay(props: { bboxes: Bbox[]; scale: { x: number; y: number } }) {
   const candidates = createMemo(() => {
-    const MIN_AREA = 400
+    const MIN_AREA = 40 * 40
     const MAX_AREA = 200000
     const MIN_AR = 0.3
     const MAX_AR = 3.5

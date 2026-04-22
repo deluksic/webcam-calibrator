@@ -6,8 +6,8 @@ function mat3FromHomography8(h: Float32Array): number[] {
   return [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1]
 }
 
-/** Full inverse of a 3×3 row-major matrix; returns row-major 9 floats or null if singular. */
-export function invertMat3RowMajor(m: number[]): Float32Array | null {
+/** Full inverse of a 3×3 row-major matrix; returns row-major 9 floats or `undefined` if singular. */
+export function invertMat3RowMajor(m: number[]): number[] | undefined {
   const a = m[0],
     b = m[1],
     c = m[2]
@@ -30,11 +30,11 @@ export function invertMat3RowMajor(m: number[]): Float32Array | null {
 
   const det = a * ei_minus_fh - b * di_minus_fg + c * dh_minus_eg
   if (abs(det) < 1e-14) {
-    return null
+    return undefined
   }
 
   const invDet = 1 / det
-  return new Float32Array([
+  return [
     ei_minus_fh * invDet,
     -bi_minus_ch * invDet,
     bf_minus_ce * invDet,
@@ -44,7 +44,7 @@ export function invertMat3RowMajor(m: number[]): Float32Array | null {
     dh_minus_eg * invDet,
     -ah_minus_bg * invDet,
     ae_minus_bd * invDet,
-  ])
+  ]
 }
 
 /**

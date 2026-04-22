@@ -46,9 +46,6 @@ export function acceptQuadForCalibration(q: DetectedQuad): boolean {
   if (!q || q.cornerDebug?.failureCode !== 0) {
     return false
   }
-  if (!q.gridCells?.innerCorners || q.gridCells.innerCorners.length !== 49) {
-    return false
-  }
   const minR2 = q.cornerDebug.minR2
   if (minR2 < CALIB_MIN_MIN_R2) {
     return false

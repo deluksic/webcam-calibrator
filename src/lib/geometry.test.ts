@@ -4,7 +4,6 @@ import {
   lineFromPoints,
   lineIntersection,
   pointLineDistance,
-  fitLine,
   subdivideSegment,
   quadAspectRatio,
   computeHomography,
@@ -64,26 +63,6 @@ describe('geometry', () => {
       const line = { a: 0, b: 1, c: 0 } // y = 0
       const dist = pointLineDistance({ x: 3, y: 4 }, line)
       expect(dist).toBeCloseTo(4, 5)
-    })
-  })
-
-  describe('fitLine', () => {
-    it('fits line to collinear points', () => {
-      const points = [
-        { x: 0, y: 0 },
-        { x: 1, y: 1 },
-        { x: 2, y: 2 },
-        { x: 3, y: 3 },
-      ]
-      const line = fitLine(points)
-      expect(line).not.toBeNull()
-      // Line should pass through origin
-      expect(line!.c).toBeCloseTo(0, 5)
-    })
-
-    it('returns null for insufficient points', () => {
-      const points = [{ x: 0, y: 0 }]
-      expect(fitLine(points)).toBeNull()
     })
   })
 

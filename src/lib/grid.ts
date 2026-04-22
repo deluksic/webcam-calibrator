@@ -170,15 +170,6 @@ export function imageGradToUvGrad(
   return { gu, gv }
 }
 
-export type CellSobelSample = {
-  mag: number
-  tangent: number
-  gx: number
-  gy: number
-  u: number
-  v: number
-}
-
 /** Min |UV − center|² so we ignore the flat interior where radial direction is ill-defined. */
 const DECODE_RADIAL_MIN2 = 0.015 * 0.015
 /** Dot-product deadband in UV-gradient space (noise). */
@@ -188,52 +179,6 @@ const DECODE_DOT_EPS = 1e-8
  * Ties with at least this many votes return **`-2`** (ambiguous, not “missing edges”).
  */
 const DECODE_MIN_VOTE_TOTAL = 3
-
-/**
- * Classify a 6×6 cell: **0 = white**, **1 = black**, **-1 = no/weak signal**, **-2 = tie** (enough votes).
- * Edge-only: pull `(gx, gy)` to UV, dot with outward radial from cell center `(u−½, v−½)`;
- * **unweighted** ±1 vote per sample (GPU/NMS is assumed to have already filtered edges).
- */
-export function decodeCell(cell: GridCell, samples: CellSobelSample[]): 0 | 1 | -1 | -2 {
-  const n = samples.length
-  if (n < 9) {
-    return -1
-  }
-
-  let pos = 0
-  let neg = 0
-  for (const s of samples) {
-    if (s.mag <= 1e-12) {
-      continue
-    }
-    const ru = s.u - 0.5
-    const rv = s.v - 0.5
-    const r2 = ru * ru + rv * rv
-    if (r2 < DECODE_RADIAL_MIN2) {
-      continue
-    }
-
-    const { gu, gv } = imageGradToUvGrad(cell, s.u, s.v, s.gx, s.gy)
-    const dot = gu * ru + gv * rv
-    if (dot > DECODE_DOT_EPS) {
-      pos += 1
-    } else if (dot < -DECODE_DOT_EPS) {
-      neg += 1
-    }
-  }
-
-  const sum = pos + neg
-  if (sum < DECODE_MIN_VOTE_TOTAL) {
-    return -1
-  }
-  if (pos > neg) {
-    return 1
-  }
-  if (neg > pos) {
-    return 0
-  }
-  return -2
-}
 
 /** AprilTag unit square is an 8×8 module grid (black border ring + inner 6×6 data). */
 const TAG_MODULES = 8
@@ -412,32 +357,8 @@ export function decodeEdgeAlignedDot(
 }
 
 /**
- * Same sign convention as `decodeCell`: **positive** ⇒ vote **toward black** (`blackModuleCount`).
- * Horizontal lattice edges (tri **top** / **bottom**): **`gv * (v − cv)`** for that bin’s center **`cv`**.
- * Vertical edges (**left** / **right**): **`gu * (u − cu)`**.
- */
-export function decodeVoteBinEdgeChannelDot(
-  tri: DecodeTriangle,
-  u: number,
-  v: number,
-  cu: number,
-  cv: number,
-  gu: number,
-  gv: number,
-): number {
-  switch (tri) {
-    case 'top':
-    case 'bottom':
-      return gv * (v - cv)
-    case 'left':
-    case 'right':
-      return gu * (u - cu)
-  }
-}
-
-/**
- * Same sign convention as {@link decodeCell}: **positive** ⇒ vote **toward black**. Dot of tag UV
- * gradient with outward radial from **that bin’s** center **`(cu, cv)`** toward **`(u, v)`**.
+ * Convention: positive ⇒ vote toward black. Dot of tag UV
+ * gradient with outward radial from that bin’s center `(cu, cv)` toward `(u, v)`.
  *
  * **`decodeTagPattern`** accumulates votes with this scalar (see {@link decodeVoteBinEdgeChannelDot} for
  * the older edge‑channel variant, still used in unit tests).
@@ -587,17 +508,16 @@ export type DecodeTagPatternVoteMaps = {
 }
 
 function decodeTagPatternVoteAccumulation(
-  grid: GridResult,
+  corners: [Point, Point, Point, Point],
   sobelData: Float32Array,
   imageWidth: number,
   imageH: number,
   edgeMask?: Uint8Array,
 ): { whiteModuleCount: Uint32Array; blackModuleCount: Uint32Array; uvProximityMax: number } {
-  const oc = grid.outerCorners
-  const strip: [Point, Point, Point, Point] = [oc[0], oc[1], oc[3], oc[2]]
-  const h = tryComputeHomography([...strip])
+  const [tl, tr, br, bl] = corners
+  const h = tryComputeHomography(corners)
 
-  const lMin = minQuadEdgeLengthPx(oc)
+  const lMin = minQuadEdgeLengthPx(corners)
   const uvHalfModule = 0.5 / TAG_MODULES
   const uvProximityMax = max(TAU_MODULE_UV, 2 / lMin, uvHalfModule)
 
@@ -609,10 +529,10 @@ function decodeTagPatternVoteAccumulation(
     }
   }
 
-  let x0 = min(oc[0].x, oc[1].x, oc[2].x, oc[3].x)
-  let y0 = min(oc[0].y, oc[1].y, oc[2].y, oc[3].y)
-  let x1 = max(oc[0].x, oc[1].x, oc[2].x, oc[3].x)
-  let y1 = max(oc[0].y, oc[1].y, oc[2].y, oc[3].y)
+  let x0 = min(tl.x, tr.x, bl.x, br.x)
+  let y0 = min(tl.y, tr.y, bl.y, br.y)
+  let x1 = max(tl.x, tr.x, bl.x, br.x)
+  let y1 = max(tl.y, tr.y, bl.y, br.y)
   const ix0 = max(0, floor(x0))
   const iy0 = max(0, floor(y0))
   const ix1 = min(imageWidth - 1, ceil(x1))
@@ -632,7 +552,7 @@ function decodeTagPatternVoteAccumulation(
       }
       const gx = sobelData[(iy * imageWidth + ix) * 2]
       const gy = sobelData[(iy * imageWidth + ix) * 2 + 1]
-      const mag = length(gx, gy)
+      const mag = gx * gx + gy * gy
       if (mag <= 1e-12) {
         continue
       }
@@ -676,7 +596,7 @@ function decodeTagPatternVoteAccumulation(
  * Each contributing pixel adds **±1** to **at most two** 8×8 bins per {@link decodeVoteBinRadialDot}.
  */
 export function decodeTagPatternWithVoteMaps(
-  grid: GridResult,
+  corners: [Point, Point, Point, Point],
   sobelData: Float32Array,
   imageWidth: number,
   edgeMask?: Uint8Array,
@@ -684,7 +604,7 @@ export function decodeTagPatternWithVoteMaps(
 ): DecodeTagPatternVoteMaps {
   const imageH = imageHeight !== undefined ? imageHeight : floor(sobelData.length / (2 * imageWidth))
   const { whiteModuleCount, blackModuleCount, uvProximityMax } = decodeTagPatternVoteAccumulation(
-    grid,
+    corners,
     sobelData,
     imageWidth,
     imageH,
@@ -707,11 +627,11 @@ export function decodeTagPatternWithVoteMaps(
 }
 
 export function decodeTagPattern(
-  grid: GridResult,
+  corners: [Point, Point, Point, Point],
   sobelData: Float32Array,
   imageWidth: number,
   edgeMask?: Uint8Array,
   imageHeight?: number,
 ): TagPattern {
-  return decodeTagPatternWithVoteMaps(grid, sobelData, imageWidth, edgeMask, imageHeight).pattern
+  return decodeTagPatternWithVoteMaps(corners, sobelData, imageWidth, edgeMask, imageHeight).pattern
 }

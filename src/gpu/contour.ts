@@ -2,8 +2,7 @@
 
 import { findCornersFromEdgesWithDebug, type CornerDebugInfo } from '@/lib/corners'
 import type { Point } from '@/lib/geometry'
-import type { GridResult } from '@/lib/grid'
-import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
+import { decodeTagPattern } from '@/lib/grid'
 import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
 import { hasExactlyFourElements } from '@/utils/assertArray'
 
@@ -19,7 +18,6 @@ export interface DetectedQuad {
   count: number
   aspectRatio: number
   area: number
-  gridCells: GridResult | undefined
   pattern: TagPattern | undefined
   hasCorners: boolean // true if detected via corner finding, false if fallback bbox
   cornerDebug: CornerDebugInfo | undefined
@@ -29,11 +27,6 @@ export interface DetectedQuad {
   decodedTagId?: number
   /** Clockwise quarter-turns (0–3) from pattern grid to canonical tag orientation. */
   decodedRotation?: number
-}
-
-/** `buildTagGrid` / AprilTag decode need TL,TR,BR,BL; homography uses TL,TR,BL,BR (triangle strip). */
-function cornersForTagGrid(c: [Point, Point, Point, Point]): [Point, Point, Point, Point] {
-  return [c[0], c[1], c[3], c[2]]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,8 +135,8 @@ export function validateAndFilterQuads(
   sobelData: Float32Array,
   labelData: Uint32Array,
   width: number,
-  minArea: number = 400,
-  maxArea: number = 200000,
+  minArea: number,
+  maxArea: number,
 ): DetectedQuad[] {
   const quads: DetectedQuad[] = []
   const imageHeight = floor(labelData.length / width)
@@ -173,7 +166,7 @@ export function validateAndFilterQuads(
     }
 
     // Try to detect real corners via line intersection
-    const cornerResult = findCornersFromEdgesWithDebug(
+    const { corners, debug } = findCornersFromEdgesWithDebug(
       sobelData,
       labelData,
       width,
@@ -183,22 +176,26 @@ export function validateAndFilterQuads(
       region.maxX,
       region.maxY,
     )
-    const detectedCorners = cornerResult.corners
-    const corners: [Point, Point, Point, Point] = hasExactlyFourElements(detectedCorners)
-      ? detectedCorners
-      : [
+
+    if (!hasExactlyFourElements(corners)) {
+      quads.push({
+        corners: [
           { x: region.minX, y: region.minY },
           { x: region.maxX, y: region.minY },
           { x: region.minX, y: region.maxY },
           { x: region.maxX, y: region.maxY },
-        ]
-    const tagGrid = buildTagGrid(cornersForTagGrid(corners))
-    if (!tagGrid || !tagGrid.cells || tagGrid.cells.length === 0) {
+        ],
+        label: region.label,
+        count: region.count,
+        aspectRatio,
+        area,
+        pattern: undefined,
+        hasCorners: true,
+        cornerDebug: debug,
+      })
       continue
     }
-    // Decode uses bilinear Sobel everywhere in the cell; do not gate on a label/mag floor mask —
-    // floor(sample) often lands on flat interiors (NMS ≈ 0) while the float bilinear tap still sees edges.
-    const pattern = decodeTagPattern(tagGrid, sobelData, width, undefined, imageHeight)
+    const pattern = decodeTagPattern(corners, sobelData, width, undefined, imageHeight)
     const decoded = decodeTag36h11AnyRotation(pattern, ALLOWED_ERROR_COUNT)
     quads.push({
       corners,
@@ -206,10 +203,9 @@ export function validateAndFilterQuads(
       count: region.count,
       aspectRatio,
       area,
-      gridCells: tagGrid,
       pattern,
-      hasCorners: detectedCorners.length === 4,
-      cornerDebug: cornerResult.debug,
+      hasCorners: true,
+      cornerDebug: debug,
       ...(decoded ? { decodedTagId: decoded.id, decodedRotation: decoded.rotation } : {}),
     })
   }

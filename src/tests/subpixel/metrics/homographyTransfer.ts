@@ -1,7 +1,7 @@
 import type { Point } from '@/lib/geometry'
 import { applyHomography, length } from '@/lib/geometry'
 
-const { max } = Math
+const { max, sqrt } = Math
 
 function dist(a: Point, b: Point): number {
   return length(a.x - b.x, a.y - b.y)

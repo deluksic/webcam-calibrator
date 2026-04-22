@@ -177,12 +177,13 @@
   font-weight: 700;
   color: #000;
   text-shadow:
-    0 0 3px #fff,
-    0 0 6px #fff,
-    1px 0 0 #fff,
-    -1px 0 0 #fff,
-    0 1px 0 #fff,
-    0 -1px 0 #fff;
+    0 0 2px #fff8,
+    0 0 4px #fff8,
+    0 0 8px #fff8,
+    -1px -1px 1px #fff8,
+    1px -1px 1px #fff8,
+    -1px 1px 1px #fff8,
+    1px 1px 1px #fff8;
   white-space: nowrap;
 }
 

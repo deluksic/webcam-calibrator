@@ -4,18 +4,14 @@ import { type Point, applyHomography, computeHomography } from '@/lib/geometry'
 import {
   buildDecodeEdgeMask,
   buildTagGrid,
-  decodeCell,
   decodeEdgeAlignedDot,
   decodeEdgeDistanceUv,
   decodeTriangleFromLocalUv,
-  decodeVoteBinEdgeChannelDot,
   decodeVoteModuleIndices,
   fillUnknownNeighbors6,
   imageSobelToTagGradient,
   minQuadEdgeLengthPx,
   primaryModuleFromUv,
-  type CellSobelSample,
-  type GridCell,
 } from '@/lib/grid'
 import type { TagPattern } from '@/lib/tag36h11'
 
@@ -109,77 +105,6 @@ describe('grid', () => {
 
       // Should have 36 cells (6x6)
       expect(grid.cells.length).toBe(36)
-    })
-  })
-
-  describe('decodeCell', () => {
-    /** Axis-aligned cell quad: x = 100u, y = 100v (TL,TR,BR,BL). */
-    const axisCell: GridCell = {
-      row: 0,
-      col: 0,
-      corners: [
-        { x: 0, y: 0 },
-        { x: 100, y: 0 },
-        { x: 100, y: 100 },
-        { x: 0, y: 100 },
-      ],
-      center: { x: 50, y: 50 },
-    }
-
-    const base = (over: Partial<CellSobelSample>): CellSobelSample => ({
-      mag: 1,
-      tangent: 0,
-      gx: 0,
-      gy: 0,
-      u: 0.5,
-      v: 0.5,
-      ...over,
-    })
-
-    it('returns -1 for insufficient samples', () => {
-      const samples: CellSobelSample[] = [base({ mag: 1 })]
-      expect(decodeCell(axisCell, samples)).toBe(-1)
-    })
-
-    it('returns -1 for low magnitude samples (solid interior)', () => {
-      const samples: CellSobelSample[] = Array.from({ length: 11 }, (_, i) =>
-        base({ mag: 0.001, tangent: i * 0.1, u: 0.2 + i * 0.06, v: 0.5 }),
-      )
-      expect(decodeCell(axisCell, samples)).toBe(-1)
-    })
-
-    it('votes black when UV gradient aligns with outward radial (dark interior)', () => {
-      const samples: CellSobelSample[] = Array.from({ length: 11 }, (_, i) =>
-        base({
-          mag: 1,
-          gx: 1,
-          gy: 0,
-          u: 0.65 + i * 0.02,
-          v: 0.5,
-        }),
-      )
-      expect(decodeCell(axisCell, samples)).toBe(1)
-    })
-
-    it('votes white when UV gradient opposes outward radial', () => {
-      const samples: CellSobelSample[] = Array.from({ length: 11 }, (_, i) =>
-        base({
-          mag: 1,
-          gx: -1,
-          gy: 0,
-          u: 0.65 + i * 0.02,
-          v: 0.5,
-        }),
-      )
-      expect(decodeCell(axisCell, samples)).toBe(0)
-    })
-
-    it('returns -2 when pos/neg tie with enough votes', () => {
-      const samples: CellSobelSample[] = [
-        ...Array.from({ length: 5 }, (_, i) => base({ mag: 1, gx: 1, gy: 0, u: 0.65 + i * 0.02, v: 0.5 })),
-        ...Array.from({ length: 5 }, (_, i) => base({ mag: 1, gx: -1, gy: 0, u: 0.65 + i * 0.02, v: 0.5 })),
-      ]
-      expect(decodeCell(axisCell, samples)).toBe(-2)
     })
   })
 
@@ -302,23 +227,6 @@ describe('grid', () => {
       const radial = gu * (u - cu) + gv * (v - cv)
       expect(edgeDot).toBeLessThan(0)
       expect(radial).toBeGreaterThan(0)
-    })
-
-    it('decodeVoteBinEdgeChannelDot flips sign across the two bins on a horizontal edge', () => {
-      const tri = 'bottom' as const
-      const mx = 2
-      const my = 3
-      const u = (mx + 0.5) / 8
-      const v = ((my + 1) / 8 + (my + 1.5) / 8) * 0.5
-      const gv = 1
-      const gu = 0
-      const cuUpper = (mx + 0.5) / 8
-      const cvUpper = (my + 1.5) / 8
-      const cuLower = (mx + 0.5) / 8
-      const cvLower = (my + 0.5) / 8
-      const dUpper = decodeVoteBinEdgeChannelDot(tri, u, v, cuUpper, cvUpper, gu, gv)
-      const dLower = decodeVoteBinEdgeChannelDot(tri, u, v, cuLower, cvLower, gu, gv)
-      expect(dUpper * dLower).toBeLessThan(0)
     })
   })
 

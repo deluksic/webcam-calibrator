@@ -158,7 +158,7 @@ export function decodeTag36h11(pattern: TagPattern | undefined, maxError: number
  * Rotate a 6×6 pattern 90 degrees clockwise.
  */
 export function rotatePattern(pattern: TagPattern): TagPattern {
-  const result: TagPattern = Array.from({ length: 36 }, () => 0)
+  const result = [] as TagPattern
   for (let row = 0; row < 6; row++) {
     for (let col = 0; col < 6; col++) {
       const srcIdx = row * 6 + col

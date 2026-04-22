@@ -6,7 +6,7 @@ export const WB = 0.0722
 export const HISTOGRAM_BINS = 256
 export const HIST_WIDTH = 512
 export const HIST_HEIGHT = 120
-export const ALLOWED_ERROR_COUNT = 1
+export const ALLOWED_ERROR_COUNT = 3
 
 /**
  * Must match every `computeFn` that uses `workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1]`.

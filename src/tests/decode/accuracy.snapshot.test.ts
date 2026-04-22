@@ -7,13 +7,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import {
-  DECODE_STRESS_SIZES,
-  DECODE_STRESS_SPECKLE_AMP,
-  decodeStressCornersGridOrder,
-  decodeStressSpeckleSeed,
-} from '@/lib/decodeStressHarness'
-import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
+import { DECODE_STRESS_SIZES, DECODE_STRESS_SPECKLE_AMP, decodeStressSpeckleSeed } from '@/lib/decodeStressHarness'
+import { decodeTagPattern } from '@/lib/grid'
 import { codeToPattern, decodeTag36h11Best, TAG36H11_CODES } from '@/lib/tag36h11'
 import { buildPerspectiveAccuracyTable, cellErrorsVsTruth } from '@/tests/decode/accuracyTable'
 import { buildRasterPack } from '@/tests/shared/pipeline'
@@ -54,8 +49,7 @@ describe('decode accuracy snapshots', () => {
             },
           ],
         })
-        const grid = buildTagGrid(decodeStressCornersGridOrder(pack.groundTruthStrip), 6)
-        const decodedPattern = decodeTagPattern(grid, pack.sobel, wh, undefined, wh)
+        const decodedPattern = decodeTagPattern(pack.groundTruthStrip, pack.sobel, wh, undefined, wh)
         if (!decodedPattern) {
           continue
         }
