@@ -1,6 +1,8 @@
 import { tgpu, d } from 'typegpu'
 
 import { type DetectedQuad, extractRegions, validateAndFilterQuads } from '@/gpu/contour'
+import { createFrameSlotPool } from '@/gpu/frameSlotPool'
+import type { FrameSlot, FrameSlotPool } from '@/gpu/frameSlotPool'
 import {
   createCompactLabelLayouts,
   createCanonicalResetPipeline,
@@ -98,12 +100,6 @@ export function createCameraPipeline(
   const sobelBuffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage('storage')
 
   const filteredBuffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage('storage')
-
-  // Staging buffer for CPU readback of filtered edge gradients
-  const filteredStaging = root.device.createBuffer({
-    size: width * height * 8,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  })
 
   const dilatedEdgeBuffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage('storage')
 
@@ -209,12 +205,6 @@ export function createCameraPipeline(
 
   const compactLabelBuffer = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
 
-  // Staging buffers for CPU readback (requires COPY_DST | MAP_READ)
-  const compactLabelStaging = root.device.createBuffer({
-    size: area * 4,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  })
-
   const compactCounterBuffer = root.createBuffer(d.atomic(d.u32)).$usage('storage')
 
   const { trackLayout: extentTrackLayout } = createExtentTrackingLayouts()
@@ -248,6 +238,8 @@ export function createCameraPipeline(
     compactCounter: compactCounterBuffer,
     canonicalRoot: canonicalRootBuffer,
   })
+  // POINTER_JUMP_ITERATIONS is required to be even, so pj === 0 after the loop
+  // and pointerJumpBuffer0 always holds the converged labels here.
   const compactClaimBindGroup = root.createBindGroup(claimLayout, {
     labelBuffer: pointerJumpBuffer0,
     compactCounter: compactCounterBuffer,
@@ -295,6 +287,9 @@ export function createCameraPipeline(
     sobelRenderLayout,
     filteredRenderLayout,
   } = createLayouts(histogramSchema)
+
+  // ─── Frame slot pool (grid mode: 3 pinned gray+staging slots for frame pairing) ───
+  const frameSlotPool: FrameSlotPool = createFrameSlotPool(root, { width, height, grayRenderLayout })
 
   const copyPipeline = createCopyPipeline(root, copyLayout)
   const grayPipeline = createGrayPipeline(root, grayTexToBufferLayout, width, height)
@@ -397,8 +392,6 @@ export function createCameraPipeline(
     grayBuffer,
     sobelBuffer,
     filteredBuffer,
-    compactLabelStaging,
-    filteredStaging,
     dilatedEdgeBuffer,
     thresholdBuffer,
     thresholdBinBuffer,
@@ -472,6 +465,8 @@ export function createCameraPipeline(
     gridVizBindGroup,
     quadCornersBuffer,
     gridVizDebugModeBuffer,
+    // Frame slot pool for grid-mode frame pairing
+    frameSlotPool,
   }
 }
 
@@ -484,27 +479,39 @@ export const MAX_U32 = 0xffffffff
 export type CameraPipeline = ReturnType<typeof createCameraPipeline>
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PER-FAME PROCESSING
+// PER-FRAME PROCESSING
 // ═══════════════════════════════════════════════════════════════════════════
-export function processFrame(
+
+let nextFrameId = 0
+
+/**
+ * Append the external-texture copy and the full compute chain to `enc`.
+ * Does not submit, does not draw to the canvas.
+ * After this call `pipeline.compactLabelBuffer` and `pipeline.filteredBuffer`
+ * contain the results for this frame.
+ *
+ * When `slot` is provided the matching copies are also appended so that slot's
+ * pinned buffers capture this frame's data. The slot is transitioned to
+ * `'inflight'` and assigned a monotonically-increasing `frameId`.
+ *
+ * IMPORTANT: `enc` must be submitted in the same task (before returning to the
+ * event loop) to avoid the GPUExternalTexture expiring.
+ */
+export function runCompute(
+  enc: GPUCommandEncoder,
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
   video: HTMLVideoElement,
   threshold: number,
-  displayMode: DisplayMode = 'edges',
-  onError?: (msg: string) => void,
+  slot?: FrameSlot,
 ) {
   const copyBindGroup = root.createBindGroup(pipeline.copyLayoutTemplate, {
     cameraTex: root.device.importExternalTexture({ source: video }),
     sampler: pipeline.sampler,
   })
 
-  // Update uniforms
   pipeline.thresholdBuffer.write(threshold)
-  const thresholdBin = round(threshold * 255)
-  pipeline.thresholdBinBuffer.write(thresholdBin)
-
-  const enc = root.device.createCommandEncoder({ label: 'camera frame' })
+  pipeline.thresholdBinBuffer.write(round(threshold * 255))
 
   // RENDER: Copy external → grayTex (MUST happen before compute)
   pipeline.copyPipeline
@@ -513,82 +520,97 @@ export function processFrame(
     .with(copyBindGroup)
     .draw(3)
 
-  // COMPUTE: Gray → Sobel → Histogram + pointer-jump labeling (when Labels/Debug)
-  let finalLabelBuffer = pipeline.pointerJumpBuffer0
-  {
-    const computePass = enc.beginComputePass({
-      label: 'gray + sobel + histogram + filter',
-    })
-    const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height)
-    const area = pipeline.width * pipeline.height
+  // COMPUTE: Gray → Sobel → Histogram + NMS filter + pointer-jump labeling → compact remap → extent tracking
+  const computePass = enc.beginComputePass({ label: 'gray + sobel + histogram + filter' })
+  const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height)
+  const area = pipeline.width * pipeline.height
 
-    pipeline.grayPipeline.with(computePass).with(pipeline.grayTexToBufferBindGroup).dispatchWorkgroups(wgX, wgY)
+  pipeline.grayPipeline.with(computePass).with(pipeline.grayTexToBufferBindGroup).dispatchWorkgroups(wgX, wgY)
+  pipeline.sobelPipeline.with(computePass).with(pipeline.sobelBindGroup).dispatchWorkgroups(wgX, wgY)
+  pipeline.histogramResetPipeline
+    .with(computePass)
+    .with(pipeline.histogramResetBindGroup)
+    .dispatchWorkgroups(HISTOGRAM_BINS)
+  pipeline.histogramPipeline.with(computePass).with(pipeline.histogramComputeBindGroup).dispatchWorkgroups(wgX, wgY)
+  pipeline.edgeFilterPipeline.with(computePass).with(pipeline.edgeFilterBindGroup).dispatchWorkgroups(wgX, wgY)
 
-    pipeline.sobelPipeline.with(computePass).with(pipeline.sobelBindGroup).dispatchWorkgroups(wgX, wgY)
-
-    pipeline.histogramResetPipeline
+  // Pointer-jump connected component labeling
+  pipeline.pointerJumpInitPipeline
+    .with(computePass)
+    .with(pipeline.pointerJumpInitBindGroup)
+    .dispatchWorkgroups(wgX, wgY)
+  let pj = 0
+  for (let s = 0; s < POINTER_JUMP_ITERATIONS; s++) {
+    pipeline.pointerJumpStepPipeline
       .with(computePass)
-      .with(pipeline.histogramResetBindGroup)
-      .dispatchWorkgroups(HISTOGRAM_BINS)
-
-    pipeline.histogramPipeline.with(computePass).with(pipeline.histogramComputeBindGroup).dispatchWorkgroups(wgX, wgY)
-
-    pipeline.edgeFilterPipeline.with(computePass).with(pipeline.edgeFilterBindGroup).dispatchWorkgroups(wgX, wgY)
-
-    // Pointer-jump connected component labeling
-    pipeline.pointerJumpInitPipeline
-      .with(computePass)
-      .with(pipeline.pointerJumpInitBindGroup)
+      .with(pipeline.pointerJumpPingPongBindGroups[pj]!)
       .dispatchWorkgroups(wgX, wgY)
-    let pj = 0
-    for (let s = 0; s < POINTER_JUMP_ITERATIONS; s++) {
-      pipeline.pointerJumpStepPipeline
-        .with(computePass)
-        .with(pipeline.pointerJumpPingPongBindGroups[pj])
-        .dispatchWorkgroups(wgX, wgY)
-      pj ^= 1
-      pipeline.pointerJumpLabelsToAtomicPipeline
-        .with(computePass)
-        .with(pipeline.pointerJumpLabelsToAtomicBindGroups[pj])
-        .dispatchWorkgroups(wgX, wgY)
-      pipeline.pointerJumpParentTightenPipeline
-        .with(computePass)
-        .with(pipeline.pointerJumpParentTightenBindGroups[pj])
-        .dispatchWorkgroups(wgX, wgY)
-      pipeline.pointerJumpAtomicToLabelsPipeline
-        .with(computePass)
-        .with(pipeline.pointerJumpAtomicToLabelsBindGroups[pj])
-        .dispatchWorkgroups(wgX, wgY)
-    }
-    finalLabelBuffer = pj === 0 ? pipeline.pointerJumpBuffer0 : pipeline.pointerJumpBuffer1
-
-    // Compact labeling: 3-pass remap of pixel-index labels to compact IDs (0..N-1).
-    // Always runs — needed for extent tracking to work (labels must fit in extent buffer).
-    // 1. Reset canonicalRoot to INVALID
-    pipeline.compactResetPipeline
+    pj ^= 1
+    pipeline.pointerJumpLabelsToAtomicPipeline
       .with(computePass)
-      .with(pipeline.compactResetBindGroup)
-      .dispatchWorkgroups(ceil(area / COMPUTE_WORKGROUP_SIZE))
-    // 2. Claim: each root (label == pixel idx) stores its own index as compact ID
-    pipeline.compactClaimPipeline.with(computePass).with(pipeline.compactClaimBindGroup).dispatchWorkgroups(wgX, wgY)
-    // 3. Remap: L[i] = canonicalRoot[label] (compact ID, fits in extent buffer)
-    pipeline.compactRemapPipeline.with(computePass).with(pipeline.compactRemapBindGroup).dispatchWorkgroups(wgX, wgY)
-
-    // Use compact labels everywhere downstream
-    finalLabelBuffer = pipeline.compactLabelBuffer
-
-    // Track extents on compact labels
-    pipeline.extentResetPipeline
+      .with(pipeline.pointerJumpLabelsToAtomicBindGroups[pj]!)
+      .dispatchWorkgroups(wgX, wgY)
+    pipeline.pointerJumpParentTightenPipeline
       .with(computePass)
-      .with(pipeline.extentResetBindGroup)
-      .dispatchWorkgroups(ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE))
-    pipeline.extentTrackPipeline.with(computePass).with(pipeline.extentTrackBindGroup).dispatchWorkgroups(wgX, wgY)
-
-    computePass.end()
+      .with(pipeline.pointerJumpParentTightenBindGroups[pj]!)
+      .dispatchWorkgroups(wgX, wgY)
+    pipeline.pointerJumpAtomicToLabelsPipeline
+      .with(computePass)
+      .with(pipeline.pointerJumpAtomicToLabelsBindGroups[pj]!)
+      .dispatchWorkgroups(wgX, wgY)
   }
 
-  // RENDER: Display mode selection + Histogram
-  // onError?.(`[camera] render mode=${displayMode}`);
+  // Compact labeling: 3-pass remap of pixel-index labels to compact IDs (0..N-1).
+  // Always runs — needed for extent tracking (labels must fit in extent buffer).
+  // Reads pointerJumpBuffer0, which holds the converged result because
+  // POINTER_JUMP_ITERATIONS is even (pj === 0 on exit).
+  pipeline.compactResetPipeline
+    .with(computePass)
+    .with(pipeline.compactResetBindGroup)
+    .dispatchWorkgroups(ceil(area / COMPUTE_WORKGROUP_SIZE))
+  pipeline.compactClaimPipeline.with(computePass).with(pipeline.compactClaimBindGroup).dispatchWorkgroups(wgX, wgY)
+  pipeline.compactRemapPipeline.with(computePass).with(pipeline.compactRemapBindGroup).dispatchWorkgroups(wgX, wgY)
+
+  // Extent tracking on compact labels
+  pipeline.extentResetPipeline
+    .with(computePass)
+    .with(pipeline.extentResetBindGroup)
+    .dispatchWorkgroups(ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE))
+  pipeline.extentTrackPipeline.with(computePass).with(pipeline.extentTrackBindGroup).dispatchWorkgroups(wgX, wgY)
+
+  computePass.end()
+
+  // If a slot was provided, pin this frame's buffers into it for async readback.
+  if (slot !== undefined) {
+    pipeline.frameSlotPool.enqueueCopiesForSlot(enc, pipeline, slot)
+    slot.frameId = nextFrameId++
+    slot.state = 'inflight'
+  }
+}
+
+/**
+ * Non-grid display modes that paint synchronously to the canvas.
+ * `'grid'` is intentionally excluded — use `presentGridFrame` for that path,
+ * which pairs the gray snapshot with its matching detection.
+ */
+export type NonGridDisplayMode = Exclude<DisplayMode, 'grid'>
+
+/**
+ * Append display-mode render passes and the histogram draw to `enc`.
+ * After this the caller should submit `enc`.
+ * `pipeline.compactLabelBuffer` is used for label/debug modes (always the
+ * compact output after `runCompute`).
+ *
+ * Only non-grid modes are accepted. Grid mode is handled by `presentGridFrame`
+ * so that the gray snapshot and the overlay always originate from the same frame.
+ */
+export function presentFrame(
+  enc: GPUCommandEncoder,
+  root: Awaited<ReturnType<typeof tgpu.init>>,
+  pipeline: CameraPipeline,
+  displayMode: NonGridDisplayMode,
+  onError?: (msg: string) => void,
+) {
   if (displayMode === 'edges') {
     try {
       pipeline.sobelRenderPipeline
@@ -613,9 +635,9 @@ export function processFrame(
       console.error(msg)
       onError?.(msg)
     }
-  } else if (displayMode === 'labels') {
+  } else if (displayMode === 'labels' || displayMode === 'debug') {
     const labelVizBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
-      labelBuffer: finalLabelBuffer,
+      labelBuffer: pipeline.compactLabelBuffer,
     })
     try {
       pipeline.labelVizPipeline
@@ -624,50 +646,7 @@ export function processFrame(
         .with(labelVizBindGroup)
         .draw(3)
     } catch (e) {
-      const msg = `[camera] labelVizPipeline failed: ${e}`
-      console.error(msg)
-      onError?.(msg)
-    }
-  } else if (displayMode === 'debug') {
-    const labelVizBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
-      labelBuffer: finalLabelBuffer,
-    })
-    try {
-      pipeline.labelVizPipeline
-        .with(enc)
-        .withColorAttachment({ view: pipeline.context })
-        .with(labelVizBindGroup)
-        .draw(3)
-    } catch (e) {
-      const msg = `[camera] labelVizPipeline (debug) failed: ${e}`
-      console.error(msg)
-      onError?.(msg)
-    }
-  } else if (displayMode === 'grid') {
-    // Grayscale base with grid overlay on top (alpha blend)
-    pipeline.grayRenderPipeline
-      .with(enc)
-      .withColorAttachment({
-        view: pipeline.context,
-        loadOp: 'load',
-        storeOp: 'store',
-      })
-      .with(pipeline.grayRenderBindGroup)
-      .draw(3)
-
-    try {
-      // console.log('[camera] gridViz: drawing full-canvas overlay');
-      pipeline.gridVizPipeline
-        .with(enc)
-        .withColorAttachment({
-          view: pipeline.context,
-          loadOp: 'load',
-          storeOp: 'store',
-        })
-        .with(pipeline.gridVizBindGroup)
-        .draw(4, MAX_DETECTED_TAGS) // triangle strip quad per instance
-    } catch (e) {
-      const msg = `[camera] gridViz failed: ${e}`
+      const msg = `[camera] labelVizPipeline (${displayMode}) failed: ${e}`
       console.error(msg)
       onError?.(msg)
     }
@@ -690,8 +669,6 @@ export function processFrame(
     .withColorAttachment({ view: pipeline.histContext })
     .with(pipeline.histogramDisplayBindGroup)
     .draw(6, HISTOGRAM_BINS)
-
-  root.device.queue.submit([enc.finish()])
 }
 
 /**
@@ -782,58 +759,123 @@ export function setGridVizFailInterrogate(pipeline: CameraPipeline, mode: GridVi
   pipeline.gridVizDebugModeBuffer.write(mode)
 }
 
-export async function detectContours(
+/**
+ * Append copies of `compactLabelBuffer` and `filteredBuffer` into the given
+ * staging buffers. The encoder must be submitted by the caller before calling
+ * `readDetection`.
+ */
+export function enqueueReadbackCopies(
+  enc: GPUCommandEncoder,
+  pipeline: CameraPipeline,
+  labelStaging: GPUBuffer,
+  filteredStaging: GPUBuffer,
+) {
+  const labelStorage = pipeline.compactLabelBuffer.buffer as GPUBuffer
+  enc.copyBufferToBuffer(labelStorage, 0, labelStaging, 0, labelStorage.size)
+  const edgeStorage = pipeline.filteredBuffer.buffer as GPUBuffer
+  enc.copyBufferToBuffer(edgeStorage, 0, filteredStaging, 0, edgeStorage.size)
+}
+
+/**
+ * After the encoder containing the readback copies has been submitted, await
+ * GPU completion, map both staging buffers, run CPU region extraction + quad
+ * fitting, and read the extent buffer. Returns the same shape as the old
+ * `detectContours`.
+ */
+export async function readDetection(
   root: Awaited<ReturnType<typeof tgpu.init>>,
   pipeline: CameraPipeline,
+  labelStaging: GPUBuffer,
+  filteredStaging: GPUBuffer,
 ): Promise<{
   quads: DetectedQuad[]
   extentData: ExtentRow[]
   dilatedGradients: Float32Array
   labelData: Uint32Array
 }> {
-  try {
-    // Copy storage buffers → staging buffers (staging has MAP_READ, storage does not)
-    const enc = root.device.createCommandEncoder({ label: 'readback' })
-    const labelStorage = pipeline.compactLabelBuffer.buffer as GPUBuffer
-    enc.copyBufferToBuffer(labelStorage, 0, pipeline.compactLabelStaging, 0, labelStorage.size)
-    const edgeStorage = pipeline.filteredBuffer.buffer as GPUBuffer
-    enc.copyBufferToBuffer(edgeStorage, 0, pipeline.filteredStaging, 0, edgeStorage.size)
-    root.device.queue.submit([enc.finish()])
-    await root.device.queue.onSubmittedWorkDone()
+  await root.device.queue.onSubmittedWorkDone()
 
-    // Read from staging buffers — no TypeGPU wrapper, no per-element toString()
-    await pipeline.compactLabelStaging.mapAsync(GPUMapMode.READ)
-    const labelData = new Uint32Array(pipeline.compactLabelStaging.getMappedRange())
-    const labelDataCopy = new Uint32Array(labelData)
-    pipeline.compactLabelStaging.unmap()
+  await labelStaging.mapAsync(GPUMapMode.READ)
+  const labelDataCopy = new Uint32Array(new Uint32Array(labelStaging.getMappedRange()))
+  labelStaging.unmap()
 
-    await pipeline.filteredStaging.mapAsync(GPUMapMode.READ)
-    const dilatedGradients = new Float32Array(pipeline.filteredStaging.getMappedRange())
-    const dilatedCopy = new Float32Array(dilatedGradients)
-    pipeline.filteredStaging.unmap()
+  await filteredStaging.mapAsync(GPUMapMode.READ)
+  const dilatedCopy = new Float32Array(new Float32Array(filteredStaging.getMappedRange()))
+  filteredStaging.unmap()
 
-    // CPU-side: extract regions and fit quads
-    const regions = extractRegions(labelDataCopy, pipeline.width, pipeline.height, dilatedCopy)
-    const maxArea = pipeline.width * pipeline.height * 0.5
-    const quads = validateAndFilterQuads(regions, dilatedCopy, labelDataCopy, pipeline.width, 400, maxArea).filter(
-      (q) => q.area < pipeline.width * pipeline.height * 0.25,
-    )
+  const regions = extractRegions(labelDataCopy, pipeline.width, pipeline.height, dilatedCopy)
+  const maxArea = pipeline.width * pipeline.height * 0.5
+  const quads = validateAndFilterQuads(regions, dilatedCopy, labelDataCopy, pipeline.width, 400, maxArea).filter(
+    (q) => q.area < pipeline.width * pipeline.height * 0.25,
+  )
 
-    // Read extent buffer
-    const extentData: ExtentRow[] = await pipeline.extentBuffer.read()
+  const extentData: ExtentRow[] = await pipeline.extentBuffer.read()
 
-    return {
-      quads,
-      extentData,
-      dilatedGradients: dilatedCopy,
-      labelData: labelDataCopy,
-    }
-  } catch (e) {
-    console.error('[detectContours] Error:', e)
-    throw e
-  }
+  return { quads, extentData, dilatedGradients: dilatedCopy, labelData: labelDataCopy }
 }
 
-// (empty space)
+/**
+ * Read detection results from a slot whose copies were already enqueued by
+ * `runCompute`. Returns the quads, extents, and the slot itself so the caller
+ * can call `swapDisplaySlot` and `presentGridFrame` after.
+ */
+export async function detectForSlot(
+  root: Awaited<ReturnType<typeof tgpu.init>>,
+  pipeline: CameraPipeline,
+  slot: FrameSlot,
+): Promise<{
+  quads: ReturnType<typeof validateAndFilterQuads>
+  extentData: ExtentRow[]
+  dilatedGradients: Float32Array
+  labelData: Uint32Array
+  frameId: number
+  slot: FrameSlot
+}> {
+  const { quads, extentData, dilatedGradients, labelData } = await readDetection(
+    root,
+    pipeline,
+    slot.labelStaging,
+    slot.filteredStaging,
+  )
+  return { quads, extentData, dilatedGradients, labelData, frameId: slot.frameId, slot }
+}
+
+/**
+ * Encode and submit a command buffer that renders the pinned gray snapshot
+ * from `slot` plus the current grid viz overlay and histogram.
+ * Call this right after `updateQuadCornersBuffer` so the write and draw are
+ * in the same synchronous block.
+ */
+export function presentGridFrame(
+  root: Awaited<ReturnType<typeof tgpu.init>>,
+  pipeline: CameraPipeline,
+  slot: FrameSlot,
+): void {
+  const enc = root.device.createCommandEncoder({ label: 'grid frame present' })
+
+  pipeline.grayRenderPipeline
+    .with(enc)
+    .withColorAttachment({ view: pipeline.context, loadOp: 'load', storeOp: 'store' })
+    .with(slot.grayRenderBindGroup)
+    .draw(3)
+
+  try {
+    pipeline.gridVizPipeline
+      .with(enc)
+      .withColorAttachment({ view: pipeline.context, loadOp: 'load', storeOp: 'store' })
+      .with(pipeline.gridVizBindGroup)
+      .draw(4, MAX_DETECTED_TAGS)
+  } catch (e) {
+    console.error('[presentGridFrame] gridViz failed:', e)
+  }
+
+  pipeline.histogramDisplayPipeline
+    .with(enc)
+    .withColorAttachment({ view: pipeline.histContext })
+    .with(pipeline.histogramDisplayBindGroup)
+    .draw(6, HISTOGRAM_BINS)
+
+  root.device.queue.submit([enc.finish()])
+}
 
 export { computeThreshold }

@@ -14,8 +14,15 @@ export const ALLOWED_ERROR_COUNT = 3
  */
 export const COMPUTE_WORKGROUP_SIZE = 16
 
-/** Pointer-doubling passes: L'[i]=L[L[i]] after init (see pointerJumpPipeline). */
-export const POINTER_JUMP_ITERATIONS = 10
+/**
+ * Pointer-doubling passes: L'[i]=L[L[i]] after init (see pointerJumpPipeline).
+ *
+ * MUST be even. After each full iteration the ping-pong index `pj` flips once,
+ * so an even count guarantees `pj === 0` on exit and the compact-label pipeline
+ * (whose bind groups are fixed to pointerJumpBuffer0) always reads the correct
+ * converged buffer. An odd value would silently read the penultimate result.
+ */
+export const POINTER_JUMP_ITERATIONS = 10 // even ✓
 
 /**
  * Gradient dot-product threshold for edge connectivity.

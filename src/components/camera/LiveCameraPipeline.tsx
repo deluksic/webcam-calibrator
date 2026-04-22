@@ -1,20 +1,24 @@
 import type { JSX } from 'solid-js'
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 
-import type { CameraPipeline, DisplayMode, ExtentRow } from '@/gpu/camera'
+import type { CameraPipeline, DisplayMode, ExtentRow, NonGridDisplayMode } from '@/gpu/camera'
 import {
   createCameraPipeline,
-  processFrame,
+  detectForSlot,
+  presentFrame,
+  presentGridFrame,
   readExtentBuffer,
+  runCompute,
   updateQuadCornersBuffer,
-  detectContours,
   MAX_U32,
   MAX_DETECTED_TAGS,
 } from '@/gpu/camera'
 import type { DetectedQuad } from '@/gpu/contour'
+import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/constants'
 import { createElementSize } from '@/utils/createElementSize'
+import { createFrameLoop } from '@/utils/createFrameLoop'
 
 import styles from '@/components/camera/LiveCameraPipeline.module.css'
 
@@ -175,19 +179,12 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     const canvas = canvasEl()
     const histCanvas = histCanvasEl()
     const video = cameraVideo
-    let primeHandle = 0
-    let rafHandle = 0
     let disposed = false
-    let frameSeq = 0
+    let frameLoop: ReturnType<typeof createFrameLoop> | undefined
 
     onCleanup(() => {
       disposed = true
-      if (primeHandle) {
-        video.cancelVideoFrameCallback(primeHandle)
-      }
-      if (rafHandle) {
-        video.cancelVideoFrameCallback(rafHandle)
-      }
+      frameLoop?.dispose()
       video.pause()
       video.srcObject = null
       log('Pipeline cleanup')
@@ -217,19 +214,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     const pip = createCameraPipeline(g, canvas, histCanvas, vw, vh, navigator.gpu.getPreferredCanvasFormat())
     log(`Pipeline created ${vw}x${vh}`)
 
-    await new Promise<void>((resolve) => {
-      primeHandle = video.requestVideoFrameCallback(() => {
-        primeHandle = 0
-        resolve()
-      })
-    })
-    if (disposed) {
-      return undefined
-    }
-    log('First frame presented')
-
     let extentReadPending = false
-    let quadDetectionPending = false
 
     const scheduleExtentRead = () => {
       if (extentReadPending || disposed) {
@@ -271,21 +256,18 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         })
     }
 
-    const scheduleQuadDetection = (sf: boolean) => {
-      if (quadDetectionPending || disposed) {
-        return
-      }
-      quadDetectionPending = true
+    const scheduleQuadDetection = (slot: FrameSlot, sf: boolean) => {
       const gNow = gpu()
       if (!gNow) {
+        pip.frameSlotPool.releaseSlot(slot)
         return
       }
-      detectContours(gNow, pip)
+      detectForSlot(gNow, pip, slot)
         .then((result) => {
           if (disposed) {
+            pip.frameSlotPool.releaseSlot(slot)
             return
           }
-          quadDetectionPending = false
           const { quads } = result
           quads.sort((a, b) => b.count - a.count)
           const top = quads.slice(0, MAX_DETECTED_TAGS)
@@ -296,6 +278,13 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               vizTagId: ok && typeof q.decodedTagId === 'number' ? q.decodedTagId : undefined,
             }
           })
+
+          // Write corners + render gray+grid+histogram in the same synchronous
+          // block so the GPU overlay always matches slot.graySnapshot.
+          updateQuadCornersBuffer(pip, tagged, sf)
+          pip.frameSlotPool.swapDisplaySlot(slot)
+          presentGridFrame(gNow, pip, slot)
+
           setGridOverlayQuads(
             tagged.filter((q) => {
               if (!q?.hasCorners || q.cornerDebug?.failureCode !== 0) {
@@ -307,45 +296,60 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               return typeof q.decodedTagId === 'number'
             }),
           )
-          updateQuadCornersBuffer(pip, tagged, sf)
-          frameSeq++
-          props.onQuadDetection?.(tagged, { frameId: frameSeq })
+          props.onQuadDetection?.(tagged, { frameId: slot.frameId })
         })
         .catch((e) => {
-          if (disposed) {
-            return
+          if (!disposed) {
+            log(`detectForSlot error: ${e}`)
           }
-          quadDetectionPending = false
-          log(`detectContours error: ${e}`)
+          pip.frameSlotPool.releaseSlot(slot)
         })
     }
 
-    const loop = () => {
-      if (disposed) {
-        return
-      }
-      const gpuNow = gpu()
-      if (!gpuNow) {
-        return
-      }
-      const dm = props.displayMode
-      processFrame(gpuNow, pip, cameraVideo, threshold(), dm, (_err) => {})
-      if (dm === 'debug') {
-        scheduleExtentRead()
-      }
-      if (dm === 'grid' && props.showGrid) {
-        scheduleQuadDetection(props.showFallbacks)
-      }
-      void pip.histogramBuffer.read().then((bins: Uint32Array | number[]) => {
+    frameLoop = createFrameLoop({
+      video,
+      onPrime: () => log('First frame presented'),
+      onFrame: () => {
         if (disposed) {
           return
         }
-        const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins)
-        setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE))
-      })
-      rafHandle = cameraVideo.requestVideoFrameCallback(loop)
-    }
-    rafHandle = cameraVideo.requestVideoFrameCallback(loop)
+        const gpuNow = gpu()
+        if (!gpuNow) {
+          return
+        }
+        const dm = props.displayMode
+        const enc = gpuNow.device.createCommandEncoder({ label: 'camera frame' })
+
+        if (dm === 'grid' && props.showGrid) {
+          // Grid mode: acquire a slot, run compute with copies pinned into it,
+          // submit, then kick off async detection. Canvas is NOT repainted here;
+          // presentGridFrame does that after detection resolves.
+          const slot = pip.frameSlotPool.acquireFreeSlot()
+          if (slot !== undefined) {
+            runCompute(enc, gpuNow, pip, cameraVideo, threshold(), slot)
+            gpuNow.device.queue.submit([enc.finish()])
+            scheduleQuadDetection(slot, props.showFallbacks)
+          }
+          // If no slot is free, skip this frame entirely (backpressure).
+        } else {
+          // Non-grid modes: compute + present synchronously as before.
+          runCompute(enc, gpuNow, pip, cameraVideo, threshold())
+          presentFrame(enc, gpuNow, pip, dm as NonGridDisplayMode, (_err) => {})
+          gpuNow.device.queue.submit([enc.finish()])
+          if (dm === 'debug') {
+            scheduleExtentRead()
+          }
+        }
+
+        void pip.histogramBuffer.read().then((bins: Uint32Array | number[]) => {
+          if (disposed) {
+            return
+          }
+          const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins)
+          setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE))
+        })
+      },
+    })
     log('rVFC loop started')
 
     return pip
