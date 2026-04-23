@@ -45,7 +45,6 @@ export function useCameraStream(): CameraStreamContextValue {
 }
 
 export function CameraStreamProvider(props: ParentProps) {
-  console.log('render')
   const [registeredCameraUsers, setRegisteredCameraUsers] = createSignal(new Set<symbol>(), { equals: false })
   const cameraIsNeeded = createMemo(() => registeredCameraUsers().size > 0)
   const [selectedResolution, setSelectedResolution] = createSignal<Resolution>('low')
@@ -66,15 +65,20 @@ export function CameraStreamProvider(props: ParentProps) {
 
   const deviceIdAndStream = createMemo<{ deviceId: string; stream: MediaStream } | undefined>(async (prev) => {
     const id = selectedCameraDeviceId()
-    console.log('deviceID', id, cameraIsNeeded(), prev)
     if (!id || !cameraIsNeeded()) {
+      if (prev?.stream) {
+        stopCameraStream(prev.stream)
+      }
       return undefined
     }
     if (prev?.deviceId === id) {
       return prev
     }
+    // Many mobile browsers only allow one active camera: release before a new getUserMedia.
+    if (prev?.stream) {
+      stopCameraStream(prev.stream)
+    }
     const stream = await acquireVideoStream(id, untrack(selectedResolution))
-    console.log('stream acquired', id, cameraIsNeeded(), prev)
     return { deviceId: id, stream }
   })
 
@@ -86,7 +90,6 @@ export function CameraStreamProvider(props: ParentProps) {
     return () => {
       untrack(() => {
         if (stream && (!latest(cameraIsNeeded) || latest(selectedCameraDeviceId) !== deviceId)) {
-          console.log('stopped stream', deviceId)
           stopCameraStream(stream)
         }
       })
@@ -97,24 +100,13 @@ export function CameraStreamProvider(props: ParentProps) {
 
   const trackSize = createMemo(async () => {
     const s = stream()
+    const res = RESOLUTION_LADDER[selectedResolution()]
+    await s?.getVideoTracks()[0]?.applyConstraints({ width: res.width, height: res.height })
     const settings = s?.getVideoTracks()[0]?.getSettings()
     const { width, height } = settings ?? {}
     if (s === undefined || width === undefined || height === undefined) {
-      console.log('no stream')
       return undefined
     }
-    const res = RESOLUTION_LADDER[selectedResolution()]
-    if (width !== res.width.ideal || height !== res.height.ideal) {
-      await s?.getVideoTracks()[0]?.applyConstraints({ width: res.width, height: res.height })
-      const settings = s.getVideoTracks()[0]?.getSettings()
-      const { width, height } = settings ?? {}
-      if (width === undefined || height === undefined) {
-        return undefined
-      }
-      console.log('renegotiated', width, height)
-      return { width, height }
-    }
-    console.log('got', width, height)
     return { width, height }
   })
 
