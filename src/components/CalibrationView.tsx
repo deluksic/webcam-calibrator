@@ -157,7 +157,6 @@ function CalibrationView() {
             showFallbacks={showFallbacks()}
             showHistogramCanvas={false}
             stream={cam.stream()}
-            trackSize={cam.trackSize()}
             onQuadDetection={onQuadDetection}
             onLog={console.log}
           />

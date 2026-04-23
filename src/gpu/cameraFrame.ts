@@ -1,4 +1,4 @@
-import type { tgpu, TgpuRoot } from 'typegpu'
+import type { TgpuRoot } from 'typegpu'
 import { d } from 'typegpu'
 
 import type { DetectedQuad } from '@/gpu/contour'
@@ -203,11 +203,13 @@ export function presentFrame(
     }
   }
 
-  pipeline.histogramDisplayPipeline
-    .with(enc)
-    .withColorAttachment({ view: pipeline.histContext })
-    .with(pipeline.histogramDisplayBindGroup)
-    .draw(6, HISTOGRAM_BINS)
+  if (pipeline.histContext) {
+    pipeline.histogramDisplayPipeline
+      .with(enc)
+      .withColorAttachment({ view: pipeline.histContext })
+      .with(pipeline.histogramDisplayBindGroup)
+      .draw(6, HISTOGRAM_BINS)
+  }
 }
 
 /** Write homography matrix (mat3x3) + debug data per quad to the GPU buffer.
@@ -301,11 +303,13 @@ export function presentGridFrame(root: TgpuRoot, pipeline: CameraPipeline, slot:
     console.error('[presentGridFrame] gridViz failed:', e)
   }
 
-  pipeline.histogramDisplayPipeline
-    .with(enc)
-    .withColorAttachment({ view: pipeline.histContext })
-    .with(pipeline.histogramDisplayBindGroup)
-    .draw(6, HISTOGRAM_BINS)
+  if (pipeline.histContext) {
+    pipeline.histogramDisplayPipeline
+      .with(enc)
+      .withColorAttachment({ view: pipeline.histContext })
+      .with(pipeline.histogramDisplayBindGroup)
+      .draw(6, HISTOGRAM_BINS)
+  }
 
   root.device.queue.submit([enc.finish()])
 }

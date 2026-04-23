@@ -61,14 +61,13 @@ export const MAX_U32 = 0xffffffff
 export function createCameraPipeline(
   root: TgpuRoot,
   canvas: HTMLCanvasElement,
-  histCanvas: HTMLCanvasElement,
+  histCanvas: HTMLCanvasElement | undefined,
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
 ) {
   // Configure contexts on canvases
   const context = root.configureContext({ canvas, alphaMode: 'premultiplied' })
-  const histContext = root.configureContext({ canvas: histCanvas })
 
   // ═══════════════════════════════════════════════════════════════════════
   // RESOURCES
@@ -377,6 +376,8 @@ export function createCameraPipeline(
   const labelVizBindGroup = root.createBindGroup(labelVizLayout, {
     labelBuffer: pointerJumpBuffer0,
   })
+
+  const histContext = histCanvas ? root.configureContext({ canvas: histCanvas }) : undefined
 
   return {
     context,

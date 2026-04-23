@@ -20,7 +20,6 @@ export type CameraStreamContextValue = {
   selectedCameraDeviceId: Accessor<string | undefined>
   setSelectedCameraDeviceId: (id: string) => void
   stream: Accessor<MediaStream | undefined>
-  trackSize: Accessor<{ width: number; height: number } | undefined>
   selectedResolution: Accessor<Resolution>
   setSelectedResolution: Setter<Resolution>
   registerCameraUsage: (id: symbol) => void
@@ -66,9 +65,6 @@ export function CameraStreamProvider(props: ParentProps) {
   const deviceIdAndStream = createMemo<{ deviceId: string; stream: MediaStream } | undefined>(async (prev) => {
     const id = selectedCameraDeviceId()
     if (!id || !cameraIsNeeded()) {
-      if (prev?.stream) {
-        stopCameraStream(prev.stream)
-      }
       return undefined
     }
     if (prev?.deviceId === id) {
@@ -98,17 +94,13 @@ export function CameraStreamProvider(props: ParentProps) {
 
   const stream = () => deviceIdAndStream()?.stream
 
-  const trackSize = createMemo(async () => {
-    const s = stream()
-    const res = RESOLUTION_LADDER[selectedResolution()]
-    await s?.getVideoTracks()[0]?.applyConstraints({ width: res.width, height: res.height })
-    const settings = s?.getVideoTracks()[0]?.getSettings()
-    const { width, height } = settings ?? {}
-    if (s === undefined || width === undefined || height === undefined) {
-      return undefined
-    }
-    return { width, height }
-  })
+  createEffect(
+    () => ({ stream: latest(stream), resolution: selectedResolution() }),
+    ({ stream, resolution }) => {
+      const res = RESOLUTION_LADDER[resolution]
+      stream?.getVideoTracks()[0]?.applyConstraints({ width: res.width, height: res.height })
+    },
+  )
 
   async function onDeviceChange() {
     setDevices(await navigator.mediaDevices.enumerateDevices())
@@ -140,7 +132,6 @@ export function CameraStreamProvider(props: ParentProps) {
     selectedCameraDeviceId,
     setSelectedCameraDeviceId,
     stream,
-    trackSize,
     selectedResolution,
     setSelectedResolution,
     registerCameraUsage,

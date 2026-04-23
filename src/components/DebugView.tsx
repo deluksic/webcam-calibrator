@@ -135,7 +135,6 @@ export function DebugView() {
             showFallbacks={showFallbacks()}
             showHistogramCanvas
             stream={cam.stream()}
-            trackSize={cam.trackSize()}
             onLog={log}
           />
         </div>

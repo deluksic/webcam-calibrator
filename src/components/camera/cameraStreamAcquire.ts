@@ -11,7 +11,6 @@ export const RESOLUTION_LADDER = {
  */
 export async function acquireVideoStream(deviceId: string, resolution: Resolution): Promise<MediaStream> {
   const size = RESOLUTION_LADDER[resolution]
-  console.log('acquireVideoStream', deviceId, resolution, size)
   try {
     return await navigator.mediaDevices.getUserMedia({
       video: {

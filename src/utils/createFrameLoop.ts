@@ -8,13 +8,8 @@
  * Returns a `dispose()` function; call it (e.g. from a SolidJS `onCleanup`)
  * to cancel any pending callbacks and stop the loop.
  */
-export function createFrameLoop(options: {
-  video: HTMLVideoElement
-  onPrime?: () => void
-  onFrame: () => void
-}): { dispose: () => void } {
-  const { video, onPrime, onFrame } = options
-  let primeHandle = 0
+export function createFrameLoop(options: { video: HTMLVideoElement; onFrame: () => void }): { dispose: () => void } {
+  const { video, onFrame } = options
   let rafHandle = 0
   let disposed = false
 
@@ -30,22 +25,11 @@ export function createFrameLoop(options: {
     rafHandle = video.requestVideoFrameCallback(loop)
   }
 
-  primeHandle = video.requestVideoFrameCallback(() => {
-    primeHandle = 0
-    if (disposed) {
-      return
-    }
-    onPrime?.()
-    rafHandle = video.requestVideoFrameCallback(loop)
-  })
+  rafHandle = video.requestVideoFrameCallback(loop)
 
   return {
     dispose() {
       disposed = true
-      if (primeHandle) {
-        video.cancelVideoFrameCallback(primeHandle)
-        primeHandle = 0
-      }
       if (rafHandle) {
         video.cancelVideoFrameCallback(rafHandle)
         rafHandle = 0

@@ -1,5 +1,5 @@
 import type { JSX } from 'solid-js'
-import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 
 import { detectForSlot } from '@/gpu/cameraDetection'
 import type { ExtentRow } from '@/gpu/cameraDetection'
@@ -108,7 +108,6 @@ export type LiveCameraPipelineProps = {
   showFallbacks: boolean
   showHistogramCanvas: boolean
   stream: MediaStream | undefined
-  trackSize: { width: number; height: number } | undefined
   onLog: (msg: string) => void
   onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number }) => void
   /** Extra controls (camera select, mode buttons, …). */
@@ -116,7 +115,7 @@ export type LiveCameraPipelineProps = {
 }
 
 export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
-  const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>()
+  const [canvasElement, setCanvasElement] = createSignal<HTMLCanvasElement>()
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement>()
 
   const [threshold, setThreshold] = createSignal(0, { ownedWrite: true })
@@ -125,14 +124,51 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     ownedWrite: true,
   })
 
-  const canvasSize = createElementSize(canvasEl)
+  const videoElement = createMemo(async () => {
+    const canvas = canvasElement()
+    if (!canvas || !props.stream) {
+      return undefined
+    }
+    const el = document.createElement('video')
+    el.muted = true
+    el.srcObject = props.stream
+    el.play()
+    onCleanup(() => {
+      el.pause()
+      el.srcObject = null
+    })
+    return el
+  })
+
+  const [frameSize, setFrameSize] = createSignal(() => {
+    const video = videoElement()
+    if (!video || video.videoWidth === 0 || video.videoHeight === 1) {
+      return undefined
+    }
+    return { width: video.videoWidth, height: video.videoHeight }
+  })
+
+  createEffect(videoElement, (video) => {
+    if (!video) {
+      return
+    }
+    const onResize = () => {
+      setFrameSize({ width: video.videoWidth, height: video.videoHeight })
+    }
+    video.addEventListener('resize', onResize)
+    return () => {
+      video.removeEventListener('resize', onResize)
+    }
+  })
+
+  const canvasSize = createElementSize(canvasElement)
   const scale = createMemo(() => {
+    const video = videoElement()
     const canvasSize_ = canvasSize()
-    const { trackSize } = props
-    if (!canvasSize_ || !trackSize) {
+    if (!canvasSize_ || !video) {
       return { x: 0, y: 0 }
     }
-    return { x: canvasSize_.width / trackSize.width, y: canvasSize_.height / trackSize.height }
+    return { x: canvasSize_.width / video.videoWidth, y: canvasSize_.height / video.videoHeight }
   })
 
   const log = (msg: string) => {
@@ -152,51 +188,41 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
   })
 
   createMemo(async () => {
-    const size = props.trackSize
-    console.log('Init pipeline', size)
-    if (!size) {
+    const video = videoElement()
+    const size = frameSize()
+    if (!video || !size) {
       return undefined
     }
 
     const g = gpu()
-    const canvas = canvasEl()
+    const canvas = canvasElement()
     const histCanvas = histCanvasEl()
-    const video = document.createElement('video')
-    video.muted = true
     let disposed = false
     let frameLoop: ReturnType<typeof createFrameLoop> | undefined
 
     onCleanup(() => {
       disposed = true
       frameLoop?.dispose()
-      video.pause()
-      video.srcObject = null
       log('Pipeline cleanup')
     })
 
-    const stream = props.stream
-    if (!g || !canvas || !histCanvas || !stream) {
+    if (!g || !canvas) {
       log('Pipeline: missing deps')
       return undefined
     }
 
-    histCanvas.width = 512
-    histCanvas.height = 120
-
-    video.srcObject = stream
-    video.play().catch(() => {})
     if (disposed) {
       return undefined
     }
 
-    const vw = video.videoWidth > 0 ? video.videoWidth : max(1, size.width)
-    const vh = video.videoHeight > 0 ? video.videoHeight : max(1, size.height)
-    canvas.width = vw
-    canvas.height = vh
-
     log('Creating pipeline...')
-    const pip = createCameraPipeline(g, canvas, histCanvas, vw, vh, navigator.gpu.getPreferredCanvasFormat())
-    log(`Pipeline created ${vw}x${vh}`)
+
+    const { width, height } = size
+    canvas.width = width
+    canvas.height = height
+
+    const pip = createCameraPipeline(g, canvas, histCanvas, width, height, navigator.gpu.getPreferredCanvasFormat())
+    log(`Pipeline created ${width}x${height}`)
 
     let extentReadPending = false
 
@@ -290,7 +316,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
 
     frameLoop = createFrameLoop({
       video,
-      onPrime: () => log('First frame presented'),
       onFrame: () => {
         if (disposed) {
           return
@@ -343,12 +368,12 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       <div class={[styles.feedPanel, styles.feedPanelMain]}>
         <div class={styles.feedHeader}>
           <span class={styles.feedLabel}>
-            Camera Feed — {props.trackSize?.width ?? '-'}×{props.trackSize?.height ?? '-'}
+            Camera Feed — {frameSize()?.width ?? '-'}×{frameSize()?.height ?? '-'}
           </span>
           {props.toolbar}
         </div>
         <div class={styles.feedContainer}>
-          <canvas ref={setCanvasEl} class={styles.feedCanvas} />
+          <canvas ref={setCanvasElement} class={styles.feedCanvas} />
           <Show when={props.displayMode === 'debug'}>
             <QuadCandidateOverlay bboxes={bboxes()} scale={scale()} />
           </Show>
@@ -360,16 +385,13 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       <div class={[styles.feedPanel, styles.feedPanelSide]}>
         <Show when={props.showHistogramCanvas}>
           <span class={styles.feedLabel}>Edge Detection</span>
-          <canvas ref={setHistCanvasEl} class={styles.histogramCanvas} style={{ width: '512px', height: '120px' }} />
+          <canvas ref={setHistCanvasEl} class={styles.histogramCanvas} width={512} height={120} />
           <div class={styles.histogramInfo}>
             <span class={styles.thresholdLabel}>{(THRESHOLD_PERCENTILE * 100).toFixed(0)}th Percentile Threshold</span>
             <span class={styles.thresholdValue}>
               {(threshold() * 255).toFixed(1)} / 255 <span>({(threshold() * 100).toFixed(1)}%)</span>
             </span>
           </div>
-        </Show>
-        <Show when={!props.showHistogramCanvas}>
-          <canvas ref={setHistCanvasEl} class={styles.histogramHidden} width={512} height={120} aria-hidden="true" />
         </Show>
       </div>
     </div>
