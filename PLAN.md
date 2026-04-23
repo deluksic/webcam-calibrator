@@ -1,42 +1,15 @@
-# AprilTag Grid Visualization
+# AprilTag grid overlay
 
-## Goal
+Wires each detected quad to a **7×7** line grid in image space with a homography from the unit square, rendered in the grid fragment shader (see [`gridVizPipeline.ts`](src/gpu/pipelines/gridVizPipeline.ts)).
 
-Render 7×7 grid lines over detected quads with perspective-correct warping via homography.
+**Data path:** `DetectedQuad` (CPU) → `computeHomography()` → `quadCornersBuffer` (GPU) → `gridVizPipeline` (vertex + fragment).
 
-## Approach
+**`quadCornersBuffer`:** `GridDataSchema` — up to 1024 instances (`MAX_INSTANCES`). Per instance: `mat3x3f` homography (column-major, w normalized to 1 in the last element), `QuadDebug` (`failureCode`, `edgePixelCount`, `minR2`, `intersectionCount`), and `decodedTagId` (use `0xFFFFFFFF` for unknown; shader draws black, no id hash). Homography maps **uv ∈ [0,1]²** to the image quad. Decoded tag IDs get a stable fill tint with `stableHashToRgb01`.
 
-### Shader Strategy
+**UI:** In **Debug**, every display mode (Gray, Edges, NMS, Labels, **Grid**, **Debug**) and the `Fallbk` toggle live on the toolbar. In **Calibrate**, the app stays on **grid** and omits a mode switcher; collection controls only.
 
-For each detected quad, apply a homography warp to map the unit square onto the quad's 4 corner points. Draw grid lines in the fragment shader using the warped UV coordinates.
+**Decode:** NMS-filtered readback from the GPU, CPU homography + bbox scan, tag36h11 with Hamming budget 3, UV voting as described in [`ARCHITECTURE.md`](ARCHITECTURE.md). Overlay shows the numeric id or **`?`** when decode fails.
 
-### Data Flow
+**Corner order** everywhere: **TL, TR, BL, BR** (see `Corners` in [`geometry.ts`](src/lib/geometry.ts)).
 
-```
-DetectedQuads (CPU) → computeHomography() → quadCornersBuffer (GPU)
-                                                   ↓
-                                           gridVizPipeline vertex shader
-                                                   ↓
-                                           Fragment shader draws grid lines
-```
-
-### Buffer Format
-
-`quadCornersBuffer` follows `GridDataSchema` in `gridVizPipeline.ts`: **`MAX_INSTANCES`** entries, each a **`mat3x3f` homography** (column-major, 8 free coeffs + bottom-right 1) plus **`QuadDebug`** (`failureCode`, `edgePixelCount`, `minR2`, `intersectionCount`) and **`decodedTagId`** (u32; **`0xFFFFFFFF`** = unknown / black fill). Homography maps unit square → image quad; failure styling is driven from CPU `cornerDebug`. When a dictionary id is known, the fragment shader hashes **`decodedTagId`** for a stable fill tint (`stableHashToRgb01`).
-
-## Status
-
-- [x] Create gridVizPipeline.ts
-- [x] Add buffer and pipeline to camera.ts
-- [x] Add 'grid' display mode
-- [x] Add Grid button in CalibrationView UI
-- [x] Homography-based perspective warp
-- [x] Fallback quads with visual distinction (red outline, 50% opacity)
-- [x] Fallbk checkbox: show bbox quads and corner quads **without** dictionary decode; off = decoded-only grid
-- [x] CPU AprilTag grid + dictionary decode wired from NMS-filtered Sobel readback (unweighted **τ**-voting; see **`ARCHITECTURE.md` → AprilTag grid + decode**); overlay **`?`** when no match
-
-Full roadmap and phase checkboxes: **`docs/plan.md`**. Product-wide architecture (GPU stages, corner order, buffers): **`ARCHITECTURE.md`**.
-
-### Note — corner order
-
-Everything uses quad corners in **TL, TR, BL, BR** order (`Corners` in `geometry.ts`).
+**Broader** product and roadmap: [`docs/plan.md`](docs/plan.md). **GPU stages and failure semantics:** [`ARCHITECTURE.md`](ARCHITECTURE.md).

@@ -1,146 +1,67 @@
-# Webcam Calibration App — Architecture Plan
+# Webcam calibrator — product notes
 
 ## Overview
 
-Browser-based camera calibration using AprilTag 6×6 grid. Client-side only — no backend.
+In-browser AprilTag 6×6 target capture; no server. All capture, GPU stages, and CPU decode run client-side.
 
-**Stack:** SolidJS 2.0, TypeGPU (WebGPU), CSS Modules
-
----
-
-## Pages
-
-| View          | Description                                                                                                                 |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **Target**    | SVG AprilTag36h11 grid generator for printing                                                                               |
-| **Calibrate** | Live camera + fixed grid/decode viz; **Start / Pause / Reset**; top‑K observation pool + stats (no print layout form in v1) |
-| **Results**   | Calibration output + export (stub)                                                                                          |
-| **Debug**     | Full GPU pipeline exploration: grayscale / edges / NMS / labels / grid / debug, histogram UI, fallbacks, dev logs           |
-
-**Camera:** [`CameraStreamProvider`](src/components/camera/CameraStreamContext.tsx) at app root — shared `MediaStream`, device pick, `enumerateDevices` refresh on `devicechange`, constraint ladder + `getCapabilities` / `applyConstraints` upgrade (`src/lib/cameraStreamAcquire.ts`). **Live camera:** [`LiveCameraPipeline`](src/components/camera/LiveCameraPipeline.tsx) (Calibrate + Debug).
+**Stack:** SolidJS 2.0, TypeGPU (WebGPU), CSS modules.
 
 ---
 
-## Detection Pipeline
+## UI
 
-**GPU (every frame in grid / labels / debug paths):**
+| View | Role |
+| ---- | ---- |
+| **Target** | SVG AprilTag36h11 sheet for printing |
+| **Calibrate** | Live **grid** view; **Start / Pause / Reset**; top‑K observation pool and session stats |
+| **Results** | Camera intrinsics, distortion, and export (solver and wiring not in this build) |
+| **Debug** | Full `DisplayMode` set, edge histogram, optional bbox overlay, `Fallbk` (show quads that did not pass dictionary decode), log tail |
 
-1. Grayscale conversion
-2. Sobel edge detection
-3. Histogram + adaptive threshold (90th percentile)
-4. Non-maximum suppression (NMS) + edge filter
-5. Connected component labeling (GPU pointer-jump)
-6. Compact labeling (atomic remap to 0..N-1)
-7. Extent tracking (atomic bounding boxes)
-
-**CPU (grid mode, throttled readback — `detectContours` / `validateAndFilterQuads`):**
-
-8. Regions from compact labels → per region **corner pipeline** in order: labeled edge pixels → k-means on gradients → **four** line fits (RANSAC+PCA) → all-pairs line intersections (clip to extent bbox ± shared slack) → dedupe → strict convex CCW ordering + plausibility; emit corners **TL, TR, BL, BR** for homography (see **`ARCHITECTURE.md` → Corner Detection**).
-9. **AprilTag decode (same pass)** — `buildTagGrid` + `decodeTagPattern` use corners **TL, TR, BL, BR** → `decodeTagPattern` (quad bbox pixel loop, inverse homography → tag UV, **8×8** center+diagonal half-spaces → two adjacent bins, **unweighted** ±1 **`decodeVoteBinRadialDot`** per bin on **NMS-filtered** `(gx, gy)` — same readback family as corner Sobel inputs) → `decodeTag36h11AnyRotation` → optional `decodedTagId` / `decodedRotation` on `DetectedQuad`.
-10. Homography solve per quad (CPU) → GPU `quadCornersBuffer` for instanced grid viz.
-11. Grid render (GPU, `gridVizPipeline`: homography warp + fragment **8×8** grid lines; successful quads with a CPU-supplied id get **`stableHashToRgb01`** tint from the buffer’s **`decodedTagId`** field, populated from **`vizTagId`** when the dictionary match exists).
-
-Step 8 failure ordering: **`ARCHITECTURE.md` → Corner Detection**. Grid + decode detail: **`ARCHITECTURE.md` → AprilTag grid + decode**.
+**Camera** — shared [`CameraStreamContext`](../src/components/camera/CameraStreamContext.tsx) at the root: `MediaStream`, device selection, `devicechange` refresh, resolution ladder, and `applyConstraints` where supported ([`cameraStreamAcquire.ts`](../src/components/camera/cameraStreamAcquire.ts)). **Live** preview and GPU work: [`LiveCameraPipeline`](../src/components/camera/LiveCameraPipeline.tsx).
 
 ---
 
-## Implementation Phases
+## Detection pipeline
 
-### Phase 1 — Infrastructure
+**GPU (modes that need the full label chain: `labels`, `debug`, `grid`):**
 
-- [x] Vite + SolidJS + TypeGPU setup
-- [x] CSS design system
+1. Grayscale
+2. Sobel
+3. Histogram; adaptive edge threshold (95th percentile, `THRESHOLD_PERCENTILE` in [`constants.ts`](../src/gpu/pipelines/constants.ts))
+4. NMS and edge filter
+5. Pointer-jump CCL
+6. Compact remap to 0…N−1
+7. Extent (axis-aligned bounds per component)
 
-### Phase 2 — UI Shell
+**CPU-on-grid** — after each submitted grid pass, if a [frame slot](../src/gpu/frameSlotPool.ts) is available, `readDetection` maps staging buffers, builds regions, runs `validateAndFilterQuads`, and completes homography + tag36h11 decode. Frame slots (default: 3) provide backpressure: if all slots are busy, the incoming frame is skipped.
 
-- [x] App with view switching (Target → Calibrate → Results → **Debug**)
-- [x] **Debug** view: display modes + histogram; **Calibrate** view: workflow + fixed grid (modes moved off Calibrate)
+Order for one region: labeled edge samples → k-means (k=4) on NMS `(gx, gy)` → RANSAC+PCA line per cluster → line intersections (with slack) → dedupe → convex order + plausibility → **TL, TR, BL, BR** → `buildTagGrid` / `decodeTagPattern` → `decodeTag36h11AnyRotation(..., ALLOWED_ERROR_COUNT)` with `maxError = 3` → `DetectedQuad` fields. See [`ARCHITECTURE.md`](../ARCHITECTURE.md) for the corner table and decode notes.
 
-### Phase 3 — Camera + Grayscale
-
-- [x] Camera access + video display
-- [x] Grayscale conversion
-- [x] Sobel edge detection
-- [x] Histogram + adaptive threshold
-- [x] Edge filtering
-
-### Phase 4 — AprilTag Detection
-
-- [x] Edge detection (Sobel + threshold)
-- [x] NMS (non-max suppression)
-- [x] Connected components (GPU pointer-jump)
-- [x] Compact labeling (atomic counter)
-- [x] Extent tracking (atomic bounding boxes)
-
-### Phase 4.1 — Quad Fitting
-
-- [x] Region extraction from labels
-- [x] K-means clustering on **raw Sobel gradients** (cosine dissimilarity, k=4, restarts)
-- [x] **RANSAC + PCA** line fit per cluster (`src/lib/corners.ts`)
-- [x] All line-pair intersections → dedupe → strict convex CCW cycle + rotation to TL/TR/BL/BR + plausibility
-- [x] Homography solve via Gaussian elimination
-- [x] Corner plausibility checks
-- [x] Bounding box fallback for failed quads
-
-See **`ARCHITECTURE.md` → Corner Detection** for the ordered CPU stages (what runs _before_ line intersection and how that relates to failure codes).
-
-### Phase 4.2 — Tag Decode
-
-- [x] tag36h11 dictionary (587 codings; Hamming match in `decodeTag36h11`, configurable `maxError`)
-- [x] Hamming distance matching + rotation-invariant decode (`decodeTag36h11AnyRotation`)
-- [x] End-to-end CPU wire: `validateAndFilterQuads` → `buildTagGrid` (with TL/TR/BR/BL corner order) → `decodeTagPattern` → dictionary decode; `pattern`, `decodedTagId`, `decodedRotation` on `DetectedQuad`
-- [x] UI / GPU tint: prefer decoded id; show **`?`** when no dictionary match (see `CalibrationView`)
-- [x] **Robust decode (homography + 8×8)** — `decodeTagPattern`: bbox scan, inverse **H** → `(u,v)`, NMS-filtered Sobel, tag-UV gradient, half-space triangle per sample → **two** adjacent module bins; **unweighted** ±1 votes use **`decodeVoteBinRadialDot`** per bin (**`gᵤ(u−cu)+gᵥ(v−cv)`**); proximity **`max(τ, 2/L_min, 0.5/8)`** in UV (`L_min` = shortest quad edge px). No bbox quantile **`magCut`**, no **`mag²`** weighting—edge filtering is **GPU NMS**. Inner **6×6** pattern with **`-1`** / **`-2`** + **`fillUnknownNeighbors6`** (**`-1`** only). Optional **`buildDecodeEdgeMask`**; live path passes **`undefined`**. Per-cell **`decodeCell`** remains for unit tests.
-
-### Phase 4.3 — Subpixel Refinement
-
-- [ ] Parabolic surface fit on gradient magnitude
-
-### Phase 5 — Pose + Solver
-
-- [ ] EPnP + RANSAC
-- [ ] Bundle adjustment (LM)
-- [ ] Target point relaxation
-
-### Phase 6 — Full Pipeline
-
-- [ ] Connect all stages
-- [ ] Real-time corner overlay
-- [ ] View collection + BA trigger
-- [ ] Results display + export
-
-### Phase 7 — Target Display
-
-- [x] SVG AprilTag grid generation
-- [x] Configurable N×M layout
-- [x] Spacing control (as ratio of tag size)
-- [x] Optional checkerboard between tags
-- [x] Fullscreen mode
-
-### Phase 8 — Polish
-
-- [ ] Motion blur feedback
-- [ ] Quality indicators
-- [ ] Error states
+**Grid draw** — [`gridVizPipeline`](../src/gpu/pipelines/gridVizPipeline.ts) warps a unit grid with the CPU homography; `decodedTagId` drives tint via `stableHashToRgb01` when known.
 
 ---
 
-## Camera Model
+## What ships in this build
 
-**Planned solver:** pinhole + **OpenCV rational** distortion (`k1, k2, p1, p2, k3, k4, k5, k6`). Types: [`src/lib/cameraModel.ts`](src/lib/cameraModel.ts).
-
-Legacy note (superseded for BA):
-
-```
-Intrinsics: fx, fy, cx, cy (4)
-Distortion: k1, k2, k3, p1, p2 (5)
-```
+- WebGPU frame pipeline: gray → Sobel → threshold → NMS → labeling → extent
+- `grid` + async `readDetection` with slot pool
+- Per-quad homography, bounding-box fallback, grid visualization, optional `Fallbk` in Debug
+- tag36h11 decode (587 codewords, Hamming `maxError` 3 from constants)
+- **Calibrate:** top‑K tag observations (id, rotation, score) with merge/eviction; duplicate tag IDs in one frame are rejected; stats panel
+- **Target** sheet generator (layout, spacing, optional checker, fullscreen)
+- **Results** route: UI shell only; no solver data or export yet
 
 ---
 
-## Good View Criteria
+## Roadmap (not in this build)
 
-- ≥ 30 tags detected
-- RANSAC inlier ratio > 80%
-- Reprojection error < 5 px
-- Minimum 10–15 views before BA
+- Subpixel corner refinement (e.g. parabolic fit on gradient magnitude)
+- Camera pose: EPnP + RANSAC, then bundle adjustment (e.g. Levenberg–Marquardt)
+- **Results:** show intrinsics, rational / OpenCV-style distortion, export
+- Refined UX: motion hints, reprojection and inlier stats once a solver exists, stronger error states
+
+**Camera / solver model (planned):** pinhole with OpenCV **rational** distortion (`k1`…`k6`); types in [`cameraModel.ts`](../src/lib/cameraModel.ts). Earlier five-parameter distortion (k1, k2, k3, p1, p2) appears in some OpenCV examples; the solver is expected to use the full rational model.
+
+**Good-view heuristics (for a future BA):** on the order of 30+ tags visible, high RANSAC inlier rate, reprojection under ~5 px, and 10–15+ diverse views before a global solve.
+
+Grid overlay design notes: [`PLAN.md`](../PLAN.md) (homography, buffer layout, corner order **TL, TR, BL, BR** in [`geometry.ts`](../src/lib/geometry.ts)).

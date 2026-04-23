@@ -2,25 +2,18 @@
 
 ## Development
 
-**IMPORTANT**: Never run `pnpm vite build`, `npx tsc`, or any build/typecheck commands manually. Watchers run in the background.
+- `pnpm dev` — Vite dev server
+- `pnpm type` — TypeScript check (`tsc --noEmit`)
+- `pnpm build` — production build to `dist/`
+- `pnpm test` — Vitest (also `test:subpixel`, `test:decode` for focused suites)
+- `pnpm lint` / `pnpm fmt` — Oxlint, Oxfmt
 
-- `pnpm check` — check typecheck + build status (reads from running watchers). **Always use this** instead of `tsc` manually.
-- `pnpm ship:watch` — rebuild + redeploy on file changes.
-- `pnpm typecheck:watch` — typecheck on file changes.
-
-Watchers log to:
-
-- Typecheck: `/tmp/tsc-watch.log`
-- Build: `/tmp/ship-watch.log`
-
-## Setup
-
-```bash
-# One-time: symlink dist to webroot
-rm -rf /var/www/webcam-calibration.clodhost.com/public
-ln -s /webcam-calibrator/dist /var/www/webcam-calibration.clodhost.com/public
-```
+Deploy by serving the `dist/` output as static files (any static host or CDN).
 
 ## Versioning
 
-Build hash is automatic — injected by `src/plugins/buildHash.ts`. Check the `[build] <hash>` console log to verify which build is running.
+Build hash is injected at build time (`src/plugins/buildHash.ts`). The browser console shows `[build] <hash>` so you can confirm which build is running.
+
+---
+
+Project docs: [`README.md`](../README.md), [`ARCHITECTURE.md`](../ARCHITECTURE.md), [`docs/plan.md`](../docs/plan.md).
