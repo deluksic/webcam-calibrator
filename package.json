@@ -1,6 +1,6 @@
 {
   "name": "webcam-calibrator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -13,6 +13,7 @@
     "test:decode": "vitest run src/tests/decode"
   },
   "dependencies": {
+    "@solidjs/router": "0.17.0-next.2",
     "@solidjs/web": "2.0.0-beta.7",
     "solid-js": "2.0.0-beta.7",
     "typegpu": "^0.11.2"

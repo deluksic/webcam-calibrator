@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js'
+import { A, HashRouter, Route, type RouteSectionProps } from '@solidjs/router'
 
 import { CalibrationView } from '@/components/CalibrationView'
 import { CameraStreamProvider } from '@/components/camera/CameraStreamContext'
@@ -9,49 +9,29 @@ import { VERSION } from '@/version'
 
 import styles from '@/components/App.module.css'
 
-export type View = 'target' | 'calibrate' | 'results' | 'debug'
-
 export function App() {
-  const [view, setView] = createSignal<View>('calibrate')
+  const Layout = (props: RouteSectionProps) => (
+    <>
+      <nav class={styles.nav}>
+        <A href="/target" class={styles.navBtn}>Target</A>
+        <A href="/calibrate" class={styles.navBtn}>Calibrate</A>
+        <A href="/results" class={styles.navBtn}>Results</A>
+        <A href="/debug" class={styles.navBtn}>Debug</A>
+        <span class={styles.version}>{VERSION}</span>
+      </nav>
+      <main class={styles.main}>{props.children}</main>
+    </>
+  )
 
   return (
     <CameraStreamProvider>
-      <div class={styles.root}>
-        <nav class={styles.nav}>
-          <button
-            class={[styles.navBtn, view() === 'target' && styles.navBtnActive]}
-            onClick={() => setView('target')}
-          >
-            Target
-          </button>
-          <button
-            class={[styles.navBtn, view() === 'calibrate' && styles.navBtnActive]}
-            onClick={() => setView('calibrate')}
-          >
-            Calibrate
-          </button>
-          <button
-            class={[styles.navBtn, view() === 'results' && styles.navBtnActive]}
-            onClick={() => setView('results')}
-          >
-            Results
-          </button>
-          <button
-            class={[styles.navBtn, view() === 'debug' && styles.navBtnActive]}
-            onClick={() => setView('debug')}
-          >
-            Debug
-          </button>
-          <span class={styles.version}>{VERSION}</span>
-        </nav>
-
-        <main class={styles.main}>
-          {view() === 'target' && <TargetView />}
-          {view() === 'calibrate' && <CalibrationView />}
-          {view() === 'results' && <ResultsView />}
-          {view() === 'debug' && <DebugView />}
-        </main>
-      </div>
+      <HashRouter root={Layout}>
+        <Route path="/" component={TargetView} />
+        <Route path="/target" component={TargetView} />
+        <Route path="/calibrate" component={CalibrationView} />
+        <Route path="/results" component={ResultsView} />
+        <Route path="/debug" component={DebugView} />
+      </HashRouter>
     </CameraStreamProvider>
   )
 }
