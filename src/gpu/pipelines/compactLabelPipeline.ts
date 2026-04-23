@@ -12,6 +12,7 @@
 //   3. Remap: L[i] = canonicalRoot[label] (compact ID), or INVALID if > maxComponents
 //
 // Root index IS the compact ID — this is deterministic, no counter race.
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { atomicLoad, atomicStore, atomicAdd } from 'typegpu/std'
 
@@ -40,7 +41,7 @@ export function createCompactLabelLayouts() {
 }
 
 export function createCanonicalResetPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   resetLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   area: number,
 ) {
@@ -62,7 +63,7 @@ export function createCanonicalResetPipeline(
 }
 
 export function createCanonicalClaimPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   claimLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
@@ -109,7 +110,7 @@ export function createCanonicalClaimPipeline(
 }
 
 export function createRemapLabelPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   remapLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

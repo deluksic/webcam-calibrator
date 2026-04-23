@@ -1,10 +1,11 @@
 // Sobel buffer render pipeline: sobelBuffer → canvas
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor, length } from 'typegpu/std'
 
 export function createSobelRenderPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   sobelLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

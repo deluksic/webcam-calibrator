@@ -1,13 +1,14 @@
 // Merge edge responses only along the local edge tangent (perpendicular to Sobel gradient).
 // Skips neighbors that lie mostly along the gradient normal so the mask does not thicken.
 // Outputs gradient (vec2f) instead of scalar mask.
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { abs, length, sqrt } from 'typegpu/std'
 
 import { EDGE_DILATE_THRESHOLD } from '@/gpu/pipelines/constants'
 
 export function createEdgeDilatePipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   edgeDilateLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

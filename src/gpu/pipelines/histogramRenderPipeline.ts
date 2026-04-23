@@ -1,4 +1,5 @@
 // Histogram render pipeline: histogramBuffer → histogram bars
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { atomicLoad, log2 } from 'typegpu/std'
 
@@ -7,7 +8,7 @@ import { HISTOGRAM_BINS, HIST_WIDTH, HIST_HEIGHT } from '@/gpu/pipelines/constan
 const { floor } = Math
 
 export function createHistogramRenderPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   histogramDisplayLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   presentationFormat: GPUTextureFormat,
   totalPixels: number,

@@ -1,10 +1,11 @@
 // Grayscale render pipeline: grayBuffer → canvas
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor } from 'typegpu/std'
 
 export function createGrayRenderPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   grayLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

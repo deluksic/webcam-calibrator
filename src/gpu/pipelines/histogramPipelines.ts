@@ -1,11 +1,12 @@
 // Histogram pipelines: reset and accumulate
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { atomicAdd, atomicStore, length } from 'typegpu/std'
 
 import { HISTOGRAM_BINS } from '@/gpu/pipelines/constants'
 
 export function createHistogramResetPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   histogramResetLayout: ReturnType<typeof tgpu.bindGroupLayout>,
 ) {
   const histogramResetKernel = tgpu.computeFn({
@@ -24,7 +25,7 @@ export function createHistogramResetPipeline(
 }
 
 export function createHistogramAccumulatePipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   histogramLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

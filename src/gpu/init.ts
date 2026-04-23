@@ -1,25 +1,20 @@
 // TypeGPU initialization — singleton GPU root
+import type { TgpuRoot } from 'typegpu'
 import { tgpu } from 'typegpu'
 
 const { navigator } = globalThis
 
-let rootPromise: Promise<Awaited<ReturnType<typeof tgpu.init>>> | null = null
+let rootPromise: Promise<TgpuRoot> | undefined = undefined
 
-export async function initGPU(): Promise<Awaited<ReturnType<typeof tgpu.init>>> {
+export async function initGPU(): Promise<TgpuRoot> {
   if (rootPromise) {
     return rootPromise
   }
 
   if (!navigator.gpu) {
-    throw new Error(
-      'WebGPU is not supported. Please use Chrome 113+, Edge 113+, ' + 'or Firefox Nightly with WebGPU enabled.',
-    )
+    throw new Error('WebGPU is not supported.')
   }
 
   rootPromise = tgpu.init()
   return rootPromise
-}
-
-export function getRoot() {
-  throw new Error('getRoot is deprecated — use the root from initGPU instead')
 }

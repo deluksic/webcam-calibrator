@@ -3,6 +3,7 @@
 //
 // Gradient compatibility: neighbors with strongly opposing gradient directions (dot(g_i, g_j) < cosThreshold)
 // are NOT connected — this prevents corners from spanning across edge discontinuities.
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { atomicLoad, atomicMin, atomicStore, length } from 'typegpu/std'
 
@@ -42,7 +43,7 @@ export function createPointerJumpLayouts() {
 }
 
 export function createPointerJumpInitPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   initLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
@@ -90,7 +91,7 @@ export function createPointerJumpInitPipeline(
 }
 
 export function createPointerJumpStepPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   stepLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
@@ -122,7 +123,7 @@ export function createPointerJumpStepPipeline(
 }
 
 export function createPointerJumpLabelsToAtomicPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   labelsToAtomicLayout: ReturnType<typeof createPointerJumpLayouts>['labelsToAtomicLayout'],
   width: number,
   height: number,
@@ -149,7 +150,7 @@ export function createPointerJumpLabelsToAtomicPipeline(
 }
 
 export function createPointerJumpParentTightenPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   parentTightenLayout: ReturnType<typeof createPointerJumpLayouts>['parentTightenLayout'],
   width: number,
   height: number,
@@ -206,7 +207,7 @@ export function createPointerJumpParentTightenPipeline(
 }
 
 export function createPointerJumpAtomicToLabelsPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   atomicToLabelsLayout: ReturnType<typeof createPointerJumpLayouts>['atomicToLabelsLayout'],
   width: number,
   height: number,

@@ -1,9 +1,10 @@
 // Sobel pipeline: grayBuffer → sobelBuffer
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { clamp } from 'typegpu/std'
 
 export function createSobelPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   sobelLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

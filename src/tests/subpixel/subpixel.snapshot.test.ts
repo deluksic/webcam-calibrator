@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { refineHomographyV1, refineIdentity } from '@/tests/subpixel/refiners'
+import { refineIdentity, refineSubpixelHomographyV1 } from '@/tests/subpixel/refiners'
 import { runSubpixelAlignmentCase } from '@/tests/subpixel/runCase'
 import { attachFailureArtifacts, writeGreyPng, writeSobelMagPng } from '@/tests/utils/failureArtifacts'
 import { finiteDifferenceSobelFromIntensity } from '@/tests/utils/syntheticAprilTag'
@@ -28,7 +28,7 @@ describe('subpixel alignment', () => {
       scene: baseScene,
       noise: [{ type: 'speckle' as const, amplitude: 0.1, seed: 42 }],
       initial: { kind: 'mismatchTemplate' as const, scale: 0.5 },
-      refiner: refineHomographyV1,
+      refiner: refineSubpixelHomographyV1,
       decodedTagId: 0,
     }
     const result = runSubpixelAlignmentCase(args)

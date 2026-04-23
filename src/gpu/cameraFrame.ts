@@ -1,4 +1,5 @@
-import { tgpu, d } from 'typegpu'
+import type { tgpu, TgpuRoot } from 'typegpu'
+import { d } from 'typegpu'
 
 import type { DetectedQuad } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
@@ -44,7 +45,7 @@ let nextFrameId = 0
  */
 export function runCompute(
   enc: GPUCommandEncoder,
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   pipeline: CameraPipeline,
   video: HTMLVideoElement,
   threshold: number,
@@ -144,7 +145,7 @@ export function runCompute(
  */
 export function presentFrame(
   enc: GPUCommandEncoder,
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   pipeline: CameraPipeline,
   displayMode: NonGridDisplayMode,
   onError?: (msg: string) => void,
@@ -232,9 +233,15 @@ export function updateQuadCornersBuffer(
       homography: H
         ? d.mat3x3f(
             // transpose the matrix (row-major Mat3 → column-major GPU)
-            H[0], H[3], H[6],
-            H[1], H[4], H[7],
-            H[2], H[5], H[8],
+            H[0],
+            H[3],
+            H[6],
+            H[1],
+            H[4],
+            H[7],
+            H[2],
+            H[5],
+            H[8],
           )
         : d.mat3x3f(0, 0, 0, 0, 0, 0, 0, 0, 1),
       debug: {
@@ -275,11 +282,7 @@ export function setGridVizFailInterrogate(pipeline: CameraPipeline, mode: GridVi
  * Call this right after `updateQuadCornersBuffer` so the write and draw are
  * in the same synchronous block.
  */
-export function presentGridFrame(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
-  pipeline: CameraPipeline,
-  slot: FrameSlot,
-): void {
+export function presentGridFrame(root: TgpuRoot, pipeline: CameraPipeline, slot: FrameSlot): void {
   const enc = root.device.createCommandEncoder({ label: 'grid frame present' })
 
   pipeline.grayRenderPipeline
@@ -306,4 +309,3 @@ export function presentGridFrame(
 
   root.device.queue.submit([enc.finish()])
 }
-

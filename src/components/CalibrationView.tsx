@@ -61,7 +61,7 @@ function CalibrationView() {
   const showFallbacks = () => false
 
   const devicesSorted = createMemo(async () => {
-    const list = await cam.devices()
+    const list = cam.devices()
     return [...list].sort((a, b) => deviceScore(b) - deviceScore(a))
   })
 
@@ -127,15 +127,14 @@ function CalibrationView() {
   return (
     <div class={styles.root}>
       <p class={styles.hint}>
-        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target. Layout is recovered in bundle
-        adjustment — no grid setup here.
+        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target.
       </p>
       <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
         <div class={styles.cameraBlock}>
           <select
             class={[pipelineStyles.cameraSelect, styles.calibrateCameraSelect]}
-            value={cam.deviceId() ?? ''}
-            onChange={(e) => cam.setDeviceId(e.currentTarget.value)}
+            value={cam.selectedCameraDeviceId() ?? ''}
+            onChange={(e) => cam.setSelectedCameraDeviceId(e.currentTarget.value)}
           >
             <For each={devicesSorted()}>
               {(item) => (
@@ -145,6 +144,7 @@ function CalibrationView() {
           </select>
           <select
             class={pipelineStyles.cameraSelect}
+            value={cam.selectedResolution()}
             onChange={(e) => cam.setSelectedResolution(e.currentTarget.value as Resolution)}
           >
             <For each={Object.keys(RESOLUTION_LADDER)} keyed={false}>
@@ -159,6 +159,7 @@ function CalibrationView() {
             stream={cam.stream()}
             trackSize={cam.trackSize()}
             onQuadDetection={onQuadDetection}
+            onLog={console.log}
           />
         </div>
       </Errored>

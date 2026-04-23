@@ -1,10 +1,11 @@
 // Gray pipeline: grayTex → grayBuffer
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 
 import { WR, WG, WB } from '@/gpu/pipelines/constants'
 
 export function createGrayPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   grayTexToBufferLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

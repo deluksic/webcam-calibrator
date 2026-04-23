@@ -1,21 +1,12 @@
-import { tgpu, d } from 'typegpu'
+import type { d, TgpuRoot } from 'typegpu'
 
 import { type DetectedQuad, extractRegions, validateAndFilterQuads } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
-import { ExtentEntry } from '@/gpu/pipelines/extentTrackingPipeline'
+import type { ExtentEntry } from '@/gpu/pipelines/extentTrackingPipeline'
 
 import { MAX_U32, type CameraPipeline } from './cameraPipeline'
 
-// ═══════════════════════════════════════════════════════════════════════════
-// EXTENT READBACK
-// ═══════════════════════════════════════════════════════════════════════════
-
-/** Read the extent buffer. Call periodically (not every frame) to get bounding boxes. */
 export type ExtentRow = d.Infer<typeof ExtentEntry>
-
-export async function readExtentBuffer(pipeline: CameraPipeline): Promise<ExtentRow[]> {
-  return pipeline.extentBuffer.read()
-}
 
 /**
  * Read extent buffer and filter to valid quad candidates.
@@ -25,10 +16,6 @@ export async function readExtentDataForQuads(pipeline: CameraPipeline): Promise<
   const all = await pipeline.extentBuffer.read()
   return all.filter((e) => e.minX !== MAX_U32)
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GPU→CPU READBACK + DETECTION
-// ═══════════════════════════════════════════════════════════════════════════
 
 /**
  * Append copies of `compactLabelBuffer` and `filteredBuffer` into the given
@@ -54,7 +41,7 @@ export function enqueueReadbackCopies(
  * `detectContours`.
  */
 export async function readDetection(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   pipeline: CameraPipeline,
   labelStaging: GPUBuffer,
   filteredStaging: GPUBuffer,
@@ -91,7 +78,7 @@ export async function readDetection(
  * can call `swapDisplaySlot` and `presentGridFrame` after.
  */
 export async function detectForSlot(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   pipeline: CameraPipeline,
   slot: FrameSlot,
 ): Promise<{

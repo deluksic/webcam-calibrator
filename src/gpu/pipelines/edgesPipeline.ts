@@ -1,11 +1,12 @@
 // Edge render pipeline: filteredBuffer + sobelBuffer → edges canvas
 // Colorizes edges by gradient direction using continuous HSV coloring.
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { common } from 'typegpu'
 import { atan2, clamp, floor, length, max } from 'typegpu/std'
 
 export function createEdgesPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   edgesLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

@@ -6,11 +6,12 @@
 //
 // Output: filteredBuffer[i] = suppressed gradient (vec2f; zero if not a local max or below threshold).
 // The edges display pipeline computes magnitude from length() on-the-fly.
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { length, select } from 'typegpu/std'
 
 export function createEdgeFilterPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   edgeFilterLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

@@ -1,3 +1,4 @@
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 
 import { createFrameSlotPool } from '@/gpu/frameSlotPool'
@@ -8,10 +9,7 @@ import {
   createCanonicalClaimPipeline,
   createRemapLabelPipeline,
 } from '@/gpu/pipelines/compactLabelPipeline'
-import {
-  HISTOGRAM_BINS,
-  POINTER_JUMP_ITERATIONS,
-} from '@/gpu/pipelines/constants'
+import { HISTOGRAM_BINS } from '@/gpu/pipelines/constants'
 import { createCopyPipeline } from '@/gpu/pipelines/copyPipeline'
 import { createEdgeDilatePipeline } from '@/gpu/pipelines/edgeDilatePipeline'
 import { createEdgeFilterPipeline } from '@/gpu/pipelines/edgeFilterPipeline'
@@ -61,7 +59,7 @@ export const MAX_U32 = 0xffffffff
 // PIPELINE FACTORY
 // ═══════════════════════════════════════════════════════════════════════════
 export function createCameraPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   canvas: HTMLCanvasElement,
   histCanvas: HTMLCanvasElement,
   width: number,

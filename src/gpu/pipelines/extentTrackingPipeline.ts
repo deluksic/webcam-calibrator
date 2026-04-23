@@ -1,5 +1,6 @@
 // Extent tracking: atomic min/max per component across a single pass over the label buffer.
 // GPU tracks (minX, minY, maxX, maxY) for each component ID.
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { atomicMin, atomicMax, atomicStore } from 'typegpu/std'
 
@@ -34,7 +35,7 @@ export function createExtentTrackingLayouts() {
 // ════════════════════════════════════════════════════════════════════════════
 
 export function createExtentResetPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   resetLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   numComponents: number,
 ) {
@@ -62,7 +63,7 @@ export function createExtentResetPipeline(
 // ════════════════════════════════════════════════════════════════════════════
 
 export function createExtentTrackPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   trackLayout: ReturnType<typeof createExtentTrackingLayouts>['trackLayout'],
   width: number,
   height: number,

@@ -4,11 +4,34 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-6);
-  padding: var(--space-8);
+  gap: var(--space-4);
+  padding: var(--space-6);
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+.error {
+  color: var(--color-error);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+  max-width: 42rem;
+  line-height: var(--leading-relaxed);
+}
+
+.cameraBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 100%;
 }
 
 .debugToolbar {

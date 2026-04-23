@@ -1,10 +1,8 @@
 // Copy pipeline: external texture → grayTex
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std, common } from 'typegpu'
 
-export function createCopyPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
-  copyLayout: ReturnType<typeof tgpu.bindGroupLayout>,
-) {
+export function createCopyPipeline(root: TgpuRoot, copyLayout: ReturnType<typeof tgpu.bindGroupLayout>) {
   const copyFrag = tgpu.fragmentFn({
     in: { uv: d.location(0, d.vec2f) },
     out: d.vec4f,

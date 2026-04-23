@@ -43,7 +43,6 @@ const { min, max, floor, ceil, abs, round } = Math
 
 const TAG = 8
 const DOT_EPS = 1e-8
-const MIN_VOTE_TOTAL = 3
 const SPECKLE = 0
 const TAG_ID = 0
 
@@ -106,10 +105,10 @@ function writeVotesOnRasterPng(
   return path
 }
 
-function classify(blackCount: number, whiteCount: number): string {
+function classify(blackCount: number, whiteCount: number, minVoteTotal: number): string {
   const sum = whiteCount + blackCount
-  if (sum < MIN_VOTE_TOTAL) {
-    return `-1 (sum=${sum} < ${MIN_VOTE_TOTAL})`
+  if (sum < minVoteTotal) {
+    return `-1 (sum=${sum} < ${minVoteTotal})`
   }
   if (blackCount > whiteCount) {
     return `0 black (blackCount ${blackCount} > whiteCount ${whiteCount})`
@@ -156,7 +155,7 @@ function main() {
   const { intensity, sobel } = decodeStressRasterSobel(wh, wh, rasterStrip, truthPat, ss, TAG_ID, SPECKLE)
 
   const grid = buildTagGrid(decodeStrip, 6)
-  const { pattern, whiteModuleCount, blackModuleCount, uvProximityMax } = decodeTagPatternWithVoteMaps(
+  const { pattern, whiteModuleCount, blackModuleCount, uvProximityMax, minVoteTotal } = decodeTagPatternWithVoteMaps(
     decodeStrip,
     sobel,
     wh,
@@ -179,7 +178,9 @@ function main() {
   console.log(
     `wh=${wh} homography max-axis≈${hMaxAxisPx}px (scale=${scaleDiag.toFixed(6)}), tagId=${TAG_ID}, ss=${ss}, speckle=${SPECKLE}`,
   )
-  console.log(`uvProximityMax=${uvProximityMax.toFixed(6)} (TAU/Lmin/half) grid lMin≈${lMin.toFixed(2)}px`)
+  console.log(
+    `uvProximityMax=${uvProximityMax.toFixed(6)} (TAU/Lmin/half) grid lMin≈${lMin.toFixed(2)}px minVoteTotal=${minVoteTotal}`,
+  )
   console.log('')
 
   const pi = row * 6 + col
@@ -188,13 +189,13 @@ function main() {
   )
   console.log(`truth[${pi}]=${truthPat[pi]} decoded[${pi}]=${pattern[pi]}`)
   console.log(
-    `blackModuleCount[${miInner}]=${blackModuleCount[miInner]} whiteModuleCount[${miInner}]=${whiteModuleCount[miInner]} → ${classify(blackModuleCount[miInner]!, whiteModuleCount[miInner]!)}`,
+    `blackModuleCount[${miInner}]=${blackModuleCount[miInner]} whiteModuleCount[${miInner}]=${whiteModuleCount[miInner]} → ${classify(blackModuleCount[miInner]!, whiteModuleCount[miInner]!, minVoteTotal)}`,
   )
   console.log('')
   if (target !== miInner) {
     console.log(`--- module mi=${target} (mx=${target % TAG}, my=${(target / TAG) | 0}) ---`)
     console.log(
-      `blackModuleCount[${target}]=${blackModuleCount[target]} whiteModuleCount[${target}]=${whiteModuleCount[target]} → ${classify(blackModuleCount[target]!, whiteModuleCount[target]!)}`,
+      `blackModuleCount[${target}]=${blackModuleCount[target]} whiteModuleCount[${target}]=${whiteModuleCount[target]} → ${classify(blackModuleCount[target]!, whiteModuleCount[target]!, minVoteTotal)}`,
     )
     console.log('')
   }

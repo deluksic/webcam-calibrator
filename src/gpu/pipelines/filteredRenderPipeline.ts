@@ -1,10 +1,11 @@
 // Debug render pipeline: filtered edge buffer → canvas
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor, length } from 'typegpu/std'
 
 export function createFilteredRenderPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   filteredLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

@@ -46,97 +46,99 @@ export function DebugView() {
   }
 
   const devicesSorted = createMemo(async () => {
-    const list = await cam.devices()
+    const list = cam.devices()
     return [...list].sort((a, b) => deviceScore(b) - deviceScore(a))
   })
 
-  const toolbar = () => (
-    <div class={styles.debugToolbar}>
-      <select
-        class={[pipelineStyles.cameraSelect, styles.debugCameraSelect]}
-        value={cam.deviceId() ?? ''}
-        onChange={(e) => cam.setDeviceId(e.currentTarget.value)}
-      >
-        <For each={devicesSorted()}>
-          {(item) => <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>}
-        </For>
-      </select>
-      <select
-        class={pipelineStyles.cameraSelect}
-        onChange={(e) => cam.setSelectedResolution(e.currentTarget.value as Resolution)}
-      >
-        <For each={Object.keys(RESOLUTION_LADDER)} keyed={false}>
-          {(resolution) => <option value={resolution()}>{resolution()}</option>}
-        </For>
-      </select>
-      <div class={styles.debugModeRow}>
-        <button
-          type="button"
-          class={displayMode() === 'grayscale' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-          onClick={() => setDisplayMode('grayscale')}
-        >
-          Gray
-        </button>
-        <button
-          type="button"
-          class={displayMode() === 'edges' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-          onClick={() => setDisplayMode('edges')}
-        >
-          Edges
-        </button>
-        <button
-          type="button"
-          class={displayMode() === 'nms' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-          onClick={() => setDisplayMode('nms')}
-        >
-          NMS
-        </button>
-        <button
-          type="button"
-          class={displayMode() === 'labels' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-          onClick={() => setDisplayMode('labels')}
-        >
-          Labels
-        </button>
-        <button
-          type="button"
-          class={displayMode() === 'grid' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-          onClick={() => setDisplayMode('grid')}
-        >
-          Grid
-        </button>
-        <label class={pipelineStyles.checkboxLabel}>
-          <input
-            type="checkbox"
-            checked={showFallbacks()}
-            onChange={(e) => setShowFallbacks(e.currentTarget.checked)}
-          />
-          Fallbk
-        </label>
-        <button
-          type="button"
-          class={displayMode() === 'debug' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-          onClick={() => setDisplayMode('debug')}
-        >
-          Debug
-        </button>
-      </div>
-    </div>
-  )
-
   return (
     <div class={styles.root}>
-      <Errored fallback={(err) => <p style={{ color: 'var(--color-error)' }}>Camera: {String(err)}</p>}>
-        <LiveCameraPipeline
-          displayMode={displayMode()}
-          showGrid={showGrid()}
-          showFallbacks={showFallbacks()}
-          showHistogramCanvas
-          stream={cam.stream()}
-          trackSize={cam.trackSize()}
-          onLog={log}
-          toolbar={toolbar()}
-        />
+      <p class={styles.hint}>Pipeline modes, histogram, and log tail for tuning detection.</p>
+      <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
+        <div class={styles.cameraBlock}>
+          <div class={styles.debugToolbar}>
+            <select
+              class={[pipelineStyles.cameraSelect, styles.debugCameraSelect]}
+              value={cam.selectedCameraDeviceId() ?? ''}
+              onChange={(e) => cam.setSelectedCameraDeviceId(e.currentTarget.value)}
+            >
+              <For each={devicesSorted()}>
+                {(item) => (
+                  <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
+                )}
+              </For>
+            </select>
+            <select
+              class={pipelineStyles.cameraSelect}
+              value={cam.selectedResolution()}
+              onChange={(e) => cam.setSelectedResolution(e.currentTarget.value as Resolution)}
+            >
+              <For each={Object.keys(RESOLUTION_LADDER)} keyed={false}>
+                {(resolution) => <option value={resolution()}>{resolution()}</option>}
+              </For>
+            </select>
+            <div class={styles.debugModeRow}>
+              <button
+                type="button"
+                class={displayMode() === 'grayscale' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
+                onClick={() => setDisplayMode('grayscale')}
+              >
+                Gray
+              </button>
+              <button
+                type="button"
+                class={displayMode() === 'edges' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
+                onClick={() => setDisplayMode('edges')}
+              >
+                Edges
+              </button>
+              <button
+                type="button"
+                class={displayMode() === 'nms' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
+                onClick={() => setDisplayMode('nms')}
+              >
+                NMS
+              </button>
+              <button
+                type="button"
+                class={displayMode() === 'labels' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
+                onClick={() => setDisplayMode('labels')}
+              >
+                Labels
+              </button>
+              <button
+                type="button"
+                class={displayMode() === 'grid' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
+                onClick={() => setDisplayMode('grid')}
+              >
+                Grid
+              </button>
+              <label class={pipelineStyles.checkboxLabel}>
+                <input
+                  type="checkbox"
+                  checked={showFallbacks()}
+                  onChange={(e) => setShowFallbacks(e.currentTarget.checked)}
+                />
+                Fallbk
+              </label>
+              <button
+                type="button"
+                class={displayMode() === 'debug' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
+                onClick={() => setDisplayMode('debug')}
+              >
+                Debug
+              </button>
+            </div>
+          </div>
+          <LiveCameraPipeline
+            displayMode={displayMode()}
+            showGrid={showGrid()}
+            showFallbacks={showFallbacks()}
+            showHistogramCanvas
+            stream={cam.stream()}
+            trackSize={cam.trackSize()}
+            onLog={log}
+          />
+        </div>
       </Errored>
       <div class={styles.logTail}>
         <For each={logs()} keyed={false}>

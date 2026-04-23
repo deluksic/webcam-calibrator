@@ -1,12 +1,12 @@
 import type { JSX } from 'solid-js'
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js'
 
-import { detectForSlot, readExtentBuffer } from '@/gpu/cameraDetection'
+import { detectForSlot } from '@/gpu/cameraDetection'
 import type { ExtentRow } from '@/gpu/cameraDetection'
 import { presentFrame, presentGridFrame, runCompute, updateQuadCornersBuffer } from '@/gpu/cameraFrame'
 import type { NonGridDisplayMode } from '@/gpu/cameraFrame'
 import { createCameraPipeline, MAX_U32, MAX_DETECTED_TAGS } from '@/gpu/cameraPipeline'
-import type { CameraPipeline, DisplayMode } from '@/gpu/cameraPipeline'
+import type { DisplayMode } from '@/gpu/cameraPipeline'
 import type { DetectedQuad } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
@@ -109,25 +109,13 @@ export type LiveCameraPipelineProps = {
   showHistogramCanvas: boolean
   stream: MediaStream | undefined
   trackSize: { width: number; height: number } | undefined
-  onLog?: (msg: string) => void
+  onLog: (msg: string) => void
   onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number }) => void
   /** Extra controls (camera select, mode buttons, …). */
   toolbar?: JSX.Element
 }
 
 export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
-  const cameraVideo = (() => {
-    const v = document.createElement('video')
-    v.muted = true
-    v.playsInline = true
-    return v
-  })()
-
-  onCleanup(() => {
-    cameraVideo.pause()
-    cameraVideo.srcObject = null
-  })
-
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>()
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement>()
 
@@ -163,8 +151,9 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     }
   })
 
-  const cameraPipeline = createMemo(async (_prev: CameraPipeline | undefined) => {
+  createMemo(async () => {
     const size = props.trackSize
+    console.log('Init pipeline', size)
     if (!size) {
       return undefined
     }
@@ -172,7 +161,8 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     const g = gpu()
     const canvas = canvasEl()
     const histCanvas = histCanvasEl()
-    const video = cameraVideo
+    const video = document.createElement('video')
+    video.muted = true
     let disposed = false
     let frameLoop: ReturnType<typeof createFrameLoop> | undefined
 
@@ -194,7 +184,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     histCanvas.height = 120
 
     video.srcObject = stream
-    await video.play().catch(() => {})
+    video.play().catch(() => {})
     if (disposed) {
       return undefined
     }
@@ -215,7 +205,8 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         return
       }
       extentReadPending = true
-      readExtentBuffer(pip)
+      pip.extentBuffer
+        .read()
         .then((extentData: ExtentRow[]) => {
           if (disposed) {
             return
@@ -242,10 +233,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           boxes.sort((a, b) => b.area - a.area)
           setBboxes(boxes.slice(0, 128))
         })
-        .catch(() => {
-          if (disposed) {
-            return
-          }
+        .finally(() => {
           extentReadPending = false
         })
     }
@@ -320,14 +308,14 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           // presentGridFrame does that after detection resolves.
           const slot = pip.frameSlotPool.acquireFreeSlot()
           if (slot !== undefined) {
-            runCompute(enc, gpuNow, pip, cameraVideo, threshold(), slot)
+            runCompute(enc, gpuNow, pip, video, threshold(), slot)
             gpuNow.device.queue.submit([enc.finish()])
             scheduleQuadDetection(slot, props.showFallbacks)
           }
           // If no slot is free, skip this frame entirely (backpressure).
         } else {
           // Non-grid modes: compute + present synchronously as before.
-          runCompute(enc, gpuNow, pip, cameraVideo, threshold())
+          runCompute(enc, gpuNow, pip, video, threshold())
           presentFrame(enc, gpuNow, pip, dm as NonGridDisplayMode, (_err) => {})
           gpuNow.device.queue.submit([enc.finish()])
           if (dm === 'debug') {
@@ -335,11 +323,12 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           }
         }
 
-        void pip.histogramBuffer.read().then((bins: Uint32Array | number[]) => {
+        // TODO: read using Uint32Array directly
+        void pip.histogramBuffer.read().then((bins) => {
           if (disposed) {
             return
           }
-          const data = bins instanceof Uint32Array ? bins : new Uint32Array(bins)
+          const data = new Uint32Array(bins)
           setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE))
         })
       },
@@ -348,12 +337,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
 
     return pip
   })
-
-  /** Subscribe so the async pipeline memo runs (lazy memos are not pulled otherwise). */
-  createEffect(
-    () => cameraPipeline(),
-    () => {},
-  )
 
   return (
     <div class={styles.feedRow}>

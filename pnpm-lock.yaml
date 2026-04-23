@@ -16,7 +16,7 @@ importers:
     dependencies:
       '@solidjs/router':
         specifier: 0.17.0-next.2
-        version: https://codeload.github.com/solidjs/solid-router/tar.gz/c8322771fc8137b605c7e9bad0dbc60dd1fadd78(@solidjs/web@2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7))(solid-js@2.0.0-beta.7)
+        version: 0.17.0-next.2(@solidjs/web@2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7))(solid-js@2.0.0-beta.7)
       '@solidjs/web':
         specifier: 2.0.0-beta.7
         version: 2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7)
@@ -838,9 +838,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@solidjs/router@https://codeload.github.com/solidjs/solid-router/tar.gz/c8322771fc8137b605c7e9bad0dbc60dd1fadd78':
-    resolution: {tarball: https://codeload.github.com/solidjs/solid-router/tar.gz/c8322771fc8137b605c7e9bad0dbc60dd1fadd78}
-    version: 0.17.0-next.2
+  '@solidjs/router@0.17.0-next.2':
+    resolution: {integrity: sha512-CtzkzF+B/D/wD5U7gUfhG+qLSSyY3CqvrkeODZ1YivgPW/AynnRha98QaqRSt6/8ymMqBQ7aPt8CmxmFDZG1CQ==}
     peerDependencies:
       '@solidjs/web': 2.0.0-beta.7
       solid-js: 2.0.0-beta.7
@@ -2302,7 +2301,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.60.1':
     optional: true
 
-  '@solidjs/router@https://codeload.github.com/solidjs/solid-router/tar.gz/c8322771fc8137b605c7e9bad0dbc60dd1fadd78(@solidjs/web@2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7))(solid-js@2.0.0-beta.7)':
+  '@solidjs/router@0.17.0-next.2(@solidjs/web@2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7))(solid-js@2.0.0-beta.7)':
     dependencies:
       '@solidjs/web': 2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7)
       solid-js: 2.0.0-beta.7

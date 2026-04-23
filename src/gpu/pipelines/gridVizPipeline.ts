@@ -1,4 +1,5 @@
 // Grid visualization pipeline: instanced quad rendering via homography warping
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { abs, floor, fract, min, max, dpdx, dpdy, mul } from 'typegpu/std'
 
@@ -41,7 +42,7 @@ export function createGridVizLayouts() {
 }
 
 export function createGridVizPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   gridVizLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,

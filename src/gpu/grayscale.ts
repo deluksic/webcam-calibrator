@@ -3,6 +3,7 @@
 // Pass 2: compute RGBA → rgba8unorm grayscale (compute pass)
 // Pass 3: render grayscale → canvas (render pass)
 
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, common, std } from 'typegpu'
 
 const WR = 0.2126
@@ -11,7 +12,7 @@ const WB = 0.0722
 
 // ─── Pipeline factory ────────────────────────────────────────────────────
 export function createGrayscalePipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   canvas: HTMLCanvasElement,
   width: number,
   height: number,

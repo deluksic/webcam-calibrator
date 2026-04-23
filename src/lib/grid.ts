@@ -6,7 +6,7 @@ import { length, lineFromPoints, lineIntersection, tryComputeHomography } from '
 import type { Corners, Mat3, Point } from '@/lib/geometry'
 import type { TagPattern } from '@/lib/tag36h11'
 
-const { min, max, abs, floor, ceil } = Math
+const { min, max, abs, floor, ceil, round } = Math
 
 export interface GridCell {
   row: number
@@ -112,7 +112,12 @@ export function buildTagGrid(corners: Corners, divisions: number = 6): GridResul
       const brIdx = (row + 1) * (divisions + 1) + col + 1
       const blIdx = brIdx - 1
 
-      const cellCorners: Corners = [innerCorners[tlIdx]!, innerCorners[trIdx]!, innerCorners[blIdx]!, innerCorners[brIdx]!]
+      const cellCorners: Corners = [
+        innerCorners[tlIdx]!,
+        innerCorners[trIdx]!,
+        innerCorners[blIdx]!,
+        innerCorners[brIdx]!,
+      ]
 
       const center = {
         x: (cellCorners[0].x + cellCorners[1].x + cellCorners[2].x + cellCorners[3].x) / 4,
@@ -165,15 +170,14 @@ export function imageGradToUvGrad(
   return { gu, gv }
 }
 
-/** Min |UV − center|² so we ignore the flat interior where radial direction is ill-defined. */
-const DECODE_RADIAL_MIN2 = 0.015 * 0.015
 /** Dot-product deadband in UV-gradient space (noise). */
 const DECODE_DOT_EPS = 1e-8
 /**
- * Minimum count of directional votes (pos + neg) before calling black/white vs **no signal** (`-1`).
- * Ties with at least this many votes return **`-2`** (ambiguous, not “missing edges”).
+ * Minimum directional vote total (`white+black`) is `max(2, round(this × shortest quad edge px))` so
+ * the bar tracks on-screen tag size under homography (distance / angle). Floor **2** matches the old
+ * fixed threshold for ~100px edges at 2%.
  */
-const DECODE_MIN_VOTE_TOTAL = 3
+export const DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE = 0.02
 
 /** AprilTag unit square is an 8×8 module grid (black border ring + inner 6×6 data). */
 const TAG_MODULES = 8
@@ -362,9 +366,17 @@ export function distPointToClosedRectUv(u: number, v: number, u0: number, u1: nu
   return length(u - cu, v - cv)
 }
 
-function classifyModuleFromPosNeg(whiteCount: number, blackCount: number): 0 | 1 | -1 | -2 {
+function decodeMinVoteTotalFromShortestEdgePx(lMinPx: number): number {
+  return max(2, round(DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE * lMinPx))
+}
+
+function classifyModuleFromPosNeg(
+  whiteCount: number,
+  blackCount: number,
+  minVoteTotal: number,
+): 0 | 1 | -1 | -2 {
   const sum = whiteCount + blackCount
-  if (sum < DECODE_MIN_VOTE_TOTAL) {
+  if (sum < minVoteTotal) {
     return -1
   }
   if (blackCount > whiteCount) {
@@ -493,6 +505,11 @@ export type DecodeTagPatternVoteMaps = {
   blackModuleCount: Uint32Array
   /** Same gate as the inner loop: `max(TAU_MODULE_UV, 2/L_min, 0.5/8)` in tag UV. */
   uvProximityMax: number
+  /**
+   * Minimum `white+black` per cell for black/white vs **`-1`**; `max(2, round(f·L_min))` with
+   * **f** = {@link DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE}.
+   */
+  minVoteTotal: number
 }
 
 function decodeTagPatternVoteAccumulation(
@@ -501,11 +518,17 @@ function decodeTagPatternVoteAccumulation(
   imageWidth: number,
   imageH: number,
   edgeMask?: Uint8Array,
-): { whiteModuleCount: Uint32Array; blackModuleCount: Uint32Array; uvProximityMax: number } {
+): {
+  whiteModuleCount: Uint32Array
+  blackModuleCount: Uint32Array
+  uvProximityMax: number
+  minVoteTotal: number
+} {
   const [tl, tr, bl, br] = corners
   const h = tryComputeHomography(corners)
 
   const lMin = minQuadEdgeLengthPx(corners)
+  const minVoteTotal = decodeMinVoteTotalFromShortestEdgePx(lMin)
   const uvHalfModule = 0.5 / TAG_MODULES
   const uvProximityMax = max(TAU_MODULE_UV, 2 / lMin, uvHalfModule)
 
@@ -514,6 +537,7 @@ function decodeTagPatternVoteAccumulation(
       whiteModuleCount: new Uint32Array(64),
       blackModuleCount: new Uint32Array(64),
       uvProximityMax,
+      minVoteTotal,
     }
   }
 
@@ -576,7 +600,7 @@ function decodeTagPatternVoteAccumulation(
     }
   }
 
-  return { whiteModuleCount, blackModuleCount, uvProximityMax }
+  return { whiteModuleCount, blackModuleCount, uvProximityMax, minVoteTotal }
 }
 
 /**
@@ -591,7 +615,7 @@ export function decodeTagPatternWithVoteMaps(
   imageHeight?: number,
 ): DecodeTagPatternVoteMaps {
   const imageH = imageHeight !== undefined ? imageHeight : floor(sobelData.length / (2 * imageWidth))
-  const { whiteModuleCount, blackModuleCount, uvProximityMax } = decodeTagPatternVoteAccumulation(
+  const { whiteModuleCount, blackModuleCount, uvProximityMax, minVoteTotal } = decodeTagPatternVoteAccumulation(
     corners,
     sobelData,
     imageWidth,
@@ -605,13 +629,13 @@ export function decodeTagPatternWithVoteMaps(
       const mx = col + 1
       const my = row + 1
       const mi = my * TAG_MODULES + mx
-      const cell = classifyModuleFromPosNeg(whiteModuleCount[mi]!, blackModuleCount[mi]!)
+      const cell = classifyModuleFromPosNeg(whiteModuleCount[mi]!, blackModuleCount[mi]!, minVoteTotal)
       pattern.push(cell)
     }
   }
 
   fillUnknownNeighbors6(pattern)
-  return { pattern, whiteModuleCount, blackModuleCount, uvProximityMax }
+  return { pattern, whiteModuleCount, blackModuleCount, uvProximityMax, minVoteTotal }
 }
 
 export function decodeTagPattern(

@@ -1,3 +1,4 @@
+import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor } from 'typegpu/std'
@@ -6,7 +7,7 @@ import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
 export function createLabelVizPipeline(
-  root: Awaited<ReturnType<typeof tgpu.init>>,
+  root: TgpuRoot,
   labelVizLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
