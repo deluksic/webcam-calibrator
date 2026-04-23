@@ -11,6 +11,7 @@ import {
   applyHomography,
   computeProjectiveWeights,
   type Corners,
+  type Mat3,
 } from '@/lib/geometry'
 
 const { abs, max, min } = Math
@@ -273,7 +274,7 @@ describe('geometry', () => {
 
   describe('applyHomography', () => {
     it('applies identity correctly', () => {
-      const H = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0])
+      const H: Mat3 = [1, 0, 0, 0, 1, 0, 0, 0, 1]
       const result = applyHomography(H, 0.5, 0.5)
       expect(result.x).toBeCloseTo(0.5, 5)
       expect(result.y).toBeCloseTo(0.5, 5)
@@ -281,7 +282,7 @@ describe('geometry', () => {
 
     it('applies translation correctly', () => {
       // H maps (u,v) → (u+10, v+20)
-      const H = new Float32Array([1, 0, 10, 0, 1, 20, 0, 0])
+      const H: Mat3 = [1, 0, 10, 0, 1, 20, 0, 0, 1]
       const result = applyHomography(H, 0, 0)
       expect(result.x).toBeCloseTo(10, 5)
       expect(result.y).toBeCloseTo(20, 5)
@@ -289,7 +290,7 @@ describe('geometry', () => {
 
     it('applies scale correctly', () => {
       // H maps (u,v) → (2*u, 3*v)
-      const H = new Float32Array([2, 0, 0, 0, 3, 0, 0, 0])
+      const H: Mat3 = [2, 0, 0, 0, 3, 0, 0, 0, 1]
       const result = applyHomography(H, 0.5, 0.5)
       expect(result.x).toBeCloseTo(1, 5)
       expect(result.y).toBeCloseTo(1.5, 5)

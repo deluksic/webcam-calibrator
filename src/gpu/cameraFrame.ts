@@ -231,16 +231,10 @@ export function updateQuadCornersBuffer(
     data.push({
       homography: H
         ? d.mat3x3f(
-            // transpose the matrix
-            H[0],
-            H[3],
-            H[6],
-            H[1],
-            H[4],
-            H[7],
-            H[2],
-            H[5],
-            1,
+            // transpose the matrix (row-major Mat3 → column-major GPU)
+            H[0], H[3], H[6],
+            H[1], H[4], H[7],
+            H[2], H[5], H[8],
           )
         : d.mat3x3f(0, 0, 0, 0, 0, 0, 0, 0, 1),
       debug: {

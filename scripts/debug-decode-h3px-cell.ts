@@ -279,11 +279,11 @@ function main() {
       `${s.ix},${s.iy} tri=${s.tri} dot=${s.dot.toExponential(4)} ${s.sign} u=${s.u.toFixed(5)} v=${s.v.toFixed(5)}`,
     )
   }
-  const nPos = samples.filter((s) => s.sign === 'pos').length
-  const nNeg = samples.filter((s) => s.sign === 'neg').length
+  const nBlack = samples.filter((s) => s.sign === 'black').length
+  const nWhite = samples.filter((s) => s.sign === 'white').length
   const nSkip = samples.filter((s) => s.sign === 'skip').length
   console.log(
-    `total pixel-bin contributions into mi=${target}: ${samples.length} (pos ${nPos} neg ${nNeg} deadband ${nSkip})`,
+    `total pixel-bin contributions into mi=${target}: ${samples.length} (black ${nBlack} white ${nWhite} deadband ${nSkip})`,
   )
 }
 

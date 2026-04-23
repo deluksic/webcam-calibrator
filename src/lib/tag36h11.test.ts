@@ -129,7 +129,7 @@ describe('tag36h11', () => {
 
   describe('decodeTag36h11AnyRotation', () => {
     it('returns undefined for undefined pattern', () => {
-      expect(decodeTag36h11AnyRotation(undefined)).toBeUndefined()
+      expect(decodeTag36h11AnyRotation(undefined, 5)).toBeUndefined()
     })
 
     it('chooses rotation with lowest Hamming distance', () => {

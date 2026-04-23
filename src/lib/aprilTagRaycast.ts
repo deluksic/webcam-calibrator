@@ -1,22 +1,11 @@
-// Homography UV mapping for decode: inverse 3×3 of `computeHomography`’s strip corners → unit-square (u, v).
+// Homography UV mapping for decode: inverse 3×3 of `computeHomography`'s strip corners → unit-square (u, v).
+import type { Mat3 } from '@/lib/geometry'
+
 const { abs } = Math
 
-/** 3×3 row-major [m0..m8] = [r0c0, r0c1, r0c2, r1c0, ...] */
-function mat3FromHomography8(h: Float32Array): number[] {
-  return [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1]
-}
-
-/** Full inverse of a 3×3 row-major matrix; returns row-major 9 floats or `undefined` if singular. */
-export function invertMat3RowMajor(m: number[]): number[] | undefined {
-  const a = m[0],
-    b = m[1],
-    c = m[2]
-  const d = m[3],
-    e = m[4],
-    f = m[5]
-  const g = m[6],
-    h = m[7],
-    i = m[8]
+/** Full inverse of a 3×3 row-major matrix; returns row-major 9-tuple or `undefined` if singular. */
+export function invertMat3RowMajor(m: Mat3): Mat3 | undefined {
+  const [a, b, c, d, e, f, g, h, i] = m
 
   const ei_minus_fh = e * i - f * h
   const di_minus_fg = d * i - f * g
@@ -48,23 +37,23 @@ export function invertMat3RowMajor(m: number[]): number[] | undefined {
 }
 
 /**
- * Map image pixel (x, y) to unit-square (u, v) using the inverse of `computeHomography`’s 8-parameter map.
+ * Map image pixel (x, y) to unit-square (u, v) using the inverse of the homography from `computeHomography`.
  * Corners must be **TL, TR, BL, BR** (same order as `computeHomography`).
  */
 export function imagePixelToUnitSquareUv(
-  homography8: Float32Array,
+  homography: Mat3,
   x: number,
   y: number,
 ): { u: number; v: number; inside: boolean } {
-  const M = mat3FromHomography8(homography8)
-  const inv = invertMat3RowMajor(M)
+  const inv = invertMat3RowMajor(homography)
   if (!inv) {
     return { u: 0, v: 0, inside: false }
   }
 
-  const xh = inv[0] * x + inv[1] * y + inv[2]
-  const yh = inv[3] * x + inv[4] * y + inv[5]
-  const wh = inv[6] * x + inv[7] * y + inv[8]
+  const [i0, i1, i2, i3, i4, i5, i6, i7, i8] = inv
+  const xh = i0 * x + i1 * y + i2
+  const yh = i3 * x + i4 * y + i5
+  const wh = i6 * x + i7 * y + i8
   if (abs(wh) < 1e-12) {
     return { u: 0, v: 0, inside: false }
   }

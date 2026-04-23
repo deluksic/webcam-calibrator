@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { type Corners, applyHomography, computeHomography } from '@/lib/geometry'
+import { type Corners, type Mat3, applyHomography, computeHomography } from '@/lib/geometry'
 import {
   buildDecodeEdgeMask,
   buildTagGrid,
@@ -19,7 +19,7 @@ const { max, abs } = Math
 
 /** Central FD of J = ∂(x,y)/∂(u,v) for `applyHomography` (column u then column v). */
 function jacobianImageWrtTagUvFd(
-  h: Float32Array,
+  h: Mat3,
   u: number,
   v: number,
   eps = 1e-5,
@@ -48,13 +48,13 @@ function tagGradientFromJacobianTranspose(
 }
 
 /** ∂/∂u of a·x(u,v)+b·y(u,v) by central differences (independent check on chain rule). */
-function linearImageFieldPartialU(h: Float32Array, u: number, v: number, a: number, b: number, eps = 1e-5): number {
+function linearImageFieldPartialU(h: Mat3, u: number, v: number, a: number, b: number, eps = 1e-5): number {
   const pp = applyHomography(h, u + eps, v)
   const pm = applyHomography(h, u - eps, v)
   return (a * (pp.x - pm.x) + b * (pp.y - pm.y)) / (2 * eps)
 }
 
-function linearImageFieldPartialV(h: Float32Array, u: number, v: number, a: number, b: number, eps = 1e-5): number {
+function linearImageFieldPartialV(h: Mat3, u: number, v: number, a: number, b: number, eps = 1e-5): number {
   const pp = applyHomography(h, u, v + eps)
   const pm = applyHomography(h, u, v - eps)
   return (a * (pp.x - pm.x) + b * (pp.y - pm.y)) / (2 * eps)
@@ -204,7 +204,7 @@ describe('grid', () => {
     })
 
     it('imageSobelToTagGradient pulls image Sobel to tag UV via Jᵀ (identity homography)', () => {
-      const h = Float32Array.from([1, 0, 0, 0, 1, 0, 0, 0])
+      const h: Mat3 = [1, 0, 0, 0, 1, 0, 0, 0, 1]
       const { gu, gv } = imageSobelToTagGradient(h, 0.25, 0.25, 3, -4)
       expect(gu).toBeCloseTo(3, 10)
       expect(gv).toBeCloseTo(-4, 10)
@@ -262,7 +262,7 @@ describe('grid', () => {
     })
 
     it('agrees with central differences on I(u,v)=a·x(u,v)+b·y(u,v) (chain rule end-to-end)', () => {
-      const h = Float32Array.from([2.5, -0.25, 30, 0.1, 1.8, 40, 0.03, -0.02])
+      const h: Mat3 = [2.5, -0.25, 30, 0.1, 1.8, 40, 0.03, -0.02, 1]
       const u = 0.41
       const v = 0.62
       const a = 1.7
@@ -279,7 +279,7 @@ describe('grid', () => {
       const h3 = -0.25
       const h4 = 1.5
       const h5 = -20
-      const h = Float32Array.from([h0, h1, h2, h3, h4, h5, 0, 0])
+      const h: Mat3 = [h0, h1, h2, h3, h4, h5, 0, 0, 1]
       const gx = 0.25
       const gy = 0.75
       for (const u of [0, 0.3, 0.99]) {
@@ -295,7 +295,7 @@ describe('grid', () => {
       const s = 40
       const c = 0
       const si = 1
-      const h = Float32Array.from([c * s, -si * s, 0, si * s, c * s, 0, 0, 0])
+      const h: Mat3 = [c * s, -si * s, 0, si * s, c * s, 0, 0, 0, 1]
       const { gu, gv } = imageSobelToTagGradient(h, 0.5, 0.5, 1, 0)
       expect(gu).toBeCloseTo(0, 6)
       expect(gv).toBeCloseTo(-s, 6)

@@ -1,12 +1,12 @@
+import type { Corners } from '@/lib/geometry'
 import { codeToPattern, TAG36H11_CODES } from '@/lib/tag36h11'
 import type { TagPattern } from '@/lib/tag36h11'
-import type { StripCorners } from '@/tests/shared/types'
 import { finiteDifferenceSobelFromIntensity, renderAprilTagIntensity } from '@/tests/utils/syntheticAprilTag'
 
 export interface RasterFromStripOptions {
   width: number
   height: number
-  strip: StripCorners
+  strip: Corners
   pattern: TagPattern
   supersample: number
 }

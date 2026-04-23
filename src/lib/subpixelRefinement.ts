@@ -1,4 +1,4 @@
-import type { Corners, Point } from '@/lib/geometry'
+import type { Corners, Mat3, Point } from '@/lib/geometry'
 import { applyHomography, computeHomography, length } from '@/lib/geometry'
 import { finiteDifferenceSobelFromIntensity } from '@/tests/utils/syntheticAprilTag'
 
@@ -9,7 +9,7 @@ export interface SubpixelRefineInput {
   height: number
   grayscale: Float32Array
   /** CPU homography: unit square → image, 8 floats + implicit h33=1. */
-  homography8: Float32Array
+  homography: Mat3
   /** Optional; v1 refiner ignores (reserved for interior-aware scoring). */
   decodedTagId?: number
 }
@@ -17,7 +17,7 @@ export interface SubpixelRefineInput {
 const RADIUS_PX = 5
 const RADIUS_SQ = RADIUS_PX * RADIUS_PX
 
-function stripCornersFromHomography(h: Float32Array): Corners {
+function stripCornersFromHomography(h: Mat3): Corners {
   return [applyHomography(h, 0, 0), applyHomography(h, 1, 0), applyHomography(h, 0, 1), applyHomography(h, 1, 1)]
 }
 
@@ -59,12 +59,12 @@ function refineCornerInDisk(
  * v1: independently refine each corner within a 5px Euclidean disk by maximizing Sobel magnitude
  * at the rounded pixel; deterministic tie-break: smallest (dy, dx) lexicographic among equal scores.
  */
-export function refineSubpixelHomographyV1(input: SubpixelRefineInput): Float32Array {
-  const { width, height, grayscale, homography8 } = input
+export function refineSubpixelHomographyV1(input: SubpixelRefineInput): Mat3 {
+  const { width, height, grayscale, homography } = input
   const sobel = finiteDifferenceSobelFromIntensity(grayscale, width, height, {
     gradientScale: 4,
   })
-  const corners = stripCornersFromHomography(homography8)
+  const corners = stripCornersFromHomography(homography)
   const refined: Corners = [
     refineCornerInDisk(sobel, width, height, corners[0]),
     refineCornerInDisk(sobel, width, height, corners[1]),

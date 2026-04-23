@@ -3,7 +3,7 @@
 
 import { imagePixelToUnitSquareUv } from '@/lib/aprilTagRaycast'
 import { length, lineFromPoints, lineIntersection, tryComputeHomography } from '@/lib/geometry'
-import type { Corners, Point } from '@/lib/geometry'
+import type { Corners, Mat3, Point } from '@/lib/geometry'
 import type { TagPattern } from '@/lib/tag36h11'
 
 const { min, max, abs, floor, ceil } = Math
@@ -205,15 +205,8 @@ const MIN_QUAD_EDGE_EPS_PX = 1e-6
  * **pull back** with **Jᵀ**. Tangents to the tag in UV push forward with **J** (columns **(∂x/∂u, ∂y/∂u)**
  * and **(∂x/∂v, ∂y/∂v)** in image). Sobel estimates the cotangent **dI** in image; tag-side **dI** uses **Jᵀ**.
  */
-function jacobianImageWrtTagUv(h: Float32Array, u: number, v: number) {
-  const h0 = h[0],
-    h1 = h[1],
-    h2 = h[2]
-  const h3 = h[3],
-    h4 = h[4],
-    h5 = h[5]
-  const h6 = h[6],
-    h7 = h[7]
+function jacobianImageWrtTagUv(h: Mat3, u: number, v: number) {
+  const [h0, h1, h2, h3, h4, h5, h6, h7] = h
   const xh = h0 * u + h1 * v + h2
   const yh = h3 * u + h4 * v + h5
   const wh = h6 * u + h7 * v + 1
@@ -230,7 +223,7 @@ function jacobianImageWrtTagUv(h: Float32Array, u: number, v: number) {
  * `applyHomography`: **[gᵤ, gᵥ]ᵀ = Jᵀ [gₓ, gᵧ]ᵀ** (see `jacobianImageWrtTagUv`).
  */
 export function imageSobelToTagGradient(
-  h: Float32Array,
+  h: Mat3,
   u: number,
   v: number,
   gx: number,

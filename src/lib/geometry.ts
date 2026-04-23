@@ -14,6 +14,9 @@ export type Point = {
 /** Quad corners in image / triangle-strip order: TL, TR, BL, BR. */
 export type Corners = [tl: Point, tr: Point, bl: Point, br: Point]
 
+/** 3×3 row-major homography matrix `[m00, m01, m02, m10, m11, m12, m20, m21, m22]`. */
+export type Mat3 = readonly [number, number, number, number, number, number, number, number, number]
+
 export type Line = {
   a: number
   b: number
@@ -126,68 +129,42 @@ export function areParallel(l1: Line, l2: Line, threshold: number = 0.1): boolea
  * On success: 8 values `[h1, h2, h3, h4, h5, h6, h7, h8]`. Returns `undefined` if the 8×8 system is
  * singular (degenerate / collinear corners, or wrong point count).
  */
-export function tryComputeHomography(src: Corners): number[] | undefined {
-  // Corner order: TL(0), TR(1), BL(2), BR(3)
-  // Destination (unit square): (0,0), (1,0), (0,1), (1,1)
-  const dst: [number, number][] = [
-    [0, 0], // TL
-    [1, 0], // TR
-    [0, 1], // BL
-    [1, 1], // BR
+export function tryComputeHomography(src: Corners): Mat3 | undefined {
+  const N = 8
+
+  // Unit-square destination corners (TL, TR, BL, BR) paired with source points.
+  const correspondences: readonly (readonly [u: number, v: number, p: Point])[] = [
+    [0, 0, src[0]],
+    [1, 0, src[1]],
+    [0, 1, src[2]],
+    [1, 1, src[3]],
   ]
 
-  // Build the 8x8 matrix for the linear system Ah = b
-  // For each correspondence (ui, vi) → (xi, yi):
-  //   [ui, vi, 1, 0, 0, 0, -ui*xi, -vi*xi] [h1 h2 h3 h4 h5 h6 h7 h8]^T = xi
-  //   [0, 0, 0, ui, vi, 1, -ui*yi, -vi*yi] [h1 h2 h3 h4 h5 h6 h7 h8]^T = yi
-  const N = 8
-  const A: number[][] = Array.from({ length: N }, () => Array.from({ length: N }, () => 0))
-  const b: number[] = Array.from({ length: N }, () => 0)
-
-  const [p0, p1, p2, p3] = src
-  const srcPts = [p0, p1, p2, p3]
-  for (let i = 0; i < 4; i++) {
-    const ui = dst[i][0]
-    const vi = dst[i][1]
-    const xi = srcPts[i].x
-    const yi = srcPts[i].y
-
-    // Row 2i: xi equation
-    A[2 * i][0] = ui
-    A[2 * i][1] = vi
-    A[2 * i][2] = 1
-    A[2 * i][6] = -ui * xi
-    A[2 * i][7] = -vi * xi
-    b[2 * i] = xi
-
-    // Row 2i+1: yi equation
-    A[2 * i + 1][3] = ui
-    A[2 * i + 1][4] = vi
-    A[2 * i + 1][5] = 1
-    A[2 * i + 1][6] = -ui * yi
-    A[2 * i + 1][7] = -vi * yi
-    b[2 * i + 1] = yi
+  // Build rows of the 8x8 linear system Ah = b directly as literals.
+  // Per correspondence (u,v) → (x,y):
+  //   row 2i : [u, v, 1, 0, 0, 0, -u*x, -v*x] · h = x
+  //   row 2i+1: [0, 0, 0, u, v, 1, -u*y, -v*y] · h = y
+  const A: number[][] = []
+  const b: number[] = []
+  for (const [u, v, p] of correspondences) {
+    A.push([u, v, 1, 0, 0, 0, -u * p.x, -v * p.x])
+    A.push([0, 0, 0, u, v, 1, -u * p.y, -v * p.y])
+    b.push(p.x, p.y)
   }
 
   // Gaussian elimination with partial pivoting
-  const h: number[] = []
-
   for (let col = 0; col < N; col++) {
     // Find pivot
     let maxRow = col
     for (let row = col + 1; row < N; row++) {
-      if (abs(A[row][col]) > abs(A[maxRow][col])) {
+      if (abs(A[row]![col]!) > abs(A[maxRow]![col]!)) {
         maxRow = row
       }
     }
 
     // Swap rows
-    const tmpA = A[col]!
-    A[col] = A[maxRow]!
-    A[maxRow] = tmpA
-    const tmpB = b[col]!
-    b[col] = b[maxRow]!
-    b[maxRow] = tmpB
+    ;[A[col], A[maxRow]] = [A[maxRow]!, A[col]!]
+    ;[b[col], b[maxRow]] = [b[maxRow]!, b[col]!]
 
     const pivot = A[col]![col]!
     if (abs(pivot) < 1e-10) {
@@ -216,17 +193,13 @@ export function tryComputeHomography(src: Corners): number[] | undefined {
     }
   }
 
-  for (let i = 0; i < N; i++) {
-    h[i] = b[i]!
-  }
-
-  return h
+  return [b[0]!, b[1]!, b[2]!, b[3]!, b[4]!, b[5]!, b[6]!, b[7]!, 1]
 }
 
 /**
  * Same as {@link tryComputeHomography}, but throws if the quad does not admit a unique homography.
  */
-export function computeHomography(src: Corners): Float32Array {
+export function computeHomography(src: Corners): Mat3 {
   const h = tryComputeHomography(src)
   if (!h) {
     throw new Error('Singular homography matrix')
@@ -238,19 +211,11 @@ export function computeHomography(src: Corners): Float32Array {
  * Apply homography to a unit-square point (u, v).
  * Returns {x, y} in image coordinates.
  */
-export function applyHomography(h: Float32Array, u: number, v: number): Point {
-  const h1 = h[0],
-    h2 = h[1],
-    h3 = h[2]
-  const h4 = h[3],
-    h5 = h[4],
-    h6 = h[5]
-  const h7 = h[6],
-    h8 = h[7]
-
-  const w = h7 * u + h8 * v + 1
-  const x = (h1 * u + h2 * v + h3) / w
-  const y = (h4 * u + h5 * v + h6) / w
+export function applyHomography(h: Mat3, u: number, v: number): Point {
+  const [h0, h1, h2, h3, h4, h5, h6, h7, h8] = h
+  const w = h6 * u + h7 * v + h8
+  const x = (h0 * u + h1 * v + h2) / w
+  const y = (h3 * u + h4 * v + h5) / w
   return { x, y }
 }
 
@@ -312,14 +277,6 @@ export function verifyProjectiveWeights(corners: Corners): {
 } {
   const [w0, w1, w2, w3] = computeProjectiveWeights(corners)
 
-  // At unit square corners, bilinear blend should give unit positions
-  const expected = [
-    { x: 0, y: 0 }, // TL → (0,0)
-    { x: 1, y: 0 }, // TR → (1,0)
-    { x: 0, y: 1 }, // BL → (0,1)
-    { x: 1, y: 1 }, // BR → (1,1)
-  ]
-
   // Compute what corners would be if the unit square maps through these weights
   const _wSum = w0 + w1 + w2 + w3
 
@@ -327,22 +284,19 @@ export function verifyProjectiveWeights(corners: Corners): {
   // At u=1,v=0: w = w1/wSum → blended = (1 * w1 + 0 * w0 + ... ) / wSum = w1/wSum
   // We want blended = 1 at TR, 0 at TL/BL, and w1/wSum to normalize to 1...
 
+  const [c0, c1, c2, c3] = corners
   const blended: Corners = [
-    { x: corners[0].x / w0, y: corners[0].y / w0 },
-    { x: corners[1].x / w1, y: corners[1].y / w1 },
-    { x: corners[2].x / w2, y: corners[2].y / w2 },
-    { x: corners[3].x / w3, y: corners[3].y / w3 },
+    { x: c0.x / w0, y: c0.y / w0 },
+    { x: c1.x / w1, y: c1.y / w1 },
+    { x: c2.x / w2, y: c2.y / w2 },
+    { x: c3.x / w3, y: c3.y / w3 },
   ]
 
-  const e0 = expected[0]!
-  const e1 = expected[1]!
-  const e2 = expected[2]!
-  const e3 = expected[3]!
   const errors: [number, number, number, number] = [
-    sqrt((e0.x - blended[0].x) ** 2 + (e0.y - blended[0].y) ** 2),
-    sqrt((e1.x - blended[1].x) ** 2 + (e1.y - blended[1].y) ** 2),
-    sqrt((e2.x - blended[2].x) ** 2 + (e2.y - blended[2].y) ** 2),
-    sqrt((e3.x - blended[3].x) ** 2 + (e3.y - blended[3].y) ** 2),
+    sqrt(blended[0].x ** 2 + blended[0].y ** 2),                          // expected (0,0)
+    sqrt((blended[1].x - 1) ** 2 + blended[1].y ** 2),                    // expected (1,0)
+    sqrt(blended[2].x ** 2 + (blended[2].y - 1) ** 2),                    // expected (0,1)
+    sqrt((blended[3].x - 1) ** 2 + (blended[3].y - 1) ** 2),              // expected (1,1)
   ]
 
   return { blended, errors }

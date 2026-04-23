@@ -1,7 +1,8 @@
+import type { Corners, Mat3 } from '@/lib/geometry'
 import { computeHomography } from '@/lib/geometry'
 import type { SubpixelRefineInput } from '@/lib/subpixelRefinement'
 import { buildRasterPack } from '@/tests/shared/pipeline'
-import type { BuildImageOptions, StripCorners } from '@/tests/shared/types'
+import type { BuildImageOptions } from '@/tests/shared/types'
 import { applyInitialRoughStrip, type InitialSpec } from '@/tests/subpixel/initialEstimate'
 import { roundCornerStats, cornerErrorStats } from '@/tests/subpixel/metrics/corners'
 import { homographyTransferStats, roundTransferStats } from '@/tests/subpixel/metrics/homographyTransfer'
@@ -19,11 +20,11 @@ export interface SubpixelCaseResult {
   width: number
   height: number
   grayscale: Float32Array
-  groundTruthStrip: StripCorners
-  roughStrip: StripCorners
-  H_gt: Float32Array
-  H_init: Float32Array
-  H_refined: Float32Array
+  groundTruthStrip: Corners
+  roughStrip: Corners
+  H_gt: Mat3
+  H_init: Mat3
+  H_refined: Mat3
   metrics: {
     cornersRounded: ReturnType<typeof roundCornerStats>
     transferRounded: ReturnType<typeof roundTransferStats>
@@ -45,7 +46,7 @@ export function runSubpixelAlignmentCase(args: RunSubpixelCaseArgs): SubpixelCas
     width: pack.width,
     height: pack.height,
     grayscale: pack.grayscale,
-    homography8: H_init,
+    homography: H_init,
     decodedTagId: args.decodedTagId,
   }
   const H_refined = args.refiner(refineIn)

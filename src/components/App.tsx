@@ -19,25 +19,25 @@ export function App() {
       <div class={styles.root}>
         <nav class={styles.nav}>
           <button
-            class={[styles.navBtn, { [styles.navBtnActive]: view() === 'target' }]}
+            class={[styles.navBtn, view() === 'target' && styles.navBtnActive]}
             onClick={() => setView('target')}
           >
             Target
           </button>
           <button
-            class={[styles.navBtn, { [styles.navBtnActive]: view() === 'calibrate' }]}
+            class={[styles.navBtn, view() === 'calibrate' && styles.navBtnActive]}
             onClick={() => setView('calibrate')}
           >
             Calibrate
           </button>
           <button
-            class={[styles.navBtn, { [styles.navBtnActive]: view() === 'results' }]}
+            class={[styles.navBtn, view() === 'results' && styles.navBtnActive]}
             onClick={() => setView('results')}
           >
             Results
           </button>
           <button
-            class={[styles.navBtn, { [styles.navBtnActive]: view() === 'debug' }]}
+            class={[styles.navBtn, view() === 'debug' && styles.navBtnActive]}
             onClick={() => setView('debug')}
           >
             Debug

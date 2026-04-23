@@ -1,10 +1,10 @@
-import type { StripCorners } from '@/tests/shared/types'
+import type { Corners } from '@/lib/geometry'
 import { cornerErrorStats } from '@/tests/subpixel/metrics/corners'
 
 export function improvementCornerMaxPx(
-  gt: StripCorners,
-  initStrip: StripCorners,
-  refinedStrip: StripCorners,
+  gt: Corners,
+  initStrip: Corners,
+  refinedStrip: Corners,
 ): { initMaxPx: number; refinedMaxPx: number; deltaMaxPx: number } {
   const init = cornerErrorStats(gt, initStrip)
   const ref = cornerErrorStats(gt, refinedStrip)

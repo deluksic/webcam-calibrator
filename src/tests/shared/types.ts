@@ -37,10 +37,12 @@ export interface BuildImageOptions {
   radialDistortion?: RadialDistortionSpec
 }
 
+import type { Corners } from '@/lib/geometry'
+
 export interface RasterPack {
   width: number
   height: number
-  groundTruthStrip: StripCorners
+  groundTruthStrip: Corners
   grayscale: Float32Array
   sobel: Float32Array
 }

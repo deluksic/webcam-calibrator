@@ -1,6 +1,5 @@
-import type { Point } from '@/lib/geometry'
+import type { Corners, Point } from '@/lib/geometry'
 import { length } from '@/lib/geometry'
-import type { StripCorners } from '@/tests/shared/types'
 
 const { max, cos, sin } = Math
 
@@ -9,7 +8,7 @@ function dist(a: Point, b: Point): number {
 }
 
 /** Longest edge of quad TL, TR, BL, BR (triangle-strip order). */
-export function quadMaxEdgePx(strip: StripCorners): number {
+export function quadMaxEdgePx(strip: Corners): number {
   const [tl, tr, bl, br] = strip
   const e0 = dist(tl, tr)
   const e1 = dist(tr, br)
@@ -18,7 +17,7 @@ export function quadMaxEdgePx(strip: StripCorners): number {
   return max(e0, e1, e2, e3)
 }
 
-function stripCentroid(strip: StripCorners): Point {
+function stripCentroid(strip: Corners): Point {
   let x = 0
   let y = 0
   for (const p of strip) {
@@ -29,30 +28,28 @@ function stripCentroid(strip: StripCorners): Point {
 }
 
 /** Rotate each corner around centroid by `rad` (CCW). */
-export function rotateStripAroundCentroid(strip: StripCorners, rad: number): StripCorners {
+export function rotateStripAroundCentroid(strip: Corners, rad: number): Corners {
   const c = stripCentroid(strip)
   const cosTheta = cos(rad)
   const sinTheta = sin(rad)
-  return strip.map((p) => {
-    const dx = p.x - c.x
-    const dy = p.y - c.y
-    return {
-      x: c.x + dx * cosTheta - dy * sinTheta,
-      y: c.y + dx * sinTheta + dy * cosTheta,
-    }
-  }) as StripCorners
+  const rot = (p: Point): Point => ({
+    x: c.x + (p.x - c.x) * cosTheta - (p.y - c.y) * sinTheta,
+    y: c.y + (p.x - c.x) * sinTheta + (p.y - c.y) * cosTheta,
+  })
+  return [rot(strip[0]), rot(strip[1]), rot(strip[2]), rot(strip[3])]
 }
 
 /** Uniform scale about centroid so longest edge ≤ `maxEdgePx`. */
-export function scaleStripToMaxEdgePx(strip: StripCorners, maxEdgePx: number): StripCorners {
+export function scaleStripToMaxEdgePx(strip: Corners, maxEdgePx: number): Corners {
   const m = quadMaxEdgePx(strip)
   if (m < 1e-12) {
     return strip
   }
   const s = maxEdgePx / m
   const c = stripCentroid(strip)
-  return strip.map((p) => ({
+  const scale = (p: Point): Point => ({
     x: c.x + (p.x - c.x) * s,
     y: c.y + (p.y - c.y) * s,
-  })) as StripCorners
+  })
+  return [scale(strip[0]), scale(strip[1]), scale(strip[2]), scale(strip[3])]
 }
