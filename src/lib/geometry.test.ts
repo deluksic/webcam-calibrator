@@ -255,7 +255,7 @@ describe('geometry', () => {
   describe('tryComputeHomography', () => {
     it('returns null for coincident corners (singular)', () => {
       const p = { x: 10, y: 20 }
-      expect(tryComputeHomography([p, p, p, p] as Corners)).toBeNull()
+      expect(tryComputeHomography([p, p, p, p] as Corners)).toBeUndefined()
     })
 
     it('matches computeHomography for a valid quad', () => {

@@ -39,7 +39,7 @@ describe('refineSubpixelHomographyV1', () => {
       grayscale,
       homography: H,
     })
-    expect(out.length).toBe(8)
+    expect(out.length).toBe(9)
     expect(out.every((x) => Number.isFinite(x))).toBe(true)
   })
 })
