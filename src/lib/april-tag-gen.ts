@@ -2,7 +2,7 @@
 // Generates SVG with configurable NxM tag grid, spacing, and checkerboard
 // Uses real tag36h11 dictionary from AprilRobotics/apriltag
 
-import { codeToPattern, TAG36H11_CODES, TAG36H11_COUNT } from '@/lib/tag36h11'
+import { codeToPattern, tag36h11Code, TAG36H11_COUNT } from '@/lib/tag36h11'
 
 const { floor } = Math
 
@@ -24,7 +24,9 @@ export function selectRandomTags(count: number, seed: number): number[] {
   const indices = Array.from({ length: TAG36H11_COUNT }, (_, i) => i)
   for (let i = indices.length - 1; i > 0; i--) {
     const j = floor(rng() * (i + 1))
-    ;[indices[i], indices[j]] = [indices[j], indices[i]]
+    const tmp = indices[i]!
+    indices[i] = indices[j]!
+    indices[j] = tmp
   }
   return indices.slice(0, count)
 }
@@ -134,7 +136,7 @@ export function generateTagGridSVG(options: Partial<TagGridOptions> = {}): strin
     for (let c = 0; c < cols; c++) {
       const idx = r * cols + c
       const tagId = tagIds && tagIds[idx] !== undefined ? tagIds[idx] : idx % TAG36H11_COUNT
-      const pattern = codeToPattern(TAG36H11_CODES[tagId])
+      const pattern = codeToPattern(tag36h11Code(tagId))
       const tagX = startX + c * (tagSize + boardSize)
       const tagY = startY + r * (tagSize + boardSize)
       svg += generateTagSVG(tagSize, tagX, tagY, pattern as (0 | 1 | -1)[])
@@ -158,7 +160,7 @@ export function generateSingleTagSVG(tagSize: number, tagId: number = 0): string
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${tagSize}" height="${tagSize}" viewBox="0 0 ${tagSize} ${tagSize}" shape-rendering="crispEdges">\n`
   svg += `  <rect width="100%" height="100%" fill="white"/>\n`
 
-  const pattern = codeToPattern(TAG36H11_CODES[tagId % TAG36H11_COUNT])
+  const pattern = codeToPattern(tag36h11Code(tagId % TAG36H11_COUNT))
   for (let my = 0; my < 8; my++) {
     for (let mx = 0; mx < 8; mx++) {
       const x = mx * cellSize

@@ -43,7 +43,7 @@ export function createHistogramRenderPipeline(
       d.vec2f(1.0, 1.0),
       d.vec2f(0.0, 1.0),
     ]
-    const uv = uvs[idx]
+    const uv = uvs[idx]!
     const histW = d.f32(HIST_WIDTH)
     const histH = d.f32(HIST_HEIGHT)
     const numBars = d.f32(HISTOGRAM_BINS)

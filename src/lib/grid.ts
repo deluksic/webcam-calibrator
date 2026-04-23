@@ -70,10 +70,10 @@ export function buildTagGrid(corners: Corners, divisions: number = 6): GridResul
   // and vertical lines from subdivision cross
   for (let row = 0; row <= divisions; row++) {
     for (let col = 0; col <= divisions; col++) {
-      const topPoint = topEdge[col]
-      const bottomPoint = bottomEdge[col]
-      const leftPoint = leftEdge[row]
-      const rightPoint = rightEdge[row]
+      const topPoint = topEdge[col]!
+      const bottomPoint = bottomEdge[col]!
+      const leftPoint = leftEdge[row]!
+      const rightPoint = rightEdge[row]!
 
       // Horizontal line: from left edge to right edge at row position
       const hLine = lineFromPoints(leftPoint, rightPoint)
@@ -112,7 +112,7 @@ export function buildTagGrid(corners: Corners, divisions: number = 6): GridResul
       const brIdx = (row + 1) * (divisions + 1) + col + 1
       const blIdx = brIdx - 1
 
-      const cellCorners: Corners = [innerCorners[tlIdx], innerCorners[trIdx], innerCorners[blIdx], innerCorners[brIdx]]
+      const cellCorners: Corners = [innerCorners[tlIdx]!, innerCorners[trIdx]!, innerCorners[blIdx]!, innerCorners[brIdx]!]
 
       const center = {
         x: (cellCorners[0].x + cellCorners[1].x + cellCorners[2].x + cellCorners[3].x) / 4,
@@ -462,8 +462,8 @@ export function buildDecodeEdgeMask(
       if (labelData[idx] !== regionLabel) {
         continue
       }
-      const gx = sobelData[idx * 2]
-      const gy = sobelData[idx * 2 + 1]
+      const gx = sobelData[idx * 2]!
+      const gy = sobelData[idx * 2 + 1]!
       if (gx * gx + gy * gy >= eps2) {
         mask[idx] = 1
       }
@@ -538,8 +538,8 @@ function decodeTagPatternVoteAccumulation(
       if (!inside) {
         continue
       }
-      const gx = sobelData[(iy * imageWidth + ix) * 2]
-      const gy = sobelData[(iy * imageWidth + ix) * 2 + 1]
+      const gx = sobelData[(iy * imageWidth + ix) * 2]!
+      const gy = sobelData[(iy * imageWidth + ix) * 2 + 1]!
       const mag = gx * gx + gy * gy
       if (mag <= 1e-12) {
         continue
@@ -568,9 +568,9 @@ function decodeTagPatternVoteAccumulation(
         }
         const dot = decodeVoteBinRadialDot(u, v, cu, cv, gu, gv)
         if (dot > DECODE_DOT_EPS) {
-          blackModuleCount[mi] += 1
+          blackModuleCount[mi] = (blackModuleCount[mi] ?? 0) + 1
         } else if (dot < -DECODE_DOT_EPS) {
-          whiteModuleCount[mi] += 1
+          whiteModuleCount[mi] = (whiteModuleCount[mi] ?? 0) + 1
         }
       }
     }
@@ -605,7 +605,7 @@ export function decodeTagPatternWithVoteMaps(
       const mx = col + 1
       const my = row + 1
       const mi = my * TAG_MODULES + mx
-      const cell = classifyModuleFromPosNeg(whiteModuleCount[mi], blackModuleCount[mi])
+      const cell = classifyModuleFromPosNeg(whiteModuleCount[mi]!, blackModuleCount[mi]!)
       pattern.push(cell)
     }
   }

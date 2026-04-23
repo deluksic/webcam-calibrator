@@ -2,7 +2,7 @@ import { For, createSignal, createMemo } from 'solid-js'
 
 import { selectRandomTags } from '@/lib/april-tag-gen'
 import { gridVizFillRgbCss } from '@/lib/hashStableColor'
-import { TAG36H11_CODES, codeToPattern } from '@/lib/tag36h11'
+import { tag36h11Code, codeToPattern, TAG36H11_COUNT } from '@/lib/tag36h11'
 
 import styles from '@/components/TargetView.module.css'
 
@@ -31,7 +31,7 @@ export function TargetView() {
     for (let r = 0; r < rows(); r++) {
       for (let c = 0; c < cols(); c++) {
         const idx = r * cols() + c
-        const tagId = tagIds()[idx] ?? idx % TAG36H11_CODES.length
+        const tagId = tagIds()[idx] ?? idx % TAG36H11_COUNT
         const x = marginSize() + c * (tagSize + boardSize())
         const y = marginSize() + r * (tagSize + boardSize())
         positions.push({ x, y, tagId })
@@ -61,7 +61,7 @@ export function TargetView() {
     let content = `<rect width="${w}" height="${h}" fill="white"/>`
 
     for (const tag of tagPositions()) {
-      const pattern = codeToPattern(TAG36H11_CODES[tag.tagId])
+      const pattern = codeToPattern(tag36h11Code(tag.tagId))
       for (let row = 0; row < 8; row++) {
         for (let col = 0; col < 8; col++) {
           // Border: outer ring (positions 0 or 7 in either dimension)

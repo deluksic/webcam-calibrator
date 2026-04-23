@@ -223,7 +223,7 @@ export function updateQuadCornersBuffer(
 
   const data: QuadData[] = []
   for (let i = 0; i < count; i++) {
-    const quad = filtered[i]
+    const quad = filtered[i]!
     const H = tryComputeHomography(quad.corners)
     const debug = quad.cornerDebug
     const tagId = quad.vizTagId !== undefined ? quad.vizTagId >>> 0 : DECODED_TAG_ID_UNKNOWN

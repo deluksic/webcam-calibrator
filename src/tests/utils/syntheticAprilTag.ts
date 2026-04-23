@@ -101,7 +101,7 @@ export function finiteDifferenceSobelFromIntensity(
       const xp = min(width - 1, x + 1)
       const ym = max(0, y - 1)
       const yp = min(height - 1, y + 1)
-      const I = (xx: number, yy: number) => intensity[yy * width + xx]
+      const I = (xx: number, yy: number) => intensity[yy * width + xx]!
       const gx = (I(xp, y) - I(xm, y)) * 0.5 * scale
       const gy = (I(x, yp) - I(x, ym)) * 0.5 * scale
       const o = (y * width + x) * 2

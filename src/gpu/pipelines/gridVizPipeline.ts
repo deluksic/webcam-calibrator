@@ -62,12 +62,12 @@ export function createGridVizPipeline(
       decodedTagId: d.interpolate('flat', d.u32),
     },
   })(({ vertexIndex, instanceIndex }) => {
-    const quad = gridVizLayout.$.quads[instanceIndex]
+    const quad = gridVizLayout.$.quads[instanceIndex]!
     const H = quad.homography
     const debug = quad.debug
 
     const uvs = [d.vec2f(0, 0), d.vec2f(1, 0), d.vec2f(0, 1), d.vec2f(1, 1)]
-    const uv = uvs[vertexIndex]
+    const uv = uvs[vertexIndex]!
     const imgPos = mul(H, d.vec3f(uv, 1))
     const imgX = imgPos.x
     const imgY = imgPos.y

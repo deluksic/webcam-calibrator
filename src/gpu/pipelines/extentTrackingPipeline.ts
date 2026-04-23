@@ -82,7 +82,7 @@ export function createExtentTrackPipeline(
     }
 
     const idx = d.u32(y * w + x)
-    const label = trackLayout.$.labelBuffer[idx]
+    const label = trackLayout.$.labelBuffer[idx]!
     if (label === d.u32(COMPONENT_LABEL_INVALID)) {
       return
     }
@@ -92,7 +92,7 @@ export function createExtentTrackPipeline(
       return
     }
 
-    const entry = trackLayout.$.extentBuffer[label]
+    const entry = trackLayout.$.extentBuffer[label]!
     atomicMin(entry.minX, d.u32(x))
     atomicMin(entry.minY, d.u32(y))
     atomicMax(entry.maxX, d.u32(x))

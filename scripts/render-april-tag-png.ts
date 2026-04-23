@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { PNG } from 'pngjs'
 
 import type { Corners } from '@/lib/geometry'
-import { codeToPattern, TAG36H11_CODES } from '@/lib/tag36h11'
+import { codeToPattern, tag36h11Code, TAG36H11_CODES } from '@/lib/tag36h11'
 import { renderAprilTagIntensity } from '@/tests/utils/syntheticAprilTag'
 
 const { min, max, round } = Math
@@ -27,7 +27,7 @@ function main() {
     }
   }
 
-  const pattern = codeToPattern(TAG36H11_CODES[tagId])
+  const pattern = codeToPattern(tag36h11Code(tagId))
   const size = 360
   const margin = 20
   const strip: Corners = [

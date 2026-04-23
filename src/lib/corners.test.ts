@@ -121,9 +121,9 @@ describe('extractLabeledEdgePixels', () => {
 
     const pixels = extractLabeledEdgePixels(sobelData, labelData, w, 1, 0, 0, 9, 9)
     expect(pixels.length).toBeGreaterThan(0)
-    expect(pixels[0].gx).toBeCloseTo(10, 5)
-    expect(pixels[0].gy).toBeCloseTo(0, 5)
-    expect(pixels[0].magnitude).toBeCloseTo(10, 5)
+    expect(pixels[0]!.gx).toBeCloseTo(10, 5)
+    expect(pixels[0]!.gy).toBeCloseTo(0, 5)
+    expect(pixels[0]!.magnitude).toBeCloseTo(10, 5)
   })
 })
 

@@ -53,8 +53,8 @@ export function extractLabeledEdgePixels(
       }
 
       const idx = y * width + x
-      const gx = sobelData[idx * 2]
-      const gy = sobelData[idx * 2 + 1]
+      const gx = sobelData[idx * 2]!
+      const gy = sobelData[idx * 2 + 1]!
       const mag = sqrt(gx * gx + gy * gy)
       if (mag < EPS) {
         continue
@@ -119,17 +119,17 @@ function kMeansGradientDirections(pixels: LabeledEdgePixel[], k: number = 4, max
       converged = true
 
       for (let i = 0; i < n; i++) {
-        const v = { x: pixels[i].gx, y: pixels[i].gy }
+        const v = { x: pixels[i]!.gx, y: pixels[i]!.gy }
         let bestCluster = 0
         let bestCost = Infinity
         for (let c = 0; c < k; c++) {
-          const cost = cosineDissimilarity(v, centroids[c])
+          const cost = cosineDissimilarity(v, centroids[c]!)
           if (cost < bestCost) {
             bestCost = cost
             bestCluster = c
           }
         }
-        if (assignments[i] !== bestCluster) {
+        if (assignments[i]! !== bestCluster) {
           converged = false
         }
         assignments[i] = bestCluster
@@ -145,8 +145,8 @@ function kMeansGradientDirections(pixels: LabeledEdgePixel[], k: number = 4, max
           if (assignments[i] !== c) {
             continue
           }
-          sx += pixels[i].gx
-          sy += pixels[i].gy
+          sx += pixels[i]!.gx
+          sy += pixels[i]!.gy
         }
         const len = length(sx, sy)
         if (len > 1e-8) {
@@ -157,8 +157,8 @@ function kMeansGradientDirections(pixels: LabeledEdgePixel[], k: number = 4, max
 
     let totalCost = 0
     for (let i = 0; i < n; i++) {
-      const v = { x: pixels[i].gx, y: pixels[i].gy }
-      totalCost += cosineDissimilarity(v, centroids[assignments[i]])
+      const v = { x: pixels[i]!.gx, y: pixels[i]!.gy }
+      totalCost += cosineDissimilarity(v, centroids[assignments[i]!]!)
     }
 
     if (totalCost < bestTotalCost) {
@@ -276,8 +276,8 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
       i2 = randInt(n)
     }
 
-    const p1 = points[i1],
-      p2 = points[i2]
+    const p1 = points[i1]!,
+      p2 = points[i2]!
     const dx = p2.x - p1.x,
       dy = p2.y - p1.y
     const len = sqrt(dx * dx + dy * dy)
@@ -291,7 +291,7 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
 
     let inliers = 0
     for (let i = 0; i < n; i++) {
-      const dist = abs(nx * points[i].x + ny * points[i].y - d)
+      const dist = abs(nx * points[i]!.x + ny * points[i]!.y - d)
       if (dist < THRESH) {
         inliers++
       }
@@ -311,9 +311,9 @@ function fitLine(points: { x: number; y: number }[], seed: number = 42): LineFit
 
   const inlierPoints: { x: number; y: number }[] = []
   for (let i = 0; i < n; i++) {
-    const dist = abs(bestNx * points[i].x + bestNy * points[i].y - bestD)
+    const dist = abs(bestNx * points[i]!.x + bestNy * points[i]!.y - bestD)
     if (dist < THRESH) {
-      inlierPoints.push(points[i])
+      inlierPoints.push(points[i]!)
     }
   }
 
@@ -382,7 +382,7 @@ function signedArea(pts: Point[]): number {
   let a = 0
   for (let i = 0; i < pts.length; i++) {
     const j = (i + 1) % pts.length
-    a += pts[i].x * pts[j].y - pts[j].x * pts[i].y
+    a += pts[i]!.x * pts[j]!.y - pts[j]!.x * pts[i]!.y
   }
   return a / 2
 }
@@ -464,9 +464,10 @@ function findConvexCCWCycle(pts: Corners): Corners | undefined {
   return best
 }
 
+const RING_ROTATIONS = [[0, 1, 2, 3], [2, 0, 3, 1], [3, 2, 1, 0], [1, 3, 0, 2]] as const
 export function rotateRing(ring: Corners, k: number): Corners {
-  const indices = [[0, 1, 2, 3], [2, 0, 3, 1], [3, 2, 1, 0], [1, 3, 0, 2]][k % 4]
-  return [ring[indices[0]]!, ring[indices[1]]!, ring[indices[2]]!, ring[indices[3]]!]
+  const [a, b, c, d] = RING_ROTATIONS[k % 4]!
+  return [ring[a], ring[b], ring[c], ring[d]]
 }
 
 /**
@@ -513,8 +514,8 @@ function plausibilityCheck(
   // Compute edge lengths and check ratios
   const edges: number[] = []
   for (let i = 0; i < 4; i++) {
-    const c1 = corners[i]
-    const c2 = corners[(i + 1) % 4]
+    const c1 = corners[i]!
+    const c2 = corners[(i + 1) % 4]!
     edges.push(length(c2.x - c1.x, c2.y - c1.y))
   }
 
@@ -525,8 +526,8 @@ function plausibilityCheck(
 
   // Opposite edges should have similar lengths (parallelogram check)
   // Relaxed for oblique/foreshortened quads: allow up to 3x ratio
-  const ratio01 = edges[0] / edges[2]
-  const ratio23 = edges[1] / edges[3]
+  const ratio01 = edges[0]! / edges[2]!
+  const ratio23 = edges[1]! / edges[3]!
   if (ratio01 < 0.33 || ratio01 > 3.0 || ratio23 < 0.33 || ratio23 > 3.0) {
     return false
   }
@@ -535,7 +536,8 @@ function plausibilityCheck(
   // Reduced from 5 to 3 for sparse edge regions (oblique tags)
   const clusterCounts = Array.from({ length: 4 }, () => 0)
   for (let i = 0; i < assignments.length; i++) {
-    clusterCounts[assignments[i]]++
+    const ci = assignments[i]!
+    clusterCounts[ci] = (clusterCounts[ci] ?? 0) + 1
   }
   if (clusterCounts.some((c) => c < 3)) {
     return false
@@ -646,8 +648,8 @@ export function findCornersFromEdgesWithDebug(
   for (let c = 0; c < 4; c++) {
     const clusterPoints: { x: number; y: number }[] = []
     for (let i = 0; i < pixels.length; i++) {
-      if (assignments[i] === c) {
-        clusterPoints.push({ x: pixels[i].x, y: pixels[i].y })
+      if (assignments[i]! === c) {
+        clusterPoints.push({ x: pixels[i]!.x, y: pixels[i]!.y })
       }
     }
     const line = fitLine(clusterPoints, seed + c)

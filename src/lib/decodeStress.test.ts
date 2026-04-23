@@ -36,7 +36,7 @@ import {
 } from '@/lib/decodeStressHarness'
 import type { Point } from '@/lib/geometry'
 import { decodeTagPattern } from '@/lib/grid'
-import { TAG36H11_CODES, codeToPattern, decodeTag36h11Best, type TagPattern } from '@/lib/tag36h11'
+import { tag36h11Code, codeToPattern, decodeTag36h11Best, type TagPattern } from '@/lib/tag36h11'
 import {
   attachFailureArtifacts,
   writeCellLegendPng,
@@ -83,7 +83,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
     const h = 48
     const side = 32
     const strip = decodeStressAxisStrip(w, h, 4, side)
-    const truthPat = codeToPattern(TAG36H11_CODES[tagId])
+    const truthPat = codeToPattern(tag36h11Code(tagId))
     const { intensity, sobel } = decodeStressRasterSobel(
       w,
       h,
@@ -113,7 +113,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
     const w = 120
     const h = 120
     const strip = decodeStressFitPerspectiveStrip(w, h)
-    const truth = codeToPattern(TAG36H11_CODES[tagId])
+    const truth = codeToPattern(tag36h11Code(tagId))
     const { intensity, sobel } = decodeStressRasterSobel(
       w,
       h,
@@ -143,7 +143,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
     const w = 72
     const h = 72
     const strip = decodeStressFitPerspectiveStrip(w, h)
-    const truth = codeToPattern(TAG36H11_CODES[tagId])
+    const truth = codeToPattern(tag36h11Code(tagId))
     const { intensity, sobel } = decodeStressRasterSobel(
       w,
       h,
@@ -172,7 +172,7 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
   describe('homography mismatch (perturbed decode corners, H recomputed)', () => {
     for (const wh of DECODE_STRESS_SIZES) {
       it(`decode at ${wh}x${wh} (id 0; exact or one-cell slack)`, () => {
-        const truth = codeToPattern(TAG36H11_CODES[tagId])
+        const truth = codeToPattern(tag36h11Code(tagId))
         const rasterStrip = decodeStressFitPerspectiveStrip(wh, wh)
         const decodeStrip = decodeStressStripWithHomographyMismatchOffsetsPx(rasterStrip)
         const { intensity, sobel } = decodeStressRasterSobel(
@@ -220,9 +220,9 @@ describe('decodeTagPattern stress (perspective + low resolution)', () => {
    * `unknowns` = count of `-1` (few votes) and `-2` (tie) from `classifyModuleFromPosNeg`. Rising `unknowns` / `dist` at low `wh` marks where decode starts to slip for this raster settings.
    */
   it('matches perspective + resolution characterization table', () => {
-    const truth = codeToPattern(TAG36H11_CODES[tagId])
+    const truth = codeToPattern(tag36h11Code(tagId))
     const sizes = [...DECODE_STRESS_SIZES]
-    const truthPat = codeToPattern(TAG36H11_CODES[tagId])
+    const truthPat = codeToPattern(tag36h11Code(tagId))
 
     const table = sizes.map((wh) => {
       const strip = decodeStressFitPerspectiveStrip(wh, wh)

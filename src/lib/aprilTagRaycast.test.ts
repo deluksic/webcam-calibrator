@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 
 import { imagePixelToUnitSquareUv, invertMat3RowMajor } from '@/lib/aprilTagRaycast'
-import { applyHomography, computeHomography, type Corners } from '@/lib/geometry'
+import { applyHomography, computeHomography, type Corners, type Mat3 } from '@/lib/geometry'
 import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
-import { TAG36H11_CODES, codeToPattern, decodeTag36h11AnyRotation } from '@/lib/tag36h11'
+import { tag36h11Code, codeToPattern, decodeTag36h11AnyRotation } from '@/lib/tag36h11'
 import {
   finiteDifferenceSobelFromIntensity,
   intensityAtTagUv,
@@ -15,14 +15,14 @@ const { max, min, floor, round, abs } = Math
 
 describe('aprilTagRaycast', () => {
   it('invertMat3RowMajor * M ≈ I', () => {
-    const M = [2, 0, 1, 0, 3, 0, 0, 0, 1]
+    const M: Mat3 = [2, 0, 1, 0, 3, 0, 0, 0, 1]
     const inv = invertMat3RowMajor(M)!
-    const mul = (A: number[], B: number[]) => {
+    const mul = (A: readonly number[], B: readonly number[]) => {
       const o = Array.from({ length: 9 }, () => 0)
       for (let r = 0; r < 3; r++) {
         for (let c = 0; c < 3; c++) {
           for (let k = 0; k < 3; k++) {
-            o[r * 3 + c] += A[r * 3 + k] * B[k * 3 + c]
+            o[r * 3 + c]! += A[r * 3 + k]! * B[k * 3 + c]!
           }
         }
       }
@@ -54,7 +54,7 @@ describe('aprilTagRaycast', () => {
   })
 
   it('intensityAtTagUv: black 1/8 border + inner 6×6 from pattern', () => {
-    const pattern = codeToPattern(TAG36H11_CODES[0])
+    const pattern = codeToPattern(tag36h11Code(0))
     expect(intensityAtTagUv(0.04, 0.04, pattern)).toBe(0)
     expect(intensityAtTagUv(0.96, 0.96, pattern)).toBe(0)
     const innerU = 3.5 / 8
@@ -68,7 +68,7 @@ describe('aprilTagRaycast', () => {
   })
 
   it('renderAprilTagIntensity matches UV law at each cell center (forward projection)', () => {
-    const pattern = codeToPattern(TAG36H11_CODES[42])
+    const pattern = codeToPattern(tag36h11Code(42))
     const strip: Corners = [
       { x: 40, y: 40 },
       { x: 280, y: 45 },
@@ -112,12 +112,12 @@ describe('aprilTagRaycast', () => {
     const cx = 32
     const cy = 32
     const o = (cy * w + cx) * 2
-    expect(abs(s[o])).toBeGreaterThan(0.2)
+    expect(abs(s[o]!)).toBeGreaterThan(0.2)
   })
 
   it('buildTagGrid cell centers: UV indices match row/col; raster matches tag law (nearest pixel)', () => {
     const tagId = 7
-    const pattern = codeToPattern(TAG36H11_CODES[tagId])
+    const pattern = codeToPattern(tag36h11Code(tagId))
     const size = 360
     const strip: Corners = [
       { x: 20, y: 20 },
@@ -154,7 +154,7 @@ describe('aprilTagRaycast', () => {
 
   it('decodeTagPattern recovers dictionary id from synthetic raycast + finite-difference Sobel', () => {
     const tagId = 0
-    const pattern = codeToPattern(TAG36H11_CODES[tagId])
+    const pattern = codeToPattern(tag36h11Code(tagId))
     const size = 360
     const strip: Corners = [
       { x: 20, y: 20 },

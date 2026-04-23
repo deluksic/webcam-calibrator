@@ -141,8 +141,8 @@ export function createPointerJumpLabelsToAtomicPipeline(
     }
 
     const idx = d.u32(y * w + x)
-    const v = labelsToAtomicLayout.$.source[idx]
-    atomicStore(labelsToAtomicLayout.$.atomicLabels[idx], v)
+    const v = labelsToAtomicLayout.$.source[idx]!
+    atomicStore(labelsToAtomicLayout.$.atomicLabels[idx]!, v)
   })
 
   return root.createComputePipeline({ compute: kernel })
@@ -168,13 +168,13 @@ export function createPointerJumpParentTightenPipeline(
     }
 
     const idx = d.u32(y * w + x)
-    const ei = parentTightenLayout.$.edgeBuffer[idx]
+    const ei = parentTightenLayout.$.edgeBuffer[idx]!
     if (length(ei) <= d.f32(0)) {
       return
     }
 
     const wh = d.u32(w) * d.u32(h)
-    const p = parentTightenLayout.$.labelRead[idx]
+    const p = parentTightenLayout.$.labelRead[idx]!
     if (p === d.u32(COMPONENT_LABEL_INVALID) || p >= wh) {
       return
     }
@@ -186,9 +186,9 @@ export function createPointerJumpParentTightenPipeline(
         const ny = y + dy
         if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
           const nIdx = d.u32(ny * w + nx)
-          const ej = parentTightenLayout.$.edgeBuffer[nIdx]
+          const ej = parentTightenLayout.$.edgeBuffer[nIdx]!
           if (length(ej) > d.f32(0)) {
-            const lj = parentTightenLayout.$.labelRead[nIdx]
+            const lj = parentTightenLayout.$.labelRead[nIdx]!
             if (lj !== d.u32(COMPONENT_LABEL_INVALID)) {
               cand = std.min(cand, lj)
             }
@@ -198,7 +198,7 @@ export function createPointerJumpParentTightenPipeline(
     }
 
     if (cand !== d.u32(COMPONENT_LABEL_INVALID)) {
-      atomicMin(parentTightenLayout.$.atomicLabels[p], cand)
+      atomicMin(parentTightenLayout.$.atomicLabels[p]!, cand)
     }
   })
 
@@ -225,7 +225,7 @@ export function createPointerJumpAtomicToLabelsPipeline(
     }
 
     const idx = d.u32(y * w + x)
-    const v = atomicLoad(atomicToLabelsLayout.$.atomicLabels[idx])
+    const v = atomicLoad(atomicToLabelsLayout.$.atomicLabels[idx]!)
     atomicToLabelsLayout.$.dest[idx] = v
   })
 

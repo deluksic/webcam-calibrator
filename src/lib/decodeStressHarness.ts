@@ -6,7 +6,7 @@ import type { Corners } from '@/lib/geometry'
 import { decodeTagPattern } from '@/lib/grid'
 import { xorshift32U01 } from '@/lib/seededRng'
 import {
-  TAG36H11_CODES,
+  tag36h11Code,
   codeToPattern,
   decodeTag36h11AnyRotation,
   decodeTag36h11Best,
@@ -188,7 +188,7 @@ export function decodeStressSyntheticWithHomographyMismatch(
   supersample: number,
   speckleAmp: number,
 ) {
-  const pattern = codeToPattern(TAG36H11_CODES[tagId])
+  const pattern = codeToPattern(tag36h11Code(tagId))
   const { sobel } = decodeStressRasterSobel(w, h, rasterStrip, pattern, supersample, tagId, speckleAmp)
   const decodedPattern = decodeTagPattern(decodeStrip, sobel, w, undefined, h)
   const best = decodeTag36h11Best(decodedPattern, 8)

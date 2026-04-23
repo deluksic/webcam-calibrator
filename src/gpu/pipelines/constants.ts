@@ -65,7 +65,7 @@ export function computeThreshold(histogramData: number[], percentile: number = T
 
   let cumulative = 0
   for (let i = 0; i < histogramData.length; i++) {
-    cumulative += histogramData[i]
+    cumulative += histogramData[i]!
     if (cumulative >= targetCount) {
       return i / 255.0
     }

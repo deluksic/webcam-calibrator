@@ -32,11 +32,19 @@ export type TagPattern = (0 | 1 | -1 | -2)[]
  * Coordinate mapping: 10×10 tag grid, values stored at (bit_y, bit_x),
  * 6×6 pattern extracts rows 1–6, cols 1–6 (1-indexed).
  */
+export function tag36h11Code(id: number): bigint {
+  const code = TAG36H11_CODES[id]
+  if (code === undefined) {
+    throw new RangeError(`tag36h11 id ${id} out of range [0, ${TAG36H11_COUNT})`)
+  }
+  return code
+}
+
 export function codeToPattern(code: bigint): TagPattern {
   const pattern: TagPattern = Array.from({ length: 36 }, () => 0)
   for (let bit = 0; bit < 36; bit++) {
-    const x = BIT_X[bit]
-    const y = BIT_Y[bit]
+    const x = BIT_X[bit]!
+    const y = BIT_Y[bit]!
     // 10×10 coords (1-indexed) → 6×6 0-indexed pattern
     const row = y - 1 // 0–5
     const col = x - 1 // 0–5
@@ -75,8 +83,8 @@ export function patternToCode(pattern: TagPattern): bigint {
   }
   let code = 0n
   for (let bit = 0; bit < 36; bit++) {
-    const x = BIT_X[bit]
-    const y = BIT_Y[bit]
+    const x = BIT_X[bit]!
+    const y = BIT_Y[bit]!
     const row = y - 1
     const col = x - 1
     if (pattern[row * 6 + col] === 1) {
@@ -109,8 +117,8 @@ export function decodeTag36h11Best(pattern: TagPattern | undefined, maxError: nu
   // Collect positions of unknown bits (-1) for wildcard optimization
   const unknownPositions: number[] = []
   for (let bit = 0; bit < 36; bit++) {
-    const x = BIT_X[bit]
-    const y = BIT_Y[bit]
+    const x = BIT_X[bit]!
+    const y = BIT_Y[bit]!
     const pRow = y - 1
     const pCol = x - 1
     if (pRow >= 0 && pRow <= 5 && pCol >= 0 && pCol <= 5) {
@@ -129,7 +137,7 @@ export function decodeTag36h11Best(pattern: TagPattern | undefined, maxError: nu
       wildcardMasks.push(mask)
       return
     }
-    const bitIndex = unknownPositions[pos]
+    const bitIndex = unknownPositions[pos]!
     generateMasks(pos + 1, mask) // 0
     generateMasks(pos + 1, mask | (1n << BigInt(bitIndex))) // 1
   }
@@ -140,13 +148,13 @@ export function decodeTag36h11Best(pattern: TagPattern | undefined, maxError: nu
   // Pre-compute pattern bits that are known (0 or 1)
   let patternKnown = 0n
   for (let bit = 0; bit < 36; bit++) {
-    const x = BIT_X[bit]
-    const y = BIT_Y[bit]
+    const x = BIT_X[bit]!
+    const y = BIT_Y[bit]!
     const pRow = y - 1
     const pCol = x - 1
-    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) continue
+    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) { continue }
     const pIdx = pRow * 6 + pCol
-    if (pattern[pIdx] === 1) patternKnown |= 1n << BigInt(35 - bit)
+    if (pattern[pIdx] === 1) { patternKnown |= 1n << BigInt(35 - bit) }
   }
 
   let bestId = -1
@@ -159,10 +167,10 @@ export function decodeTag36h11Best(pattern: TagPattern | undefined, maxError: nu
       if (dist < bestDist) {
         bestDist = dist
         bestId = TAG36H11_CODES.indexOf(baseCode)
-        if (bestDist === 0) break
+        if (bestDist === 0) { break }
       }
     }
-    if (bestDist === 0) break
+    if (bestDist === 0) { break }
   }
 
   return bestDist > maxError ? { id: -1, dist: bestDist } : { id: bestId, dist: bestDist }
@@ -187,7 +195,7 @@ export function rotatePattern(pattern: TagPattern): TagPattern {
       const dstRow = col
       const dstCol = 5 - row
       const dstIdx = dstRow * 6 + dstCol
-      result[dstIdx] = pattern[srcIdx]
+      result[dstIdx] = pattern[srcIdx]!
     }
   }
   return result

@@ -11,7 +11,7 @@ import {
  * Single entry point for “does the decode stress battery pass?” — used by tests and limit scripts.
  */
 import type { Point } from '@/lib/geometry'
-import { TAG36H11_CODES, codeToPattern } from '@/lib/tag36h11'
+import { tag36h11Code, codeToPattern } from '@/lib/tag36h11'
 
 export type DecodeStressSuiteOptions = {
   /** Speckle amplitude on `[0,1]` intensity before Sobel. */
@@ -48,7 +48,7 @@ export function decodeStressSuiteFailuresFromOptions(opts: DecodeStressSuiteOpti
   const homographyMismatchScale = opts.homographyMismatchScale ?? 0
   const supersample = opts.supersample ?? DECODE_STRESS_SUPERSAMPLE_DEFAULT
   const tagId = opts.tagId ?? 0
-  const truth = codeToPattern(TAG36H11_CODES[tagId])
+  const truth = codeToPattern(tag36h11Code(tagId))
 
   const failures: string[] = []
 

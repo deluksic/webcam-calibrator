@@ -13,6 +13,10 @@ export default defineConfig({
     '@typescript-eslint/strict-boolean-expressions': 'error',
     '@typescript-eslint/no-unused-expressions': 'error',
     '@typescript-eslint/prefer-optional-chain': 'error',
+    // Discourage non-null assertions — prefer structural fixes (typed tuples, checked accessors).
+    // GPU shader bodies and TypedArray bounds-proven sites are exempt via overrides below.
+    // Note: oxlint's no-non-null-assertion is 🚧 (in progress); revisit when stabilised.
+    '@typescript-eslint/no-non-null-assertion': 'warn',
     ...typegpu.configs.recommended.rules,
 
     'no-restricted-globals': [

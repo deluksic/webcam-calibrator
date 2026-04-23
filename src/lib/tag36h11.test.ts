@@ -7,8 +7,8 @@ import {
   decodeTag36h11,
   rotatePattern,
   decodeTag36h11AnyRotation,
+  tag36h11Code,
   TAG36H11_COUNT,
-  TAG36H11_CODES,
 } from '@/lib/tag36h11'
 
 describe('tag36h11', () => {
@@ -67,7 +67,7 @@ describe('tag36h11', () => {
   describe('codeToPattern', () => {
     it('produces valid patterns for reference codes', () => {
       // Every reference code should decode to a pattern that round-trips
-      for (const code of [TAG36H11_CODES[0], TAG36H11_CODES[100], TAG36H11_CODES[300], TAG36H11_CODES[586]]) {
+      for (const code of [tag36h11Code(0), tag36h11Code(100), tag36h11Code(300), tag36h11Code(586)]) {
         const pattern = codeToPattern(code)
         expect(pattern).toHaveLength(36)
         // Decode should find a matching tag in the dictionary
@@ -77,7 +77,7 @@ describe('tag36h11', () => {
     })
 
     it('round-trips reference codes (encode→decode→encode)', () => {
-      for (const code of [TAG36H11_CODES[0], TAG36H11_CODES[100], TAG36H11_CODES[586]]) {
+      for (const code of [tag36h11Code(0), tag36h11Code(100), tag36h11Code(586)]) {
         const pattern = codeToPattern(code)
         const reconstructed = patternToCode(pattern)
         expect(reconstructed).toBe(code)
@@ -120,7 +120,7 @@ describe('tag36h11', () => {
 
     it('decodes all reference codes correctly', () => {
       for (let i = 0; i < TAG36H11_COUNT; i++) {
-        const pattern = codeToPattern(TAG36H11_CODES[i])
+        const pattern = codeToPattern(tag36h11Code(i))
         const decoded = decodeTag36h11(pattern, 5)
         expect(decoded).toBe(i)
       }
@@ -134,7 +134,7 @@ describe('tag36h11', () => {
 
     it('chooses rotation with lowest Hamming distance', () => {
       const tagId = 42
-      const canonical = codeToPattern(TAG36H11_CODES[tagId])
+      const canonical = codeToPattern(tag36h11Code(tagId))
       let p = canonical
       for (let k = 0; k < 2; k++) {
         p = rotatePattern(p)
