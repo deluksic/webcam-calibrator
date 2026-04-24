@@ -117,7 +117,7 @@ function CalibrationView() {
   const calib = createMemo<CalibrationResult | null>(() => {
     const r = run()
     const lay = layout()
-    if (r.collection !== 'running' || !lay || r.framePool.length < 1) {
+    if (r.collection === 'idle' || !lay || r.framePool.length < 1) {
       return null
     }
     return solveCalibration(lay, r.framePool)

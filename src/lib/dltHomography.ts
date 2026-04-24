@@ -43,24 +43,12 @@ function hartley2(pts: ReadonlyArray<{ x: number; y: number }>, n: number): Mat3
 }
 
 function matMul3(a: Mat3, b: Mat3): Mat3Mut {
-  const a00 = a[0]!,
-    a01 = a[1]!,
-    a02 = a[2]!
-  const a10 = a[3]!,
-    a11 = a[4]!,
-    a12 = a[5]!
-  const a20 = a[6]!,
-    a21 = a[7]!,
-    a22 = a[8]!
-  const b00 = b[0]!,
-    b01 = b[1]!,
-    b02 = b[2]!
-  const b10 = b[3]!,
-    b11 = b[4]!,
-    b12 = b[5]!
-  const b20 = b[6]!,
-    b21 = b[7]!,
-    b22 = b[8]!
+  const a00 = a[0]!, a01 = a[1]!, a02 = a[2]!
+  const a10 = a[3]!, a11 = a[4]!, a12 = a[5]!
+  const a20 = a[6]!, a21 = a[7]!, a22 = a[8]!
+  const b00 = b[0]!, b01 = b[1]!, b02 = b[2]!
+  const b10 = b[3]!, b11 = b[4]!, b12 = b[5]!
+  const b20 = b[6]!, b21 = b[7]!, b22 = b[8]!
   return [
     a00 * b00 + a01 * b10 + a02 * b20,
     a00 * b01 + a01 * b11 + a02 * b21,
@@ -87,59 +75,53 @@ export function solveHomographyDLT(pairs: ReadonlyArray<Correspondence>): Mat3 |
   if (m < 4) {
     return undefined
   }
-  const pPlane: { x: number; y: number }[] = []
-  const pIm: { x: number; y: number }[] = []
-  for (const c of pairs) {
-    pPlane.push(c.plane)
-    pIm.push(c.image)
-  }
-  const tP = hartley2(pPlane, m) as Mat3
-  const tI = hartley2(pIm, m) as Mat3
-  const tInvI = invertMat3RowMajor(tI)
-  if (!tInvI) {
-    return undefined
-  }
 
   const rows = 2 * m
   const a = new Float64Array(rows * 9)
+
+  // Raw DLT constraint (no Hartley normalization):
+  // For normalized coordinates Xn=[X,Y,1], Un=[u,v,1]:
+  // u = (h0*X + h1*Y + h2) / (h6*X + h7*Y + h8)
+  // Rearranging: u*(h6*X + h7*Y + h8) - (h0*X + h1*Y + h2) = 0
+  //              = -h0*X - h1*Y - h2 + h6*X*u + h7*Y*u + h8*u = 0
+
   for (let r = 0; r < m; r++) {
-    const pl = pPlane[r]!
-    const im = pIm[r]!
-    const Xn = tP[0]! * pl.x + tP[1]! * pl.y + tP[2]!
-    const Yn = tP[3]! * pl.x + tP[4]! * pl.y + tP[5]!
-    const Un = tI[0]! * im.x + tI[1]! * im.y + tI[2]!
-    const Vn = tI[3]! * im.x + tI[4]! * im.y + tI[5]!
-    const row0 = 2 * r
-    a[row0 * 9 + 0] = -Xn
-    a[row0 * 9 + 1] = -Yn
-    a[row0 * 9 + 2] = -1
-    a[row0 * 9 + 3] = 0
-    a[row0 * 9 + 4] = 0
-    a[row0 * 9 + 5] = 0
-    a[row0 * 9 + 6] = Un * Xn
-    a[row0 * 9 + 7] = Un * Yn
-    a[row0 * 9 + 8] = Un
-    const row1 = 2 * r + 1
-    a[row1 * 9 + 0] = 0
-    a[row1 * 9 + 1] = 0
-    a[row1 * 9 + 2] = 0
-    a[row1 * 9 + 3] = -Xn
-    a[row1 * 9 + 4] = -Yn
-    a[row1 * 9 + 5] = -1
-    a[row1 * 9 + 6] = Vn * Xn
-    a[row1 * 9 + 7] = Vn * Yn
-    a[row1 * 9 + 8] = Vn
+    const pl = pairs[r]!.plane
+    const im = pairs[r]!.image
+
+    const row = r * 18
+
+    // Row for u coordinate
+    a[row + 0] = -pl.x
+    a[row + 1] = -pl.y
+    a[row + 2] = -1
+    a[row + 6] = pl.x * im.x
+    a[row + 7] = pl.y * im.x
+    a[row + 8] = im.x
+
+    // Row for v coordinate
+    a[row + 9 + 3] = -pl.x
+    a[row + 9 + 4] = -pl.y
+    a[row + 9 + 5] = -1
+    a[row + 9 + 6] = pl.x * im.y
+    a[row + 9 + 7] = pl.y * im.y
+    a[row + 9 + 8] = im.y
   }
 
   const h = solveHomogeneousNullVector(a, rows, 9)
-  const hN = hVecToMat3(h)
-  const comb = matMul3(matMul3(tInvI, hN), tP)
-  const w8 = comb[8]!
-  if (abs(w8) < 1e-12) {
+  if (!h) {
     return undefined
   }
-  for (let i = 0; i < 9; i++) {
-    comb[i]! /= w8
+
+  const hN = hVecToMat3(h)
+
+  // Normalize: divide by h[8] to ensure h[8] = 1
+  const hN_norm = hN.map((v, i) => i === 8 ? v : v / h[8]!)
+
+  // Check if h[8] is valid
+  if (abs(hN_norm[8]!) < 1e-12) {
+    return undefined
   }
-  return comb
+
+  return hN_norm
 }
