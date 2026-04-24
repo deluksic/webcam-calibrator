@@ -129,6 +129,38 @@ function column(H: Mat3, col: number): Vec3 {
 // ============================================================================
 
 /**
+ * Normalize homography so that ||h1||² + ||h2||² = 2.
+ * This is critical for numerical stability in Zhang's method.
+ * Without normalization, B matrix elements can have very different scales.
+ */
+function normalizeHomography(H: Mat3): Mat3 {
+  // h1 = column 0, h2 = column 1
+  const h1x = H[0]!
+  const h1y = H[3]!
+  const h1z = H[6]!
+  const h2x = H[1]!
+  const h2y = H[4]!
+  const h2z = H[7]!
+
+  // ||h1||² + ||h2||²
+  const normSq = h1x * h1x + h1y * h1y + h1z * h1z +
+                 h2x * h2x + h2y * h2y + h2z * h2z
+
+  if (normSq < 1e-10) {
+    return H
+  }
+
+  // Scale factor: s = sqrt(2 / normSq)
+  const s = Math.sqrt(2 / normSq)
+
+  return [
+    H[0]! * s, H[1]! * s, H[2]! * s,
+    H[3]! * s, H[4]! * s, H[5]! * s,
+    H[6]! * s, H[7]! * s, H[8]! * s,
+  ] as unknown as Mat3
+}
+
+/**
  * Build V matrix from homographies.
  * Each homography contributes 2 rows: [v12^T, (v11-v22)^T]
  */
@@ -139,7 +171,8 @@ export function buildVMatrix(homographies: readonly Homography[]): number[] {
   const V: number[] = new Array(numRows * numCols)
 
   for (let i = 0; i < numViews; i++) {
-    const H = homographies[i]!.H
+    // Normalize homography for numerical stability
+    const H = normalizeHomography(homographies[i]!.H)
     const v12 = computeV12(H)
     const v11MinusV22 = computeV11MinusV22(H)
 
@@ -188,12 +221,23 @@ export function solveForB(V: number[], numViews: number): Vec6 | undefined {
  * Returns K = [[fx, s, cx], [0, fy, cy], [0, 0, 1]]
  */
 export function extractKFromB(B: Vec6): Intrinsics {
-  const B11 = B[0]!
-  const B12 = B[1]!
-  const B22 = B[2]!
-  const B13 = B[3]!
-  const B23 = B[4]!
-  const B33 = B[5]!
+  let B11 = B[0]!
+  let B12 = B[1]!
+  let B22 = B[2]!
+  let B13 = B[3]!
+  let B23 = B[4]!
+  let B33 = B[5]!
+
+  // Ensure B is positive definite by negating if necessary
+  // B = λ * K^(-T) * K^(-1) should have positive eigenvalues
+  if (B11 < 0 || B33 < 0) {
+    B11 = -B11
+    B12 = -B12
+    B22 = -B22
+    B13 = -B13
+    B23 = -B23
+    B33 = -B33
+  }
 
   // cy = (B12*B13 - B11*B23) / (B11*B22 - B12²)
   const denom = B11 * B22 - B12 * B12
