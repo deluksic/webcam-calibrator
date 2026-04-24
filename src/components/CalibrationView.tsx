@@ -319,7 +319,7 @@ function CalibrationView() {
               if (!l || !c || c.kind !== 'ok') {
                 return undefined
               }
-              return { k: c.K, layout: l, extrinsics: calibratedExtrinsics }
+              return { k: c.K, layout: l, extrinsics: calibratedExtrinsics() }
             }}
             onReprojectionFrame={(m) => setReproj(m)}
           />
