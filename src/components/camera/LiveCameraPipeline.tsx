@@ -129,7 +129,7 @@ function drawReprojectionOverlay(
   w: number,
   h: number,
   quads: DetectedQuad[],
-  live: { k: CameraIntrinsics; layout: TargetLayout } | undefined,
+  live: { k: CameraIntrinsics; layout: TargetLayout; extrinsics?: ReadonlyMap<number, { R: Mat3R; t: Vec3 }> } | undefined,
 ) {
   const ctx = canvas.getContext('2d')
   if (!ctx) {
@@ -145,7 +145,7 @@ function drawReprojectionOverlay(
   if (!live) {
     return undefined
   }
-  const built = buildReprojectionDrawOps(live.layout, live.k, quads, w, h)
+  const built = buildReprojectionDrawOps(live.layout, live.k, quads, live.extrinsics, w, h)
   if (!built) {
     return undefined
   }

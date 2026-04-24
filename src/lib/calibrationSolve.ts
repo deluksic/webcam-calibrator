@@ -50,6 +50,8 @@ export type CalibrationOk = {
   perFrameRmsPx: Map<number, number>
 }
 
+export type CalibratedExtrinsics = ReadonlyMap<number, { R: Mat3R; t: Vec3 }>
+
 export type CalibrationErr = { kind: 'error'; reason: 'too-few-views' | 'singular' | 'non-physical' }
 
 export type CalibrationResult = CalibrationOk | CalibrationErr

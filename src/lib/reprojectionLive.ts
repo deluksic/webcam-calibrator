@@ -1,11 +1,10 @@
 // Build per-frame reprojection overlay geometry for a 2D canvas (image pixel space).
 
-import { solveHomographyDLT, type Correspondence } from '@/lib/dltHomography'
-import { extrinsicsFromHomography, type Mat3R } from '@/lib/zhangCalibration'
 import type { CameraIntrinsics } from '@/lib/cameraModel'
 import type { TargetLayout } from '@/lib/targetLayout'
-import { applyHomography, type Point } from '@/lib/geometry'
+import { projectPlanePoint, type Point } from '@/lib/reprojectionError'
 import type { Vec3 } from '@/lib/zhangCalibration'
+import type { Mat3R } from '@/lib/zhangCalibration'
 import type { DetectedQuad } from '@/gpu/contour'
 
 const { hypot, acos, min: minf, max: maxf } = Math
@@ -41,11 +40,17 @@ export function buildReprojectionDrawOps(
   layout: TargetLayout,
   k: CameraIntrinsics,
   quads: readonly DetectedQuad[],
+  extrinsics: ReadonlyMap<number, { R: Mat3R; t: Vec3 }> | undefined,
   imageWidth: number,
   imageHeight: number,
 ): { ops: ReprojectionDrawOp[]; rms: number; R: Mat3R; t: Vec3; tagCount: number } | null {
-  const pairs: Correspondence[] = []
+  if (!extrinsics || extrinsics.size === 0) {
+    return null
+  }
   const tags: { id: number; corners: [Point, Point, Point, Point] }[] = []
+  const pairsWithExtrinsics: Array<{ plane: Point; image: Point; R: Mat3R; t: Vec3 }> = []
+
+  // First pass: collect all valid tags and build correspondence data
   for (const q of quads) {
     if (typeof q.decodedTagId !== 'number' || !q.hasCorners) {
       continue
@@ -54,41 +59,43 @@ export function buildReprojectionDrawOps(
     if (!pl) {
       continue
     }
-    for (let j = 0; j < 4; j++) {
-      pairs.push({ plane: { x: pl[j]!.x, y: pl[j]!.y }, image: q.corners[j]! })
+    const ex = extrinsics.get(q.decodedTagId)
+    if (!ex) {
+      continue
     }
     tags.push({ id: q.decodedTagId, corners: [q.corners[0]!, q.corners[1]!, q.corners[2]!, q.corners[3]!] })
+    for (let j = 0; j < 4; j++) {
+      pairsWithExtrinsics.push({
+        plane: { x: pl[j]!.x, y: pl[j]!.y },
+        image: q.corners[j]!,
+        R: ex.R,
+        t: ex.t,
+      })
+    }
   }
-  if (tags.length < 2 || pairs.length < 8) {
+  if (tags.length < 2) {
     return null
   }
-  const h = solveHomographyDLT(pairs)
-  if (!h) {
-    return null
-  }
-  const ex = extrinsicsFromHomography(h, k)
-  if (!ex) {
-    return null
-  }
-  const { R, t } = ex
+
+  // Second pass: compute reprojection errors and build visualization ops
   const ops: ReprojectionDrawOp[] = []
   const errSq: number[] = []
-  for (const tg of tags) {
-    const pl = layout.get(tg.id)!
-    for (let j = 0; j < 4; j++) {
-      const pred = applyHomography(h, pl[j]!.x, pl[j]!.y)
-      const im = tg.corners[j]!
-      const d = dist(pred, im)
-      errSq.push(d * d)
-      ops.push({ t: 'ring', c: im, r: 4, color: 'rgba(0,200,255,0.5)' })
-      ops.push({ t: 'dot', c: pred, r: 3, color: 'rgba(255,0,200,0.9)' })
-      ops.push({ t: 'line', a: im, b: pred, color: residualColor(d), w: 1.5 })
-    }
+  for (let i = 0; i < pairsWithExtrinsics.length; i++) {
+    const { plane, image, R, t } = pairsWithExtrinsics[i]!
+    const pred = projectPlanePoint(k, R, t, plane.x, plane.y)
+    const d = dist(pred, image)
+    errSq.push(d * d)
+    ops.push({ t: 'ring', c: image, r: 4, color: 'rgba(0,200,255,0.5)' })
+    ops.push({ t: 'dot', c: pred, r: 3, color: 'rgba(255,0,200,0.9)' })
+    ops.push({ t: 'line', a: image, b: pred, color: residualColor(d), w: 1.5 })
   }
   const rms = errSq.length > 0 ? Math.sqrt(errSq.reduce((a, b) => a + b, 0) / errSq.length) : 0
   void imageWidth
   void imageHeight
-  return { ops, rms, R, t, tagCount: tags.length }
+
+  // Use extrinsics from first valid tag for display
+  const firstExtr = extrinsics.get(tags[0]!.id)!
+  return { ops, rms, R: firstExtr.R, t: firstExtr.t, tagCount: tags.length }
 }
 
 export function cameraTiltDegFromR(R: Mat3R): number {

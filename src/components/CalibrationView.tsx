@@ -143,6 +143,24 @@ function CalibrationView() {
     return solveCalibration(lay, labeledPoints, filteredPool)
   })
 
+  // DAG: calibratedExtrinsics is a pure derivation of calib and framePool.
+  const calibratedExtrinsics = createMemo(() => {
+    const c = calib()
+    if (!c || c.kind !== 'ok') {
+      return null
+    }
+    const frameIds = new Set(runs().map((f) => f.frameId))
+    const result: Map<number, { R: Mat3R; t: Vec3 }> = new Map()
+    for (const ext of c.extrinsics) {
+      if (frameIds.has(ext.frameId)) {
+        result.set(ext.frameId, { R: ext.R, t: ext.t })
+      }
+    }
+    return result
+  })
+
+  const runs = createMemo(() => run().framePool)
+
   const onQuadDetection = (quads: DetectedQuad[], meta: { frameId: number }) => {
     setRun((r) => ({
       ...r,
@@ -301,7 +319,7 @@ function CalibrationView() {
               if (!l || !c || c.kind !== 'ok') {
                 return undefined
               }
-              return { k: c.K, layout: l }
+              return { k: c.K, layout: l, extrinsics: extrs }
             }}
             onReprojectionFrame={(m) => setReproj(m)}
           />
