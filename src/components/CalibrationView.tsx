@@ -1,9 +1,9 @@
 import { Errored, For, createMemo, createSignal } from 'solid-js'
+import type { DetectedQuad } from '@/gpu/contour'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
-import type { DetectedQuad } from '@/gpu/contour'
 import {
   acceptQuadForCalibration,
   calibrationQuadScore,
@@ -11,8 +11,8 @@ import {
 } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
 import { solveCalibration, type CalibrationResult } from '@/lib/calibrationSolve'
-import type { TagObservation, CalibrationFrameObservation } from '@/lib/calibrationTypes'
-import { learnLayoutFromFrame, type TargetLayout } from '@/lib/targetLayout'
+import type { TagObservation, LabeledPoint, CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
+import { learnLayoutFromFrame, layoutToLabeledPoints, type TargetLayout } from '@/lib/targetLayout'
 import { RESOLUTION_LADDER, type Resolution } from './camera/cameraStreamAcquire'
 
 import styles from '@/components/CalibrationView.module.css'
@@ -120,7 +120,8 @@ function CalibrationView() {
     if (r.collection === 'idle' || !lay || r.framePool.length < 1) {
       return null
     }
-    return solveCalibration(lay, r.framePool)
+    const labeledPoints = layoutToLabeledPoints(lay)
+    return solveCalibration(lay, labeledPoints, r.framePool)
   })
 
   const onQuadDetection = (quads: DetectedQuad[], meta: { frameId: number }) => {
@@ -128,7 +129,7 @@ function CalibrationView() {
       ...r,
       stats: { ...r.stats, framesProcessed: r.stats.framesProcessed + 1 },
     }))
-    if (run().collection !== 'running') {
+    if (run().collection === 'idle' || run().collection === 'paused') {
       return
     }
 
@@ -180,6 +181,18 @@ function CalibrationView() {
       return
     }
 
+    // Convert tags to labeled points for this frame
+    const framePoints: FramePoint[] = []
+    for (const t of tags) {
+      const pointId = t.tagId * 10000
+      for (let j = 0; j < 4; j++) {
+        framePoints.push({
+          pointId: pointId + j,
+          imagePoint: t.corners[j]!,
+        })
+      }
+    }
+
     if (!lay) {
       if (tags.length < 2) {
         return
@@ -192,7 +205,7 @@ function CalibrationView() {
       }
     }
 
-    const frame: CalibrationFrameObservation = { frameId: meta.frameId, tags }
+    const frame: CalibrationFrameObservation = { frameId: meta.frameId, framePoints }
     setRun((r) => {
       const { next, evicted } = mergeCalibrationFramesTopK(r.framePool, [frame], DEFAULT_CALIBRATION_TOP_K)
       return {
@@ -210,8 +223,8 @@ function CalibrationView() {
   const uniqueTagCount = createMemo(() => {
     const s = new Set<number>()
     for (const f of run().framePool) {
-      for (const t of f.tags) {
-        s.add(t.tagId)
+      for (const fp of f.framePoints) {
+        s.add(Math.floor(fp.pointId / 10000))
       }
     }
     return s.size
@@ -346,7 +359,16 @@ function CalibrationView() {
         <div>Quad rejects: {run().stats.quadRejects}</div>
         <div>Top-K evictions: {run().stats.evictions}</div>
         <div class={styles.statsSection}>Pooled solve</div>
-        <div>{calibBlock().line1}</div>
+        <div>
+          <span style="color: var(--color-success)">ok</span>{' '}
+          RMS <span>{fmt(calib() && calib()!.kind === 'ok' ? calib()!.rmsPx : undefined, 3)}</span>
+          <span style="color: var(--color-text-muted)"> px</span>{' '}
+          med <span>{calib() && calib()!.kind === 'ok' ? fmt(percentile([...calib()!.perFrameRmsPx.values()].sort((a, b) => a - b), 0.5), 3) : '—'}</span>
+          {' p95 '}
+          <span>{calib() && calib()!.kind === 'ok' ? fmt(percentile([...calib()!.perFrameRmsPx.values()].sort((a, b) => a - b), 0.95), 3) : '—'}</span>
+          {' views '}
+          <span>{calib() && calib()!.kind === 'ok' ? calib()!.homographies.length : '—'}</span>
+        </div>
         <div>
           fx / fy: {calib() && calib()!.kind === 'ok' ? calibBlock().fxfy : '—'} px
         </div>

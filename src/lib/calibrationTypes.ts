@@ -1,4 +1,4 @@
-import type { Corners } from '@/lib/geometry'
+import type { Corners, Point } from '@/lib/geometry'
 
 /** One decoded tag in a single frame. */
 export interface TagObservation {
@@ -8,10 +8,22 @@ export interface TagObservation {
   score: number
 }
 
-/** All decoded tags observed in one frame (used by calibration + solver). */
+/** Point definition with unique ID (tag × corner). */
+export interface LabeledPoint {
+  pointId: number
+  plane: { x: number; y: number }
+}
+
+/** Per-frame observation of a specific point. */
+export interface FramePoint {
+  pointId: number
+  imagePoint: Point
+}
+
+/** All decoded tags observed in one frame. */
 export interface CalibrationFrameObservation {
   frameId: number
-  tags: readonly TagObservation[]
+  framePoints: readonly FramePoint[]
 }
 
 export interface Point3 {

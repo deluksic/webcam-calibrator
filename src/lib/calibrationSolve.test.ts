@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { rotY } from '@/lib/calibrationTestUtils'
-import type { CalibrationFrameObservation, TagObservation } from '@/lib/calibrationTypes'
+import type { CalibrationFrameObservation, LabeledPoint, FramePoint } from '@/lib/calibrationTypes'
 import { solveCalibration } from '@/lib/calibrationSolve'
 import type { Corners } from '@/lib/geometry'
 import { projectPlanePoint } from '@/lib/reprojectionError'
@@ -40,11 +40,30 @@ function oneFrame(
   score: number,
 ): CalibrationFrameObservation {
   const c = frameCorners(R, t)
-  const tags: TagObservation[] = [
-    { tagId: 0, rotation: 0, corners: c.tag0, score },
-    { tagId: 1, rotation: 0, corners: c.tag1, score },
+  const framePoints: FramePoint[] = [
+    { pointId: 0, imagePoint: c.tag0[0]! },
+    { pointId: 1, imagePoint: c.tag0[1]! },
+    { pointId: 2, imagePoint: c.tag0[2]! },
+    { pointId: 3, imagePoint: c.tag0[3]! },
+    { pointId: 10000, imagePoint: c.tag1[0]! },
+    { pointId: 10001, imagePoint: c.tag1[1]! },
+    { pointId: 10002, imagePoint: c.tag1[2]! },
+    { pointId: 10003, imagePoint: c.tag1[3]! },
   ]
-  return { frameId: id, tags }
+  return { frameId: id, framePoints }
+}
+
+function syntheticLabeledPoints(): LabeledPoint[] {
+  return [
+    { pointId: 0, plane: { x: 0, y: 0 } },
+    { pointId: 1, plane: { x: 1, y: 0 } },
+    { pointId: 2, plane: { x: 0, y: 1 } },
+    { pointId: 3, plane: { x: 1, y: 1 } },
+    { pointId: 10000, plane: { x: 1.3, y: 0.1 } },
+    { pointId: 10001, plane: { x: 2.3, y: 0.1 } },
+    { pointId: 10002, plane: { x: 1.3, y: 1.1 } },
+    { pointId: 10003, plane: { x: 2.3, y: 1.1 } },
+  ]
 }
 
 function syntheticFrames(): CalibrationFrameObservation[] {
@@ -59,7 +78,8 @@ function syntheticFrames(): CalibrationFrameObservation[] {
 describe('solveCalibration', () => {
   it('succeeds on synthetic multi-tag, multi-view data with low RMS', () => {
     const frames = syntheticFrames()
-    const res = solveCalibration(layoutPlane, frames)
+    const labeledPoints = syntheticLabeledPoints()
+    const res = solveCalibration(layoutPlane, labeledPoints, frames)
     expect(res.kind).toBe('ok')
     if (res.kind !== 'ok') {
       return
@@ -71,7 +91,8 @@ describe('solveCalibration', () => {
 
   it('returns too-few-views with <3 valid homographies', () => {
     const f = [oneFrame(1, rotY(0.1), { x: 0, y: 0, z: 2.5 }, 1)]
-    const r = solveCalibration(layoutPlane, f)
+    const labeledPoints = syntheticLabeledPoints()
+    const r = solveCalibration(layoutPlane, labeledPoints, f)
     expect(r.kind).toBe('error')
     if (r.kind === 'error') {
       expect(r.reason).toBe('too-few-views')

@@ -87,7 +87,7 @@
 }
 
 .stats div {
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .statsSection {

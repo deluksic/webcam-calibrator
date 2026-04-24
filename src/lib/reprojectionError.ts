@@ -2,10 +2,11 @@
 
 import { length, type Mat3, type Point } from '@/lib/geometry'
 import type { CameraIntrinsics } from '@/lib/cameraModel'
-import type { CalibrationFrameObservation } from '@/lib/calibrationTypes'
+import type { CalibrationFrameObservation, LabeledPoint } from '@/lib/calibrationTypes'
 import type { TargetLayout } from '@/lib/targetLayout'
 import type { Vec3 } from '@/lib/zhangCalibration'
 import { extrinsicsFromHomography, type Mat3R } from '@/lib/zhangCalibration'
+import { rotateRing } from '@/lib/corners'
 
 const { sqrt } = Math
 
@@ -29,21 +30,20 @@ function cornerError(pred: Point, im: Point): number {
 
 export function reprojectionRmsForFrame(
   layout: TargetLayout,
+  labeledPoints: readonly LabeledPoint[],
   k: CameraIntrinsics,
   R: Mat3R,
   t: Vec3,
   f: CalibrationFrameObservation,
 ): { rms: number; n: number } {
   const sq: number[] = []
-  for (const tag of f.tags) {
-    const pl = layout.get(tag.tagId)
-    if (!pl) {
+  for (const fp of f.framePoints) {
+    const lp = labeledPoints.find((p) => p.pointId === fp.pointId)
+    if (!lp) {
       continue
     }
-    for (let j = 0; j < 4; j++) {
-      const err = cornerError(projectPlanePoint(k, R, t, pl[j]!.x, pl[j]!.y), tag.corners[j]!)
-      sq.push(err * err)
-    }
+    const err = cornerError(projectPlanePoint(k, R, t, lp.plane.x, lp.plane.y), fp.imagePoint)
+    sq.push(err * err)
   }
   if (sq.length === 0) {
     return { rms: 0, n: 0 }
@@ -56,6 +56,7 @@ export function reprojectionRmsForFrame(
  */
 export function reprojectionStatsPooled(
   layout: TargetLayout,
+  labeledPoints: readonly LabeledPoint[],
   k: CameraIntrinsics,
   hs: readonly { frameId: number; h: Mat3 }[],
   frameObs: readonly CalibrationFrameObservation[],
@@ -71,21 +72,19 @@ export function reprojectionStatsPooled(
     if (!ex) {
       continue
     }
-    const { rms, n } = reprojectionRmsForFrame(layout, k, ex.R, ex.t, fo)
+    const { rms, n } = reprojectionRmsForFrame(layout, labeledPoints, k, ex.R, ex.t, fo)
     if (n > 0) {
       perFrameRmsPx.set(fo.frameId, rms)
     }
-    for (const tag of fo.tags) {
-      const pl = layout.get(tag.tagId)
-      if (!pl) {
+    for (const fp of fo.framePoints) {
+      const lp = labeledPoints.find((p) => p.pointId === fp.pointId)
+      if (!lp) {
         continue
       }
-      for (let j = 0; j < 4; j++) {
-        const p = projectPlanePoint(k, ex.R, ex.t, pl[j]!.x, pl[j]!.y)
-        const e = p.x - tag.corners[j]!.x
-        const f_ = p.y - tag.corners[j]!.y
-        allSq.push(e * e + f_ * f_)
-      }
+      const p = projectPlanePoint(k, ex.R, ex.t, lp.plane.x, lp.plane.y)
+      const e = p.x - fp.imagePoint.x
+      const f_ = p.y - fp.imagePoint.y
+      allSq.push(e * e + f_ * f_)
     }
   }
   const rmsPx = allSq.length > 0 ? sqrt(allSq.reduce((a, b) => a + b, 0) / allSq.length) : 0

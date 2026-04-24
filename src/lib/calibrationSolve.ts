@@ -1,40 +1,44 @@
-// Pure: planar Zhang calibration from target layout + frame observations.
+// Pure: planar Zhang calibration from labeled points + frame observations.
 
 import { solveHomographyDLT, type Correspondence } from '@/lib/dltHomography'
 import { type Mat3, type Point } from '@/lib/geometry'
 import type { CameraIntrinsics } from '@/lib/cameraModel'
-import type { CalibrationFrameObservation, TagObservation } from '@/lib/calibrationTypes'
+import type { CalibrationFrameObservation, LabeledPoint, FramePoint } from '@/lib/calibrationTypes'
 import { reprojectionStatsPooled } from '@/lib/reprojectionError'
 import type { TargetLayout } from '@/lib/targetLayout'
 import { extrinsicsFromHomography, solveIntrinsicsFromHomographies, type Mat3R, type Vec3 } from '@/lib/zhangCalibration'
 
-function cornersToPlaneList(c: TargetLayout, tag: TagObservation): { plane: { x: number; y: number }; image: Point }[] | undefined {
-  const p = c.get(tag.tagId)
-  if (!p) {
+function framePointsToCorrespondences(
+  framePoints: readonly FramePoint[],
+  labeledPoints: readonly LabeledPoint[],
+): Correspondence[] | undefined {
+  const all: Correspondence[] = []
+  for (const fp of framePoints) {
+    const lp = labeledPoints.find((p) => p.pointId === fp.pointId)
+    if (!lp) {
+      continue
+    }
+    all.push({ plane: lp.plane, image: fp.imagePoint })
+  }
+  if (all.length < 8) {
     return undefined
   }
-  return p.map((pl, j) => ({ plane: { x: pl.x, y: pl.y }, image: tag.corners[j]! }))
+  return all
 }
 
 function homographyForFrame(
-  layout: TargetLayout,
+  labeledPoints: readonly LabeledPoint[],
   f: CalibrationFrameObservation,
 ): { h: Mat3; frameId: number; pairs: number } | undefined {
-  const all: Correspondence[] = []
-  for (const t of f.tags) {
-    const part = cornersToPlaneList(layout, t)
-    if (part) {
-      all.push(...part)
-    }
-  }
-  if (all.length < 4) {
+  const pairs = framePointsToCorrespondences(f.framePoints, labeledPoints)
+  if (!pairs) {
     return undefined
   }
-  const h = solveHomographyDLT(all)
+  const h = solveHomographyDLT(pairs)
   if (!h) {
     return undefined
   }
-  return { h, frameId: f.frameId, pairs: all.length }
+  return { h, frameId: f.frameId, pairs: pairs.length }
 }
 
 export type CalibrationOk = {
@@ -51,18 +55,19 @@ export type CalibrationErr = { kind: 'error'; reason: 'too-few-views' | 'singula
 export type CalibrationResult = CalibrationOk | CalibrationErr
 
 /**
- * @param frames — frames that contain at least 2 layout tags; views with <4 correspondences are skipped for H; Zhang needs ≥3 Hs.
+ * @param layout — used only for reprojection errors
+ * @param labeledPoints — flat list of points with unique IDs, for computing homographies
+ * @param frames — frames with tag observations
  */
-export function solveCalibration(layout: TargetLayout, frames: readonly CalibrationFrameObservation[]): CalibrationResult {
+export function solveCalibration(
+  layout: TargetLayout,
+  labeledPoints: LabeledPoint[],
+  frames: readonly CalibrationFrameObservation[],
+): CalibrationResult {
   const hs: { frameId: number; h: Mat3 }[] = []
   for (const f of frames) {
-    // count tags in layout
-    const nTags = f.tags.filter((t) => layout.has(t.tagId)).length
-    if (nTags < 2) {
-      continue
-    }
-    const o = homographyForFrame(layout, f)
-    if (o && o.pairs >= 4) {
+    const o = homographyForFrame(labeledPoints, f)
+    if (o && o.pairs >= 8) {
       hs.push({ frameId: o.frameId, h: o.h })
     }
   }
@@ -85,6 +90,6 @@ export function solveCalibration(layout: TargetLayout, frames: readonly Calibrat
     }
     extr.push({ frameId: h.frameId, R: e.R, t: e.t })
   }
-  const stats = reprojectionStatsPooled(layout, k, hs, frames)
+  const stats = reprojectionStatsPooled(layout, labeledPoints, k, hs, frames)
   return { kind: 'ok', K: k, homographies: hs, extrinsics: extr, rmsPx: stats.rmsPx, perFrameRmsPx: stats.perFrameRmsPx }
 }

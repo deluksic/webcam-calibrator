@@ -9,10 +9,17 @@ export function length(x: number, y: number): number {
 export type Point = {
   x: number
   y: number
+  score?: number
 }
 
 /** Quad corners in image / triangle-strip order: TL, TR, BL, BR. */
 export type Corners = [tl: Point, tr: Point, bl: Point, br: Point]
+
+/** Correspondence between plane (X,Y) and image (u,v). */
+export type Correspondence = {
+  plane: { x: number; y: number }
+  image: Point
+}
 
 /** 3×3 row-major homography matrix `[m00, m01, m02, m10, m11, m12, m20, m21, m22]`. */
 export type Mat3 = readonly [number, number, number, number, number, number, number, number, number]

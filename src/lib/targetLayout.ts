@@ -2,7 +2,7 @@
 
 import { invertMat3RowMajor } from '@/lib/aprilTagRaycast'
 import { applyHomography, tryComputeHomography, type Corners, type Mat3, type Point } from '@/lib/geometry'
-import type { TagObservation } from '@/lib/calibrationTypes'
+import type { TagObservation, LabeledPoint } from '@/lib/calibrationTypes'
 
 const UNIT_SQUARE: Corners = [
   { x: 0, y: 0 },
@@ -13,6 +13,8 @@ const UNIT_SQUARE: Corners = [
 
 export type TargetLayout = ReadonlyMap<number, Corners>
 export type TargetLayoutEntry = { tagId: number; corners: Corners }
+
+const POINT_ID_MULTIPLIER = 10000
 
 /**
  * Map each tag to its four corner positions in the anchor tag's plane (Z=0, xy).
@@ -38,6 +40,23 @@ export function learnLayoutFromFrame(tags: readonly TagObservation[]): TargetLay
     m.set(t.tagId, corners)
   }
   return m
+}
+
+/**
+ * Convert layout tags into labeled points with unique pointIds.
+ * Each tag has 4 corners labeled as tagId * 10000 + cornerId.
+ */
+export function layoutToLabeledPoints(layout: TargetLayout): LabeledPoint[] {
+  const result: LabeledPoint[] = []
+  for (const [tagId, corners] of layout.entries()) {
+    for (let cornerId = 0; cornerId < 4; cornerId++) {
+      result.push({
+        pointId: tagId * POINT_ID_MULTIPLIER + cornerId,
+        plane: corners[cornerId]!,
+      })
+    }
+  }
+  return result
 }
 
 function mapPt(h: Mat3, p: Point): Point {

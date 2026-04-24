@@ -377,23 +377,25 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
             }),
           )
           const live = typeof pi.liveCalibration === 'function' ? pi.liveCalibration() : undefined
-          const ovl = overlayCanvas()
-          if (ovl) {
-            const br = drawReprojectionOverlay(ovl, width, height, tagged, live)
-            if (typeof pi.onReprojectionFrame === 'function') {
-              if (br) {
-                pi.onReprojectionFrame({
-                  rms: br.rms,
-                  tagCount: br.tagCount,
-                  tiltDeg: cameraTiltDegFromR(br.R),
-                  dist: cameraDistanceFromT(br.t),
-                })
-              } else {
-                pi.onReprojectionFrame(null)
+          if (!pi.paused) {
+            const ovl = overlayCanvas()
+            if (ovl) {
+              const br = drawReprojectionOverlay(ovl, width, height, tagged, live)
+              if (typeof pi.onReprojectionFrame === 'function') {
+                if (br) {
+                  pi.onReprojectionFrame({
+                    rms: br.rms,
+                    tagCount: br.tagCount,
+                    tiltDeg: cameraTiltDegFromR(br.R),
+                    dist: cameraDistanceFromT(br.t),
+                  })
+                } else {
+                  pi.onReprojectionFrame(null)
+                }
               }
+            } else if (typeof pi.onReprojectionFrame === 'function') {
+              pi.onReprojectionFrame(null)
             }
-          } else if (typeof pi.onReprojectionFrame === 'function') {
-            pi.onReprojectionFrame(null)
           }
           pi.onQuadDetection?.(tagged, { frameId: slot.frameId })
         })
@@ -411,6 +413,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         if (disposed) {
           return
         }
+
         const gpuNow = gpu()
         if (!gpuNow) {
           return
@@ -427,7 +430,9 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           if (slot !== undefined) {
             runCompute(enc, gpuNow, pip, video, threshold(), slot)
             gpuNow.device.queue.submit([enc.finish()])
-            scheduleQuadDetection(slot, pi.showFallbacks)
+            if (!pi.paused) {
+              scheduleQuadDetection(slot, pi.showFallbacks)
+            }
           }
           // If no slot is free, skip this frame entirely (backpressure).
         } else {
@@ -436,18 +441,22 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           presentFrame(enc, gpuNow, pip, dm as NonGridDisplayMode, (_err) => {})
           gpuNow.device.queue.submit([enc.finish()])
           if (dm === 'debug') {
-            scheduleExtentRead()
+            if (!pi.paused) {
+              scheduleExtentRead()
+            }
           }
         }
 
         // TODO: read using Uint32Array directly
-        void pip.histogramBuffer.read().then((bins) => {
-          if (disposed) {
-            return
-          }
-          const data = new Uint32Array(bins)
-          setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE))
-        })
+        if (!pi.paused) {
+          void pip.histogramBuffer.read().then((bins) => {
+            if (disposed) {
+              return
+            }
+            const data = new Uint32Array(bins)
+            setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE))
+          })
+        }
       },
     })
     log('rVFC loop started')
