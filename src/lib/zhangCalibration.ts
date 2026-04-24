@@ -1,8 +1,8 @@
 // Zhang: intrinsics from planar homographies; extrinsics M = K^{-1} H.
 
-import type { CameraIntrinsics } from '@/lib/cameraModel'
-import { solveHomogeneousNullVector, symPowInvSqrt } from '@/lib/jacobiEigenSym'
-import type { Mat3 } from '@/lib/geometry'
+import type { CameraIntrinsics } from './cameraModel'
+import { solveHomogeneousNullVector, symPowInvSqrt } from './calibration/jacobiEigenSym'
+import type { Mat3 } from './geometry'
 
 const { abs, sqrt } = Math
 

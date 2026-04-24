@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { jacobiEigenSym } from '@/lib/jacobiEigenSym'
+import { jacobiEigenSym } from './jacobiEigenSym'
 
 describe('jacobiEigenSym', () => {
   it('produces ordered eigenvalues whose sum matches trace (diagonal input)', () => {

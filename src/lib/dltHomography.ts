@@ -1,5 +1,5 @@
-import type { Mat3, Point } from '@/lib/geometry'
-import { solveHomogeneousNullVector } from '@/lib/jacobiEigenSym'
+import type { Mat3, Point } from './geometry'
+import { solveHomogeneousNullVector } from './calibration/jacobiEigenSym'
 
 const { abs } = Math
 
