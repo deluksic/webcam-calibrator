@@ -120,8 +120,27 @@ function CalibrationView() {
     if (r.collection === 'idle' || !lay || r.framePool.length < 1) {
       return null
     }
+    // Collect all tagIds present in the layout
+    const layoutTagIds = new Set<number>()
+    for (const tagId of lay.keys()) {
+      layoutTagIds.add(tagId)
+    }
+    // Filter framePool to only include points from tags in the layout
+    const filteredPool: CalibrationFrameObservation[] = []
+    for (const frame of r.framePool) {
+      const filteredPoints = frame.framePoints.filter((fp) => {
+        const tagId = Math.floor(fp.pointId / 10000)
+        return layoutTagIds.has(tagId)
+      })
+      if (filteredPoints.length >= 8) {
+        filteredPool.push({ frameId: frame.frameId, framePoints: filteredPoints })
+      }
+    }
+    if (filteredPool.length < 3) {
+      return null
+    }
     const labeledPoints = layoutToLabeledPoints(lay)
-    return solveCalibration(lay, labeledPoints, r.framePool)
+    return solveCalibration(lay, labeledPoints, filteredPool)
   })
 
   const onQuadDetection = (quads: DetectedQuad[], meta: { frameId: number }) => {
@@ -140,17 +159,6 @@ function CalibrationView() {
         stats: { ...r.stats, frameRejections: r.stats.frameRejections + 1 },
       }))
       return
-    }
-
-    const lay = layout()
-    for (const q of decoded) {
-      if (lay && typeof q.decodedTagId === 'number' && !lay.has(q.decodedTagId)) {
-        setRun((r) => ({
-          ...r,
-          stats: { ...r.stats, frameRejections: r.stats.frameRejections + 1 },
-        }))
-        return
-      }
     }
 
     const tags: TagObservation[] = []
@@ -193,7 +201,7 @@ function CalibrationView() {
       }
     }
 
-    if (!lay) {
+    if (!layout()) {
       if (tags.length < 2) {
         return
       }

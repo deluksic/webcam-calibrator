@@ -29,16 +29,20 @@ export function learnLayoutFromFrame(tags: readonly TagObservation[]): TargetLay
   const hAnchor = tryComputeHomography(anchor.corners) as Mat3
   const hInv = invertMat3RowMajor(hAnchor)
   if (!hInv) {
+    console.log(`[layout] Cannot invert anchor tag ${anchor.tagId} homography - singular matrix`)
     return undefined
   }
   const m = new Map<number, Corners>()
   m.set(anchor.tagId, UNIT_SQUARE)
+
+  // Map all other tags
   for (let i = 1; i < sorted.length; i++) {
     const t = sorted[i]!
     const c = t.corners
-    const corners: Corners = [mapPt(hInv, c[0]!), mapPt(hInv, c[1]!), mapPt(hInv, c[2]!), mapPt(hInv, c[3]!)]
-    m.set(t.tagId, corners)
+    const mapped = [mapPt(hInv, c[0]!), mapPt(hInv, c[1]!), mapPt(hInv, c[2]!), mapPt(hInv, c[3]!)]
+    m.set(t.tagId, mapped)
   }
+
   return m
 }
 

@@ -52,7 +52,7 @@ export function buildReprojectionDrawOps(
     }
     const pl = layout.get(q.decodedTagId)
     if (!pl) {
-      return null
+      continue
     }
     for (let j = 0; j < 4; j++) {
       pairs.push({ plane: { x: pl[j]!.x, y: pl[j]!.y }, image: q.corners[j]! })

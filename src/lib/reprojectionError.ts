@@ -14,6 +14,17 @@ function abs(x: number) {
   return x < 0 ? -x : x
 }
 
+function buildFramePointMap(f: CalibrationFrameObservation, labeledPoints: readonly LabeledPoint[]): Map<number, { x: number; y: number }> {
+  const map = new Map<number, { x: number; y: number }>()
+  for (const fp of f.framePoints) {
+    const lp = labeledPoints.find((p) => p.pointId === fp.pointId)
+    if (lp) {
+      map.set(fp.pointId, lp.plane)
+    }
+  }
+  return map
+}
+
 export function projectPlanePoint(k: CameraIntrinsics, R: Mat3R, t: Vec3, x: number, y: number): Point {
   const Xc = R[0]! * x + R[1]! * y + t.x
   const Yc = R[3]! * x + R[4]! * y + t.y
@@ -48,7 +59,11 @@ export function reprojectionRmsForFrame(
   if (sq.length === 0) {
     return { rms: 0, n: 0 }
   }
-  return { rms: sqrt(sq.reduce((a, b) => a + b, 0) / sq.length), n: sq.length }
+  const rms = sqrt(sq.reduce((a, b) => a + b, 0) / sq.length)
+  if (f.frameId < 5) {
+    console.log(`[debug] Frame ${f.frameId}: ${sq.length} points, RMS: ${rms.toFixed(3)}`)
+  }
+  return { rms, n: sq.length }
 }
 
 /**
@@ -63,6 +78,7 @@ export function reprojectionStatsPooled(
 ): { rmsPx: number; perFrameRmsPx: Map<number, number> } {
   const perFrameRmsPx = new Map<number, number>()
   const allSq: number[] = []
+  let maxN = 0
   for (const fo of frameObs) {
     const hEnt = hs.find((x) => x.frameId === fo.frameId)
     if (!hEnt) {
@@ -72,21 +88,30 @@ export function reprojectionStatsPooled(
     if (!ex) {
       continue
     }
-    const { rms, n } = reprojectionRmsForFrame(layout, labeledPoints, k, ex.R, ex.t, fo)
-    if (n > 0) {
-      perFrameRmsPx.set(fo.frameId, rms)
-    }
+    const framePointMap = buildFramePointMap(fo, labeledPoints)
+    const sq: number[] = []
     for (const fp of fo.framePoints) {
-      const lp = labeledPoints.find((p) => p.pointId === fp.pointId)
+      const lp = framePointMap.get(fp.pointId)
       if (!lp) {
         continue
       }
-      const p = projectPlanePoint(k, ex.R, ex.t, lp.plane.x, lp.plane.y)
+      const p = projectPlanePoint(k, ex.R, ex.t, lp.x, lp.y)
       const e = p.x - fp.imagePoint.x
       const f_ = p.y - fp.imagePoint.y
-      allSq.push(e * e + f_ * f_)
+      sq.push(e * e + f_ * f_)
+    }
+    if (sq.length > 0) {
+      const rms = sqrt(sq.reduce((a, b) => a + b, 0) / sq.length)
+      perFrameRmsPx.set(fo.frameId, rms)
+      maxN = Math.max(maxN, sq.length)
+      allSq.push(...sq)
     }
   }
   const rmsPx = allSq.length > 0 ? sqrt(allSq.reduce((a, b) => a + b, 0) / allSq.length) : 0
+
+  console.log(`[debug] Pooled: ${allSq.length} points, RMS: ${rmsPx.toFixed(3)}`)
+  console.log(`[debug] Max N per frame: ${maxN}`)
+  console.log(`[debug] Frame RMS: ${Array.from(perFrameRmsPx.values()).map((v, i) => `${i}: ${v.toFixed(3)}`).join(', ')}`)
+
   return { rmsPx, perFrameRmsPx }
 }
