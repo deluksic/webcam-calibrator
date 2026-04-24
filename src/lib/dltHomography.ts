@@ -59,7 +59,17 @@ export function solveHomographyDLT(pairs: ReadonlyArray<Correspondence>): Mat3 |
   const hN = hVecToMat3(h)
 
   // Normalize: divide by h[8] to ensure h[8] = 1
-  const h_norm = hN.map((v, i) => i === 8 ? v : v / h[8]!)
+  const h_norm: readonly [number, number, number, number, number, number, number, number, number] = [
+    hN[0]!,
+    hN[1]!,
+    hN[2]!,
+    hN[3]!,
+    hN[4]!,
+    hN[5]!,
+    hN[6]!,
+    hN[7]!,
+    1,
+  ]
 
   // Check if h[8] is valid
   if (abs(h_norm[8]!) < 1e-12) {

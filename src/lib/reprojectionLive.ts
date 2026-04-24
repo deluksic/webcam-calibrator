@@ -2,9 +2,11 @@
 
 import type { CameraIntrinsics } from '@/lib/cameraModel'
 import type { TargetLayout } from '@/lib/targetLayout'
-import { projectPlanePoint, type Point } from '@/lib/reprojectionError'
-import type { Vec3 } from '@/lib/zhangCalibration'
-import type { Mat3R } from '@/lib/zhangCalibration'
+import { solveHomographyDLT } from '@/lib/dltHomography'
+import { projectPlanePoint } from '@/lib/reprojectionError'
+import type { Point } from '@/lib/geometry'
+import type { Mat3 } from '@/lib/geometry'
+import { extrinsicsFromHomography, type Vec3, type Mat3R } from '@/lib/zhangCalibration'
 import type { DetectedQuad } from '@/gpu/contour'
 
 const { hypot, acos, min: minf, max: maxf } = Math
@@ -40,36 +42,33 @@ export function buildReprojectionDrawOps(
   layout: TargetLayout,
   k: CameraIntrinsics,
   quads: readonly DetectedQuad[],
-  extrinsics: ReadonlyMap<number, { R: Mat3R; t: Vec3 }> | undefined,
   imageWidth: number,
   imageHeight: number,
 ): { ops: ReprojectionDrawOp[]; rms: number; R: Mat3R; t: Vec3; tagCount: number } | null {
-  if (!extrinsics || extrinsics.size === 0) {
+  // Compute live pose from current detections
+  const livePose = livePoseFromDetections(layout, quads, k)
+  if (!livePose) {
     return null
   }
-  const tags: { id: number; corners: [Point, Point, Point, Point] }[] = []
-  const pairsWithExtrinsics: Array<{ plane: Point; image: Point; R: Mat3R; t: Vec3 }> = []
 
-  // First pass: collect all valid tags and build correspondence data
+  const { R, t } = livePose
+  const tags: { id: number; corners: [Point, Point, Point, Point] }[] = []
+  const pairs: Array<{ plane: Point; image: Point }> = []
+
+  // Collect all valid tags and build correspondences
   for (const q of quads) {
-    if (typeof q.decodedTagId !== 'number' || !q.hasCorners) {
+    if (typeof q.decodedTagId !== 'number' || !q.hasCorners || q.cornerDebug?.failureCode !== 0) {
       continue
     }
     const pl = layout.get(q.decodedTagId)
     if (!pl) {
       continue
     }
-    const ex = extrinsics.get(q.decodedTagId)
-    if (!ex) {
-      continue
-    }
     tags.push({ id: q.decodedTagId, corners: [q.corners[0]!, q.corners[1]!, q.corners[2]!, q.corners[3]!] })
     for (let j = 0; j < 4; j++) {
-      pairsWithExtrinsics.push({
+      pairs.push({
         plane: { x: pl[j]!.x, y: pl[j]!.y },
         image: q.corners[j]!,
-        R: ex.R,
-        t: ex.t,
       })
     }
   }
@@ -77,11 +76,10 @@ export function buildReprojectionDrawOps(
     return null
   }
 
-  // Second pass: compute reprojection errors and build visualization ops
+  // Compute reprojection errors and build visualization ops
   const ops: ReprojectionDrawOp[] = []
   const errSq: number[] = []
-  for (let i = 0; i < pairsWithExtrinsics.length; i++) {
-    const { plane, image, R, t } = pairsWithExtrinsics[i]!
+  for (const { plane, image } of pairs) {
     const pred = projectPlanePoint(k, R, t, plane.x, plane.y)
     const d = dist(pred, image)
     errSq.push(d * d)
@@ -93,9 +91,7 @@ export function buildReprojectionDrawOps(
   void imageWidth
   void imageHeight
 
-  // Use extrinsics from first valid tag for display
-  const firstExtr = extrinsics.get(tags[0]!.id)!
-  return { ops, rms, R: firstExtr.R, t: firstExtr.t, tagCount: tags.length }
+  return { ops, rms, R, t, tagCount: tags.length }
 }
 
 export function cameraTiltDegFromR(R: Mat3R): number {
@@ -108,4 +104,53 @@ export function cameraTiltDegFromR(R: Mat3R): number {
 
 export function cameraDistanceFromT(t: Vec3): number {
   return hypot(t.x, hypot(t.y, t.z))
+}
+
+/**
+ * Compute live pose (R, t) from current tag detections.
+ * For each visible tag, build a homography from layout positions → image corners.
+ * Use the first valid homography to get extrinsics (assuming the camera is essentially
+ * at a single position for the current frame).
+ *
+ * Returns {R, t} if we have enough correspondences, null otherwise.
+ */
+export function livePoseFromDetections(
+  layout: TargetLayout,
+  quads: readonly DetectedQuad[],
+  k: CameraIntrinsics,
+): { R: Mat3R; t: Vec3 } | null {
+  // Build correspondences from visible tags to their layout positions
+  const pairs: Array<{ plane: Point; image: Point }> = []
+  for (const q of quads) {
+    if (typeof q.decodedTagId !== 'number' || !q.hasCorners || q.cornerDebug?.failureCode !== 0) {
+      continue
+    }
+    const pl = layout.get(q.decodedTagId)
+    if (!pl) {
+      continue
+    }
+    // Use all 4 corners from this tag
+    for (let j = 0; j < 4; j++) {
+      if (q.corners[j]) {
+        pairs.push({
+          plane: { x: pl[j]!.x, y: pl[j]!.y },
+          image: q.corners[j]!,
+        })
+      }
+    }
+  }
+
+  if (pairs.length < 8) {
+    return null
+  }
+
+  // Compute homography from layout → image
+  const h = solveHomographyDLT(pairs)
+  if (!h) {
+    return null
+  }
+
+  // Get extrinsics from homography
+  const ex = extrinsicsFromHomography(h, k)
+  return ex ?? null
 }

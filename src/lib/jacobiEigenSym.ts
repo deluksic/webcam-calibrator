@@ -55,7 +55,6 @@ export function solveHomogeneousNullVector(a: Float64Array, m: number, n: number
   }
 
   const v0 = new Float64Array(n)
-  const Vdata = V.data
 
   // ml-matrix behavior with autoTranspose:
   // - When autoTranspose=false with m < n: V is n x n, null vector is LAST COLUMN
@@ -67,13 +66,13 @@ export function solveHomogeneousNullVector(a: Float64Array, m: number, n: number
     // autoTranspose=true: V is n x minDim, extract from last column
     nullVec = new Float64Array(n)
     for (let i = 0; i < n; i++) {
-      nullVec[i] = Vdata[i]![minDim - 1]!
+      nullVec[i] = V.get(i, minDim - 1)!
     }
   } else {
     // Default: extract from last column
     nullVec = new Float64Array(n)
     for (let i = 0; i < n; i++) {
-      nullVec[i] = Vdata[i]![n - 1]!
+      nullVec[i] = V.get(i, n - 1)!
     }
   }
 

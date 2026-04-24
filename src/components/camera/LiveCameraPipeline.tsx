@@ -12,6 +12,7 @@ import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/constants'
 import type { CameraIntrinsics } from '@/lib/cameraModel'
+import type { Mat3R, Vec3 } from '@/lib/zhangCalibration'
 import {
   buildReprojectionDrawOps,
   cameraDistanceFromT,
@@ -120,6 +121,8 @@ export type LiveCameraPipelineProps = {
   /** When set, draw 2D reprojection overlay and report live metrics. */
   liveCalibration?: () => { k: CameraIntrinsics; layout: TargetLayout } | undefined
   onReprojectionFrame?: (m: { rms: number; tagCount: number; tiltDeg: number; dist: number } | null) => void
+  /** Called when snapshot button is pressed - passes current tagged quads. */
+  onQuadSnapshotRequest?: () => void
   /** Extra controls (camera select, mode buttons, …). */
   toolbar?: JSX.Element
 }
@@ -129,7 +132,8 @@ function drawReprojectionOverlay(
   w: number,
   h: number,
   quads: DetectedQuad[],
-  live: { k: CameraIntrinsics; layout: TargetLayout; extrinsics?: ReadonlyMap<number, { R: Mat3R; t: Vec3 }> } | undefined,
+  k: CameraIntrinsics,
+  layout: TargetLayout,
 ) {
   const ctx = canvas.getContext('2d')
   if (!ctx) {
@@ -142,10 +146,7 @@ function drawReprojectionOverlay(
     canvas.height = h
   }
   ctx.clearRect(0, 0, w, h)
-  if (!live) {
-    return undefined
-  }
-  const built = buildReprojectionDrawOps(live.layout, live.k, quads, live.extrinsics, w, h)
+  const built = buildReprojectionDrawOps(layout, k, quads, w, h)
   if (!built) {
     return undefined
   }
@@ -193,6 +194,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     liveCalibration: props.liveCalibration,
     onReprojectionFrame: props.onReprojectionFrame,
     onQuadDetection: props.onQuadDetection,
+    onQuadSnapshotRequest: props.onQuadSnapshotRequest,
   }))
 
   const videoElement = createMemo(async () => {
@@ -341,13 +343,15 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         pip.frameSlotPool.releaseSlot(slot)
         return
       }
+      const pi = pipelineInteraction()
+      const liveCalib = typeof pi.liveCalibration === 'function' ? pi.liveCalibration() : undefined
+
       detectForSlot(gNow, pip, slot)
         .then((result) => {
           if (disposed) {
             pip.frameSlotPool.releaseSlot(slot)
             return
           }
-          const pi = pipelineInteraction()
           const { quads } = result
           quads.sort((a, b) => b.count - a.count)
           const top = quads.slice(0, MAX_DETECTED_TAGS)
@@ -376,11 +380,10 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               return typeof q.decodedTagId === 'number'
             }),
           )
-          const live = typeof pi.liveCalibration === 'function' ? pi.liveCalibration() : undefined
-          if (!pi.paused) {
+          if (true) {
             const ovl = overlayCanvas()
-            if (ovl) {
-              const br = drawReprojectionOverlay(ovl, width, height, tagged, live)
+            if (ovl && liveCalib) {
+              const br = drawReprojectionOverlay(ovl, width, height, tagged, liveCalib.k, liveCalib.layout)
               if (typeof pi.onReprojectionFrame === 'function') {
                 if (br) {
                   pi.onReprojectionFrame({
@@ -430,7 +433,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           if (slot !== undefined) {
             runCompute(enc, gpuNow, pip, video, threshold(), slot)
             gpuNow.device.queue.submit([enc.finish()])
-            if (!pi.paused) {
+            if (true) {
               scheduleQuadDetection(slot, pi.showFallbacks)
             }
           }
@@ -441,14 +444,14 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           presentFrame(enc, gpuNow, pip, dm as NonGridDisplayMode, (_err) => {})
           gpuNow.device.queue.submit([enc.finish()])
           if (dm === 'debug') {
-            if (!pi.paused) {
+            if (true) {
               scheduleExtentRead()
             }
           }
         }
 
         // TODO: read using Uint32Array directly
-        if (!pi.paused) {
+        if (true) {
           void pip.histogramBuffer.read().then((bins) => {
             if (disposed) {
               return

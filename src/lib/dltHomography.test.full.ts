@@ -66,8 +66,10 @@ describe('DLT Full Test', () => {
     const trueArr = Array.from(Htrue)
     console.log('Comparison:')
     for (let i = 0; i < 9; i++) {
-      if (Math.abs(hArr[i]) > 1e-10) {
-        const k = hArr[i] / trueArr[i]
+      const hi = hArr[i]
+      const ti = trueArr[i]
+      if (hi !== undefined && ti !== undefined && Math.abs(hi) > 1e-10) {
+        const k = hi / ti
         console.log(`  h[${i}] / H[${i}] = ${k.toFixed(6)}`)
       }
     }

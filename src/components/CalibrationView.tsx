@@ -13,6 +13,7 @@ import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/cal
 import { solveCalibration, type CalibrationResult } from '@/lib/calibrationSolve'
 import type { TagObservation, LabeledPoint, CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
 import { learnLayoutFromFrame, layoutToLabeledPoints, type TargetLayout } from '@/lib/targetLayout'
+import type { Mat3R, Vec3 } from '@/lib/zhangCalibration'
 import { RESOLUTION_LADDER, type Resolution } from './camera/cameraStreamAcquire'
 
 import styles from '@/components/CalibrationView.module.css'
@@ -47,6 +48,7 @@ type CalibRunStats = {
   frameRejections: number
   quadRejects: number
   evictions: number
+  manualSnapshots: number
 }
 
 type CalibRun = {
@@ -64,6 +66,7 @@ const initialCalibRun: CalibRun = {
     frameRejections: 0,
     quadRejects: 0,
     evictions: 0,
+    manualSnapshots: 0,
   },
 }
 
@@ -96,6 +99,7 @@ function CalibrationView() {
     tiltDeg: number
     dist: number
   } | null>(null)
+  const [currentTagged, setCurrentTagged] = createSignal<DetectedQuad[]>([])
   const [run, setRun] = createSignal<CalibRun>({
     collection: 'idle',
     framePool: [],
@@ -143,68 +147,72 @@ function CalibrationView() {
     return solveCalibration(lay, labeledPoints, filteredPool)
   })
 
-  // DAG: calibratedExtrinsics is a pure derivation of calib and framePool.
+  const runs = createMemo(() => run().framePool)
+
+  // DAG: calibratedExtrinsics is a pure derivation of calib.
   const calibratedExtrinsics = createMemo(() => {
     const c = calib()
     if (!c || c.kind !== 'ok') {
       return null
     }
-    const frameIds = new Set(runs().map((f) => f.frameId))
     const result: Map<number, { R: Mat3R; t: Vec3 }> = new Map()
     for (const ext of c.extrinsics) {
-      if (frameIds.has(ext.frameId)) {
-        result.set(ext.frameId, { R: ext.R, t: ext.t })
-      }
+      result.set(ext.frameId, { R: ext.R, t: ext.t })
     }
     return result
   })
-
-  const runs = createMemo(() => run().framePool)
 
   const onQuadDetection = (quads: DetectedQuad[], meta: { frameId: number }) => {
     setRun((r) => ({
       ...r,
       stats: { ...r.stats, framesProcessed: r.stats.framesProcessed + 1 },
     }))
-    if (run().collection === 'idle' || run().collection === 'paused') {
+    setCurrentTagged(quads)
+  }
+
+  const handleSnapshotClick = () => {
+    const tagged = currentTagged()
+    console.log(`[CalibrationView snapshot] tagged.length=${tagged.length}`)
+    const r = run()
+    if (r.collection !== 'running') {
+      console.log(`[CalibrationView snapshot] not running, skipping`)
       return
     }
 
-    const decoded = quads.filter((q) => typeof q.decodedTagId === 'number')
-    if (frameHasDuplicateDecodedTagIds(decoded)) {
-      setRun((r) => ({
-        ...r,
-        stats: { ...r.stats, frameRejections: r.stats.frameRejections + 1 },
-      }))
+    if (tagged.length < 1) {
+      console.log(`[CalibrationView snapshot] no tagged quads, skipping`)
       return
     }
 
     const tags: TagObservation[] = []
-    let quadRejectDelta = 0
-    for (const q of quads) {
-      if (!acceptQuadForCalibration(q)) {
-        quadRejectDelta += 1
-        continue
+    for (const q of tagged) {
+      if (typeof q.decodedTagId === 'number') {
+        tags.push({
+          tagId: q.decodedTagId,
+          rotation: q.decodedRotation ?? 0,
+          corners: q.corners,
+          score: calibrationQuadScore(q),
+        })
       }
-      if (typeof q.decodedTagId !== 'number') {
-        continue
-      }
-      tags.push({
-        tagId: q.decodedTagId,
-        rotation: q.decodedRotation ?? 0,
-        corners: q.corners,
-        score: calibrationQuadScore(q),
-      })
-    }
-    if (quadRejectDelta > 0) {
-      setRun((r) => ({
-        ...r,
-        stats: { ...r.stats, quadRejects: r.stats.quadRejects + quadRejectDelta },
-      }))
     }
 
     if (tags.length < 1) {
       return
+    }
+
+    // Build layout from the first 2 tags if needed
+    if (!layout()) {
+      if (tags.length < 2) {
+        console.log(`[CalibrationView snapshot] need at least 2 tags for layout, skipping`)
+        return
+      }
+      const L = learnLayoutFromFrame(tags)
+      if (L) {
+        setLayout(L)
+      } else {
+        console.log(`[CalibrationView snapshot] failed to learn layout, skipping`)
+        return
+      }
     }
 
     // Convert tags to labeled points for this frame
@@ -219,26 +227,14 @@ function CalibrationView() {
       }
     }
 
-    if (!layout()) {
-      if (tags.length < 2) {
-        return
-      }
-      const L = learnLayoutFromFrame(tags)
-      if (L) {
-        setLayout(L)
-      } else {
-        return
-      }
-    }
-
-    const frame: CalibrationFrameObservation = { frameId: meta.frameId, framePoints }
     setRun((r) => {
-      const { next, evicted } = mergeCalibrationFramesTopK(r.framePool, [frame], DEFAULT_CALIBRATION_TOP_K)
+      const { next, evicted } = mergeCalibrationFramesTopK(r.framePool, [{ frameId: Date.now(), framePoints }], DEFAULT_CALIBRATION_TOP_K)
       return {
         ...r,
         framePool: next,
         stats: {
           ...r.stats,
+          manualSnapshots: r.stats.manualSnapshots + 1,
           framesAccepted: r.stats.framesAccepted + 1,
           evictions: r.stats.evictions + evicted,
         },
@@ -322,6 +318,7 @@ function CalibrationView() {
               return { k: c.K, layout: l, extrinsics: calibratedExtrinsics() }
             }}
             onReprojectionFrame={(m) => setReproj(m)}
+            onQuadSnapshotRequest={handleSnapshotClick}
           />
         </div>
       </Errored>
@@ -371,6 +368,14 @@ function CalibrationView() {
         >
           Reset
         </button>
+        <button
+          type="button"
+          class={styles.btn}
+          disabled={run().collection !== 'running'}
+          onClick={handleSnapshotClick}
+        >
+          Snapshot ({run().stats.manualSnapshots})
+        </button>
       </div>
 
       <div class={styles.stats}>
@@ -387,21 +392,48 @@ function CalibrationView() {
         <div class={styles.statsSection}>Pooled solve</div>
         <div>
           <span style="color: var(--color-success)">ok</span>{' '}
-          RMS <span>{fmt(calib() && calib()!.kind === 'ok' ? calib()!.rmsPx : undefined, 3)}</span>
+          RMS <span>{(() => {
+            const c = calib()
+            return c?.kind === 'ok' ? fmt(c!.rmsPx, 3) : '—'
+          })()}</span>
           <span style="color: var(--color-text-muted)"> px</span>{' '}
-          med <span>{calib() && calib()!.kind === 'ok' ? fmt(percentile([...calib()!.perFrameRmsPx.values()].sort((a, b) => a - b), 0.5), 3) : '—'}</span>
+          med <span>{(() => {
+            const c = calib()
+            return c?.kind === 'ok' ? fmt(percentile([...c!.perFrameRmsPx.values()].sort((a, b) => a - b), 0.5), 3) : '—'
+          })()}</span>
           {' p95 '}
-          <span>{calib() && calib()!.kind === 'ok' ? fmt(percentile([...calib()!.perFrameRmsPx.values()].sort((a, b) => a - b), 0.95), 3) : '—'}</span>
+          <span>{(() => {
+            const c = calib()
+            return c?.kind === 'ok' ? fmt(percentile([...c!.perFrameRmsPx.values()].sort((a, b) => a - b), 0.95), 3) : '—'
+          })()}</span>
           {' views '}
-          <span>{calib() && calib()!.kind === 'ok' ? calib()!.homographies.length : '—'}</span>
+          <span>{(() => {
+            const c = calib()
+            return c?.kind === 'ok' ? c!.homographies.length : '—'
+          })()}</span>
         </div>
         <div>
-          fx / fy: {calib() && calib()!.kind === 'ok' ? calibBlock().fxfy : '—'} px
+          fx / fy: {(() => {
+            const c = calib()
+            return c?.kind === 'ok' ? calibBlock().fxfy : '—'
+          })()} px
         </div>
-        <div>cx, cy: {calib() && calib()!.kind === 'ok' ? calibBlock().cxyc : '—'}</div>
-        <div>H FOV (x): {calib() && calib()!.kind === 'ok' ? calibBlock().fov : '—'}°</div>
-        <div>fy/fx: {calib() && calib()!.kind === 'ok' ? calibBlock().ratio : '—'}</div>
-        <div>pp offset (cx-W/2, cy-H/2): {calib() && calib()!.kind === 'ok' ? calibBlock().off : '—'}</div>
+        <div>cx, cy: {(() => {
+          const c = calib()
+          return c?.kind === 'ok' ? calibBlock().cxyc : '—'
+        })()}</div>
+        <div>H FOV (x): {(() => {
+          const c = calib()
+          return c?.kind === 'ok' ? calibBlock().fov : '—'
+        })()}°</div>
+        <div>fy/fx: {(() => {
+          const c = calib()
+          return c?.kind === 'ok' ? calibBlock().ratio : '—'
+        })()}</div>
+        <div>pp offset (cx-W/2, cy-H/2): {(() => {
+          const c = calib()
+          return c?.kind === 'ok' ? calibBlock().off : '—'
+        })()}</div>
         <div class={styles.statsSection}>Live frame</div>
         <div>
           RMS: {reproj() ? fmt(reproj()!.rms, 3) : '—'} px | tags: {reproj() ? reproj()!.tagCount : '—'}

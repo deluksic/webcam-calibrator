@@ -39,7 +39,7 @@ export function learnLayoutFromFrame(tags: readonly TagObservation[]): TargetLay
   for (let i = 1; i < sorted.length; i++) {
     const t = sorted[i]!
     const c = t.corners
-    const mapped = [mapPt(hInv, c[0]!), mapPt(hInv, c[1]!), mapPt(hInv, c[2]!), mapPt(hInv, c[3]!)]
+    const mapped: Corners = [mapPt(hInv, c[0]!), mapPt(hInv, c[1]!), mapPt(hInv, c[2]!), mapPt(hInv, c[3]!)]
     m.set(t.tagId, mapped)
   }
 
