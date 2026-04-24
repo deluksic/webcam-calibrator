@@ -89,3 +89,13 @@
 .stats div {
   white-space: nowrap;
 }
+
+.statsSection {
+  grid-column: 1 / -1;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-1);
+  white-space: normal;
+}

@@ -1,29 +1,42 @@
-import type { CalibrationSample } from '@/lib/calibrationTypes'
+import type { CalibrationFrameObservation } from '@/lib/calibrationTypes'
 
 export const DEFAULT_CALIBRATION_TOP_K = 10_000
 
-/** Lower score evicted first; tie-break older `frameId` first. */
-function compareSamples(a: CalibrationSample, b: CalibrationSample): number {
-  if (a.score !== b.score) {
-    return a.score - b.score
+function frameTotalScore(f: CalibrationFrameObservation): number {
+  let s = 0
+  for (const t of f.tags) {
+    s += t.score
+  }
+  return s
+}
+
+/** Lower total score evicted first; tie-break older `frameId` first, then more tags first. */
+function compareFrames(a: CalibrationFrameObservation, b: CalibrationFrameObservation): number {
+  const as = frameTotalScore(a)
+  const bs = frameTotalScore(b)
+  if (as !== bs) {
+    return as - bs
   }
   if (a.frameId !== b.frameId) {
     return a.frameId - b.frameId
   }
-  return a.tagId - b.tagId
+  return a.tags.length - b.tags.length
 }
 
 /**
- * Merge `incoming` into `pool`, keep at most `maxK` samples by ascending score eviction.
+ * Merge `incoming` into `pool`, keep at most `maxK` **frames** by ascending aggregate score.
  * Returns a **new** array (does not mutate `pool`).
  */
-export function mergeCalibrationSamplesTopK(
-  pool: readonly CalibrationSample[],
-  incoming: readonly CalibrationSample[],
+export function mergeCalibrationFramesTopK(
+  pool: readonly CalibrationFrameObservation[],
+  incoming: readonly CalibrationFrameObservation[] | undefined,
   maxK: number,
-): { next: CalibrationSample[]; evicted: number } {
-  const merged = [...pool, ...incoming]
-  merged.sort(compareSamples)
+): { next: CalibrationFrameObservation[]; evicted: number } {
+  const merged: CalibrationFrameObservation[] = [...pool]
+  if (incoming) {
+    merged.push(...incoming)
+  }
+  merged.sort(compareFrames)
   let evicted = 0
   while (merged.length > maxK) {
     merged.shift()

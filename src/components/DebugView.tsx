@@ -45,7 +45,7 @@ export function DebugView() {
     })
   }
 
-  const devicesSorted = createMemo(async () => {
+  const devicesSorted = createMemo(() => {
     const list = cam.devices()
     return [...list].sort((a, b) => deviceScore(b) - deviceScore(a))
   })

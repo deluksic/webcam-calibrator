@@ -1,4 +1,4 @@
-import { Errored, For, createMemo, createStore } from 'solid-js'
+import { Errored, For, createMemo, createSignal } from 'solid-js'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
@@ -9,11 +9,11 @@ import {
   calibrationQuadScore,
   frameHasDuplicateDecodedTagIds,
 } from '@/lib/calibrationQuality'
-import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationSamplesTopK } from '@/lib/calibrationTopK'
-import type { CalibrationSample } from '@/lib/calibrationTypes'
-
-import type { Resolution } from './camera/cameraStreamAcquire'
-import { RESOLUTION_LADDER } from './camera/cameraStreamAcquire'
+import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
+import { solveCalibration, type CalibrationResult } from '@/lib/calibrationSolve'
+import type { TagObservation, CalibrationFrameObservation } from '@/lib/calibrationTypes'
+import { learnLayoutFromFrame, type TargetLayout } from '@/lib/targetLayout'
+import { RESOLUTION_LADDER, type Resolution } from './camera/cameraStreamAcquire'
 
 import styles from '@/components/CalibrationView.module.css'
 import pipelineStyles from '@/components/camera/LiveCameraPipeline.module.css'
@@ -41,93 +41,208 @@ function deviceScore(d: MediaDeviceInfo): number {
 
 type Collection = 'idle' | 'running' | 'paused'
 
+type CalibRunStats = {
+  framesProcessed: number
+  framesAccepted: number
+  frameRejections: number
+  quadRejects: number
+  evictions: number
+}
+
+type CalibRun = {
+  collection: Collection
+  framePool: CalibrationFrameObservation[]
+  stats: CalibRunStats
+}
+
+const initialCalibRun: CalibRun = {
+  collection: 'idle',
+  framePool: [],
+  stats: {
+    framesProcessed: 0,
+    framesAccepted: 0,
+    frameRejections: 0,
+    quadRejects: 0,
+    evictions: 0,
+  },
+}
+
+const RES = RESOLUTION_LADDER
+function approxFrameSize(res: Resolution): { w: number; h: number } {
+  return res === 'medium' ? { w: 1280, h: 720 } : { w: 640, h: 480 }
+}
+
+function fmt(n: number | undefined, d: number) {
+  if (n === undefined || !Number.isFinite(n)) {
+    return '—'
+  }
+  return n.toFixed(d)
+}
+
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) {
+    return 0
+  }
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))))
+  return sorted[idx]!
+}
+
 function CalibrationView() {
   const cam = useCameraStream()
-
-  const [store, setStore] = createStore({
-    collection: 'idle' as Collection,
-    samples: [] as CalibrationSample[],
-    stats: {
-      framesProcessed: 0,
-      framesAccepted: 0,
-      frameRejections: 0,
-      quadRejects: 0,
-      evictions: 0,
-    },
+  const [layout, setLayout] = createSignal<TargetLayout | undefined>(undefined)
+  const [reproj, setReproj] = createSignal<{
+    rms: number
+    tagCount: number
+    tiltDeg: number
+    dist: number
+  } | null>(null)
+  const [run, setRun] = createSignal<CalibRun>({
+    collection: 'idle',
+    framePool: [],
+    stats: { ...initialCalibRun.stats },
   })
 
   const displayMode = createMemo<DisplayMode>(() => 'grid')
   const showGrid = () => true
   const showFallbacks = () => false
 
-  const devicesSorted = createMemo(async () => {
+  const devicesSorted = createMemo(() => {
     const list = cam.devices()
     return [...list].sort((a, b) => deviceScore(b) - deviceScore(a))
   })
 
+  const frameSizeApprox = createMemo(() => approxFrameSize(cam.selectedResolution() as Resolution))
+
+  // DAG: calib is a pure derivation of (collection, layout, framePool).
+  const calib = createMemo<CalibrationResult | null>(() => {
+    const r = run()
+    const lay = layout()
+    if (r.collection !== 'running' || !lay || r.framePool.length < 1) {
+      return null
+    }
+    return solveCalibration(lay, r.framePool)
+  })
+
   const onQuadDetection = (quads: DetectedQuad[], meta: { frameId: number }) => {
-    setStore((s) => {
-      s.stats.framesProcessed += 1
-    })
-    if (store.collection !== 'running') {
+    setRun((r) => ({
+      ...r,
+      stats: { ...r.stats, framesProcessed: r.stats.framesProcessed + 1 },
+    }))
+    if (run().collection !== 'running') {
       return
     }
 
     const decoded = quads.filter((q) => typeof q.decodedTagId === 'number')
     if (frameHasDuplicateDecodedTagIds(decoded)) {
-      setStore((s) => {
-        s.stats.frameRejections += 1
-      })
+      setRun((r) => ({
+        ...r,
+        stats: { ...r.stats, frameRejections: r.stats.frameRejections + 1 },
+      }))
       return
     }
 
-    const incoming: CalibrationSample[] = []
+    const lay = layout()
+    for (const q of decoded) {
+      if (lay && typeof q.decodedTagId === 'number' && !lay.has(q.decodedTagId)) {
+        setRun((r) => ({
+          ...r,
+          stats: { ...r.stats, frameRejections: r.stats.frameRejections + 1 },
+        }))
+        return
+      }
+    }
+
+    const tags: TagObservation[] = []
+    let quadRejectDelta = 0
     for (const q of quads) {
       if (!acceptQuadForCalibration(q)) {
-        setStore((s) => {
-          s.stats.quadRejects += 1
-        })
+        quadRejectDelta += 1
         continue
       }
       if (typeof q.decodedTagId !== 'number') {
         continue
       }
-      const rot = q.decodedRotation ?? 0
-      incoming.push({
-        frameId: meta.frameId,
+      tags.push({
         tagId: q.decodedTagId,
-        rotation: rot,
+        rotation: q.decodedRotation ?? 0,
+        corners: q.corners,
         score: calibrationQuadScore(q),
       })
     }
+    if (quadRejectDelta > 0) {
+      setRun((r) => ({
+        ...r,
+        stats: { ...r.stats, quadRejects: r.stats.quadRejects + quadRejectDelta },
+      }))
+    }
 
-    if (incoming.length === 0) {
+    if (tags.length < 1) {
       return
     }
 
-    setStore((s) => {
-      s.stats.framesAccepted += 1
-    })
-    const { next, evicted } = mergeCalibrationSamplesTopK(store.samples, incoming, DEFAULT_CALIBRATION_TOP_K)
-    if (evicted > 0) {
-      setStore((s) => {
-        s.stats.evictions += evicted
-      })
+    if (!lay) {
+      if (tags.length < 2) {
+        return
+      }
+      const L = learnLayoutFromFrame(tags)
+      if (L) {
+        setLayout(L)
+      } else {
+        return
+      }
     }
-    setStore((s) => {
-      s.samples = next
+
+    const frame: CalibrationFrameObservation = { frameId: meta.frameId, tags }
+    setRun((r) => {
+      const { next, evicted } = mergeCalibrationFramesTopK(r.framePool, [frame], DEFAULT_CALIBRATION_TOP_K)
+      return {
+        ...r,
+        framePool: next,
+        stats: {
+          ...r.stats,
+          framesAccepted: r.stats.framesAccepted + 1,
+          evictions: r.stats.evictions + evicted,
+        },
+      }
     })
   }
 
   const uniqueTagCount = createMemo(() => {
-    const ids = new Set(store.samples.map((s) => s.tagId))
-    return ids.size
+    const s = new Set<number>()
+    for (const f of run().framePool) {
+      for (const t of f.tags) {
+        s.add(t.tagId)
+      }
+    }
+    return s.size
+  })
+
+  const calibBlock = createMemo(() => {
+    const c = calib()
+    if (!c || c.kind === 'error') {
+      return { line1: c?.kind === 'error' ? `Solver: ${c.reason}` : 'Solver: —', k: null as null, rms: null as null }
+    }
+    const { w, h } = frameSizeApprox()
+    const fovX = (2 * Math.atan(0.5 * w / c.K.fx) * 180) / Math.PI
+    const vals = [...c.perFrameRmsPx.values()].sort((a, b) => a - b)
+    const p50 = percentile(vals, 0.5)
+    const p95 = percentile(vals, 0.95)
+    return {
+      line1: `ok  RMS ${fmt(c.rmsPx, 3)} px  med ${fmt(p50, 3)}  p95 ${fmt(p95, 3)}  views ${c.homographies.length}`,
+      fov: fmt(fovX, 1),
+      fxfy: `${fmt(c.K.fx, 1)} / ${fmt(c.K.fy, 1)}`,
+      cxyc: `${fmt(c.K.cx, 1)}, ${fmt(c.K.cy, 1)}`,
+      ratio: (c.K.fy / c.K.fx).toFixed(3),
+      off: `${fmt(c.K.cx - w / 2, 1)}, ${fmt(c.K.cy - h / 2, 1)}`,
+      rms: c.rmsPx,
+    }
   })
 
   return (
     <div class={styles.root}>
       <p class={styles.hint}>
-        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target.
+        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target. Press <strong>Start</strong> with
+        2+ tags visible; move the camera for varied views (3+ frames) to solve intrinsics.
       </p>
       <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
         <div class={styles.cameraBlock}>
@@ -147,7 +262,7 @@ function CalibrationView() {
             value={cam.selectedResolution()}
             onChange={(e) => cam.setSelectedResolution(e.currentTarget.value as Resolution)}
           >
-            <For each={Object.keys(RESOLUTION_LADDER)} keyed={false}>
+            <For each={Object.keys(RES)} keyed={false}>
               {(resolution) => <option value={resolution()}>{resolution()}</option>}
             </For>
           </select>
@@ -159,6 +274,15 @@ function CalibrationView() {
             stream={cam.stream()}
             onQuadDetection={onQuadDetection}
             onLog={console.log}
+            liveCalibration={() => {
+              const l = layout()
+              const c = calib()
+              if (!l || !c || c.kind !== 'ok') {
+                return undefined
+              }
+              return { k: c.K, layout: l }
+            }}
+            onReprojectionFrame={(m) => setReproj(m)}
           />
         </div>
       </Errored>
@@ -166,27 +290,29 @@ function CalibrationView() {
       <div class={styles.controls}>
         <button
           type="button"
-          class={store.collection === 'running' ? styles.btnActive : styles.btn}
-          onClick={() =>
-            setStore((s) => {
-              if (s.collection === 'idle' || s.collection === 'paused') {
-                s.collection = 'running'
+          class={run().collection === 'running' ? styles.btnActive : styles.btn}
+          onClick={() => {
+            setLayout(undefined)
+            setRun((r) => {
+              if (r.collection === 'idle' || r.collection === 'paused') {
+                return {
+                  collection: 'running',
+                  framePool: [],
+                  stats: { ...initialCalibRun.stats },
+                }
               }
+              return r
             })
-          }
+          }}
         >
           Start
         </button>
         <button
           type="button"
-          class={[styles.btn, store.collection !== 'running' && styles.btnDisabled]}
-          disabled={store.collection !== 'running'}
+          class={[styles.btn, run().collection !== 'running' && styles.btnDisabled]}
+          disabled={run().collection !== 'running'}
           onClick={() =>
-            setStore((s) => {
-              if (s.collection === 'running') {
-                s.collection = 'paused'
-              }
-            })
+            setRun((r) => (r.collection === 'running' ? { ...r, collection: 'paused' } : r))
           }
         >
           Pause
@@ -195,14 +321,12 @@ function CalibrationView() {
           type="button"
           class={styles.btn}
           onClick={() => {
-            setStore((s) => {
-              s.collection = 'idle'
-              s.samples = []
-              s.stats.framesProcessed = 0
-              s.stats.framesAccepted = 0
-              s.stats.frameRejections = 0
-              s.stats.quadRejects = 0
-              s.stats.evictions = 0
+            setLayout(undefined)
+            setReproj(null)
+            setRun({
+              collection: 'idle',
+              framePool: [],
+              stats: { ...initialCalibRun.stats },
             })
           }}
         >
@@ -212,14 +336,31 @@ function CalibrationView() {
 
       <div class={styles.stats}>
         <div>
-          Pool: {store.samples.length} / {DEFAULT_CALIBRATION_TOP_K}
+          Pool: {run().framePool.length} / {DEFAULT_CALIBRATION_TOP_K} frames
         </div>
-        <div>Unique tag IDs: {uniqueTagCount()}</div>
-        <div>Frames processed: {store.stats.framesProcessed}</div>
-        <div>Frames accepted: {store.stats.framesAccepted}</div>
-        <div>Frame rejections: {store.stats.frameRejections}</div>
-        <div>Quad rejects: {store.stats.quadRejects}</div>
-        <div>Top-K evictions: {store.stats.evictions}</div>
+        <div>Layout tags: {layout() ? layout()!.size : '—'}</div>
+        <div>Unique tag IDs in pool: {uniqueTagCount()}</div>
+        <div>Frames processed: {run().stats.framesProcessed}</div>
+        <div>Frames accepted: {run().stats.framesAccepted}</div>
+        <div>Frame rejections: {run().stats.frameRejections}</div>
+        <div>Quad rejects: {run().stats.quadRejects}</div>
+        <div>Top-K evictions: {run().stats.evictions}</div>
+        <div class={styles.statsSection}>Pooled solve</div>
+        <div>{calibBlock().line1}</div>
+        <div>
+          fx / fy: {calib() && calib()!.kind === 'ok' ? calibBlock().fxfy : '—'} px
+        </div>
+        <div>cx, cy: {calib() && calib()!.kind === 'ok' ? calibBlock().cxyc : '—'}</div>
+        <div>H FOV (x): {calib() && calib()!.kind === 'ok' ? calibBlock().fov : '—'}°</div>
+        <div>fy/fx: {calib() && calib()!.kind === 'ok' ? calibBlock().ratio : '—'}</div>
+        <div>pp offset (cx-W/2, cy-H/2): {calib() && calib()!.kind === 'ok' ? calibBlock().off : '—'}</div>
+        <div class={styles.statsSection}>Live frame</div>
+        <div>
+          RMS: {reproj() ? fmt(reproj()!.rms, 3) : '—'} px | tags: {reproj() ? reproj()!.tagCount : '—'}
+        </div>
+        <div>
+          ‖t‖: {reproj() ? fmt(reproj()!.dist, 3) : '—'} (tag units) | tilt: {reproj() ? fmt(reproj()!.tiltDeg, 1) : '—'}°
+        </div>
       </div>
     </div>
   )
