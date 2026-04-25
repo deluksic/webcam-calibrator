@@ -1,19 +1,20 @@
 import { Errored, For, createMemo, createSignal, createEffect } from 'solid-js'
-import type { DetectedQuad } from '@/gpu/contour'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
+import type { DetectedQuad } from '@/gpu/contour'
 import {
   acceptQuadForCalibration,
   calibrationQuadScore,
   frameHasDuplicateDecodedTagIds,
 } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
-import { calibApi, type CalibrationResult } from '@/workers/calibrationClient'
 import type { TagObservation, LabeledPoint, CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
 import { learnLayoutFromFrame, layoutToLabeledPoints, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
+import { calibApi, type CalibrationResult } from '@/workers/calibrationClient'
+
 import { RESOLUTION_LADDER, type Resolution } from './camera/cameraStreamAcquire'
 
 import styles from '@/components/CalibrationView.module.css'
@@ -123,7 +124,11 @@ function CalibrationView() {
 
   // Track pending promise to avoid showing stale results
   let pendingVersion = 0
-  const updateCalib = async (collection: string, lay: TargetLayout | undefined, framePool: CalibrationFrameObservation[]) => {
+  const updateCalib = async (
+    collection: string,
+    lay: TargetLayout | undefined,
+    framePool: CalibrationFrameObservation[],
+  ) => {
     if (collection === 'idle' || !lay || framePool.length < 1) {
       setCalib(null)
       return
@@ -157,11 +162,9 @@ function CalibrationView() {
   }
 
   // Re-run calibration when inputs change
-  createEffect(() => {
-    updateCalib(run().collection, layout(), run().framePool)
+  createEffect(run, (run) => {
+    updateCalib(run.collection, layout(), run.framePool)
   })
-
-  const runs = createMemo(() => run().framePool)
 
   // DAG: calibratedExtrinsics is a pure derivation of calib.
   const calibratedExtrinsics = createMemo(() => {
@@ -242,7 +245,11 @@ function CalibrationView() {
     }
 
     setRun((r) => {
-      const { next, evicted } = mergeCalibrationFramesTopK(r.framePool, [{ frameId: Date.now(), framePoints }], DEFAULT_CALIBRATION_TOP_K)
+      const { next, evicted } = mergeCalibrationFramesTopK(
+        r.framePool,
+        [{ frameId: Date.now(), framePoints }],
+        DEFAULT_CALIBRATION_TOP_K,
+      )
       return {
         ...r,
         framePool: next,
@@ -272,7 +279,7 @@ function CalibrationView() {
       return { line1: c?.kind === 'error' ? `Solver: ${c.reason}` : 'Solver: —', k: null as null, rms: null as null }
     }
     const { w, h } = frameSizeApprox()
-    const fovX = (2 * Math.atan(0.5 * w / c.K.fx) * 180) / Math.PI
+    const fovX = (2 * Math.atan((0.5 * w) / c.K.fx) * 180) / Math.PI
     const vals = c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b)
     const p50 = percentile(vals, 0.5)
     const p95 = percentile(vals, 0.95)
@@ -290,8 +297,8 @@ function CalibrationView() {
   return (
     <div class={styles.root}>
       <p class={styles.hint}>
-        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target. Press <strong>Start</strong> with
-        2+ tags visible; move the camera for varied views (3+ frames) to solve intrinsics.
+        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target. Press <strong>Start</strong>{' '}
+        with 2+ tags visible; move the camera for varied views (3+ frames) to solve intrinsics.
       </p>
       <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
         <div class={styles.cameraBlock}>
@@ -361,9 +368,7 @@ function CalibrationView() {
           type="button"
           class={[styles.btn, run().collection !== 'running' && styles.btnDisabled]}
           disabled={run().collection !== 'running'}
-          onClick={() =>
-            setRun((r) => (r.collection === 'running' ? { ...r, collection: 'paused' } : r))
-          }
+          onClick={() => setRun((r) => (r.collection === 'running' ? { ...r, collection: 'paused' } : r))}
         >
           Pause
         </button>
@@ -405,55 +410,95 @@ function CalibrationView() {
         <div>Top-K evictions: {run().stats.evictions}</div>
         <div class={styles.statsSection}>Pooled solve</div>
         <div>
-          <span style="color: var(--color-success)">ok</span>{' '}
-          RMS <span>{(() => {
-            const c = calib()
-            return c?.kind === 'ok' ? fmt(c!.rmsPx, 3) : '—'
-          })()}</span>
-          <span style="color: var(--color-text-muted)"> px</span>{' '}
-          med <span>{(() => {
-            const c = calib()
-            return c?.kind === 'ok' ? fmt(percentile(c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b), 0.5), 3) : '—'
-          })()}</span>
+          <span style="color: var(--color-success)">ok</span> RMS{' '}
+          <span>
+            {(() => {
+              const c = calib()
+              return c?.kind === 'ok' ? fmt(c!.rmsPx, 3) : '—'
+            })()}
+          </span>
+          <span style="color: var(--color-text-muted)"> px</span> med{' '}
+          <span>
+            {(() => {
+              const c = calib()
+              return c?.kind === 'ok'
+                ? fmt(
+                    percentile(
+                      c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b),
+                      0.5,
+                    ),
+                    3,
+                  )
+                : '—'
+            })()}
+          </span>
           {' p95 '}
-          <span>{(() => {
-            const c = calib()
-            return c?.kind === 'ok' ? fmt(percentile(c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b), 0.95), 3) : '—'
-          })()}</span>
+          <span>
+            {(() => {
+              const c = calib()
+              return c?.kind === 'ok'
+                ? fmt(
+                    percentile(
+                      c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b),
+                      0.95,
+                    ),
+                    3,
+                  )
+                : '—'
+            })()}
+          </span>
           {' views '}
-          <span>{(() => {
-            const c = calib()
-            return c?.kind === 'ok' ? c!.homographies.length : '—'
-          })()}</span>
+          <span>
+            {(() => {
+              const c = calib()
+              return c?.kind === 'ok' ? c!.homographies.length : '—'
+            })()}
+          </span>
         </div>
         <div>
-          fx / fy: {(() => {
+          fx / fy:{' '}
+          {(() => {
             const c = calib()
             return c?.kind === 'ok' ? calibBlock().fxfy : '—'
-          })()} px
+          })()}{' '}
+          px
         </div>
-        <div>cx, cy: {(() => {
-          const c = calib()
-          return c?.kind === 'ok' ? calibBlock().cxyc : '—'
-        })()}</div>
-        <div>H FOV (x): {(() => {
-          const c = calib()
-          return c?.kind === 'ok' ? calibBlock().fov : '—'
-        })()}°</div>
-        <div>fy/fx: {(() => {
-          const c = calib()
-          return c?.kind === 'ok' ? calibBlock().ratio : '—'
-        })()}</div>
-        <div>pp offset (cx-W/2, cy-H/2): {(() => {
-          const c = calib()
-          return c?.kind === 'ok' ? calibBlock().off : '—'
-        })()}</div>
+        <div>
+          cx, cy:{' '}
+          {(() => {
+            const c = calib()
+            return c?.kind === 'ok' ? calibBlock().cxyc : '—'
+          })()}
+        </div>
+        <div>
+          H FOV (x):{' '}
+          {(() => {
+            const c = calib()
+            return c?.kind === 'ok' ? calibBlock().fov : '—'
+          })()}
+          °
+        </div>
+        <div>
+          fy/fx:{' '}
+          {(() => {
+            const c = calib()
+            return c?.kind === 'ok' ? calibBlock().ratio : '—'
+          })()}
+        </div>
+        <div>
+          pp offset (cx-W/2, cy-H/2):{' '}
+          {(() => {
+            const c = calib()
+            return c?.kind === 'ok' ? calibBlock().off : '—'
+          })()}
+        </div>
         <div class={styles.statsSection}>Live frame</div>
         <div>
           RMS: {reproj() ? fmt(reproj()!.rms, 3) : '—'} px | tags: {reproj() ? reproj()!.tagCount : '—'}
         </div>
         <div>
-          ‖t‖: {reproj() ? fmt(reproj()!.dist, 3) : '—'} (tag units) | tilt: {reproj() ? fmt(reproj()!.tiltDeg, 1) : '—'}°
+          ‖t‖: {reproj() ? fmt(reproj()!.dist, 3) : '—'} (tag units) | tilt:{' '}
+          {reproj() ? fmt(reproj()!.tiltDeg, 1) : '—'}°
         </div>
       </div>
     </div>
