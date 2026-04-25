@@ -11,12 +11,8 @@ import type { DetectedQuad } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/constants'
-import type { CameraIntrinsics } from '@/lib/cameraModel'
-import {
-  buildReprojectionDrawOps,
-  cameraDistanceFromT,
-  cameraTiltDegFromR,
-} from '@/lib/reprojectionLive'
+import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
+import { buildReprojectionDrawOps, cameraDistanceFromT, cameraTiltDegFromR } from '@/lib/reprojectionLive'
 import type { TargetLayout } from '@/lib/targetLayout'
 import { createElementSize } from '@/utils/createElementSize'
 import { createFrameLoop } from '@/utils/createFrameLoop'
@@ -118,20 +114,22 @@ export type LiveCameraPipelineProps = {
   onLog: (msg: string) => void
   onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number }) => void
   /** When set, draw 2D reprojection overlay and report live metrics. */
-  liveCalibration?: () => { k: CameraIntrinsics; layout: TargetLayout } | undefined
+  liveCalibration?: () => { k: CameraIntrinsics; distortion?: RationalDistortion8; layout: TargetLayout } | undefined
   onReprojectionFrame?: (m: { rms: number; tagCount: number; tiltDeg: number; dist: number } | null) => void
+  onFrameSize?: (size: { width: number; height: number }) => void
   /** Called when snapshot button is pressed - passes current tagged quads. */
   onQuadSnapshotRequest?: () => void
   /** Extra controls (camera select, mode buttons, …). */
   toolbar?: JSX.Element
 }
 
-async function drawReprojectionOverlay(
+function drawReprojectionOverlay(
   canvas: HTMLCanvasElement,
   w: number,
   h: number,
   quads: DetectedQuad[],
   k: CameraIntrinsics,
+  distortion: RationalDistortion8 | undefined,
   layout: TargetLayout,
 ) {
   const ctx = canvas.getContext('2d')
@@ -145,7 +143,7 @@ async function drawReprojectionOverlay(
     canvas.height = h
   }
   ctx.clearRect(0, 0, w, h)
-  const built = await buildReprojectionDrawOps(layout, k, quads, w, h)
+  const built = buildReprojectionDrawOps(layout, k, distortion, quads, w, h)
   if (!built) {
     return undefined
   }
@@ -231,6 +229,13 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     return () => {
       video.removeEventListener('resize', onResize)
     }
+  })
+
+  createEffect(frameSize, (size) => {
+    if (!size) {
+      return
+    }
+    props.onFrameSize?.(size)
   })
 
   const canvasSize = createElementSize(canvasElement)
@@ -379,28 +384,25 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               return typeof q.decodedTagId === 'number'
             }),
           )
-          ;(async () => {
-            if (true) {
-              const ovl = overlayCanvas()
-              if (ovl && liveCalib) {
-                const br = await drawReprojectionOverlay(ovl, width, height, tagged, liveCalib.k, liveCalib.layout)
-                if (typeof pi.onReprojectionFrame === 'function') {
-                  if (br) {
-                    pi.onReprojectionFrame({
-                      rms: br.rms,
-                      tagCount: br.tagCount,
-                      tiltDeg: cameraTiltDegFromR(br.R),
-                      dist: cameraDistanceFromT(br.t),
-                    })
-                  } else {
-                    pi.onReprojectionFrame(null)
-                  }
-                }
-              } else if (typeof pi.onReprojectionFrame === 'function') {
+
+          const ovl = overlayCanvas()
+          if (ovl && liveCalib) {
+            const br = drawReprojectionOverlay(ovl, width, height, tagged, liveCalib.k, liveCalib.distortion, liveCalib.layout)
+            if (typeof pi.onReprojectionFrame === 'function') {
+              if (br) {
+                pi.onReprojectionFrame({
+                  rms: br.rms,
+                  tagCount: br.tagCount,
+                  tiltDeg: cameraTiltDegFromR(br.R),
+                  dist: cameraDistanceFromT(br.t),
+                })
+              } else {
                 pi.onReprojectionFrame(null)
               }
             }
-          })()
+          } else if (typeof pi.onReprojectionFrame === 'function') {
+            pi.onReprojectionFrame(null)
+          }
           pi.onQuadDetection?.(tagged, { frameId: slot.frameId })
         })
         .catch((e) => {
@@ -434,9 +436,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           if (slot !== undefined) {
             runCompute(enc, gpuNow, pip, video, threshold(), slot)
             gpuNow.device.queue.submit([enc.finish()])
-            if (true) {
-              scheduleQuadDetection(slot, pi.showFallbacks)
-            }
+            scheduleQuadDetection(slot, pi.showFallbacks)
           }
           // If no slot is free, skip this frame entirely (backpressure).
         } else {
@@ -445,22 +445,18 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           presentFrame(enc, gpuNow, pip, dm as NonGridDisplayMode, (_err) => {})
           gpuNow.device.queue.submit([enc.finish()])
           if (dm === 'debug') {
-            if (true) {
-              scheduleExtentRead()
-            }
+            scheduleExtentRead()
           }
         }
 
         // TODO: read using Uint32Array directly
-        if (true) {
-          void pip.histogramBuffer.read().then((bins) => {
-            if (disposed) {
-              return
-            }
-            const data = new Uint32Array(bins)
-            setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE))
-          })
-        }
+        void pip.histogramBuffer.read().then((bins) => {
+          if (disposed) {
+            return
+          }
+          const data = new Uint32Array(bins)
+          setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE))
+        })
       },
     })
     log('rVFC loop started')

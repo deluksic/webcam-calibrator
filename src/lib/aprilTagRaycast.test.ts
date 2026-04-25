@@ -17,7 +17,7 @@ describe('aprilTagRaycast', () => {
   it('invertMat3RowMajor * M ≈ I', () => {
     const M: Mat3 = [2, 0, 1, 0, 3, 0, 0, 0, 1]
     const inv = invertMat3RowMajor(M)!
-    const mul = (A: readonly number[], B: readonly number[]) => {
+    const mul = (A: number[], B: number[]) => {
       const o = Array.from({ length: 9 }, () => 0)
       for (let r = 0; r < 3; r++) {
         for (let c = 0; c < 3; c++) {

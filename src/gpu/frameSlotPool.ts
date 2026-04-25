@@ -1,4 +1,4 @@
-import type { tgpu, TgpuRoot } from 'typegpu';
+import type { tgpu, TgpuRoot } from 'typegpu'
 import { d } from 'typegpu'
 
 import type { CameraPipeline } from '@/gpu/cameraPipeline'
@@ -10,10 +10,10 @@ type GraySnapshot = ReturnType<TgpuRoot['createBuffer']>
 type GrayRenderBindGroup = ReturnType<TgpuRoot['createBindGroup']>
 
 export interface FrameSlot {
-  readonly graySnapshot: GraySnapshot
-  readonly labelStaging: GPUBuffer
-  readonly filteredStaging: GPUBuffer
-  readonly grayRenderBindGroup: GrayRenderBindGroup
+  graySnapshot: GraySnapshot
+  labelStaging: GPUBuffer
+  filteredStaging: GPUBuffer
+  grayRenderBindGroup: GrayRenderBindGroup
   frameId: number
   state: FrameSlotState
 }
@@ -36,7 +36,7 @@ export interface FrameSlotPool {
    */
   enqueueCopiesForSlot(enc: GPUCommandEncoder, pip: CameraPipeline, slot: FrameSlot): void
   /** The slot currently shown on the canvas (may be undefined before first detection). */
-  readonly displaySlot: FrameSlot | undefined
+  displaySlot: FrameSlot | undefined
 }
 
 export function createFrameSlotPool(

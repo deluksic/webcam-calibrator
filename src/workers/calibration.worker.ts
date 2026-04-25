@@ -1,12 +1,15 @@
+import { initCalibrator } from '@deluksic/opencv-calibration-wasm'
+import USE_WASM_MODULE from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
+void USE_WASM_MODULE
+
 import * as Comlink from 'comlink'
-import { initCalibrator, DEFAULT_WASM_MODULE_PATH, type Calibrator } from '@deluksic/opencv-calibration-wasm'
-import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
+
 import type { CalibrationFrameObservation, LabeledPoint } from '@/lib/calibrationTypes'
-import type { TargetLayout } from '@/lib/targetLayout'
+import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
+import type { Point3 } from '@/lib/calibrationTypes'
 
 export interface CalibWorkerApi {
   solveCalibration(
-    layout: TargetLayout,
     labeledPoints: LabeledPoint[],
     frames: CalibrationFrameObservation[],
     imageSize: { width: number; height: number },
@@ -21,11 +24,16 @@ export type CalibrationOk = {
   K: CameraIntrinsics
   distortion: RationalDistortion8
   extrinsics: { frameId: number; R: Mat3; t: Vec3 }[]
+  updatedTargetPoints: { pointId: number; position: Point3 }[]
   rmsPx: number
   perFrameRmsPx: [number, number][]
 }
 
-export type CalibrationErr = { kind: 'error'; reason: 'too-few-views' | 'singular' | 'non-physical' }
+export type CalibrationErr = {
+  kind: 'error'
+  reason: 'too-few-views' | 'singular' | 'non-physical'
+  details?: string
+}
 
 export type CalibrationResult = CalibrationOk | CalibrationErr
 
@@ -60,119 +68,163 @@ function cameraIntrinsicsFromMatrix(
 }
 
 function padDistortion(coeffs: number[]): RationalDistortion8 {
-  return [coeffs[0] ?? 0, coeffs[1] ?? 0, coeffs[2] ?? 0, coeffs[3] ?? 0, coeffs[4] ?? 0, coeffs[5] ?? 0, coeffs[6] ?? 0, coeffs[7] ?? 0]
+  return [
+    coeffs[0] ?? 0,
+    coeffs[1] ?? 0,
+    coeffs[2] ?? 0,
+    coeffs[3] ?? 0,
+    coeffs[4] ?? 0,
+    coeffs[5] ?? 0,
+    coeffs[6] ?? 0,
+    coeffs[7] ?? 0,
+  ]
 }
 
 function buildWasmInput(
-  labeledPoints: LabeledPoint[],
+  layoutPoints: LabeledPoint[],
   frames: CalibrationFrameObservation[],
-): { objectPoints: [number, number, number][][]; imagePoints: [number, number][][]; sharedPointIds: number[] } | undefined {
-  const framePointSets = frames.map((f) => new Set(f.framePoints.map((fp) => fp.pointId)))
-  const sharedPointIds = [...framePointSets[0]!].filter((pid) => framePointSets.every((s) => s.has(pid)))
+):
+  | { objectPoints: [number, number, number][][]; imagePoints: [number, number][][]; frameIds: number[]; pointIds: number[] }
+  | { error: string }
+  | undefined {
+  const layoutById = new Map(layoutPoints.map((lp) => [lp.pointId, lp] as const))
+  const validFrames = frames
+    .map((frame) => ({
+      frameId: frame.frameId,
+      pointsById: new Map(frame.framePoints.filter((fp) => layoutById.has(fp.pointId)).map((fp) => [fp.pointId, fp] as const)),
+    }))
+    .filter((frame) => frame.pointsById.size >= 6)
 
-  if (sharedPointIds.length < 6) {
-    return undefined
+  if (validFrames.length < 3) {
+    return { error: `need >=3 valid frames (have ${validFrames.length})` }
   }
 
-  const objectPoints: [number, number, number][][] = frames.map(() =>
-    sharedPointIds.map((pid) => {
-      const lp = labeledPoints.find((l) => l.pointId === pid)
-      return [lp!.plane.x, lp!.plane.y, 0]
-    }),
-  )
+  // `calibrateCameraRO` requires identical object-point templates per view.
+  // Use ALL valid views and intersect shared points across all of them.
+  let sharedPointIds = [...validFrames[0]!.pointsById.keys()]
+  for (let i = 1; i < validFrames.length; i++) {
+    const ids = validFrames[i]!.pointsById
+    sharedPointIds = sharedPointIds.filter((id) => ids.has(id))
+  }
+  if (sharedPointIds.length < 6) {
+    return { error: `need >=6 shared corners across all views (have ${sharedPointIds.length})` }
+  }
+  sharedPointIds.sort((a, b) => a - b)
 
-  const imagePoints: [number, number][][] = frames.map((f) =>
-    sharedPointIds.map((pid) => {
-      const fp = f.framePoints.find((p) => p.pointId === pid)!
+  const objectTemplate: [number, number, number][] = sharedPointIds.map((pointId) => {
+    const lp = layoutById.get(pointId)!
+    return [lp.position.x, lp.position.y, 0]
+  })
+
+  const objectPoints: [number, number, number][][] = validFrames.map(() => objectTemplate)
+  const imagePoints: [number, number][][] = validFrames.map((frame) =>
+    sharedPointIds.map((pointId) => {
+      const fp = frame.pointsById.get(pointId)!
       return [fp.imagePoint.x, fp.imagePoint.y]
     }),
   )
+  const frameIds = validFrames.map((frame) => frame.frameId)
 
-  return { objectPoints, imagePoints, sharedPointIds }
-}
-
-// Initialize WASM calibrator once
-let calibratorPromise: Promise<Calibrator> | null = null
-
-function getCalibrator(): Promise<Calibrator> {
-  if (!calibratorPromise) {
-    calibratorPromise = initCalibrator({ modulePath: DEFAULT_WASM_MODULE_PATH })
-  }
-  return calibratorPromise
+  return { objectPoints, imagePoints, frameIds, pointIds: sharedPointIds }
 }
 
 const api: CalibWorkerApi = {
   async solveCalibration(
-    layout: TargetLayout,
-    labeledPoints: LabeledPoint[],
+    layoutPoints: LabeledPoint[],
     frames: CalibrationFrameObservation[],
     imageSize: { width: number; height: number },
   ): Promise<CalibrationResult> {
-    const wasmInput = buildWasmInput(labeledPoints, frames)
-    if (!wasmInput || wasmInput.objectPoints.length < 3) {
-      return { kind: 'error', reason: 'too-few-views' }
-    }
+    try {
+      const wasmInput = buildWasmInput(layoutPoints, frames)
+      if (!wasmInput) {
+        return { kind: 'error', reason: 'too-few-views', details: 'input builder returned undefined' }
+      }
+      if ('error' in wasmInput) {
+        return { kind: 'error', reason: 'too-few-views', details: wasmInput.error }
+      }
+      if (wasmInput.objectPoints.length < 3) {
+        return { kind: 'error', reason: 'too-few-views', details: `need >=3 solve views (have ${wasmInput.objectPoints.length})` }
+      }
 
-    const { objectPoints, imagePoints, sharedPointIds } = wasmInput
+      const { objectPoints, imagePoints, frameIds, pointIds } = wasmInput
 
-    const calibrator = await getCalibrator()
+      const calibrator = await initCalibrator()
 
-    const wasmResult = calibrator.calibrateCameraRO({
-      objectPoints,
-      imagePoints,
-      imageSize,
-    })
+      const wasmResult = calibrator.calibrateCameraRO({
+        objectPoints,
+        imagePoints,
+        imageSize,
+      })
 
-    const K = cameraIntrinsicsFromMatrix(wasmResult.cameraMatrix)
-    const distortion = padDistortion(wasmResult.distortionCoefficients)
+      const K = cameraIntrinsicsFromMatrix(wasmResult.cameraMatrix)
+      const distortion = padDistortion(wasmResult.distortionCoefficients)
+      const refinedObjPoints =
+        Array.isArray(wasmResult.newObjPoints) && wasmResult.newObjPoints.length === pointIds.length
+          ? wasmResult.newObjPoints
+          : objectPoints[0]!
+      const updatedTargetPoints = pointIds.map((pointId, i) => {
+        const p = refinedObjPoints[i]!
+        return { pointId, position: { x: p[0]!, y: p[1]!, z: p[2]! } }
+      })
+      const refinedObjectPoints: [number, number, number][][] = imagePoints.map(() => refinedObjPoints)
 
     // Compute per-frame RMS via projectPoints
-    const projected = calibrator.projectPoints({
-      objectPoints,
-      rvecs: wasmResult.rvecs,
-      tvecs: wasmResult.tvecs,
-      cameraMatrix: wasmResult.cameraMatrix,
-      distortionCoefficients: wasmResult.distortionCoefficients,
-    })
+      const projected = calibrator.projectPoints({
+        objectPoints: refinedObjectPoints,
+        rvecs: wasmResult.rvecs,
+        tvecs: wasmResult.tvecs,
+        cameraMatrix: wasmResult.cameraMatrix,
+        distortionCoefficients: wasmResult.distortionCoefficients,
+      })
 
-    const perFrameRmsPx: [number, number][] = []
-    let allSq: number[] = []
-    for (let view = 0; view < frames.length; view++) {
-      const fo = frames[view]!
-      const proj = projected.projectedImagePoints[view]!
-      let sq: number[] = []
-      for (let p = 0; p < sharedPointIds.length; p++) {
-        const dx = proj[p]![0]! - imagePoints[view]![p]![0]!
-        const dy = proj[p]![1]! - imagePoints[view]![p]![1]!
-        sq.push(dx * dx + dy * dy)
+      const perFrameRmsPx: [number, number][] = []
+      let allSq: number[] = []
+      for (let view = 0; view < frameIds.length; view++) {
+        const proj = projected.projectedImagePoints[view]!
+        let sq: number[] = []
+        for (let p = 0; p < proj.length; p++) {
+          const dx = proj[p]![0]! - imagePoints[view]![p]![0]!
+          const dy = proj[p]![1]! - imagePoints[view]![p]![1]!
+          sq.push(dx * dx + dy * dy)
+        }
+        if (sq.length > 0) {
+          perFrameRmsPx.push([frameIds[view]!, Math.sqrt(sq.reduce((a, b) => a + b, 0) / sq.length)])
+          allSq.push(...sq)
+        }
       }
-      if (sq.length > 0) {
-        perFrameRmsPx.push([fo.frameId, Math.sqrt(sq.reduce((a, b) => a + b, 0) / sq.length)])
-        allSq.push(...sq)
-      }
-    }
-    const rmsPx = allSq.length > 0 ? Math.sqrt(allSq.reduce((a, b) => a + b, 0) / allSq.length) : 0
+      const rmsPx = allSq.length > 0 ? Math.sqrt(allSq.reduce((a, b) => a + b, 0) / allSq.length) : 0
 
     // Convert extrinsics
-    const extrinsics: { frameId: number; R: Mat3; t: Vec3 }[] = []
-    for (let i = 0; i < wasmResult.rvecs.length; i++) {
-      const rvec = wasmResult.rvecs[i]!
-      const tvec = wasmResult.tvecs[i]!
-      const frameId = frames[i]?.frameId ?? i
-      extrinsics.push({
-        frameId,
-        R: rvecToMatrix(rvec),
-        t: { x: tvec[0]!, y: tvec[1]!, z: tvec[2]! },
-      })
-    }
+      const extrinsics: { frameId: number; R: Mat3; t: Vec3 }[] = []
+      for (let i = 0; i < wasmResult.rvecs.length; i++) {
+        const rvec = wasmResult.rvecs[i]!
+        const tvec = wasmResult.tvecs[i]!
+        const frameId = frameIds[i] ?? i
+        extrinsics.push({
+          frameId,
+          R: rvecToMatrix(rvec),
+          t: { x: tvec[0]!, y: tvec[1]!, z: tvec[2]! },
+        })
+      }
 
-    return {
-      kind: 'ok',
-      K,
-      distortion,
-      extrinsics,
-      rmsPx,
-      perFrameRmsPx,
+      return {
+        kind: 'ok',
+        K,
+        distortion,
+        extrinsics,
+        updatedTargetPoints,
+        rmsPx,
+        perFrameRmsPx,
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase()
+      if (msg.includes('too-few') || msg.includes('not enough') || msg.includes('bad argument')) {
+        return { kind: 'error', reason: 'too-few-views', details: String(err) }
+      }
+      if (msg.includes('singular') || msg.includes('degenerate')) {
+        return { kind: 'error', reason: 'singular', details: String(err) }
+      }
+      return { kind: 'error', reason: 'non-physical', details: String(err) }
     }
   },
 }

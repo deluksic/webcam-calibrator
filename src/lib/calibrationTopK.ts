@@ -1,4 +1,4 @@
-import type { CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
+import type { CalibrationFrameObservation } from '@/lib/calibrationTypes'
 
 export const DEFAULT_CALIBRATION_TOP_K = 10_000
 
@@ -28,8 +28,8 @@ function compareFrames(a: CalibrationFrameObservation, b: CalibrationFrameObserv
  * Returns a **new** array (does not mutate `pool`).
  */
 export function mergeCalibrationFramesTopK(
-  pool: readonly CalibrationFrameObservation[],
-  incoming: readonly CalibrationFrameObservation[] | undefined,
+  pool: CalibrationFrameObservation[],
+  incoming: CalibrationFrameObservation[] | undefined,
   maxK: number,
 ): { next: CalibrationFrameObservation[]; evicted: number } {
   const merged: CalibrationFrameObservation[] = [...pool]

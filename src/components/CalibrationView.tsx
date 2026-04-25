@@ -4,13 +4,9 @@ import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
 import type { DetectedQuad } from '@/gpu/contour'
-import {
-  acceptQuadForCalibration,
-  calibrationQuadScore,
-  frameHasDuplicateDecodedTagIds,
-} from '@/lib/calibrationQuality'
+import { calibrationQuadScore } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
-import type { TagObservation, LabeledPoint, CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
+import type { TagObservation, CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
 import { learnLayoutFromFrame, layoutToLabeledPoints, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 import { calibApi, type CalibrationResult } from '@/workers/calibrationClient'
@@ -72,9 +68,6 @@ const initialCalibRun: CalibRun = {
 }
 
 const RES = RESOLUTION_LADDER
-function approxFrameSize(res: Resolution): { w: number; h: number } {
-  return res === 'medium' ? { w: 1280, h: 720 } : { w: 640, h: 480 }
-}
 
 function fmt(n: number | undefined, d: number) {
   if (n === undefined || !Number.isFinite(n)) {
@@ -101,22 +94,23 @@ function CalibrationView() {
     dist: number
   } | null>(null)
   const [currentTagged, setCurrentTagged] = createSignal<DetectedQuad[]>([])
+  const [videoFrameSize, setVideoFrameSize] = createSignal<{ width: number; height: number }>()
   const [run, setRun] = createSignal<CalibRun>({
     collection: 'idle',
     framePool: [],
     stats: { ...initialCalibRun.stats },
   })
+  const [solveInFlight, setSolveInFlight] = createSignal(0)
 
   const displayMode = createMemo<DisplayMode>(() => 'grid')
   const showGrid = () => true
   const showFallbacks = () => false
+  const isSolving = createMemo(() => solveInFlight() > 0)
 
   const devicesSorted = createMemo(() => {
     const list = cam.devices()
     return [...list].sort((a, b) => deviceScore(b) - deviceScore(a))
   })
-
-  const frameSizeApprox = createMemo(() => approxFrameSize(cam.selectedResolution() as Resolution))
 
   // DAG: calib is a pure derivation of (collection, layout, framePool).
   const calibSignal = createSignal<CalibrationResult | null>(null)
@@ -124,12 +118,14 @@ function CalibrationView() {
 
   // Track pending promise to avoid showing stale results
   let pendingVersion = 0
+  let lastSolveKey: string | undefined
   const updateCalib = async (
     collection: string,
     lay: TargetLayout | undefined,
     framePool: CalibrationFrameObservation[],
   ) => {
     if (collection === 'idle' || !lay || framePool.length < 1) {
+      lastSolveKey = undefined
       setCalib(null)
       return
     }
@@ -150,23 +146,52 @@ function CalibrationView() {
       }
     }
     if (filteredPool.length < 3) {
-      setCalib(null)
+      lastSolveKey = undefined
+      setCalib({ kind: 'error', reason: 'too-few-views' })
       return
     }
-    const labeledPoints = layoutToLabeledPoints(lay)
+
+    const solveKey = `${collection}|${lay.size}|${filteredPool.map((f) => f.frameId).join(',')}`
+    if (solveKey === lastSolveKey) {
+      return
+    }
+    lastSolveKey = solveKey
+
+    const layoutPoints = layoutToLabeledPoints(lay)
+    const size = videoFrameSize()
+    if (!size) {
+      setCalib({ kind: 'error', reason: 'too-few-views', details: 'waiting-for-video-size' })
+      return
+    }
+    const { width: w, height: h } = size
     const currentVersion = ++pendingVersion
-    const result = await calibApi.solveCalibration(lay, labeledPoints, filteredPool)
-    if (currentVersion === pendingVersion) {
-      setCalib(result)
+    try {
+      setSolveInFlight((n) => n + 1)
+      const result = await calibApi.solveCalibration(layoutPoints, filteredPool, {
+        width: w,
+        height: h,
+      })
+      if (currentVersion === pendingVersion) {
+        setCalib(result)
+      }
+    } catch (err) {
+      console.error('[CalibrationView] calibration failed', err)
+      if (currentVersion === pendingVersion) {
+        setCalib({ kind: 'error', reason: 'singular', details: String(err) })
+      }
+    } finally {
+      setSolveInFlight((n) => Math.max(0, n - 1))
     }
   }
 
   // Re-run calibration when inputs change
-  createEffect(run, (run) => {
-    updateCalib(run.collection, layout(), run.framePool)
-  })
+  createEffect(
+    () => ({ run: run(), layout: layout() }),
+    ({ run, layout }) => {
+      updateCalib(run.collection, layout, run.framePool)
+    },
+  )
 
-  // DAG: calibratedExtrinsics is a pure derivation of calib.
   const calibratedExtrinsics = createMemo(() => {
     const c = calib()
     if (!c || c.kind !== 'ok') {
@@ -179,7 +204,37 @@ function CalibrationView() {
     return result
   })
 
-  const onQuadDetection = (quads: DetectedQuad[], meta: { frameId: number }) => {
+  const calibratedLayout = createMemo<TargetLayout | undefined>(() => {
+    const c = calib()
+    if (!c || c.kind !== 'ok' || !layout()) {
+      return layout()
+    }
+    if (c.updatedTargetPoints.length < 4) {
+      return layout()
+    }
+    const refined = new Map<number, { x: number; y: number }[]>()
+    for (const p of c.updatedTargetPoints) {
+      const tagId = Math.floor(p.pointId / 10000)
+      const cornerId = p.pointId % 10000
+      if (cornerId < 0 || cornerId > 3) {
+        continue
+      }
+      const corners = refined.get(tagId) ?? [
+        { x: 0, y: 0 },
+        { x: 0, y: 0 },
+        { x: 0, y: 0 },
+        { x: 0, y: 0 },
+      ]
+      corners[cornerId] = { x: p.position.x, y: p.position.y }
+      refined.set(tagId, corners)
+    }
+    if (refined.size === 0) {
+      return layout()
+    }
+    return refined as TargetLayout
+  })
+
+  const onQuadDetection = (quads: DetectedQuad[]) => {
     setRun((r) => ({
       ...r,
       stats: { ...r.stats, framesProcessed: r.stats.framesProcessed + 1 },
@@ -217,13 +272,23 @@ function CalibrationView() {
       return
     }
 
+    // Keep one observation per tag id (highest score) to avoid duplicate-id collapse.
+    const tagsById = new Map<number, TagObservation>()
+    for (const tag of tags) {
+      const prev = tagsById.get(tag.tagId)
+      if (!prev || tag.score > prev.score) {
+        tagsById.set(tag.tagId, tag)
+      }
+    }
+    const uniqueTags = [...tagsById.values()]
+
     // Build layout from the first 2 tags if needed
     if (!layout()) {
-      if (tags.length < 2) {
-        console.log(`[CalibrationView snapshot] need at least 2 tags for layout, skipping`)
+      if (uniqueTags.length < 2) {
+        console.log(`[CalibrationView snapshot] need at least 2 unique tag IDs for layout, skipping`)
         return
       }
-      const L = learnLayoutFromFrame(tags)
+      const L = learnLayoutFromFrame(uniqueTags)
       if (L) {
         setLayout(L)
       } else {
@@ -234,7 +299,7 @@ function CalibrationView() {
 
     // Convert tags to labeled points for this frame
     const framePoints: FramePoint[] = []
-    for (const t of tags) {
+    for (const t of uniqueTags) {
       const pointId = t.tagId * 10000
       for (let j = 0; j < 4; j++) {
         framePoints.push({
@@ -275,11 +340,16 @@ function CalibrationView() {
 
   const calibBlock = createMemo(() => {
     const c = calib()
-    if (!c || c.kind === 'error') {
-      return { line1: c?.kind === 'error' ? `Solver: ${c.reason}` : 'Solver: —', k: null as null, rms: null as null }
+    const res = videoFrameSize()
+    if (!c || c.kind === 'error' || !res) {
+      return {
+        line1: c?.kind === 'error' ? `Solver: ${c.reason}${c.details ? ` (${c.details})` : ''}` : 'Solver: —',
+        k: null as null,
+        rms: null as null,
+      }
     }
-    const { w, h } = frameSizeApprox()
-    const fovX = (2 * Math.atan((0.5 * w) / c.K.fx) * 180) / Math.PI
+    const { width, height } = res
+    const fovX = (2 * Math.atan((0.5 * width) / c.K.fx) * 180) / Math.PI
     const vals = c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b)
     const p50 = percentile(vals, 0.5)
     const p95 = percentile(vals, 0.95)
@@ -289,7 +359,7 @@ function CalibrationView() {
       fxfy: `${fmt(c.K.fx, 1)} / ${fmt(c.K.fy, 1)}`,
       cxyc: `${fmt(c.K.cx, 1)}, ${fmt(c.K.cy, 1)}`,
       ratio: (c.K.fy / c.K.fx).toFixed(3),
-      off: `${fmt(c.K.cx - w / 2, 1)}, ${fmt(c.K.cy - h / 2, 1)}`,
+      off: `${fmt(c.K.cx - width / 2, 1)}, ${fmt(c.K.cy - height / 2, 1)}`,
       rms: c.rmsPx,
     }
   })
@@ -331,14 +401,15 @@ function CalibrationView() {
             onQuadDetection={onQuadDetection}
             onLog={console.log}
             liveCalibration={() => {
-              const l = layout()
+              const l = calibratedLayout()
               const c = calib()
               if (!l || !c || c.kind !== 'ok') {
                 return undefined
               }
-              return { k: c.K, layout: l, extrinsics: calibratedExtrinsics() }
+              return { k: c.K, distortion: c.distortion, layout: l, extrinsics: calibratedExtrinsics() }
             }}
             onReprojectionFrame={(m) => setReproj(m)}
+            onFrameSize={setVideoFrameSize}
             onQuadSnapshotRequest={handleSnapshotClick}
           />
         </div>
@@ -348,7 +419,12 @@ function CalibrationView() {
         <button
           type="button"
           class={run().collection === 'running' ? styles.btnActive : styles.btn}
+          disabled={isSolving()}
           onClick={() => {
+            if (run().collection === 'running') {
+              handleSnapshotClick()
+              return
+            }
             setLayout(undefined)
             setRun((r) => {
               if (r.collection === 'idle' || r.collection === 'paused') {
@@ -362,19 +438,20 @@ function CalibrationView() {
             })
           }}
         >
-          Start
+          {run().collection === 'running' ? `Snapshot (${run().stats.manualSnapshots})` : 'Start'}
         </button>
         <button
           type="button"
-          class={[styles.btn, run().collection !== 'running' && styles.btnDisabled]}
-          disabled={run().collection !== 'running'}
+          class={[styles.btn, (run().collection !== 'running' || isSolving()) && styles.btnDisabled]}
+          disabled={run().collection !== 'running' || isSolving()}
           onClick={() => setRun((r) => (r.collection === 'running' ? { ...r, collection: 'paused' } : r))}
         >
           Pause
         </button>
         <button
           type="button"
-          class={styles.btn}
+          class={[styles.btn, isSolving() && styles.btnDisabled]}
+          disabled={isSolving()}
           onClick={() => {
             setLayout(undefined)
             setReproj(null)
@@ -386,14 +463,6 @@ function CalibrationView() {
           }}
         >
           Reset
-        </button>
-        <button
-          type="button"
-          class={styles.btn}
-          disabled={run().collection !== 'running'}
-          onClick={handleSnapshotClick}
-        >
-          Snapshot ({run().stats.manualSnapshots})
         </button>
       </div>
 
@@ -409,6 +478,7 @@ function CalibrationView() {
         <div>Quad rejects: {run().stats.quadRejects}</div>
         <div>Top-K evictions: {run().stats.evictions}</div>
         <div class={styles.statsSection}>Pooled solve</div>
+        <div>{calibBlock().line1}</div>
         <div>
           <span style="color: var(--color-success)">ok</span> RMS{' '}
           <span>

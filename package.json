@@ -13,7 +13,7 @@
     "test:decode": "vitest run src/tests/decode"
   },
   "dependencies": {
-    "@deluksic/opencv-calibration-wasm": "^0.2.0",
+    "@deluksic/opencv-calibration-wasm": "^0.2.2",
     "@solidjs/router": "0.17.0-next.2",
     "@solidjs/web": "2.0.0-beta.7",
     "comlink": "^4.4.2",
@@ -43,7 +43,8 @@
       "@solidjs/web": "2.0.0-beta.7",
       "solid-js": "2.0.0-beta.7",
       "babel-preset-solid": "2.0.0-beta.7",
-      "typescript": "npm:tsover@latest"
+      "typescript": "npm:tsover@latest",
+      "@deluksic/opencv-calibration-wasm": "link:../opencv-calibration-wasm"
     }
   }
 }

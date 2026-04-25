@@ -9,14 +9,15 @@ overrides:
   solid-js: 2.0.0-beta.7
   babel-preset-solid: 2.0.0-beta.7
   typescript: npm:tsover@latest
+  '@deluksic/opencv-calibration-wasm': link:../opencv-calibration-wasm
 
 importers:
 
   .:
     dependencies:
       '@deluksic/opencv-calibration-wasm':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: link:../opencv-calibration-wasm
+        version: link:../opencv-calibration-wasm
       '@solidjs/router':
         specifier: 0.17.0-next.2
         version: 0.17.0-next.2(@solidjs/web@2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7))(solid-js@2.0.0-beta.7)
@@ -222,9 +223,6 @@ packages:
   '@csstools/css-tokenizer@4.0.0':
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
-
-  '@deluksic/opencv-calibration-wasm@0.2.0':
-    resolution: {integrity: sha512-Lkr5ITPpv6veqOkFqtMe1rAXpDPlUpIAxb5AVQTe3vz1mZwItNqqn/96H1pdJwdDIuo8cF2VE5mHlCfnUWpsYg==}
 
   '@esbuild/aix-ppc64@0.27.7':
     resolution: {integrity: sha512-EKX3Qwmhz1eMdEJokhALr0YiD0lhQNwDqkPYyPhiSwKrh7/4KRjQc04sZ8db+5DVVnZ1LmbNDI1uAMPEUBnQPg==}
@@ -1962,8 +1960,6 @@ snapshots:
       css-tree: 3.2.1
 
   '@csstools/css-tokenizer@4.0.0': {}
-
-  '@deluksic/opencv-calibration-wasm@0.2.0': {}
 
   '@esbuild/aix-ppc64@0.27.7':
     optional: true

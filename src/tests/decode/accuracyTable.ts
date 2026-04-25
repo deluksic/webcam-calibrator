@@ -74,7 +74,7 @@ export function perspectiveDecodeAccuracyRow(
 }
 
 export function buildPerspectiveAccuracyTable(
-  sizes: readonly number[],
+  sizes: number[],
   tagId: number,
   supersample: number,
 ): DecodeAccuracyRow[] {

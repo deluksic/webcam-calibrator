@@ -11,7 +11,7 @@ export interface TagObservation {
 /** Point definition with unique ID (tag × corner). */
 export interface LabeledPoint {
   pointId: number
-  plane: { x: number; y: number }
+  position: Point
 }
 
 /** Per-frame observation of a specific point. */
@@ -23,7 +23,7 @@ export interface FramePoint {
 /** All decoded tags observed in one frame. */
 export interface CalibrationFrameObservation {
   frameId: number
-  framePoints: readonly FramePoint[]
+  framePoints: FramePoint[]
 }
 
 export interface Point3 {

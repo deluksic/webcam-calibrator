@@ -5,7 +5,7 @@
 import codesRaw from '@/lib/tag36h11.json'
 
 // Parse JSON strings as BigInt (needed because JSON can't store 64-bit integers)
-const TAG36H11_CODES: readonly bigint[] = (codesRaw as unknown as string[]).map((s) => BigInt(s))
+const TAG36H11_CODES: bigint[] = (codesRaw as unknown as string[]).map((s) => BigInt(s))
 export { TAG36H11_CODES }
 export const TAG36H11_COUNT = TAG36H11_CODES.length
 
@@ -20,7 +20,7 @@ const BIT_Y = [
 ] as const
 
 // Precompute base code patterns (no rotations) for wildcard search
-const BASE_CODE_PATTERNS: readonly bigint[] = TAG36H11_CODES
+const BASE_CODE_PATTERNS: bigint[] = TAG36H11_CODES
 
 /** `-1` = no / weak directional signal; `-2` = enough votes but pos/neg tie (ambiguous). */
 export type TagPattern = (0 | 1 | -1 | -2)[]
@@ -152,9 +152,13 @@ export function decodeTag36h11Best(pattern: TagPattern | undefined, maxError: nu
     const y = BIT_Y[bit]!
     const pRow = y - 1
     const pCol = x - 1
-    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) { continue }
+    if (pRow < 0 || pRow > 5 || pCol < 0 || pCol > 5) {
+      continue
+    }
     const pIdx = pRow * 6 + pCol
-    if (pattern[pIdx] === 1) { patternKnown |= 1n << BigInt(35 - bit) }
+    if (pattern[pIdx] === 1) {
+      patternKnown |= 1n << BigInt(35 - bit)
+    }
   }
 
   let bestId = -1
@@ -162,15 +166,19 @@ export function decodeTag36h11Best(pattern: TagPattern | undefined, maxError: nu
 
   for (const baseCode of BASE_CODE_PATTERNS) {
     for (const wildMask of wildcardMasks) {
-      const diff = (patternKnown ^ (baseCode ^ wildMask)) & 0xFFFFFFFFn
+      const diff = (patternKnown ^ (baseCode ^ wildMask)) & 0xffffffffn
       const dist = popcount64(diff)
       if (dist < bestDist) {
         bestDist = dist
         bestId = TAG36H11_CODES.indexOf(baseCode)
-        if (bestDist === 0) { break }
+        if (bestDist === 0) {
+          break
+        }
       }
     }
-    if (bestDist === 0) { break }
+    if (bestDist === 0) {
+      break
+    }
   }
 
   return bestDist > maxError ? { id: -1, dist: bestDist } : { id: bestId, dist: bestDist }

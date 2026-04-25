@@ -1,20 +1,16 @@
 // Build per-frame reprojection overlay geometry for a 2D canvas (image pixel space).
 
-import type { CameraIntrinsics } from '@/lib/cameraModel'
-import type { TargetLayout } from '@/lib/targetLayout'
-import { initCalibrator, DEFAULT_WASM_MODULE_PATH, type Calibrator } from '@deluksic/opencv-calibration-wasm'
-import { extrinsicsFromHomography, matrixToRvec, type Vec3, type Mat3 } from '@/lib/opencvCalibration'
-import type { Point } from '@/lib/geometry'
+import { initCalibrator } from '@deluksic/opencv-calibration-wasm'
+import USE_WASM_MODULE from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
+void USE_WASM_MODULE
+
 import type { DetectedQuad } from '@/gpu/contour'
+import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
+import type { Point } from '@/lib/geometry'
+import type { Vec3, Mat3 } from '@/lib/opencvCalibration'
+import type { TargetLayout } from '@/lib/targetLayout'
 
-let calibratorPromise: Promise<Calibrator> | null = null
-
-function getCalibrator(): Promise<Calibrator> {
-  if (!calibratorPromise) {
-    calibratorPromise = initCalibrator({ modulePath: DEFAULT_WASM_MODULE_PATH })
-  }
-  return calibratorPromise
-}
+const calibrator = await initCalibrator()
 
 const { hypot } = Math
 
@@ -40,32 +36,31 @@ function dist(a: Point, b: Point) {
   return hypot(a.x - b.x, a.y - b.y)
 }
 
-export async function buildReprojectionDrawOps(
+export function buildReprojectionDrawOps(
   layout: TargetLayout,
   k: CameraIntrinsics,
-  quads: readonly DetectedQuad[],
+  distortion: RationalDistortion8 | undefined,
+  quads: DetectedQuad[],
   imageWidth: number,
   imageHeight: number,
-): Promise<{ ops: ReprojectionDrawOp[]; rms: number; R: Mat3; t: Vec3; tagCount: number } | null> {
-  const livePose = buildLivePose(layout, quads, k)
+): { ops: ReprojectionDrawOp[]; rms: number; R: Mat3; t: Vec3; tagCount: number } | null {
+  const livePose = buildLivePose(layout, quads, k, distortion)
   if (!livePose) {
     return null
   }
-  const { R, t, objectPoints, imagePoints, tagCount } = livePose
-
-  const rvec = matrixToRvec(R)
+  const { R, t, rvec, objectPoints, imagePoints, tagCount } = livePose
   const cameraMatrix: [[number, number, number], [number, number, number], [number, number, number]] = [
     [k.fx, 0, k.cx],
     [0, k.fy, k.cy],
     [0, 0, 1],
   ]
 
-  const calibrator = await getCalibrator()
   const projected = calibrator.projectPoints({
     objectPoints: [objectPoints],
     rvecs: [[rvec[0], rvec[1], rvec[2]]],
     tvecs: [[t.x, t.y, t.z]],
     cameraMatrix,
+    distortionCoefficients: distortion,
   })
 
   const projectedPoints = projected.projectedImagePoints[0]!
@@ -103,21 +98,21 @@ export function cameraDistanceFromT(t: Vec3): number {
 interface LivePose {
   R: Mat3
   t: Vec3
+  rvec: [number, number, number]
   objectPoints: [number, number, number][]
   imagePoints: [number, number][]
   tagCount: number
 }
 
 /**
- * Compute live pose (R, t) from current tag detections.
- * Builds DLT correspondences from layout → image, extracts pose via homography.
+ * Compute live pose (R, t) from current tag detections via OpenCV solvePnP.
  */
 function buildLivePose(
   layout: TargetLayout,
-  quads: readonly DetectedQuad[],
+  quads: DetectedQuad[],
   k: CameraIntrinsics,
+  distortion: RationalDistortion8 | undefined,
 ): LivePose | null {
-  const pairs: Array<{ plane: Point; image: Point }> = []
   const objectPoints: [number, number, number][] = []
   const imagePoints: [number, number][] = []
 
@@ -131,85 +126,57 @@ function buildLivePose(
     }
     for (let j = 0; j < 4; j++) {
       if (q.corners[j]) {
+        const observed = q.corners[j]!
         const plane = { x: pl[j]!.x, y: pl[j]!.y }
-        pairs.push({ plane, image: q.corners[j]! })
         objectPoints.push([plane.x, plane.y, 0])
-        imagePoints.push([q.corners[j]!.x, q.corners[j]!.y])
+        imagePoints.push([observed.x, observed.y])
       }
     }
   }
 
-  if (pairs.length < 4) {
+  if (objectPoints.length < 4) {
     return null
   }
-
-  const h = solveHomographySimple(pairs)
-  if (!h) {
+  const cameraMatrix: [[number, number, number], [number, number, number], [number, number, number]] = [
+    [k.fx, 0, k.cx],
+    [0, k.fy, k.cy],
+    [0, 0, 1],
+  ]
+  const pnp = calibrator.solvePnP({
+    objectPoints,
+    imagePoints,
+    cameraMatrix,
+    distortionCoefficients: distortion,
+  })
+  if (!pnp.success) {
     return null
   }
-
-  const ex = extrinsicsFromHomography(h, k)
-  if (!ex) {
-    return null
-  }
-
-  return { R: ex.R, t: ex.t, objectPoints, imagePoints, tagCount: quads.length }
+  const [rx, ry, rz] = pnp.rvec
+  const [tx, ty, tz] = pnp.tvec
+  const R = rvecToMatrix([rx, ry, rz])
+  return { R, t: { x: tx, y: ty, z: tz }, rvec: [rx, ry, rz], objectPoints, imagePoints, tagCount: quads.length }
 }
 
-/**
- * Simple DLT via normal equations + Gaussian elimination.
- */
-function solveHomographySimple(pairs: Array<{ plane: Point; image: Point }>): Mat3 | null {
-  let AtA: number[][] = Array.from({ length: 8 }, () => new Array(8).fill(0))
-  let Atb: number[] = new Array(8).fill(0)
-
-  for (const p of pairs) {
-    const X = p.plane.x
-    const Y = p.plane.y
-    const u = p.image.x
-    const v = p.image.y
-
-    const r0 = [-X, -Y, -1, 0, 0, 0, u * X, u * Y]
-    const r1 = [0, 0, 0, -X, -Y, -1, v * X, v * Y]
-
-    for (let i = 0; i < 8; i++) {
-      for (let j = 0; j < 8; j++) {
-        AtA[i]![j]! += r0[i]! * r0[j]!
-        AtA[i]![j]! += r1[i]! * r1[j]!
-      }
-      Atb[i]! += r0[i]! * (-u)
-      Atb[i]! += r1[i]! * (-v)
-    }
+function rvecToMatrix(rvec: [number, number, number]): Mat3 {
+  const theta = Math.hypot(rvec[0], rvec[1], rvec[2])
+  if (theta < 1e-12) {
+    return [1, 0, 0, 0, 1, 0, 0, 0, 1]
   }
-
-  const N = 8
-  for (let col = 0; col < N; col++) {
-    let maxRow = col
-    for (let row = col + 1; row < N; row++) {
-      if (Math.abs(AtA[row]![col]!) > Math.abs(AtA[maxRow]![col]!)) {
-        maxRow = row
-      }
-    }
-    ;[AtA[col], AtA[maxRow]] = [AtA[maxRow]!, AtA[col]!]
-    ;[Atb[col], Atb[maxRow]] = [Atb[maxRow]!, Atb[col]!]
-
-    const pivot = AtA[col]![col]!
-    if (Math.abs(pivot) < 1e-12) return null
-
-    const pivotRow = AtA[col]!
-    for (let j = col; j < N; j++) pivotRow[j]! /= pivot
-    Atb[col]! /= pivot
-
-    for (let row = 0; row < N; row++) {
-      if (row !== col) {
-        const factor = AtA[row]![col]!
-        if (factor !== 0) {
-          for (let j = col; j < N; j++) AtA[row]![j]! -= factor * pivotRow[j]!
-          Atb[row]! -= factor * Atb[col]!
-        }
-      }
-    }
-  }
-
-  return [Atb[0]!, Atb[1]!, Atb[2]!, Atb[3]!, Atb[4]!, Atb[5]!, Atb[6]!, Atb[7]!, 1]
+  const ux = rvec[0] / theta
+  const uy = rvec[1] / theta
+  const uz = rvec[2] / theta
+  const c = Math.cos(theta)
+  const s = Math.sin(theta)
+  const t = 1 - c
+  return [
+    t * ux * ux + c,
+    t * ux * uy - s * uz,
+    t * ux * uz + s * uy,
+    t * ux * uy + s * uz,
+    t * uy * uy + c,
+    t * uy * uz - s * ux,
+    t * ux * uz - s * uy,
+    t * uy * uz + s * ux,
+    t * uz * uz + c,
+  ]
 }

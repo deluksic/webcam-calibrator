@@ -1,9 +1,8 @@
 import * as Comlink from 'comlink'
-import type { CalibWorkerApi, CalibrationResult, CalibrationOk, CalibrationErr } from './calibration.worker'
-import type { TargetLayout } from '@/lib/targetLayout'
+
 import type { LabeledPoint, CalibrationFrameObservation } from '@/lib/calibrationTypes'
-import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
-import type { Mat3, Vec3 } from './calibration.worker'
+
+import type { CalibWorkerApi, CalibrationResult, CalibrationOk, CalibrationErr } from './calibration.worker'
 
 let worker: Worker | null = null
 let proxy: Comlink.Remote<CalibWorkerApi> | null = null
@@ -22,21 +21,19 @@ export { getWorker }
 
 export interface CalibApi {
   solveCalibration(
-    layout: TargetLayout,
-    labeledPoints: LabeledPoint[],
+    layoutPoints: LabeledPoint[],
     frames: CalibrationFrameObservation[],
-    imageSize?: { width: number; height: number },
+    imageSize: { width: number; height: number },
   ): Promise<CalibrationResult>
 }
 
 export const calibApi: CalibApi = {
   async solveCalibration(
-    layout: TargetLayout,
-    labeledPoints: LabeledPoint[],
+    layoutPoints: LabeledPoint[],
     frames: CalibrationFrameObservation[],
-    imageSize = { width: 1280, height: 720 },
+    imageSize: { width: number; height: number },
   ): Promise<CalibrationResult> {
     const w = getWorker()
-    return w.solveCalibration(layout, labeledPoints, frames, imageSize)
+    return w.solveCalibration(layoutPoints, frames, imageSize)
   },
 }
