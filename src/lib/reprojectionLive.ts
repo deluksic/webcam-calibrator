@@ -6,11 +6,8 @@ import { projectPoints } from '@deluksic/opencv-calibration-wasm'
 import { extrinsicsFromHomography, matrixToRvec, type Vec3, type Mat3 } from '@/lib/opencvCalibration'
 import type { Point } from '@/lib/geometry'
 import type { DetectedQuad } from '@/gpu/contour'
-
-const WASM_MODULE_PATH = new URL(
-  '@deluksic/opencv-calibration-wasm/wasm/calibrate.mjs',
-  import.meta.url,
-).href
+// WASM files are served from public/_wasm/ so the .mjs loader can find the .wasm file
+const WASM_MODULE_PATH = '/_wasm/calibrate.mjs'
 
 const { hypot } = Math
 
