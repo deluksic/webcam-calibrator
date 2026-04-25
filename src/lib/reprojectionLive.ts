@@ -1,8 +1,7 @@
 // Build per-frame reprojection overlay geometry for a 2D canvas (image pixel space).
 
 import { initCalibrator } from '@deluksic/opencv-calibration-wasm'
-import USE_WASM_MODULE from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
-void USE_WASM_MODULE
+import CALIBRATE_WASM_PATH from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
 
 import type { DetectedQuad } from '@/gpu/contour'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
@@ -10,7 +9,7 @@ import type { Point } from '@/lib/geometry'
 import type { Vec3, Mat3 } from '@/lib/opencvCalibration'
 import type { TargetLayout } from '@/lib/targetLayout'
 
-const calibrator = await initCalibrator()
+const calibrator = await initCalibrator({ wasmPath: CALIBRATE_WASM_PATH })
 
 const { hypot } = Math
 

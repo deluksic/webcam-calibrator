@@ -15,8 +15,8 @@ importers:
   .:
     dependencies:
       '@deluksic/opencv-calibration-wasm':
-        specifier: ^0.2.2
-        version: 0.2.2
+        specifier: ^0.2.4
+        version: 0.2.4
       '@solidjs/router':
         specifier: 0.17.0-next.2
         version: 0.17.0-next.2(@solidjs/web@2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7))(solid-js@2.0.0-beta.7)
@@ -223,8 +223,8 @@ packages:
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
 
-  '@deluksic/opencv-calibration-wasm@0.2.2':
-    resolution: {integrity: sha512-FSqzrm8NsqbXI6R5ouawbNGM70Yr/Eve/AvHw/pAXCvXH/1UZy6gsFCgsCd58NOLTbluJiPD3MLFmLHLpXBvtw==}
+  '@deluksic/opencv-calibration-wasm@0.2.4':
+    resolution: {integrity: sha512-vrYdFka5uNRHul/kageecyk/Ie6eLxx0gnff8SJoJeEjvG7q5hbowu/ZLXh2Ym+/XCIt30ci+fMDwVzYv1cbLg==}
 
   '@esbuild/aix-ppc64@0.27.7':
     resolution: {integrity: sha512-EKX3Qwmhz1eMdEJokhALr0YiD0lhQNwDqkPYyPhiSwKrh7/4KRjQc04sZ8db+5DVVnZ1LmbNDI1uAMPEUBnQPg==}
@@ -1963,7 +1963,7 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.0': {}
 
-  '@deluksic/opencv-calibration-wasm@0.2.2': {}
+  '@deluksic/opencv-calibration-wasm@0.2.4': {}
 
   '@esbuild/aix-ppc64@0.27.7':
     optional: true

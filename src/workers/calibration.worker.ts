@@ -1,12 +1,10 @@
 import { initCalibrator } from '@deluksic/opencv-calibration-wasm'
-import USE_WASM_MODULE from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
-void USE_WASM_MODULE
-
+import CALIBRATE_WASM_PATH from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
 import * as Comlink from 'comlink'
 
 import type { CalibrationFrameObservation, LabeledPoint } from '@/lib/calibrationTypes'
-import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import type { Point3 } from '@/lib/calibrationTypes'
+import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 
 export interface CalibWorkerApi {
   solveCalibration(
@@ -84,14 +82,21 @@ function buildWasmInput(
   layoutPoints: LabeledPoint[],
   frames: CalibrationFrameObservation[],
 ):
-  | { objectPoints: [number, number, number][][]; imagePoints: [number, number][][]; frameIds: number[]; pointIds: number[] }
+  | {
+      objectPoints: [number, number, number][][]
+      imagePoints: [number, number][][]
+      frameIds: number[]
+      pointIds: number[]
+    }
   | { error: string }
   | undefined {
   const layoutById = new Map(layoutPoints.map((lp) => [lp.pointId, lp] as const))
   const validFrames = frames
     .map((frame) => ({
       frameId: frame.frameId,
-      pointsById: new Map(frame.framePoints.filter((fp) => layoutById.has(fp.pointId)).map((fp) => [fp.pointId, fp] as const)),
+      pointsById: new Map(
+        frame.framePoints.filter((fp) => layoutById.has(fp.pointId)).map((fp) => [fp.pointId, fp] as const),
+      ),
     }))
     .filter((frame) => frame.pointsById.size >= 6)
 
@@ -143,12 +148,16 @@ const api: CalibWorkerApi = {
         return { kind: 'error', reason: 'too-few-views', details: wasmInput.error }
       }
       if (wasmInput.objectPoints.length < 3) {
-        return { kind: 'error', reason: 'too-few-views', details: `need >=3 solve views (have ${wasmInput.objectPoints.length})` }
+        return {
+          kind: 'error',
+          reason: 'too-few-views',
+          details: `need >=3 solve views (have ${wasmInput.objectPoints.length})`,
+        }
       }
 
       const { objectPoints, imagePoints, frameIds, pointIds } = wasmInput
 
-      const calibrator = await initCalibrator()
+      const calibrator = await initCalibrator({ wasmPath: CALIBRATE_WASM_PATH })
 
       const wasmResult = calibrator.calibrateCameraRO({
         objectPoints,
@@ -168,7 +177,7 @@ const api: CalibWorkerApi = {
       })
       const refinedObjectPoints: [number, number, number][][] = imagePoints.map(() => refinedObjPoints)
 
-    // Compute per-frame RMS via projectPoints
+      // Compute per-frame RMS via projectPoints
       const projected = calibrator.projectPoints({
         objectPoints: refinedObjectPoints,
         rvecs: wasmResult.rvecs,
@@ -194,7 +203,7 @@ const api: CalibWorkerApi = {
       }
       const rmsPx = allSq.length > 0 ? Math.sqrt(allSq.reduce((a, b) => a + b, 0) / allSq.length) : 0
 
-    // Convert extrinsics
+      // Convert extrinsics
       const extrinsics: { frameId: number; R: Mat3; t: Vec3 }[] = []
       for (let i = 0; i < wasmResult.rvecs.length; i++) {
         const rvec = wasmResult.rvecs[i]!
