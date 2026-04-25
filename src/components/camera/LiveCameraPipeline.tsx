@@ -3,7 +3,13 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'so
 
 import { detectForSlot } from '@/gpu/cameraDetection'
 import type { ExtentRow } from '@/gpu/cameraDetection'
-import { presentFrame, presentGridFrame, runCompute, updateQuadCornersBuffer } from '@/gpu/cameraFrame'
+import {
+  presentFrame,
+  presentGridFrame,
+  runCompute,
+  updateQuadCornersBuffer,
+  updateReprojectionOverlayBuffer,
+} from '@/gpu/cameraFrame'
 import type { NonGridDisplayMode } from '@/gpu/cameraFrame'
 import { createCameraPipeline, MAX_U32, MAX_DETECTED_TAGS } from '@/gpu/cameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
@@ -12,7 +18,7 @@ import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/constants'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
-import { buildReprojectionDrawOps, cameraDistanceFromT, cameraTiltDegFromR } from '@/lib/reprojectionLive'
+import { buildReprojectionOverlayPairs, cameraDistanceFromT, cameraTiltDegFromR } from '@/lib/reprojectionLive'
 import type { TargetLayout } from '@/lib/targetLayout'
 import { createElementSize } from '@/utils/createElementSize'
 import { createFrameLoop } from '@/utils/createFrameLoop'
@@ -113,7 +119,7 @@ export type LiveCameraPipelineProps = {
   stream: MediaStream | undefined
   onLog: (msg: string) => void
   onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number }) => void
-  /** When set, draw 2D reprojection overlay and report live metrics. */
+  /** When set, feed GPU reprojection overlay and report live metrics. */
   liveCalibration?: () => { k: CameraIntrinsics; distortion?: RationalDistortion8; layout: TargetLayout } | undefined
   onReprojectionFrame?: (m: { rms: number; tagCount: number; tiltDeg: number; dist: number } | null) => void
   onFrameSize?: (size: { width: number; height: number }) => void
@@ -123,57 +129,8 @@ export type LiveCameraPipelineProps = {
   toolbar?: JSX.Element
 }
 
-function drawReprojectionOverlay(
-  canvas: HTMLCanvasElement,
-  w: number,
-  h: number,
-  quads: DetectedQuad[],
-  k: CameraIntrinsics,
-  distortion: RationalDistortion8 | undefined,
-  layout: TargetLayout,
-) {
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    return
-  }
-  if (canvas.width !== w) {
-    canvas.width = w
-  }
-  if (canvas.height !== h) {
-    canvas.height = h
-  }
-  ctx.clearRect(0, 0, w, h)
-  const built = buildReprojectionDrawOps(layout, k, distortion, quads, w, h)
-  if (!built) {
-    return undefined
-  }
-  for (const op of built.ops) {
-    if (op.t === 'ring') {
-      ctx.strokeStyle = op.color
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.arc(op.c.x, op.c.y, op.r, 0, 2 * Math.PI)
-      ctx.stroke()
-    } else if (op.t === 'dot') {
-      ctx.fillStyle = op.color
-      ctx.beginPath()
-      ctx.arc(op.c.x, op.c.y, op.r, 0, 2 * Math.PI)
-      ctx.fill()
-    } else {
-      ctx.strokeStyle = op.color
-      ctx.lineWidth = op.w
-      ctx.beginPath()
-      ctx.moveTo(op.a.x, op.a.y)
-      ctx.lineTo(op.b.x, op.b.y)
-      ctx.stroke()
-    }
-  }
-  return built
-}
-
 export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
   const [canvasElement, setCanvasElement] = createSignal<HTMLCanvasElement>()
-  const [overlayCanvas, setOverlayCanvas] = createSignal<HTMLCanvasElement>()
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement>()
 
   const [threshold, setThreshold] = createSignal(0, { ownedWrite: true })
@@ -370,6 +327,39 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           // Write corners + render gray+grid+histogram in the same synchronous
           // block so the GPU overlay always matches slot.graySnapshot.
           updateQuadCornersBuffer(pip, tagged, sf)
+
+          if (liveCalib) {
+            const built = buildReprojectionOverlayPairs(
+              liveCalib.layout,
+              liveCalib.k,
+              liveCalib.distortion,
+              tagged,
+              width,
+              height,
+            )
+            if (built) {
+              updateReprojectionOverlayBuffer(pip, built.pairs, built.count)
+              if (typeof pi.onReprojectionFrame === 'function') {
+                pi.onReprojectionFrame({
+                  rms: built.rms,
+                  tagCount: built.tagCount,
+                  tiltDeg: cameraTiltDegFromR(built.R),
+                  dist: cameraDistanceFromT(built.t),
+                })
+              }
+            } else {
+              updateReprojectionOverlayBuffer(pip, [], 0)
+              if (typeof pi.onReprojectionFrame === 'function') {
+                pi.onReprojectionFrame(null)
+              }
+            }
+          } else {
+            updateReprojectionOverlayBuffer(pip, [], 0)
+            if (typeof pi.onReprojectionFrame === 'function') {
+              pi.onReprojectionFrame(null)
+            }
+          }
+
           pip.frameSlotPool.swapDisplaySlot(slot)
           presentGridFrame(gNow, pip, slot)
 
@@ -385,24 +375,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
             }),
           )
 
-          const ovl = overlayCanvas()
-          if (ovl && liveCalib) {
-            const br = drawReprojectionOverlay(ovl, width, height, tagged, liveCalib.k, liveCalib.distortion, liveCalib.layout)
-            if (typeof pi.onReprojectionFrame === 'function') {
-              if (br) {
-                pi.onReprojectionFrame({
-                  rms: br.rms,
-                  tagCount: br.tagCount,
-                  tiltDeg: cameraTiltDegFromR(br.R),
-                  dist: cameraDistanceFromT(br.t),
-                })
-              } else {
-                pi.onReprojectionFrame(null)
-              }
-            }
-          } else if (typeof pi.onReprojectionFrame === 'function') {
-            pi.onReprojectionFrame(null)
-          }
           pi.onQuadDetection?.(tagged, { frameId: slot.frameId })
         })
         .catch((e) => {
@@ -475,9 +447,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         </div>
         <div class={styles.feedContainer}>
           <canvas ref={setCanvasElement} class={styles.feedCanvas} />
-          <Show when={props.displayMode === 'grid' && props.showGrid}>
-            <canvas ref={setOverlayCanvas} class={styles.reprojOverlay} />
-          </Show>
           <Show when={props.displayMode === 'debug'}>
             <QuadCandidateOverlay bboxes={bboxes()} scale={scale()} />
           </Show>

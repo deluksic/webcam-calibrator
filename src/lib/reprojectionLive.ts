@@ -1,4 +1,4 @@
-// Build per-frame reprojection overlay geometry for a 2D canvas (image pixel space).
+// Live reprojection: solvePnP + projectPoints for GPU overlay pairs and UI metrics.
 
 import { initCalibrator } from '@deluksic/opencv-calibration-wasm'
 import CALIBRATE_WASM_PATH from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
@@ -13,36 +13,34 @@ const calibrator = await initCalibrator({ wasmPath: CALIBRATE_WASM_PATH })
 
 const { hypot } = Math
 
-export type ReprojectionDrawOp =
-  | { t: 'ring'; c: Point; r: number; color: string }
-  | { t: 'dot'; c: Point; r: number; color: string }
-  | { t: 'line'; a: Point; b: Point; color: string; w: number }
+export interface ReprojectionOverlayPair {
+  original: Point
+  reprojected: Point
+}
 
-function residualColor(d: number): string {
-  if (d < 0.5) {
-    return 'rgba(0,255,120,0.85)'
-  }
-  if (d < 1) {
-    return 'rgba(255,220,0,0.85)'
-  }
-  if (d < 3) {
-    return 'rgba(255,120,0,0.9)'
-  }
-  return 'rgba(255,40,40,0.95)'
+export interface ReprojectionOverlayResult {
+  pairs: ReprojectionOverlayPair[]
+  count: number
+  rms: number
+  R: Mat3
+  t: Vec3
+  tagCount: number
 }
 
 function dist(a: Point, b: Point) {
   return hypot(a.x - b.x, a.y - b.y)
 }
 
-export function buildReprojectionDrawOps(
+export function buildReprojectionOverlayPairs(
   layout: TargetLayout,
   k: CameraIntrinsics,
   distortion: RationalDistortion8 | undefined,
   quads: DetectedQuad[],
-  imageWidth: number,
-  imageHeight: number,
-): { ops: ReprojectionDrawOp[]; rms: number; R: Mat3; t: Vec3; tagCount: number } | null {
+  _imageWidth: number,
+  _imageHeight: number,
+): ReprojectionOverlayResult | null {
+  void _imageWidth
+  void _imageHeight
   const livePose = buildLivePose(layout, quads, k, distortion)
   if (!livePose) {
     return null
@@ -63,7 +61,7 @@ export function buildReprojectionDrawOps(
   })
 
   const projectedPoints = projected.projectedImagePoints[0]!
-  const ops: ReprojectionDrawOp[] = []
+  const pairs: ReprojectionOverlayPair[] = []
   const errSq: number[] = []
 
   for (let i = 0; i < objectPoints.length; i++) {
@@ -71,15 +69,11 @@ export function buildReprojectionDrawOps(
     const pred = { x: projectedPoints[i]![0]!, y: projectedPoints[i]![1]! }
     const d = dist(pred, image)
     errSq.push(d * d)
-    ops.push({ t: 'ring', c: image, r: 4, color: 'rgba(0,200,255,0.5)' })
-    ops.push({ t: 'dot', c: pred, r: 3, color: 'rgba(255,0,200,0.9)' })
-    ops.push({ t: 'line', a: image, b: pred, color: residualColor(d), w: 1.5 })
+    pairs.push({ original: image, reprojected: pred })
   }
   const rms = errSq.length > 0 ? Math.sqrt(errSq.reduce((a, b) => a + b, 0) / errSq.length) : 0
-  void imageWidth
-  void imageHeight
 
-  return { ops, rms, R, t, tagCount }
+  return { pairs, count: pairs.length, rms, R, t, tagCount }
 }
 
 export function cameraTiltDegFromR(R: Mat3): number {

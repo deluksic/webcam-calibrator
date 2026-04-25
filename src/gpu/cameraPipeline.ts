@@ -29,6 +29,13 @@ import {
   GridDataSchema,
   MAX_INSTANCES,
 } from '@/gpu/pipelines/gridVizPipeline'
+import {
+  createReprojectionOverlayLayouts,
+  createReprojectionOverlayLinesPipeline,
+  createReprojectionOverlayOriginalPipeline,
+  createReprojectionOverlayTargetPipeline,
+  ReprojOverlaySchema,
+} from '@/gpu/pipelines/reprojectionOverlayPipeline'
 import { createHistogramResetPipeline, createHistogramAccumulatePipeline } from '@/gpu/pipelines/histogramPipelines'
 import { createHistogramRenderPipeline } from '@/gpu/pipelines/histogramRenderPipeline'
 import { createLabelVizPipeline } from '@/gpu/pipelines/labelVizPipeline'
@@ -260,6 +267,35 @@ export function createCameraPipeline(
     failInterrogate: gridVizDebugModeBuffer,
   })
 
+  // ─── Reprojection overlay (grid + live calibration) ─────────────────────
+  const reprojOverlayBuffer = root.createBuffer(ReprojOverlaySchema).$usage('storage')
+  const { reprojOverlayLayout } = createReprojectionOverlayLayouts()
+  const reprojOverlayBindGroup = root.createBindGroup(reprojOverlayLayout, {
+    pairs: reprojOverlayBuffer,
+  })
+  const reprojOriginalPipeline = createReprojectionOverlayOriginalPipeline(
+    root,
+    reprojOverlayLayout,
+    width,
+    height,
+    presentationFormat,
+  )
+  const reprojTargetPipeline = createReprojectionOverlayTargetPipeline(
+    root,
+    reprojOverlayLayout,
+    width,
+    height,
+    presentationFormat,
+  )
+  const reprojLinesPipeline = createReprojectionOverlayLinesPipeline(
+    root,
+    reprojOverlayLayout,
+    width,
+    height,
+    presentationFormat,
+  )
+  const reprojOverlayDrawState = { instanceCount: 0 }
+
   // ═══════════════════════════════════════════════════════════════════════
   // LAYOUTS & PIPELINES
   // ═══════════════════════════════════════════════════════════════════════
@@ -459,6 +495,14 @@ export function createCameraPipeline(
     gridVizBindGroup,
     quadCornersBuffer,
     gridVizDebugModeBuffer,
+    // Reprojection overlay (GPU)
+    reprojOverlayBuffer,
+    reprojOverlayLayout,
+    reprojOverlayBindGroup,
+    reprojOriginalPipeline,
+    reprojTargetPipeline,
+    reprojLinesPipeline,
+    reprojOverlayDrawState,
     // Frame slot pool for grid-mode frame pairing
     frameSlotPool,
   }

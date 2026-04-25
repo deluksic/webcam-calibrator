@@ -29,7 +29,7 @@ describe('decode accuracy snapshots', () => {
     const truthPat = codeToPattern(TAG36H11_CODES[tagId]!)
     const sizes = [...DECODE_STRESS_SIZES]
 
-    const table = buildPerspectiveAccuracyTable(DECODE_STRESS_SIZES, tagId, STRESS_SUPERSAMPLE)
+    const table = buildPerspectiveAccuracyTable([...DECODE_STRESS_SIZES], tagId, STRESS_SUPERSAMPLE)
 
     attachFailureArtifacts(THIS_FILE, (dir) => {
       for (const wh of sizes) {

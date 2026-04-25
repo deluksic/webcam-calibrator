@@ -16,6 +16,9 @@ import {
   type GridVizFailInterrogateMode,
 } from '@/gpu/pipelines/gridVizPipeline'
 import { tryComputeHomography } from '@/lib/geometry'
+import type { ReprojectionOverlayPair } from '@/lib/reprojectionLive'
+
+import type { ReprojPairGpu } from '@/gpu/pipelines/reprojectionOverlayPipeline'
 
 import { MAX_DETECTED_TAGS, MAX_EXTENT_COMPONENTS, type CameraPipeline, type DisplayMode } from './cameraPipeline'
 
@@ -273,6 +276,29 @@ export function updateQuadCornersBuffer(
   pipeline.quadCornersBuffer.write(data)
 }
 
+/** Upload `{ original, reprojected }` pairs for the GPU reprojection overlay; pads to `MAX_INSTANCES`. */
+export function updateReprojectionOverlayBuffer(
+  pipeline: CameraPipeline,
+  pairs: ReprojectionOverlayPair[],
+  count: number,
+): void {
+  const capped = min(count, MAX_INSTANCES)
+  const data: ReprojPairGpu[] = []
+  for (let i = 0; i < capped; i++) {
+    const p = pairs[i]!
+    data.push({
+      original: d.vec2f(p.original.x, p.original.y),
+      reprojected: d.vec2f(p.reprojected.x, p.reprojected.y),
+    })
+  }
+  const dead = d.vec2f(-1, -1)
+  for (let i = capped; i < MAX_INSTANCES; i++) {
+    data.push({ original: dead, reprojected: dead })
+  }
+  pipeline.reprojOverlayBuffer.write(data)
+  pipeline.reprojOverlayDrawState.instanceCount = capped
+}
+
 /** Grid overlay: 0 = legacy fail colors, 1 = red highlights insufficient-edge failures, 2 = blue highlights line-fit failures. */
 export function setGridVizFailInterrogate(pipeline: CameraPipeline, mode: GridVizFailInterrogateMode): void {
   pipeline.gridVizDebugModeBuffer.write(mode)
@@ -301,6 +327,18 @@ export function presentGridFrame(root: TgpuRoot, pipeline: CameraPipeline, slot:
       .draw(4, MAX_DETECTED_TAGS)
   } catch (e) {
     console.error('[presentGridFrame] gridViz failed:', e)
+  }
+
+  const reprojN = pipeline.reprojOverlayDrawState.instanceCount
+  if (reprojN > 0) {
+    const load = { view: pipeline.context, loadOp: 'load' as const, storeOp: 'store' as const }
+    try {
+      pipeline.reprojOriginalPipeline.with(enc).withColorAttachment(load).with(pipeline.reprojOverlayBindGroup).draw(4, reprojN)
+      pipeline.reprojTargetPipeline.with(enc).withColorAttachment(load).with(pipeline.reprojOverlayBindGroup).draw(4, reprojN)
+      pipeline.reprojLinesPipeline.with(enc).withColorAttachment(load).with(pipeline.reprojOverlayBindGroup).draw(2, reprojN)
+    } catch (e) {
+      console.error('[presentGridFrame] reprojection overlay failed:', e)
+    }
   }
 
   if (pipeline.histContext) {

@@ -123,6 +123,7 @@ function CalibrationView() {
     collection: string,
     lay: TargetLayout | undefined,
     framePool: CalibrationFrameObservation[],
+    frameSize: { width: number; height: number },
   ) => {
     if (collection === 'idle' || !lay || framePool.length < 1) {
       lastSolveKey = undefined
@@ -158,7 +159,7 @@ function CalibrationView() {
     lastSolveKey = solveKey
 
     const layoutPoints = layoutToLabeledPoints(lay)
-    const size = videoFrameSize()
+    const size = frameSize
     if (!size) {
       setCalib({ kind: 'error', reason: 'too-few-views', details: 'waiting-for-video-size' })
       return
@@ -186,9 +187,11 @@ function CalibrationView() {
 
   // Re-run calibration when inputs change
   createEffect(
-    () => ({ run: run(), layout: layout() }),
-    ({ run, layout }) => {
-      updateCalib(run.collection, layout, run.framePool)
+    () => ({ run: run(), layout: layout(), frameSize: videoFrameSize() }),
+    ({ run, layout, frameSize }) => {
+      if (frameSize) {
+        updateCalib(run.collection, layout, run.framePool, frameSize)
+      }
     },
   )
 
