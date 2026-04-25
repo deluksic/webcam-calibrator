@@ -43,8 +43,7 @@
       "@solidjs/web": "2.0.0-beta.7",
       "solid-js": "2.0.0-beta.7",
       "babel-preset-solid": "2.0.0-beta.7",
-      "typescript": "npm:tsover@latest",
-      "@deluksic/opencv-calibration-wasm": "link:../opencv-calibration-wasm"
+      "typescript": "npm:tsover@latest"
     }
   }
 }
