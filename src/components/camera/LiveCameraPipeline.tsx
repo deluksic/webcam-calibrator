@@ -126,7 +126,7 @@ export type LiveCameraPipelineProps = {
   toolbar?: JSX.Element
 }
 
-function drawReprojectionOverlay(
+async function drawReprojectionOverlay(
   canvas: HTMLCanvasElement,
   w: number,
   h: number,
@@ -145,7 +145,7 @@ function drawReprojectionOverlay(
     canvas.height = h
   }
   ctx.clearRect(0, 0, w, h)
-  const built = buildReprojectionDrawOps(layout, k, quads, w, h)
+  const built = await buildReprojectionDrawOps(layout, k, quads, w, h)
   if (!built) {
     return undefined
   }

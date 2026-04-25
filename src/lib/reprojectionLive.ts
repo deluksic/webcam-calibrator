@@ -7,6 +7,11 @@ import { extrinsicsFromHomography, matrixToRvec, type Vec3, type Mat3 } from '@/
 import type { Point } from '@/lib/geometry'
 import type { DetectedQuad } from '@/gpu/contour'
 
+const WASM_MODULE_PATH = new URL(
+  '@deluksic/opencv-calibration-wasm/wasm/calibrate.mjs',
+  import.meta.url,
+).href
+
 const { hypot } = Math
 
 export type ReprojectionDrawOp =
@@ -31,45 +36,39 @@ function dist(a: Point, b: Point) {
   return hypot(a.x - b.x, a.y - b.y)
 }
 
-export function buildReprojectionDrawOps(
+export async function buildReprojectionDrawOps(
   layout: TargetLayout,
   k: CameraIntrinsics,
   quads: readonly DetectedQuad[],
   imageWidth: number,
   imageHeight: number,
-): { ops: ReprojectionDrawOp[]; rms: number; R: Mat3; t: Vec3; tagCount: number } | null {
+): Promise<{ ops: ReprojectionDrawOp[]; rms: number; R: Mat3; t: Vec3; tagCount: number } | null> {
   const { R, t, objectPoints, imagePoints, tagCount } = buildLivePose(layout, quads, k)
   if (!R || !t) {
     return null
   }
 
   const rvec = matrixToRvec(R)
-  const rvecs: [number, number, number][] = [[rvec[0], rvec[1], rvec[2]]]
-  const tvecs: [number, number, number][] = [[t.x, t.y, t.z]]
   const cameraMatrix: [[number, number, number], [number, number, number], [number, number, number]] = [
     [k.fx, 0, k.cx],
     [0, k.fy, k.cy],
     [0, 0, 1],
   ]
 
-  const projected = projectPoints({
+  const projected = await projectPoints({
     objectPoints: [objectPoints],
-    rvecs,
-    tvecs,
+    rvecs: [[rvec[0], rvec[1], rvec[2]]],
+    tvecs: [[t.x, t.y, t.z]],
     cameraMatrix,
-  }).then((res) => res.projectedImagePoints[0]!)
+  }, { modulePath: WASM_MODULE_PATH })
 
+  const projectedPoints = projected.projectedImagePoints[0]!
   const ops: ReprojectionDrawOp[] = []
   const errSq: number[] = []
 
-  // Sync version: use projectPlanePoint
   for (let i = 0; i < objectPoints.length; i++) {
-    const plane = { x: objectPoints[i]![0]!, y: objectPoints[i]![1]! }
     const image = { x: imagePoints[i]![0]!, y: imagePoints[i]![1]! }
-    const Xc = R[0]! * plane.x + R[1]! * plane.y + t.x
-    const Yc = R[3]! * plane.x + R[4]! * plane.y + t.y
-    const zc = R[6]! * plane.x + R[7]! * plane.y + t.z
-    const pred = zc > 1e-15 ? { x: (k.fx * Xc) / zc + k.cx, y: (k.fy * Yc) / zc + k.cy } : { x: 0, y: 0 }
+    const pred = { x: projectedPoints[i]![0]!, y: projectedPoints[i]![1]! }
     const d = dist(pred, image)
     errSq.push(d * d)
     ops.push({ t: 'ring', c: image, r: 4, color: 'rgba(0,200,255,0.5)' })
@@ -79,7 +78,6 @@ export function buildReprojectionDrawOps(
   const rms = errSq.length > 0 ? Math.sqrt(errSq.reduce((a, b) => a + b, 0) / errSq.length) : 0
   void imageWidth
   void imageHeight
-  void projected
 
   return { ops, rms, R, t, tagCount }
 }

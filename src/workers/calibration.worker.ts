@@ -1,5 +1,10 @@
 import * as Comlink from 'comlink'
 import { calibrateCameraRO, projectPoints } from '@deluksic/opencv-calibration-wasm'
+
+const WASM_MODULE_PATH = new URL(
+  '@deluksic/opencv-calibration-wasm/wasm/calibrate.mjs',
+  import.meta.url,
+).href
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import type { CalibrationFrameObservation, LabeledPoint } from '@/lib/calibrationTypes'
 import type { TargetLayout } from '@/lib/targetLayout'
@@ -109,7 +114,7 @@ const api: CalibWorkerApi = {
       objectPoints,
       imagePoints,
       imageSize,
-    })
+    }, { modulePath: WASM_MODULE_PATH })
 
     const K = cameraIntrinsicsFromMatrix(wasmResult.cameraMatrix)
     const distortion = padDistortion(wasmResult.distortionCoefficients)
@@ -121,7 +126,7 @@ const api: CalibWorkerApi = {
       tvecs: wasmResult.tvecs,
       cameraMatrix: wasmResult.cameraMatrix,
       distortionCoefficients: wasmResult.distortionCoefficients,
-    })
+    }, { modulePath: WASM_MODULE_PATH })
 
     const perFrameRmsPx: [number, number][] = []
     let allSq: number[] = []
