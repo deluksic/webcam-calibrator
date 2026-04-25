@@ -22,7 +22,7 @@ export type Correspondence = {
 }
 
 /** 3×3 row-major homography matrix `[m00, m01, m02, m10, m11, m12, m20, m21, m22]`. */
-export type Mat3 = readonly [number, number, number, number, number, number, number, number, number]
+export type Mat3 = [number, number, number, number, number, number, number, number, number]
 
 export type Line = {
   a: number
@@ -140,7 +140,7 @@ export function tryComputeHomography(src: Corners): Mat3 | undefined {
   const N = 8
 
   // Unit-square destination corners (TL, TR, BL, BR) paired with source points.
-  const correspondences: readonly (readonly [u: number, v: number, p: Point])[] = [
+  const correspondences: [u: number, v: number, p: Point][] = [
     [0, 0, src[0]],
     [1, 0, src[1]],
     [0, 1, src[2]],

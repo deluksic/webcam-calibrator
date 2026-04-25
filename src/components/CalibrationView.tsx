@@ -1,4 +1,4 @@
-import { Errored, For, createMemo, createSignal } from 'solid-js'
+import { Errored, For, createMemo, createSignal, createEffect } from 'solid-js'
 import type { DetectedQuad } from '@/gpu/contour'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
@@ -10,10 +10,10 @@ import {
   frameHasDuplicateDecodedTagIds,
 } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
-import { solveCalibration, type CalibrationResult } from '@/lib/calibrationSolve'
+import { calibApi, type CalibrationResult } from '@/workers/calibrationClient'
 import type { TagObservation, LabeledPoint, CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
 import { learnLayoutFromFrame, layoutToLabeledPoints, type TargetLayout } from '@/lib/targetLayout'
-import type { Mat3R, Vec3 } from '@/lib/zhangCalibration'
+import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 import { RESOLUTION_LADDER, type Resolution } from './camera/cameraStreamAcquire'
 
 import styles from '@/components/CalibrationView.module.css'
@@ -118,11 +118,15 @@ function CalibrationView() {
   const frameSizeApprox = createMemo(() => approxFrameSize(cam.selectedResolution() as Resolution))
 
   // DAG: calib is a pure derivation of (collection, layout, framePool).
-  const calib = createMemo<CalibrationResult | null>(() => {
-    const r = run()
-    const lay = layout()
-    if (r.collection === 'idle' || !lay || r.framePool.length < 1) {
-      return null
+  const calibSignal = createSignal<CalibrationResult | null>(null)
+  const [calib, setCalib] = calibSignal
+
+  // Track pending promise to avoid showing stale results
+  let pendingVersion = 0
+  const updateCalib = async (collection: string, lay: TargetLayout | undefined, framePool: CalibrationFrameObservation[]) => {
+    if (collection === 'idle' || !lay || framePool.length < 1) {
+      setCalib(null)
+      return
     }
     // Collect all tagIds present in the layout
     const layoutTagIds = new Set<number>()
@@ -131,7 +135,7 @@ function CalibrationView() {
     }
     // Filter framePool to only include points from tags in the layout
     const filteredPool: CalibrationFrameObservation[] = []
-    for (const frame of r.framePool) {
+    for (const frame of framePool) {
       const filteredPoints = frame.framePoints.filter((fp) => {
         const tagId = Math.floor(fp.pointId / 10000)
         return layoutTagIds.has(tagId)
@@ -141,10 +145,20 @@ function CalibrationView() {
       }
     }
     if (filteredPool.length < 3) {
-      return null
+      setCalib(null)
+      return
     }
     const labeledPoints = layoutToLabeledPoints(lay)
-    return solveCalibration(lay, labeledPoints, filteredPool)
+    const currentVersion = ++pendingVersion
+    const result = await calibApi.solveCalibration(lay, labeledPoints, filteredPool)
+    if (currentVersion === pendingVersion) {
+      setCalib(result)
+    }
+  }
+
+  // Re-run calibration when inputs change
+  createEffect(() => {
+    updateCalib(run().collection, layout(), run().framePool)
   })
 
   const runs = createMemo(() => run().framePool)
@@ -155,7 +169,7 @@ function CalibrationView() {
     if (!c || c.kind !== 'ok') {
       return null
     }
-    const result: Map<number, { R: Mat3R; t: Vec3 }> = new Map()
+    const result: Map<number, { R: Mat3; t: Vec3 }> = new Map()
     for (const ext of c.extrinsics) {
       result.set(ext.frameId, { R: ext.R, t: ext.t })
     }
@@ -259,11 +273,11 @@ function CalibrationView() {
     }
     const { w, h } = frameSizeApprox()
     const fovX = (2 * Math.atan(0.5 * w / c.K.fx) * 180) / Math.PI
-    const vals = [...c.perFrameRmsPx.values()].sort((a, b) => a - b)
+    const vals = c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b)
     const p50 = percentile(vals, 0.5)
     const p95 = percentile(vals, 0.95)
     return {
-      line1: `ok  RMS ${fmt(c.rmsPx, 3)} px  med ${fmt(p50, 3)}  p95 ${fmt(p95, 3)}  views ${c.homographies.length}`,
+      line1: `ok  RMS ${fmt(c.rmsPx, 3)} px  med ${fmt(p50, 3)}  p95 ${fmt(p95, 3)}  views ${c.extrinsics.length}`,
       fov: fmt(fovX, 1),
       fxfy: `${fmt(c.K.fx, 1)} / ${fmt(c.K.fy, 1)}`,
       cxyc: `${fmt(c.K.cx, 1)}, ${fmt(c.K.cy, 1)}`,
@@ -399,12 +413,12 @@ function CalibrationView() {
           <span style="color: var(--color-text-muted)"> px</span>{' '}
           med <span>{(() => {
             const c = calib()
-            return c?.kind === 'ok' ? fmt(percentile([...c!.perFrameRmsPx.values()].sort((a, b) => a - b), 0.5), 3) : '—'
+            return c?.kind === 'ok' ? fmt(percentile(c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b), 0.5), 3) : '—'
           })()}</span>
           {' p95 '}
           <span>{(() => {
             const c = calib()
-            return c?.kind === 'ok' ? fmt(percentile([...c!.perFrameRmsPx.values()].sort((a, b) => a - b), 0.95), 3) : '—'
+            return c?.kind === 'ok' ? fmt(percentile(c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b), 0.95), 3) : '—'
           })()}</span>
           {' views '}
           <span>{(() => {

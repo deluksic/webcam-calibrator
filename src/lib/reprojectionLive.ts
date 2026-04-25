@@ -2,14 +2,12 @@
 
 import type { CameraIntrinsics } from '@/lib/cameraModel'
 import type { TargetLayout } from '@/lib/targetLayout'
-import { solveHomographyDLT } from '@/lib/dltHomography'
-import { projectPlanePoint } from '@/lib/reprojectionError'
+import { projectPoints } from '@deluksic/opencv-calibration-wasm'
+import { extrinsicsFromHomography, matrixToRvec, type Vec3, type Mat3 } from '@/lib/opencvCalibration'
 import type { Point } from '@/lib/geometry'
-import type { Mat3 } from '@/lib/geometry'
-import { extrinsicsFromHomography, type Vec3, type Mat3R } from '@/lib/zhangCalibration'
 import type { DetectedQuad } from '@/gpu/contour'
 
-const { hypot, acos, min: minf, max: maxf } = Math
+const { hypot } = Math
 
 export type ReprojectionDrawOp =
   | { t: 'ring'; c: Point; r: number; color: string }
@@ -33,54 +31,45 @@ function dist(a: Point, b: Point) {
   return hypot(a.x - b.x, a.y - b.y)
 }
 
-/**
- * @returns null if not all decoded tags are in `layout` or DLT/ extrinsics fail.
- * Residuals use the DLT `H` via {@link applyHomography} (same model as the fit). Pinhole
- * reprojection from decomposed (R, t) can disagree with that H when K̂H→R/t is not exact.
- */
 export function buildReprojectionDrawOps(
   layout: TargetLayout,
   k: CameraIntrinsics,
   quads: readonly DetectedQuad[],
   imageWidth: number,
   imageHeight: number,
-): { ops: ReprojectionDrawOp[]; rms: number; R: Mat3R; t: Vec3; tagCount: number } | null {
-  // Compute live pose from current detections
-  const livePose = livePoseFromDetections(layout, quads, k)
-  if (!livePose) {
+): { ops: ReprojectionDrawOp[]; rms: number; R: Mat3; t: Vec3; tagCount: number } | null {
+  const { R, t, objectPoints, imagePoints, tagCount } = buildLivePose(layout, quads, k)
+  if (!R || !t) {
     return null
   }
 
-  const { R, t } = livePose
-  const tags: { id: number; corners: [Point, Point, Point, Point] }[] = []
-  const pairs: Array<{ plane: Point; image: Point }> = []
+  const rvec = matrixToRvec(R)
+  const rvecs: [number, number, number][] = [[rvec[0], rvec[1], rvec[2]]]
+  const tvecs: [number, number, number][] = [[t.x, t.y, t.z]]
+  const cameraMatrix: [[number, number, number], [number, number, number], [number, number, number]] = [
+    [k.fx, 0, k.cx],
+    [0, k.fy, k.cy],
+    [0, 0, 1],
+  ]
 
-  // Collect all valid tags and build correspondences
-  for (const q of quads) {
-    if (typeof q.decodedTagId !== 'number' || !q.hasCorners || q.cornerDebug?.failureCode !== 0) {
-      continue
-    }
-    const pl = layout.get(q.decodedTagId)
-    if (!pl) {
-      continue
-    }
-    tags.push({ id: q.decodedTagId, corners: [q.corners[0]!, q.corners[1]!, q.corners[2]!, q.corners[3]!] })
-    for (let j = 0; j < 4; j++) {
-      pairs.push({
-        plane: { x: pl[j]!.x, y: pl[j]!.y },
-        image: q.corners[j]!,
-      })
-    }
-  }
-  if (tags.length < 2) {
-    return null
-  }
+  const projected = projectPoints({
+    objectPoints: [objectPoints],
+    rvecs,
+    tvecs,
+    cameraMatrix,
+  }).then((res) => res.projectedImagePoints[0]!)
 
-  // Compute reprojection errors and build visualization ops
   const ops: ReprojectionDrawOp[] = []
   const errSq: number[] = []
-  for (const { plane, image } of pairs) {
-    const pred = projectPlanePoint(k, R, t, plane.x, plane.y)
+
+  // Sync version: use projectPlanePoint
+  for (let i = 0; i < objectPoints.length; i++) {
+    const plane = { x: objectPoints[i]![0]!, y: objectPoints[i]![1]! }
+    const image = { x: imagePoints[i]![0]!, y: imagePoints[i]![1]! }
+    const Xc = R[0]! * plane.x + R[1]! * plane.y + t.x
+    const Yc = R[3]! * plane.x + R[4]! * plane.y + t.y
+    const zc = R[6]! * plane.x + R[7]! * plane.y + t.z
+    const pred = zc > 1e-15 ? { x: (k.fx * Xc) / zc + k.cx, y: (k.fy * Yc) / zc + k.cy } : { x: 0, y: 0 }
     const d = dist(pred, image)
     errSq.push(d * d)
     ops.push({ t: 'ring', c: image, r: 4, color: 'rgba(0,200,255,0.5)' })
@@ -90,37 +79,44 @@ export function buildReprojectionDrawOps(
   const rms = errSq.length > 0 ? Math.sqrt(errSq.reduce((a, b) => a + b, 0) / errSq.length) : 0
   void imageWidth
   void imageHeight
+  void projected
 
-  return { ops, rms, R, t, tagCount: tags.length }
+  return { ops, rms, R, t, tagCount }
 }
 
-export function cameraTiltDegFromR(R: Mat3R): number {
+export function cameraTiltDegFromR(R: Mat3): number {
   const nx = R[2]!
   const ny = R[5]!
   const nz = R[8]!
   const L = hypot(nx, hypot(ny, nz)) + 1e-12
-  return (acos(minf(1, maxf(-1, nz / L))) * 180) / Math.PI
+  return (Math.acos(Math.min(1, Math.max(-1, nz / L))) * 180) / Math.PI
 }
 
 export function cameraDistanceFromT(t: Vec3): number {
   return hypot(t.x, hypot(t.y, t.z))
 }
 
+interface LivePose {
+  R: Mat3
+  t: Vec3
+  objectPoints: [number, number, number][]
+  imagePoints: [number, number][]
+  tagCount: number
+}
+
 /**
  * Compute live pose (R, t) from current tag detections.
- * For each visible tag, build a homography from layout positions → image corners.
- * Use the first valid homography to get extrinsics (assuming the camera is essentially
- * at a single position for the current frame).
- *
- * Returns {R, t} if we have enough correspondences, null otherwise.
+ * Builds DLT correspondences from layout → image, extracts pose via homography.
  */
-export function livePoseFromDetections(
+function buildLivePose(
   layout: TargetLayout,
   quads: readonly DetectedQuad[],
   k: CameraIntrinsics,
-): { R: Mat3R; t: Vec3 } | null {
-  // Build correspondences from visible tags to their layout positions
+): LivePose | null {
   const pairs: Array<{ plane: Point; image: Point }> = []
+  const objectPoints: [number, number, number][] = []
+  const imagePoints: [number, number][] = []
+
   for (const q of quads) {
     if (typeof q.decodedTagId !== 'number' || !q.hasCorners || q.cornerDebug?.failureCode !== 0) {
       continue
@@ -129,28 +125,87 @@ export function livePoseFromDetections(
     if (!pl) {
       continue
     }
-    // Use all 4 corners from this tag
     for (let j = 0; j < 4; j++) {
       if (q.corners[j]) {
-        pairs.push({
-          plane: { x: pl[j]!.x, y: pl[j]!.y },
-          image: q.corners[j]!,
-        })
+        const plane = { x: pl[j]!.x, y: pl[j]!.y }
+        pairs.push({ plane, image: q.corners[j]! })
+        objectPoints.push([plane.x, plane.y, 0])
+        imagePoints.push([q.corners[j]!.x, q.corners[j]!.y])
       }
     }
   }
 
-  if (pairs.length < 8) {
+  if (pairs.length < 4) {
     return null
   }
 
-  // Compute homography from layout → image
-  const h = solveHomographyDLT(pairs)
+  const h = solveHomographySimple(pairs)
   if (!h) {
     return null
   }
 
-  // Get extrinsics from homography
   const ex = extrinsicsFromHomography(h, k)
-  return ex ?? null
+  if (!ex) {
+    return null
+  }
+
+  return { R: ex.R, t: ex.t, objectPoints, imagePoints, tagCount: quads.length }
+}
+
+/**
+ * Simple DLT via normal equations + Gaussian elimination.
+ */
+function solveHomographySimple(pairs: Array<{ plane: Point; image: Point }>): Mat3 | null {
+  let AtA: number[][] = Array.from({ length: 8 }, () => new Array(8).fill(0))
+  let Atb: number[] = new Array(8).fill(0)
+
+  for (const p of pairs) {
+    const X = p.plane.x
+    const Y = p.plane.y
+    const u = p.image.x
+    const v = p.image.y
+
+    const r0 = [-X, -Y, -1, 0, 0, 0, u * X, u * Y]
+    const r1 = [0, 0, 0, -X, -Y, -1, v * X, v * Y]
+
+    for (let i = 0; i < 8; i++) {
+      for (let j = 0; j < 8; j++) {
+        AtA[i]![j]! += r0[i]! * r0[j]!
+        AtA[i]![j]! += r1[i]! * r1[j]!
+      }
+      Atb[i]! += r0[i]! * (-u)
+      Atb[i]! += r1[i]! * (-v)
+    }
+  }
+
+  const N = 8
+  for (let col = 0; col < N; col++) {
+    let maxRow = col
+    for (let row = col + 1; row < N; row++) {
+      if (Math.abs(AtA[row]![col]!) > Math.abs(AtA[maxRow]![col]!)) {
+        maxRow = row
+      }
+    }
+    ;[AtA[col], AtA[maxRow]] = [AtA[maxRow]!, AtA[col]!]
+    ;[Atb[col], Atb[maxRow]] = [Atb[maxRow]!, Atb[col]!]
+
+    const pivot = AtA[col]![col]!
+    if (Math.abs(pivot) < 1e-12) return null
+
+    const pivotRow = AtA[col]!
+    for (let j = col; j < N; j++) pivotRow[j]! /= pivot
+    Atb[col]! /= pivot
+
+    for (let row = 0; row < N; row++) {
+      if (row !== col) {
+        const factor = AtA[row]![col]!
+        if (factor !== 0) {
+          for (let j = col; j < N; j++) AtA[row]![j]! -= factor * pivotRow[j]!
+          Atb[row]! -= factor * Atb[col]!
+        }
+      }
+    }
+  }
+
+  return [Atb[0]!, Atb[1]!, Atb[2]!, Atb[3]!, Atb[4]!, Atb[5]!, Atb[6]!, Atb[7]!, 1]
 }

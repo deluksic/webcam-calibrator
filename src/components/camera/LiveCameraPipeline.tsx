@@ -12,7 +12,6 @@ import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/constants'
 import type { CameraIntrinsics } from '@/lib/cameraModel'
-import type { Mat3R, Vec3 } from '@/lib/zhangCalibration'
 import {
   buildReprojectionDrawOps,
   cameraDistanceFromT,

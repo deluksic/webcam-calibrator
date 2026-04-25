@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import type { CameraIntrinsics } from '@/lib/cameraModel'
 import { projectPlanePoint } from '@/lib/reprojectionError'
-import type { Mat3R } from '@/lib/zhangCalibration'
+import type { Mat3 } from '@/workers/calibration.worker'
 
 const K: CameraIntrinsics = { fx: 500, fy: 510, cx: 300, cy: 200 }
 
-const I: Mat3R = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+const I: Mat3 = [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
 describe('projectPlanePoint', () => {
   it('maps plane origin to principal point for identity R and t = (0,0,2)', () => {
