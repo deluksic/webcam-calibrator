@@ -1,8 +1,5 @@
 import * as Comlink from 'comlink'
-import { calibrateCameraRO, projectPoints } from '@deluksic/opencv-calibration-wasm'
-
-// WASM files are served from public/_wasm/ so the .mjs loader can find the .wasm file
-const WASM_MODULE_PATH = '/_wasm/calibrate.mjs'
+import { initCalibrator, DEFAULT_WASM_MODULE_PATH, type Calibrator } from '@deluksic/opencv-calibration-wasm'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import type { CalibrationFrameObservation, LabeledPoint } from '@/lib/calibrationTypes'
 import type { TargetLayout } from '@/lib/targetLayout'
@@ -51,7 +48,7 @@ function rvecToMatrix(rvec: [number, number, number]): Mat3 {
     t * uy * uy + c,
     t * uy * uz - s * ux,
     t * ux * uz - s * uy,
-    t * uy * uz + s * ux,
+    t * uy * uz + s * uy,
     t * uz * uz + c,
   ]
 }
@@ -94,6 +91,16 @@ function buildWasmInput(
   return { objectPoints, imagePoints, sharedPointIds }
 }
 
+// Initialize WASM calibrator once
+let calibratorPromise: Promise<Calibrator> | null = null
+
+function getCalibrator(): Promise<Calibrator> {
+  if (!calibratorPromise) {
+    calibratorPromise = initCalibrator({ modulePath: DEFAULT_WASM_MODULE_PATH })
+  }
+  return calibratorPromise
+}
+
 const api: CalibWorkerApi = {
   async solveCalibration(
     layout: TargetLayout,
@@ -108,23 +115,25 @@ const api: CalibWorkerApi = {
 
     const { objectPoints, imagePoints, sharedPointIds } = wasmInput
 
-    const wasmResult = await calibrateCameraRO({
+    const calibrator = await getCalibrator()
+
+    const wasmResult = calibrator.calibrateCameraRO({
       objectPoints,
       imagePoints,
       imageSize,
-    }, { modulePath: WASM_MODULE_PATH })
+    })
 
     const K = cameraIntrinsicsFromMatrix(wasmResult.cameraMatrix)
     const distortion = padDistortion(wasmResult.distortionCoefficients)
 
     // Compute per-frame RMS via projectPoints
-    const projected = await projectPoints({
+    const projected = calibrator.projectPoints({
       objectPoints,
       rvecs: wasmResult.rvecs,
       tvecs: wasmResult.tvecs,
       cameraMatrix: wasmResult.cameraMatrix,
       distortionCoefficients: wasmResult.distortionCoefficients,
-    }, { modulePath: WASM_MODULE_PATH })
+    })
 
     const perFrameRmsPx: [number, number][] = []
     let allSq: number[] = []

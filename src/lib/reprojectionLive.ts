@@ -2,12 +2,19 @@
 
 import type { CameraIntrinsics } from '@/lib/cameraModel'
 import type { TargetLayout } from '@/lib/targetLayout'
-import { projectPoints } from '@deluksic/opencv-calibration-wasm'
+import { initCalibrator, DEFAULT_WASM_MODULE_PATH, type Calibrator } from '@deluksic/opencv-calibration-wasm'
 import { extrinsicsFromHomography, matrixToRvec, type Vec3, type Mat3 } from '@/lib/opencvCalibration'
 import type { Point } from '@/lib/geometry'
 import type { DetectedQuad } from '@/gpu/contour'
-// WASM files are served from public/_wasm/ so the .mjs loader can find the .wasm file
-const WASM_MODULE_PATH = '/_wasm/calibrate.mjs'
+
+let calibratorPromise: Promise<Calibrator> | null = null
+
+function getCalibrator(): Promise<Calibrator> {
+  if (!calibratorPromise) {
+    calibratorPromise = initCalibrator({ modulePath: DEFAULT_WASM_MODULE_PATH })
+  }
+  return calibratorPromise
+}
 
 const { hypot } = Math
 
@@ -40,10 +47,11 @@ export async function buildReprojectionDrawOps(
   imageWidth: number,
   imageHeight: number,
 ): Promise<{ ops: ReprojectionDrawOp[]; rms: number; R: Mat3; t: Vec3; tagCount: number } | null> {
-  const { R, t, objectPoints, imagePoints, tagCount } = buildLivePose(layout, quads, k)
-  if (!R || !t) {
+  const livePose = buildLivePose(layout, quads, k)
+  if (!livePose) {
     return null
   }
+  const { R, t, objectPoints, imagePoints, tagCount } = livePose
 
   const rvec = matrixToRvec(R)
   const cameraMatrix: [[number, number, number], [number, number, number], [number, number, number]] = [
@@ -52,12 +60,13 @@ export async function buildReprojectionDrawOps(
     [0, 0, 1],
   ]
 
-  const projected = await projectPoints({
+  const calibrator = await getCalibrator()
+  const projected = calibrator.projectPoints({
     objectPoints: [objectPoints],
     rvecs: [[rvec[0], rvec[1], rvec[2]]],
     tvecs: [[t.x, t.y, t.z]],
     cameraMatrix,
-  }, { modulePath: WASM_MODULE_PATH })
+  })
 
   const projectedPoints = projected.projectedImagePoints[0]!
   const ops: ReprojectionDrawOp[] = []

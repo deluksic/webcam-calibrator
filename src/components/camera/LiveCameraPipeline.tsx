@@ -379,26 +379,28 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               return typeof q.decodedTagId === 'number'
             }),
           )
-          if (true) {
-            const ovl = overlayCanvas()
-            if (ovl && liveCalib) {
-              const br = drawReprojectionOverlay(ovl, width, height, tagged, liveCalib.k, liveCalib.layout)
-              if (typeof pi.onReprojectionFrame === 'function') {
-                if (br) {
-                  pi.onReprojectionFrame({
-                    rms: br.rms,
-                    tagCount: br.tagCount,
-                    tiltDeg: cameraTiltDegFromR(br.R),
-                    dist: cameraDistanceFromT(br.t),
-                  })
-                } else {
-                  pi.onReprojectionFrame(null)
+          ;(async () => {
+            if (true) {
+              const ovl = overlayCanvas()
+              if (ovl && liveCalib) {
+                const br = await drawReprojectionOverlay(ovl, width, height, tagged, liveCalib.k, liveCalib.layout)
+                if (typeof pi.onReprojectionFrame === 'function') {
+                  if (br) {
+                    pi.onReprojectionFrame({
+                      rms: br.rms,
+                      tagCount: br.tagCount,
+                      tiltDeg: cameraTiltDegFromR(br.R),
+                      dist: cameraDistanceFromT(br.t),
+                    })
+                  } else {
+                    pi.onReprojectionFrame(null)
+                  }
                 }
+              } else if (typeof pi.onReprojectionFrame === 'function') {
+                pi.onReprojectionFrame(null)
               }
-            } else if (typeof pi.onReprojectionFrame === 'function') {
-              pi.onReprojectionFrame(null)
             }
-          }
+          })()
           pi.onQuadDetection?.(tagged, { frameId: slot.frameId })
         })
         .catch((e) => {

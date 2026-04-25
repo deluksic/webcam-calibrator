@@ -451,7 +451,7 @@ function CalibrationView() {
           <span>
             {(() => {
               const c = calib()
-              return c?.kind === 'ok' ? c!.homographies.length : '—'
+              return c?.kind === 'ok' ? c!.extrinsics.length : '—'
             })()}
           </span>
         </div>

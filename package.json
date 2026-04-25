@@ -13,7 +13,7 @@
     "test:decode": "vitest run src/tests/decode"
   },
   "dependencies": {
-    "@deluksic/opencv-calibration-wasm": "^0.1.1",
+    "@deluksic/opencv-calibration-wasm": "^0.2.0",
     "@solidjs/router": "0.17.0-next.2",
     "@solidjs/web": "2.0.0-beta.7",
     "comlink": "^4.4.2",
