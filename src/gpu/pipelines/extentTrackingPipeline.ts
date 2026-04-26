@@ -5,11 +5,19 @@ import { tgpu, d } from 'typegpu'
 import { atomicMin, atomicMax, atomicStore } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
-import { COMPUTE_WORKGROUP_SIZE } from '@/gpu/pipelines/constants'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
+
+/** Match compact-label and cameraFrame extent dispatches / full-frame [16,16] grid. */
+const WORKGROUP_SIZE = 16
 
 export const MAX_U32 = 0xffffffff
 export const EXTENT_FIELDS = 4 as const
+
+/**
+ * Max labeled components with extent slots on GPU. Compact-label discards roots with
+ * index ≥ this; extent buffer has this many entries. Keep in sync with compact pass.
+ */
+export const MAX_EXTENT_COMPONENTS = 16384
 
 /** Extent entry stored in the extent buffer. */
 export const ExtentEntry = d.struct({
@@ -73,7 +81,7 @@ export function createExtentResetPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [COMPUTE_WORKGROUP_SIZE, 1, 1],
+    workgroupSize: [WORKGROUP_SIZE, 1, 1],
   })((input) => {
     'use gpu'
     const slot = d.u32(input.gid.x)
@@ -103,7 +111,7 @@ export function createExtentTrackPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
+    workgroupSize: [WORKGROUP_SIZE, WORKGROUP_SIZE, 1],
   })((input) => {
     'use gpu'
     const x = d.i32(input.gid.x)

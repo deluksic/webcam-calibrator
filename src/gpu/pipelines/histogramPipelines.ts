@@ -3,7 +3,15 @@ import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { atomicAdd, atomicLoad, atomicStore, length, log2 } from 'typegpu/std'
 
-import { HISTOGRAM_BINS, HIST_HEIGHT, HIST_WIDTH } from '@/gpu/pipelines/constants'
+/** Bin count for magnitude histogram and bar-chart vertex instances. */
+export const HISTOGRAM_BINS = 256
+
+/** Histogram chart dimensions in pixels (bar display shader). */
+export const HIST_WIDTH = 512
+export const HIST_HEIGHT = 120
+
+/** Full-frame compute tile; keep in sync with other camera passes using [16,16,1] and `computeDispatch2d` in cameraFrame. */
+const FULL_FRAME_WG = 16
 
 export const histogramStorageSchema = d.arrayOf(d.atomic(d.u32), HISTOGRAM_BINS)
 
@@ -44,7 +52,7 @@ export function createHistogramResetPipeline(root: TgpuRoot) {
 export function createHistogramAccumulatePipeline(root: TgpuRoot, width: number, height: number) {
   const histogramKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [16, 16, 1],
+    workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
   })((input) => {
     'use gpu'
     const zero = d.u32(0)
@@ -201,4 +209,21 @@ export function createHistogramStage(
     displayPipeline,
     displayBindGroup,
   }
+}
+
+/** Default percentile for adaptive edge threshold from CPU-side histogram readback. */
+export const THRESHOLD_PERCENTILE = 0.95
+
+export function computeThreshold(histogramData: number[], percentile: number = THRESHOLD_PERCENTILE): number {
+  const totalPixels = histogramData.reduce((a, b) => a + b, 0)
+  const targetCount = totalPixels * percentile
+
+  let cumulative = 0
+  for (let i = 0; i < histogramData.length; i++) {
+    cumulative += histogramData[i]!
+    if (cumulative >= targetCount) {
+      return i / 255.0
+    }
+  }
+  return 0.5
 }

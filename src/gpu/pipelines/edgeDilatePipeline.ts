@@ -5,7 +5,15 @@ import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { abs, length, sqrt } from 'typegpu/std'
 
-import { EDGE_DILATE_THRESHOLD } from '@/gpu/pipelines/constants'
+/**
+ * Edge tangent-only dilation: closes small gaps along the edge.
+ * Only dilates to neighbors that are not strongly gradient-aligned.
+ * Lower = more restrictive, thinner dilation.
+ */
+const EDGE_DILATE_THRESHOLD = 0.3
+
+/** Full-frame tile; match `computeDispatch2d` in cameraFrame. */
+const FULL_FRAME_WG = 16
 
 export const edgeDilateLayout = tgpu.bindGroupLayout({
   src: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
@@ -42,7 +50,7 @@ export function createEdgeDilatePipeline(
 ) {
   const dilateKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [16, 16, 1],
+    workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
   })((input) => {
     'use gpu'
     if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) {

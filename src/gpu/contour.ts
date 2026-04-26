@@ -5,9 +5,10 @@ import type { Corners } from '@/lib/geometry'
 import { decodeTagPattern } from '@/lib/grid'
 import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
 
-import { ALLOWED_ERROR_COUNT } from './pipelines/constants'
-
 const { min, max, floor } = Math
+
+/** Max Hamming errors allowed when matching a 6×6 tag pattern to the dictionary. */
+export const ALLOWED_ERROR_COUNT = 3
 
 export const COMPONENT_LABEL_INVALID = 0xffffffff
 

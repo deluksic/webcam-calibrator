@@ -9,6 +9,9 @@ export const GRID_DIVISIONS = 8
 export const GRID_LINE_WIDTH = 0.06
 export const MAX_INSTANCES = 1024
 
+/** App/UI cap for detected quads per frame; same as instance buffer length (`MAX_INSTANCES`). */
+export const MAX_DETECTED_TAGS = MAX_INSTANCES
+
 const QuadDebug = d.struct({
   failureCode: d.u32,
   edgePixelCount: d.f32,

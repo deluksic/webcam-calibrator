@@ -8,8 +8,19 @@ import { tgpu, d, std } from 'typegpu'
 import { atomicLoad, atomicMin, atomicStore, length } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
-import { COMPUTE_WORKGROUP_SIZE } from '@/gpu/pipelines/constants'
 import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
+
+/**
+ * Pointer-doubling passes: L'[i]=L[L[i]] after init (see shaders below).
+ *
+ * MUST be even. After each full iteration the ping-pong index flips once, so an even
+ * count guarantees `pj === 0` on exit and compact-label (fixed to pointerJumpBuffer0)
+ * reads the converged buffer.
+ */
+export const POINTER_JUMP_ITERATIONS = 10
+
+/** Full-frame compute tile; match [16,16,1] kernels here and `computeDispatch2d` in cameraFrame. */
+const FULL_FRAME_WG = 16
 
 export function createPointerJumpLayouts() {
   const initLayout = tgpu.bindGroupLayout({
@@ -51,7 +62,7 @@ export function createPointerJumpInitPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
+    workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
   })((input) => {
     'use gpu'
     const x = d.i32(input.gid.x)
@@ -99,7 +110,7 @@ export function createPointerJumpStepPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
+    workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
   })((input) => {
     'use gpu'
     const x = d.i32(input.gid.x)
@@ -131,7 +142,7 @@ export function createPointerJumpLabelsToAtomicPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
+    workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
   })((input) => {
     'use gpu'
     const x = d.i32(input.gid.x)
@@ -158,7 +169,7 @@ export function createPointerJumpParentTightenPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
+    workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
   })((input) => {
     'use gpu'
     const x = d.i32(input.gid.x)
@@ -215,7 +226,7 @@ export function createPointerJumpAtomicToLabelsPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
+    workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
   })((input) => {
     'use gpu'
     const x = d.i32(input.gid.x)

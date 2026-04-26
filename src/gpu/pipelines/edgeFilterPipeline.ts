@@ -18,6 +18,9 @@ export const edgeFilterLayout = tgpu.bindGroupLayout({
 
 export type EdgeFilterBindResources = ExtractBindGroupInputFromLayout<typeof edgeFilterLayout.entries>
 
+/** Full-frame tile; match `computeDispatch2d` in cameraFrame. */
+const FULL_FRAME_WG = 16
+
 /** Allocates NMS `filteredBuffer` and edge-strength `threshold` uniform; reads `sobelBuffer` (upstream). */
 export function createEdgeFilterStage(
   root: TgpuRoot,
@@ -43,7 +46,7 @@ export function createEdgeFilterPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [16, 16, 1],
+    workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
   })((input) => {
     'use gpu'
     if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) {

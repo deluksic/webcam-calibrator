@@ -3,13 +3,9 @@ import { d } from 'typegpu'
 
 import type { DetectedQuad } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
-import {
-  HISTOGRAM_BINS,
-  COMPUTE_WORKGROUP_SIZE,
-  POINTER_JUMP_ITERATIONS,
-  computeDispatch2d,
-} from '@/gpu/pipelines/constants'
 import { createCopyBindGroup } from '@/gpu/pipelines/copyPipeline'
+import { HISTOGRAM_BINS } from '@/gpu/pipelines/histogramPipelines'
+import { POINTER_JUMP_ITERATIONS } from '@/gpu/pipelines/pointerJumpPipeline'
 import {
   DECODED_TAG_ID_UNKNOWN,
   type QuadData,
@@ -20,9 +16,19 @@ import type { ReprojPairGpu } from '@/gpu/pipelines/reprojectionOverlayPipeline'
 import { tryComputeHomography } from '@/lib/geometry'
 import type { ReprojectionOverlayPair } from '@/lib/reprojectionLive'
 
-import { MAX_DETECTED_TAGS, MAX_EXTENT_COMPONENTS, type CameraPipeline, type DisplayMode } from './cameraPipeline'
+import { MAX_EXTENT_COMPONENTS } from '@/gpu/pipelines/extentTrackingPipeline'
+import { MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
+
+import type { CameraPipeline, DisplayMode } from './cameraPipeline'
 
 const { min, ceil, round } = Math
+
+/** Full-frame compute tile; must match [16,16,1] kernels in gray/sobel/NMS/dilate/histogram/pointer-jump. */
+const FULL_FRAME_WG = 16
+
+function computeDispatch2d(width: number, height: number): [number, number] {
+  return [ceil(width / FULL_FRAME_WG), ceil(height / FULL_FRAME_WG)]
+}
 
 /**
  * Non-grid display modes that paint synchronously to the canvas.
@@ -116,7 +122,7 @@ export function runCompute(
   pipeline.compact.compactResetPipeline
     .with(computePass)
     .with(pipeline.compact.compactResetBindGroup)
-    .dispatchWorkgroups(ceil(area / COMPUTE_WORKGROUP_SIZE))
+    .dispatchWorkgroups(ceil(area / FULL_FRAME_WG))
   pipeline.compact.compactClaimPipeline
     .with(computePass)
     .with(pipeline.compact.compactClaimBindGroup)
@@ -130,7 +136,7 @@ export function runCompute(
   pipeline.extent.extentResetPipeline
     .with(computePass)
     .with(pipeline.extent.extentResetBindGroup)
-    .dispatchWorkgroups(ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE))
+    .dispatchWorkgroups(ceil(MAX_EXTENT_COMPONENTS / FULL_FRAME_WG))
   pipeline.extent.extentTrackPipeline
     .with(computePass)
     .with(pipeline.extent.extentTrackBindGroup)

@@ -99,7 +99,7 @@ After corners (fitted or bbox), `validateAndFilterQuads` runs grid + dictionary 
 
 2. **Pattern** — `decodeTagPattern` scans the quad AABB, maps pixels through the inverse homography, accumulates half-space votes into an 8×8 module grid from **filtered** (`filteredBuffer`) gradients. Inner **6×6** bits go to the dictionary. The decode path is homography + bbox scan; `decodeCell` exists for **unit tests and tooling** in the same module.
 
-3. **Dictionary** — `decodeTag36h11AnyRotation(pattern, maxError)` with `maxError = ALLOWED_ERROR_COUNT` (**3**, [`constants.ts`](src/gpu/pipelines/constants.ts)) over 587 tag36h11 words in [`tag36h11.ts`](src/lib/tag36h11.ts).
+3. **Dictionary** — `decodeTag36h11AnyRotation(pattern, maxError)` with `maxError = ALLOWED_ERROR_COUNT` (**3**, [`contour.ts`](src/gpu/contour.ts)) over 587 tag36h11 words in [`tag36h11.ts`](src/lib/tag36h11.ts).
 
 4. **Outputs** — `DetectedQuad` carries `pattern`, optional `decodedTagId` / `decodedRotation`. UI shows the id or **`?`**. `updateQuadCornersBuffer` sends `vizTagId` to the instanced `decodedTagId` (`0xFFFFFFFF` = unknown, black fill in the shader); known IDs are tinted with `stableHashToRgb01`.
 

@@ -27,7 +27,7 @@ In-browser AprilTag 6×6 target capture; no server. All capture, GPU stages, and
 
 1. Grayscale
 2. Sobel
-3. Histogram; adaptive edge threshold (95th percentile, `THRESHOLD_PERCENTILE` in [`constants.ts`](../src/gpu/pipelines/constants.ts))
+3. Histogram; adaptive edge threshold (95th percentile, `THRESHOLD_PERCENTILE` in [`histogramPipelines.ts`](../src/gpu/pipelines/histogramPipelines.ts))
 4. NMS and edge filter
 5. Pointer-jump CCL
 6. Compact remap to 0…N−1

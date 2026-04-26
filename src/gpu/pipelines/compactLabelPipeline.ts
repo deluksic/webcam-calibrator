@@ -1,8 +1,8 @@
 // Compact labeling: remap pointer-jump roots to compact IDs (0..N-1).
 //
 // Problem: pointer-jump labels are raw pixel indices (up to area-1). The extent
-// buffer is sized for MAX_EXTENT_COMPONENTS slots. Components with root pixel
-// index >= MAX_EXTENT_COMPONENTS are discarded — acceptable for our use case.
+// buffer is sized for `MAX_EXTENT_COMPONENTS` (see extentTrackingPipeline). Roots with
+// index >= that limit are discarded — acceptable for our use case.
 //
 // Pipeline (3 passes after pointer-jump):
 //   1. Reset canonicalRoot to INVALID (needed because atomicMin is used)
@@ -17,8 +17,13 @@ import { tgpu, d } from 'typegpu'
 import { atomicLoad, atomicStore, atomicAdd } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
-import { COMPUTE_WORKGROUP_SIZE } from '@/gpu/pipelines/constants'
 import type { PointerJumpConvergedLabels } from '@/gpu/pipelines/pointerJumpPipeline'
+
+/**
+ * Thread count per workgroup for compact passes (1D rows and 2D remap).
+ * Match `FULL_FRAME_WG` / `computeDispatch2d` in cameraFrame and pointer-jump.
+ */
+const WORKGROUP_SIZE = 16
 
 /** Allocates remap buffers; reads converged `pointerJumpBuffer0` (upstream). */
 export function createCompactLabelStage(
@@ -91,7 +96,7 @@ export function createCanonicalResetPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [COMPUTE_WORKGROUP_SIZE, 1, 1],
+    workgroupSize: [WORKGROUP_SIZE, 1, 1],
   })((input) => {
     'use gpu'
     const slot = d.u32(input.gid.x)
@@ -115,7 +120,7 @@ export function createCanonicalClaimPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
+    workgroupSize: [WORKGROUP_SIZE, WORKGROUP_SIZE, 1],
   })((input) => {
     'use gpu'
     const x = d.i32(input.gid.x)
@@ -161,7 +166,7 @@ export function createRemapLabelPipeline(
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [COMPUTE_WORKGROUP_SIZE, COMPUTE_WORKGROUP_SIZE, 1],
+    workgroupSize: [WORKGROUP_SIZE, WORKGROUP_SIZE, 1],
   })((input) => {
     'use gpu'
     const x = d.i32(input.gid.x)

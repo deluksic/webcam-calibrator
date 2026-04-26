@@ -7,28 +7,19 @@ import { createCopyIngest } from '@/gpu/pipelines/copyPipeline'
 import { createEdgeDilateStage } from '@/gpu/pipelines/edgeDilatePipeline'
 import { createEdgeFilterStage } from '@/gpu/pipelines/edgeFilterPipeline'
 import { createEdgesPipeline } from '@/gpu/pipelines/edgesPipeline'
-import { createExtentTrackingStage } from '@/gpu/pipelines/extentTrackingPipeline'
+import { createExtentTrackingStage, MAX_EXTENT_COMPONENTS } from '@/gpu/pipelines/extentTrackingPipeline'
 import { createFilteredRenderPipeline } from '@/gpu/pipelines/filteredRenderPipeline'
 import { createGrayStage } from '@/gpu/pipelines/grayPipeline'
 import { createGrayRenderPipeline } from '@/gpu/pipelines/grayRenderPipeline'
-import { createGridVizStage, MAX_INSTANCES } from '@/gpu/pipelines/gridVizPipeline'
+import { createGridVizStage } from '@/gpu/pipelines/gridVizPipeline'
 import { createReprojectionOverlayStage } from '@/gpu/pipelines/reprojectionOverlayPipeline'
-import { createHistogramStage } from '@/gpu/pipelines/histogramPipelines'
+import { createHistogramStage, HIST_HEIGHT, HIST_WIDTH } from '@/gpu/pipelines/histogramPipelines'
 import { createLabelVizPipeline } from '@/gpu/pipelines/labelVizPipeline'
 import { createPointerJumpLabeling } from '@/gpu/pipelines/pointerJumpPipeline'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
 
-/** Max quads drawn in grid mode; must match `MAX_INSTANCES` in gridVizPipeline (buffer + draw). */
-export const MAX_DETECTED_TAGS = MAX_INSTANCES
-
 export type DisplayMode = 'edges' | 'nms' | 'labels' | 'grayscale' | 'debug' | 'grid'
-
-export const MAX_EXTENT_COMPONENTS = 16384
-export const MAX_COMPONENTS = 16384 // alias for CalibrationView readback
-export const EXTENT_FIELDS = 4 // 4 fields per extent entry: minX, minY, maxX, maxY
-
-export const MAX_U32 = 0xffffffff
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PIPELINE FACTORY — stages allocate their outputs; downstream stages bind inputs
@@ -89,8 +80,8 @@ export function createCameraPipeline(
     histContext,
     width,
     height,
-    histWidth: 512,
-    histHeight: 120,
+    histWidth: HIST_WIDTH,
+    histHeight: HIST_HEIGHT,
     frameSlotPool,
     ingest,
     gray,

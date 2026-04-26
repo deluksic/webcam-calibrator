@@ -9,6 +9,9 @@ export const grayTexToBufferLayout = tgpu.bindGroupLayout({
 
 export type GrayTexToBufferBindResources = ExtractBindGroupInputFromLayout<typeof grayTexToBufferLayout.entries>
 
+/** Full-frame tile; match `computeDispatch2d` in cameraFrame. */
+const FULL_FRAME_WG = 16
+
 /** Allocates `grayBuffer`; binds `grayTex` (upstream). */
 export function createGrayStage(
   root: TgpuRoot,
@@ -29,7 +32,7 @@ export function createGrayPipeline(
 ) {
   const grayKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [16, 16, 1],
+    workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
   })((input) => {
     'use gpu'
     if (input.gid.x >= width || input.gid.y >= height) {

@@ -10,6 +10,9 @@ export const sobelLayout = tgpu.bindGroupLayout({
 
 export type SobelBindResources = ExtractBindGroupInputFromLayout<typeof sobelLayout.entries>
 
+/** Full-frame tile; match `computeDispatch2d` in cameraFrame. */
+const FULL_FRAME_WG = 16
+
 /** Allocates `sobelBuffer`; reads `grayBuffer` (upstream). */
 export function createSobelStage(
   root: TgpuRoot,
@@ -41,7 +44,7 @@ export function createSobelPipeline(
 
   const sobelKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [16, 16, 1],
+    workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
   })((input) => {
     'use gpu'
     if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) {

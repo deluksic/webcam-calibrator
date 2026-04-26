@@ -4,7 +4,9 @@ import { type DetectedQuad, extractRegions, validateAndFilterQuads } from '@/gpu
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import type { ExtentEntry } from '@/gpu/pipelines/extentTrackingPipeline'
 
-import { MAX_U32, type CameraPipeline } from './cameraPipeline'
+import { MAX_U32 } from '@/gpu/pipelines/extentTrackingPipeline'
+
+import type { CameraPipeline } from './cameraPipeline'
 
 export type ExtentRow = d.Infer<typeof ExtentEntry>
 
