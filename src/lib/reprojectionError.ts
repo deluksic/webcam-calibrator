@@ -1,7 +1,7 @@
 // Reproject board plane (X,Y, z=0) with p_c = R * [x,y,0] + t; pinhole: u = fx*Xc/zc + cx, v = fy*Yc/zc + cy.
 
-import type { Point } from '@/lib/geometry'
 import type { CameraIntrinsics } from '@/lib/cameraModel'
+import type { Point } from '@/lib/geometry'
 import type { Vec3, Mat3 } from '@/workers/calibration.worker'
 
 function abs(x: number) {

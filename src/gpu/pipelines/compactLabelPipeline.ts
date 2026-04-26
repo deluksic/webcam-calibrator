@@ -55,16 +55,19 @@ export function createCompactLabelStage(
     compactLabelBuffer,
     canonicalRoot: canonicalRootBuffer,
   })
+  const wgX = Math.ceil(width / WORKGROUP_SIZE)
+  const wgY = Math.ceil(height / WORKGROUP_SIZE)
+  const resetWg = Math.ceil(area / WORKGROUP_SIZE)
+  const encodeCompute = (pass: GPUComputePassEncoder) => {
+    compactResetPipeline.with(pass).with(compactResetBindGroup).dispatchWorkgroups(resetWg)
+    compactClaimPipeline.with(pass).with(compactClaimBindGroup).dispatchWorkgroups(wgX, wgY)
+    compactRemapPipeline.with(pass).with(compactRemapBindGroup).dispatchWorkgroups(wgX, wgY)
+  }
   return {
     canonicalRootBuffer,
     compactLabelBuffer,
     compactCounterBuffer,
-    compactResetPipeline,
-    compactClaimPipeline,
-    compactRemapPipeline,
-    compactResetBindGroup,
-    compactClaimBindGroup,
-    compactRemapBindGroup,
+    encodeCompute,
   }
 }
 

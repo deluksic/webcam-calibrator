@@ -13,10 +13,18 @@ export function App() {
   const Layout = (props: RouteSectionProps) => (
     <>
       <nav class={styles.nav}>
-        <A href="/target" class={styles.navBtn}>Target</A>
-        <A href="/calibrate" class={styles.navBtn}>Calibrate</A>
-        <A href="/results" class={styles.navBtn}>Results</A>
-        <A href="/debug" class={styles.navBtn}>Debug</A>
+        <A href="/target" class={styles.navBtn}>
+          Target
+        </A>
+        <A href="/calibrate" class={styles.navBtn}>
+          Calibrate
+        </A>
+        <A href="/results" class={styles.navBtn}>
+          Results
+        </A>
+        <A href="/debug" class={styles.navBtn}>
+          Debug
+        </A>
         <span class={styles.version}>{VERSION}</span>
       </nav>
       <main class={styles.main}>{props.children}</main>

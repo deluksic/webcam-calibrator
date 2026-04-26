@@ -4,6 +4,7 @@ import { tgpu, d } from 'typegpu'
 import { clamp, fwidth, length, max, mul, select, sub } from 'typegpu/std'
 
 import { MAX_INSTANCES } from '@/gpu/pipelines/gridVizPipeline'
+import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 
 const ReprojPairStruct = d.struct({
   original: d.vec2f,
@@ -255,6 +256,19 @@ export function createReprojectionOverlayStage(
     presentationFormat,
   )
   const reprojOverlayDrawState = { instanceCount: 0 }
+  const encodeOverlayToCanvas = (
+    enc: GPUCommandEncoder,
+    colorAttachment: RenderColorAttachment,
+    instanceCount: number,
+  ) => {
+    if (instanceCount <= 0) {
+      return
+    }
+    const att = colorAttachment as never
+    reprojOriginalPipeline.with(enc).withColorAttachment(att).with(reprojOverlayBindGroup).draw(4, instanceCount)
+    reprojTargetPipeline.with(enc).withColorAttachment(att).with(reprojOverlayBindGroup).draw(4, instanceCount)
+    reprojLinesPipeline.with(enc).withColorAttachment(att).with(reprojOverlayBindGroup).draw(2, instanceCount)
+  }
   return {
     reprojOverlayBuffer,
     reprojOverlayLayout,
@@ -263,5 +277,6 @@ export function createReprojectionOverlayStage(
     reprojTargetPipeline,
     reprojLinesPipeline,
     reprojOverlayDrawState,
+    encodeOverlayToCanvas,
   }
 }

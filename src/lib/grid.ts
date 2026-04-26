@@ -370,11 +370,7 @@ function decodeMinVoteTotalFromShortestEdgePx(lMinPx: number): number {
   return max(2, round(DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE * lMinPx))
 }
 
-function classifyModuleFromPosNeg(
-  whiteCount: number,
-  blackCount: number,
-  minVoteTotal: number,
-): 0 | 1 | -1 | -2 {
+function classifyModuleFromPosNeg(whiteCount: number, blackCount: number, minVoteTotal: number): 0 | 1 | -1 | -2 {
   const sum = whiteCount + blackCount
   if (sum < minVoteTotal) {
     return -1

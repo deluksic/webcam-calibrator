@@ -60,13 +60,16 @@ export function createExtentTrackingStage(
     labelBuffer: compactLabelBuffer,
     extentBuffer,
   })
+  const wgX = Math.ceil(width / WORKGROUP_SIZE)
+  const wgY = Math.ceil(height / WORKGROUP_SIZE)
+  const resetWg = Math.ceil(maxComponents / WORKGROUP_SIZE)
+  const encodeCompute = (pass: GPUComputePassEncoder) => {
+    extentResetPipeline.with(pass).with(extentResetBindGroup).dispatchWorkgroups(resetWg)
+    extentTrackPipeline.with(pass).with(extentTrackBindGroup).dispatchWorkgroups(wgX, wgY)
+  }
   return {
     extentBuffer,
-    extentTrackLayout,
-    extentResetPipeline,
-    extentResetBindGroup,
-    extentTrackPipeline,
-    extentTrackBindGroup,
+    encodeCompute,
   }
 }
 

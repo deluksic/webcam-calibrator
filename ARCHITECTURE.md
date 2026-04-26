@@ -56,21 +56,21 @@ GPU: atomic min/max per component into `extentBuffer` (at most `MAX_EXTENT_COMPO
 
 ## Display modes
 
-| Mode | GPU work | View | CPU readback |
-| ---- | -------- | ---- | ------------ |
-| `grayscale` | Gray | Luma | Histogram |
-| `edges` | Sobel | Edges | Histogram |
-| `nms` | Sobel + NMS | Edges | Histogram |
-| `labels` | Full chain through compact | False-color labels | — |
-| `debug` | + extent | Labels + extent overlay | Extent |
-| `grid` | + extent | Grayscale + homography grid | `readDetection` when a [frame slot](src/gpu/frameSlotPool.ts) is free (default 3 slots; busy pool skips the frame) |
+| Mode        | GPU work                   | View                        | CPU readback                                                                                                       |
+| ----------- | -------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `grayscale` | Gray                       | Luma                        | Histogram                                                                                                          |
+| `edges`     | Sobel                      | Edges                       | Histogram                                                                                                          |
+| `nms`       | Sobel + NMS                | Edges                       | Histogram                                                                                                          |
+| `labels`    | Full chain through compact | False-color labels          | —                                                                                                                  |
+| `debug`     | + extent                   | Labels + extent overlay     | Extent                                                                                                             |
+| `grid`      | + extent                   | Grayscale + homography grid | `readDetection` when a [frame slot](src/gpu/frameSlotPool.ts) is free (default 3 slots; busy pool skips the frame) |
 
 ## CPU readbacks
 
-| API | When | Data |
-| --- | ---- | ---- |
-| Extent read in `debug` | Each `debug` frame | Extent table (~320 KB for max components) |
-| `readDetection` | Each **grid** attempt with a free slot | Compact labels + NMS `filtered` buffer (~11 MB) → regions, corners, decode |
+| API                    | When                                   | Data                                                                       |
+| ---------------------- | -------------------------------------- | -------------------------------------------------------------------------- |
+| Extent read in `debug` | Each `debug` frame                     | Extent table (~320 KB for max components)                                  |
+| `readDetection`        | Each **grid** attempt with a free slot | Compact labels + NMS `filtered` buffer (~11 MB) → regions, corners, decode |
 
 ## Corner pipeline (grid, CPU)
 
@@ -80,14 +80,14 @@ Flow: `readDetection` → `validateAndFilterQuads` in [`contour.ts`](src/gpu/con
 
 **Per region (CPU), order is fixed.** Failures in steps 1–5 mean the intersection set never gets four clean points, so a failure on “intersections” can still be caused upstream.
 
-| Step | Work | Typical failure code |
-| ---- | ---- | -------------------- |
-| 1 | Pixels in the region with matching compact label; **NMS-filtered** `(gx, gy)` from the same buffer as decode | `FAIL_INSUFFICIENT_EDGES` (0) if count &lt; `minEdgePixels` (12) |
-| 2 | K-means k=4 on gradient directions, cosine dissimilarity | (no bit — weak lines hurt later) |
-| 3 | RANSAC + PCA line per cluster | `FAIL_LINE_FIT_FAILED` (2) if a line is missing |
-| 4 | All line–line intersections, clipped to extent ± `extentBBoxSlack` | `FAIL_NO_INTERSECTIONS` (4) if &lt;4 raw hits after clip |
-| 5 | Dedupe within 5 px | (4) if &lt;4 points remain |
-| 6 | Convex CCW order + plausibility (`R²`, bbox slack, edge ratios) → **`[TL, TR, BL, BR]`** | `FAIL_PLAUSIBILITY` (3) |
+| Step | Work                                                                                                         | Typical failure code                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| 1    | Pixels in the region with matching compact label; **NMS-filtered** `(gx, gy)` from the same buffer as decode | `FAIL_INSUFFICIENT_EDGES` (0) if count &lt; `minEdgePixels` (12) |
+| 2    | K-means k=4 on gradient directions, cosine dissimilarity                                                     | (no bit — weak lines hurt later)                                 |
+| 3    | RANSAC + PCA line per cluster                                                                                | `FAIL_LINE_FIT_FAILED` (2) if a line is missing                  |
+| 4    | All line–line intersections, clipped to extent ± `extentBBoxSlack`                                           | `FAIL_NO_INTERSECTIONS` (4) if &lt;4 raw hits after clip         |
+| 5    | Dedupe within 5 px                                                                                           | (4) if &lt;4 points remain                                       |
+| 6    | Convex CCW order + plausibility (`R²`, bbox slack, edge ratios) → **`[TL, TR, BL, BR]`**                     | `FAIL_PLAUSIBILITY` (3)                                          |
 
 If four refined corners are not found, a bbox quad is still used for homography; `cornerDebug` records the CPU attempt.
 
@@ -113,13 +113,13 @@ Eight-parameter homography, Gaussian elimination with partial pivot. Shader uses
 
 ## GPU buffers (summary)
 
-| Buffer | Role |
-| ------ | ---- |
-| `sobelBuffer` | Raw gradients |
-| `filteredBuffer` | After NMS |
-| `pointerJumpBuffer0/1`, `pointerJumpAtomicBuffer` | Labeling |
-| `compactLabelBuffer` | Final labels |
-| `canonicalRootBuffer` | Canonical id map |
-| `histogramBuffer` | Edge histogram |
-| `extentBuffer` | Per-component bounds |
-| `quadCornersBuffer` | [`GridDataSchema`](src/gpu/pipelines/gridVizPipeline.ts): homography, debug fields, `decodedTagId` (1024 instances max) |
+| Buffer                                            | Role                                                                                                                    |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `sobelBuffer`                                     | Raw gradients                                                                                                           |
+| `filteredBuffer`                                  | After NMS                                                                                                               |
+| `pointerJumpBuffer0/1`, `pointerJumpAtomicBuffer` | Labeling                                                                                                                |
+| `compactLabelBuffer`                              | Final labels                                                                                                            |
+| `canonicalRootBuffer`                             | Canonical id map                                                                                                        |
+| `histogramBuffer`                                 | Edge histogram                                                                                                          |
+| `extentBuffer`                                    | Per-component bounds                                                                                                    |
+| `quadCornersBuffer`                               | [`GridDataSchema`](src/gpu/pipelines/gridVizPipeline.ts): homography, debug fields, `decodedTagId` (1024 instances max) |

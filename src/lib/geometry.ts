@@ -300,10 +300,10 @@ export function verifyProjectiveWeights(corners: Corners): {
   ]
 
   const errors: [number, number, number, number] = [
-    sqrt(blended[0].x ** 2 + blended[0].y ** 2),                          // expected (0,0)
-    sqrt((blended[1].x - 1) ** 2 + blended[1].y ** 2),                    // expected (1,0)
-    sqrt(blended[2].x ** 2 + (blended[2].y - 1) ** 2),                    // expected (0,1)
-    sqrt((blended[3].x - 1) ** 2 + (blended[3].y - 1) ** 2),              // expected (1,1)
+    sqrt(blended[0].x ** 2 + blended[0].y ** 2), // expected (0,0)
+    sqrt((blended[1].x - 1) ** 2 + blended[1].y ** 2), // expected (1,0)
+    sqrt(blended[2].x ** 2 + (blended[2].y - 1) ** 2), // expected (0,1)
+    sqrt((blended[3].x - 1) ** 2 + (blended[3].y - 1) ** 2), // expected (1,1)
   ]
 
   return { blended, errors }

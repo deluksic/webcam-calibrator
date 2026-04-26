@@ -1,9 +1,11 @@
-// Edge render pipeline: filteredBuffer + sobelBuffer → edges canvas
-// Colorizes edges by gradient direction using continuous HSV coloring.
 import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { common } from 'typegpu'
 import { atan2, clamp, floor, length, max } from 'typegpu/std'
+
+// Edge render pipeline: filteredBuffer + sobelBuffer → edges canvas
+// Colorizes edges by gradient direction using continuous HSV coloring.
+import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 
 export const edgesLayout = tgpu.bindGroupLayout({
   sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
@@ -106,5 +108,12 @@ export function createEdgesPipeline(
     targets: { format: presentationFormat },
   })
   const bindGroup = root.createBindGroup(edgesLayout, resources)
-  return { pipeline, bindGroup, layout: edgesLayout }
+  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
+    pipeline
+      .with(enc)
+      .withColorAttachment(colorAttachment as never)
+      .with(bindGroup)
+      .draw(3)
+  }
+  return { encodeToCanvas, layout: edgesLayout }
 }

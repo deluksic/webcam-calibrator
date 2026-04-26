@@ -3,6 +3,8 @@ import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { atomicAdd, atomicLoad, atomicStore, length, log2 } from 'typegpu/std'
 
+import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
+
 /** Bin count for magnitude histogram and bar-chart vertex instances. */
 export const HISTOGRAM_BINS = 256
 
@@ -199,15 +201,24 @@ export function createHistogramStage(
     thresholdBin: thresholdBinBuffer,
   })
   const displayPipeline = createHistogramRenderPipeline(root, presentationFormat, width * height)
+  const wgX = Math.ceil(width / FULL_FRAME_WG)
+  const wgY = Math.ceil(height / FULL_FRAME_WG)
+  const encodeAccumulateCompute = (pass: GPUComputePassEncoder) => {
+    resetPipeline.with(pass).with(resetBindGroup).dispatchWorkgroups(HISTOGRAM_BINS)
+    computePipeline.with(pass).with(computeBindGroup).dispatchWorkgroups(wgX, wgY)
+  }
+  const encodeDisplay = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
+    displayPipeline
+      .with(enc)
+      .withColorAttachment(colorAttachment as never)
+      .with(displayBindGroup)
+      .draw(6, HISTOGRAM_BINS)
+  }
   return {
     buffer,
     thresholdBinBuffer,
-    resetPipeline,
-    resetBindGroup,
-    computePipeline,
-    computeBindGroup,
-    displayPipeline,
-    displayBindGroup,
+    encodeAccumulateCompute,
+    encodeDisplay,
   }
 }
 

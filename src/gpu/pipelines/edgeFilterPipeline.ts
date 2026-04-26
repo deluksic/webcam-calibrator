@@ -21,6 +21,8 @@ export type EdgeFilterBindResources = ExtractBindGroupInputFromLayout<typeof edg
 /** Full-frame tile; match `computeDispatch2d` in cameraFrame. */
 const FULL_FRAME_WG = 16
 
+const { ceil } = Math
+
 /** Allocates NMS `filteredBuffer` and edge-strength `threshold` uniform; reads `sobelBuffer` (upstream). */
 export function createEdgeFilterStage(
   root: TgpuRoot,
@@ -35,7 +37,12 @@ export function createEdgeFilterStage(
     threshold: thresholdBuffer,
     filteredBuffer,
   })
-  return { filteredBuffer, thresholdBuffer, pipeline, bindGroup }
+  const wgX = ceil(width / FULL_FRAME_WG)
+  const wgY = ceil(height / FULL_FRAME_WG)
+  const encodeCompute = (pass: GPUComputePassEncoder) => {
+    pipeline.with(pass).with(bindGroup).dispatchWorkgroups(wgX, wgY)
+  }
+  return { filteredBuffer, thresholdBuffer, encodeCompute }
 }
 
 export function createEdgeFilterPipeline(

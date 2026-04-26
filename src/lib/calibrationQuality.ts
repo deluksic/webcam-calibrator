@@ -17,13 +17,7 @@ function quadMinEdgePx(corners: Corners): number {
 export function quadAreaPx(corners: Corners): number {
   const [tl, tr, bl, br] = corners
   // Shoelace on convex walk TL → TR → BR → BL → TL (strip order is not a polygon walk)
-  return abs(
-    (tl.x * (tr.y - bl.y) +
-      tr.x * (br.y - tl.y) +
-      br.x * (bl.y - tr.y) +
-      bl.x * (tl.y - br.y)) /
-      2,
-  )
+  return abs((tl.x * (tr.y - bl.y) + tr.x * (br.y - tl.y) + br.x * (bl.y - tr.y) + bl.x * (tl.y - br.y)) / 2)
 }
 
 export function calibrationQuadScore(q: DetectedQuad): number {

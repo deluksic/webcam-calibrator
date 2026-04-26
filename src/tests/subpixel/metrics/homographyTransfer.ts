@@ -10,11 +10,7 @@ function dist(a: Point, b: Point): number {
 /**
  * Sample `gridN`×`gridN` points in unit square [0,1]² (inclusive edges) and compare image positions.
  */
-export function homographyTransferStats(
-  H_gt: Mat3,
-  H_test: Mat3,
-  gridN = 9,
-): { rmsePx: number; maxPx: number } {
+export function homographyTransferStats(H_gt: Mat3, H_test: Mat3, gridN = 9): { rmsePx: number; maxPx: number } {
   const n = max(2, gridN)
   let sumSq = 0
   let maxD = 0

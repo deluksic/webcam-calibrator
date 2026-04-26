@@ -12,6 +12,8 @@ export type GrayTexToBufferBindResources = ExtractBindGroupInputFromLayout<typeo
 /** Full-frame tile; match `computeDispatch2d` in cameraFrame. */
 const FULL_FRAME_WG = 16
 
+const { ceil } = Math
+
 /** Allocates `grayBuffer`; binds `grayTex` (upstream). */
 export function createGrayStage(
   root: TgpuRoot,
@@ -21,7 +23,12 @@ export function createGrayStage(
 ) {
   const buffer = root.createBuffer(d.arrayOf(d.f32, width * height)).$usage('storage')
   const { pipeline, bindGroup } = createGrayPipeline(root, width, height, { grayTex, grayBuffer: buffer })
-  return { buffer, pipeline, bindGroup }
+  const wgX = ceil(width / FULL_FRAME_WG)
+  const wgY = ceil(height / FULL_FRAME_WG)
+  const encodeCompute = (pass: GPUComputePassEncoder) => {
+    pipeline.with(pass).with(bindGroup).dispatchWorkgroups(wgX, wgY)
+  }
+  return { buffer, encodeCompute }
 }
 
 export function createGrayPipeline(

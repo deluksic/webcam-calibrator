@@ -1,23 +1,18 @@
 import type { JSX } from 'solid-js'
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 
+import { encodeCameraCompute } from '@/gpu/cameraComputeEncoding'
 import { detectForSlot } from '@/gpu/cameraDetection'
 import type { ExtentRow } from '@/gpu/cameraDetection'
-import {
-  presentFrame,
-  presentGridFrame,
-  runCompute,
-  updateQuadCornersBuffer,
-  updateReprojectionOverlayBuffer,
-} from '@/gpu/cameraFrame'
-import type { NonGridDisplayMode } from '@/gpu/cameraFrame'
+import { updateQuadCornersBuffer, updateReprojectionOverlayBuffer } from '@/gpu/cameraFrame'
 import { createCameraPipeline } from '@/gpu/cameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
-import { MAX_U32 } from '@/gpu/pipelines/extentTrackingPipeline'
-import { MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
+import { encodeAndSubmitGridPresent, encodePresentNonGrid } from '@/gpu/cameraPresentEncoding'
 import type { DetectedQuad } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
+import { MAX_U32 } from '@/gpu/pipelines/extentTrackingPipeline'
+import { MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import { buildReprojectionOverlayPairs, cameraDistanceFromT, cameraTiltDegFromR } from '@/lib/reprojectionLive'
@@ -27,7 +22,7 @@ import { createFrameLoop } from '@/utils/createFrameLoop'
 
 import styles from '@/components/camera/LiveCameraPipeline.module.css'
 
-const { navigator } = globalThis
+const { navigator, performance } = globalThis
 const { max, abs } = Math
 
 interface Bbox {
@@ -115,7 +110,6 @@ function TagIdGridOverlay(props: { quads: DetectedQuad[]; scale: { x: number; y:
 
 export type LiveCameraPipelineProps = {
   displayMode: DisplayMode
-  showGrid: boolean
   showFallbacks: boolean
   showHistogramCanvas: boolean
   stream: MediaStream | undefined
@@ -145,7 +139,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
   const pipelineInteraction = createMemo(() => ({
     onLog: props.onLog,
     displayMode: props.displayMode,
-    showGrid: props.showGrid,
     showFallbacks: props.showFallbacks,
     liveCalibration: props.liveCalibration,
     onReprojectionFrame: props.onReprojectionFrame,
@@ -363,7 +356,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           }
 
           pip.frameSlotPool.swapDisplaySlot(slot)
-          presentGridFrame(gNow, pip, slot)
+          encodeAndSubmitGridPresent(gNow, pip, slot, performance.now() * 0.001)
 
           setGridOverlayQuads(
             tagged.filter((q) => {
@@ -398,25 +391,26 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         if (!gpuNow) {
           return
         }
+        const timeSec = performance.now() * 0.001
         const pi = pipelineInteraction()
         const dm = pi.displayMode
         const enc = gpuNow.device.createCommandEncoder({ label: 'camera frame' })
 
-        if (dm === 'grid' && pi.showGrid) {
+        if (dm === 'grid') {
           // Grid mode: acquire a slot, run compute with copies pinned into it,
           // submit, then kick off async detection. Canvas is NOT repainted here;
-          // presentGridFrame does that after detection resolves.
+          // encodeAndSubmitGridPresent does that after detection resolves.
           const slot = pip.frameSlotPool.acquireFreeSlot()
           if (slot !== undefined) {
-            runCompute(enc, gpuNow, pip, video, threshold(), slot)
+            encodeCameraCompute(enc, gpuNow, pip, video, threshold(), slot)
             gpuNow.device.queue.submit([enc.finish()])
             scheduleQuadDetection(slot, pi.showFallbacks)
           }
           // If no slot is free, skip this frame entirely (backpressure).
         } else {
           // Non-grid modes: compute + present synchronously as before.
-          runCompute(enc, gpuNow, pip, video, threshold())
-          presentFrame(enc, gpuNow, pip, dm as NonGridDisplayMode, (_err) => {})
+          encodeCameraCompute(enc, gpuNow, pip, video, threshold())
+          encodePresentNonGrid(enc, gpuNow, pip, dm, timeSec, (_err) => {})
           gpuNow.device.queue.submit([enc.finish()])
           if (dm === 'debug') {
             scheduleExtentRead()
@@ -452,7 +446,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           <Show when={props.displayMode === 'debug'}>
             <QuadCandidateOverlay bboxes={bboxes()} scale={scale()} />
           </Show>
-          <Show when={props.displayMode === 'grid' && props.showGrid}>
+          <Show when={props.displayMode === 'grid'}>
             <TagIdGridOverlay quads={gridOverlayQuads()} scale={scale()} />
           </Show>
         </div>

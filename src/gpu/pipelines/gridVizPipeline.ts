@@ -3,6 +3,7 @@ import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { abs, floor, fract, min, max, dpdx, dpdy, mul } from 'typegpu/std'
 
+import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
 export const GRID_DIVISIONS = 8
@@ -189,11 +190,17 @@ export function createGridVizStage(
     quads: quadCornersBuffer,
     failInterrogate: gridVizDebugModeBuffer,
   })
+  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
+    gridVizPipeline
+      .with(enc)
+      .withColorAttachment(colorAttachment as never)
+      .with(gridVizBindGroup)
+      .draw(4, MAX_INSTANCES)
+  }
   return {
     quadCornersBuffer,
     gridVizLayout,
     gridVizDebugModeBuffer,
-    gridVizPipeline,
-    gridVizBindGroup,
+    encodeToCanvas,
   }
 }

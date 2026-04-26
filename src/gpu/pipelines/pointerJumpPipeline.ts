@@ -334,20 +334,34 @@ export function createPointerJumpLabeling(
     }),
   ]
 
+  const wgX = Math.ceil(width / FULL_FRAME_WG)
+  const wgY = Math.ceil(height / FULL_FRAME_WG)
+  const encodeCompute = (pass: GPUComputePassEncoder) => {
+    pointerJumpInitPipeline.with(pass).with(pointerJumpInitBindGroup).dispatchWorkgroups(wgX, wgY)
+    let pj = 0
+    for (let s = 0; s < POINTER_JUMP_ITERATIONS; s++) {
+      pointerJumpStepPipeline.with(pass).with(pointerJumpPingPongBindGroups[pj]!).dispatchWorkgroups(wgX, wgY)
+      pj ^= 1
+      pointerJumpLabelsToAtomicPipeline
+        .with(pass)
+        .with(pointerJumpLabelsToAtomicBindGroups[pj]!)
+        .dispatchWorkgroups(wgX, wgY)
+      pointerJumpParentTightenPipeline
+        .with(pass)
+        .with(pointerJumpParentTightenBindGroups[pj]!)
+        .dispatchWorkgroups(wgX, wgY)
+      pointerJumpAtomicToLabelsPipeline
+        .with(pass)
+        .with(pointerJumpAtomicToLabelsBindGroups[pj]!)
+        .dispatchWorkgroups(wgX, wgY)
+    }
+  }
+
   return {
     pointerJumpBuffer0,
     pointerJumpBuffer1,
     pointerJumpAtomicBuffer,
-    pointerJumpInitPipeline,
-    pointerJumpInitBindGroup,
-    pointerJumpStepPipeline,
-    pointerJumpPingPongBindGroups,
-    pointerJumpLabelsToAtomicPipeline,
-    pointerJumpLabelsToAtomicBindGroups,
-    pointerJumpParentTightenPipeline,
-    pointerJumpParentTightenBindGroups,
-    pointerJumpAtomicToLabelsPipeline,
-    pointerJumpAtomicToLabelsBindGroups,
+    encodeCompute,
   }
 }
 

@@ -3,19 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
 import type { CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
 
-import type { Corners } from '@/lib/geometry'
-
-const unitCorners: Corners = [
-  { x: 0, y: 0 },
-  { x: 1, y: 0 },
-  { x: 0, y: 1 },
-  { x: 1, y: 1 },
-]
-
-function frame(
-  frameId: number,
-  tagScores: { tagId: number; score: number }[],
-): CalibrationFrameObservation {
+function frame(frameId: number, tagScores: { tagId: number; score: number }[]): CalibrationFrameObservation {
   const framePoints: FramePoint[] = []
   for (const { tagId, score } of tagScores) {
     const pointId = tagId * 10000
@@ -34,7 +22,11 @@ describe('mergeCalibrationFramesTopK', () => {
     const k = 3
     const a = mergeCalibrationFramesTopK(
       [],
-      [frame(1, [{ tagId: 1, score: 0.5 }]), frame(1, [{ tagId: 2, score: 0.9 }]), frame(1, [{ tagId: 3, score: 0.7 }])],
+      [
+        frame(1, [{ tagId: 1, score: 0.5 }]),
+        frame(1, [{ tagId: 2, score: 0.9 }]),
+        frame(1, [{ tagId: 3, score: 0.7 }]),
+      ],
       k,
     )
     expect(a.next.length).toBe(3)

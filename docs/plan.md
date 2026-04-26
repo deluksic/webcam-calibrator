@@ -10,12 +10,12 @@ In-browser AprilTag 6×6 target capture; no server. All capture, GPU stages, and
 
 ## UI
 
-| View | Role |
-| ---- | ---- |
-| **Target** | SVG AprilTag36h11 sheet for printing |
-| **Calibrate** | Live **grid** view; **Start / Pause / Reset**; top‑K observation pool and session stats |
-| **Results** | Camera intrinsics, distortion, and export (solver and wiring not in this build) |
-| **Debug** | Full `DisplayMode` set, edge histogram, optional bbox overlay, `Fallbk` (show quads that did not pass dictionary decode), log tail |
+| View          | Role                                                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **Target**    | SVG AprilTag36h11 sheet for printing                                                                                               |
+| **Calibrate** | Live **grid** view; **Start / Pause / Reset**; top‑K observation pool and session stats                                            |
+| **Results**   | Camera intrinsics, distortion, and export (solver and wiring not in this build)                                                    |
+| **Debug**     | Full `DisplayMode` set, edge histogram, optional bbox overlay, `Fallbk` (show quads that did not pass dictionary decode), log tail |
 
 **Camera** — shared [`CameraStreamContext`](../src/components/camera/CameraStreamContext.tsx) at the root: `MediaStream`, device selection, `devicechange` refresh, resolution ladder, and `applyConstraints` where supported ([`cameraStreamAcquire.ts`](../src/components/camera/cameraStreamAcquire.ts)). **Live** preview and GPU work: [`LiveCameraPipeline`](../src/components/camera/LiveCameraPipeline.tsx).
 

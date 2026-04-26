@@ -30,12 +30,7 @@ function sobelMagnitudeAt(sobel: Float32Array, width: number, height: number, x:
   return length(gx, gy)
 }
 
-function refineCornerInDisk(
-  sobel: Float32Array,
-  width: number,
-  height: number,
-  base: Point,
-): Point {
+function refineCornerInDisk(sobel: Float32Array, width: number, height: number, base: Point): Point {
   let bestMag = -1
   let bestDy = 0
   let bestDx = 0

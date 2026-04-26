@@ -464,7 +464,12 @@ function findConvexCCWCycle(pts: Corners): Corners | undefined {
   return best
 }
 
-const RING_ROTATIONS = [[0, 1, 2, 3], [2, 0, 3, 1], [3, 2, 1, 0], [1, 3, 0, 2]] as const
+const RING_ROTATIONS = [
+  [0, 1, 2, 3],
+  [2, 0, 3, 1],
+  [3, 2, 1, 0],
+  [1, 3, 0, 2],
+] as const
 export function rotateRing(ring: Corners, k: number): Corners {
   const [a, b, c, d] = RING_ROTATIONS[k % 4]!
   return [ring[a], ring[b], ring[c], ring[d]]

@@ -3,6 +3,7 @@ import { d } from 'typegpu'
 
 import type { CameraPipeline } from '@/gpu/cameraPipeline'
 import { grayRenderLayout } from '@/gpu/pipelines/grayRenderPipeline'
+import type { GrayRenderBindResources } from '@/gpu/pipelines/grayRenderPipeline'
 
 export type FrameSlotState = 'free' | 'inflight' | 'display'
 
@@ -45,10 +46,11 @@ export function createFrameSlotPool(
   options: {
     width: number
     height: number
+    grayRenderTimeBuffer: GrayRenderBindResources['timeSec']
     slotCount?: number
   },
 ): FrameSlotPool {
-  const { width, height, slotCount = 3 } = options
+  const { width, height, grayRenderTimeBuffer, slotCount = 3 } = options
   const area = width * height
 
   const slots: FrameSlot[] = Array.from({ length: slotCount }, () => {
@@ -61,7 +63,10 @@ export function createFrameSlotPool(
       size: area * 8,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     })
-    const grayRenderBindGroup = root.createBindGroup(grayRenderLayout, { grayBuffer: graySnapshot })
+    const grayRenderBindGroup = root.createBindGroup(grayRenderLayout, {
+      grayBuffer: graySnapshot,
+      timeSec: grayRenderTimeBuffer,
+    })
     return {
       graySnapshot,
       labelStaging,

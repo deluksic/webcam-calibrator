@@ -36,7 +36,6 @@ export function DebugView() {
   const [logs, setLogs] = createSignal<string[]>([])
   const [displayMode, setDisplayMode] = createSignal<DisplayMode>('grid')
   const [showFallbacks, setShowFallbacks] = createSignal(false)
-  const showGrid = () => true
 
   const log = (msg: string) => {
     Promise.resolve().then(() => {
@@ -131,7 +130,6 @@ export function DebugView() {
           </div>
           <LiveCameraPipeline
             displayMode={displayMode()}
-            showGrid={showGrid()}
             showFallbacks={showFallbacks()}
             showHistogramCanvas
             stream={cam.stream()}

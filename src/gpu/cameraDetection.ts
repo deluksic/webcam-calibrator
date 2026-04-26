@@ -3,7 +3,6 @@ import type { d, TgpuRoot } from 'typegpu'
 import { type DetectedQuad, extractRegions, validateAndFilterQuads } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import type { ExtentEntry } from '@/gpu/pipelines/extentTrackingPipeline'
-
 import { MAX_U32 } from '@/gpu/pipelines/extentTrackingPipeline'
 
 import type { CameraPipeline } from './cameraPipeline'
@@ -77,7 +76,7 @@ export async function readDetection(
 /**
  * Read detection results from a slot whose copies were already enqueued by
  * `runCompute`. Returns the quads, extents, and the slot itself so the caller
- * can call `swapDisplaySlot` and `presentGridFrame` after.
+ * can call `swapDisplaySlot` and `encodeAndSubmitGridPresent` after.
  */
 export async function detectForSlot(
   root: TgpuRoot,

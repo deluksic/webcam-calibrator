@@ -66,9 +66,5 @@ export function matrixToRvec(R: Mat3): [number, number, number] {
   }
   const theta = Math.acos(Math.max(-1, Math.min(1, cosTheta)))
   const scale = theta / (2 * Math.sin(theta))
-  return [
-    (R[7]! - R[5]!) * scale,
-    (R[2]! - R[6]!) * scale,
-    (R[3]! - R[1]!) * scale,
-  ]
+  return [(R[7]! - R[5]!) * scale, (R[2]! - R[6]!) * scale, (R[3]! - R[1]!) * scale]
 }

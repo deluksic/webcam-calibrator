@@ -1,10 +1,13 @@
 // Grayscale render pipeline: grayBuffer → canvas
 import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
-import { tgpu, d } from 'typegpu'
+import { tgpu, d, std } from 'typegpu'
 import { common } from 'typegpu'
+
+import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 
 export const grayRenderLayout = tgpu.bindGroupLayout({
   grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+  timeSec: { uniform: d.f32 },
 })
 
 export type GrayRenderBindResources = ExtractBindGroupInputFromLayout<typeof grayRenderLayout.entries>
@@ -12,7 +15,7 @@ export type GrayRenderBindResources = ExtractBindGroupInputFromLayout<typeof gra
 export function createGrayRenderPipeline(
   root: TgpuRoot,
   width: number,
-  _height: number,
+  height: number,
   presentationFormat: GPUTextureFormat,
   resources: GrayRenderBindResources,
 ) {
@@ -24,7 +27,16 @@ export function createGrayRenderPipeline(
     const pos = d.vec2i(i.pos.xy)
     const idx = pos.y * width + pos.x
     const gray = grayRenderLayout.$.grayBuffer[idx]!
-    return d.vec4f(gray, gray, gray, 1)
+    const t = grayRenderLayout.$.timeSec
+    const uv = d.vec2f(i.pos.x / width, i.pos.y / height)
+    const stripePhase = std.fract((uv.x + uv.y) * 72 + t * 3.5)
+    const stripeMask = std.step(0.5, stripePhase)
+    const saturationMask = std.smoothstep(0.92, 0.98, gray)
+    const hit = saturationMask * stripeMask
+    const r = std.clamp(gray + hit * 0.52, 0, 1)
+    const g = std.clamp(gray - hit * 0.14, 0, 1)
+    const b = std.clamp(gray - hit * 0.42, 0, 1)
+    return d.vec4f(r, g, b, 1)
   })
 
   const pipeline = root.createRenderPipeline({
@@ -33,5 +45,12 @@ export function createGrayRenderPipeline(
     targets: { format: presentationFormat },
   })
   const bindGroup = root.createBindGroup(grayRenderLayout, resources)
-  return { pipeline, bindGroup, layout: grayRenderLayout }
+  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment, bg: unknown = bindGroup) => {
+    pipeline
+      .with(enc)
+      .withColorAttachment(colorAttachment as never)
+      .with(bg as never)
+      .draw(3)
+  }
+  return { bindGroup, encodeToCanvas, layout: grayRenderLayout }
 }

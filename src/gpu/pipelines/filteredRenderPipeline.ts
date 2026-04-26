@@ -4,6 +4,8 @@ import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor, length } from 'typegpu/std'
 
+import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
+
 export const filteredRenderLayout = tgpu.bindGroupLayout({
   filteredBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
 })
@@ -40,5 +42,12 @@ export function createFilteredRenderPipeline(
     targets: { format: presentationFormat },
   })
   const bindGroup = root.createBindGroup(filteredRenderLayout, resources)
-  return { pipeline, bindGroup, layout: filteredRenderLayout }
+  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
+    pipeline
+      .with(enc)
+      .withColorAttachment(colorAttachment as never)
+      .with(bindGroup)
+      .draw(3)
+  }
+  return { encodeToCanvas, layout: filteredRenderLayout }
 }

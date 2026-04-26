@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { learnLayoutFromFrame } from '@/lib/targetLayout'
 import type { TagObservation } from '@/lib/calibrationTypes'
 import type { Corners } from '@/lib/geometry'
+import { learnLayoutFromFrame } from '@/lib/targetLayout'
 
 const sq = (o: { x: number; y: number }): Corners => [
   { x: 100 + o.x, y: 100 + o.y },

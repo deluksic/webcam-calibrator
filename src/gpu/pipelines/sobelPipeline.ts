@@ -13,6 +13,8 @@ export type SobelBindResources = ExtractBindGroupInputFromLayout<typeof sobelLay
 /** Full-frame tile; match `computeDispatch2d` in cameraFrame. */
 const FULL_FRAME_WG = 16
 
+const { ceil } = Math
+
 /** Allocates `sobelBuffer`; reads `grayBuffer` (upstream). */
 export function createSobelStage(
   root: TgpuRoot,
@@ -22,15 +24,15 @@ export function createSobelStage(
 ) {
   const buffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage('storage')
   const { pipeline, bindGroup } = createSobelPipeline(root, width, height, { grayBuffer, sobelBuffer: buffer })
-  return { buffer, pipeline, bindGroup }
+  const wgX = ceil(width / FULL_FRAME_WG)
+  const wgY = ceil(height / FULL_FRAME_WG)
+  const encodeCompute = (pass: GPUComputePassEncoder) => {
+    pipeline.with(pass).with(bindGroup).dispatchWorkgroups(wgX, wgY)
+  }
+  return { buffer, encodeCompute }
 }
 
-export function createSobelPipeline(
-  root: TgpuRoot,
-  width: number,
-  height: number,
-  resources: SobelBindResources,
-) {
+export function createSobelPipeline(root: TgpuRoot, width: number, height: number, resources: SobelBindResources) {
   function sobelLoad(px: number, py: number, w: number, h: number) {
     'use gpu'
     const wi = d.i32(w)

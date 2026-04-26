@@ -4,6 +4,7 @@ import { common } from 'typegpu'
 import { clamp, floor } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
 export const labelVizLayout = tgpu.bindGroupLayout({
@@ -45,5 +46,12 @@ export function createLabelVizPipeline(
     fragment: labelVizFrag,
     targets: { format: presentationFormat },
   })
-  return { pipeline, layout: labelVizLayout }
+  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment, bindGroup: unknown) => {
+    pipeline
+      .with(enc)
+      .withColorAttachment(colorAttachment as never)
+      .with(bindGroup as never)
+      .draw(3)
+  }
+  return { encodeToCanvas, layout: labelVizLayout }
 }

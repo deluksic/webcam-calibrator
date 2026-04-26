@@ -22,7 +22,11 @@ export function createCopyIngest(root: TgpuRoot, width: number, height: number) 
     })
     .$usage('storage', 'sampled', 'render')
   const copyPipeline = createCopyPipeline(root)
-  return { grayTex, copyPipeline }
+  const encodeIngest = (enc: GPUCommandEncoder, ingestRoot: TgpuRoot, video: HTMLVideoElement) => {
+    const copyBindGroup = createCopyBindGroup(ingestRoot, video)
+    copyPipeline.with(enc).withColorAttachment({ view: grayTex.createView() }).with(copyBindGroup).draw(3)
+  }
+  return { grayTex, encodeIngest }
 }
 
 export function createCopyPipeline(root: TgpuRoot) {

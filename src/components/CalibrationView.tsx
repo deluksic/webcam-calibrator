@@ -103,8 +103,6 @@ function CalibrationView() {
   const [solveInFlight, setSolveInFlight] = createSignal(0)
 
   const displayMode = createMemo<DisplayMode>(() => 'grid')
-  const showGrid = () => true
-  const showFallbacks = () => false
   const isSolving = createMemo(() => solveInFlight() > 0)
 
   const devicesSorted = createMemo(() => {
@@ -397,8 +395,7 @@ function CalibrationView() {
           </select>
           <LiveCameraPipeline
             displayMode={displayMode()}
-            showGrid={showGrid()}
-            showFallbacks={showFallbacks()}
+            showFallbacks={false}
             showHistogramCanvas={false}
             stream={cam.stream()}
             onQuadDetection={onQuadDetection}

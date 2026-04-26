@@ -4,6 +4,8 @@ import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor, length } from 'typegpu/std'
 
+import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
+
 export const sobelRenderLayout = tgpu.bindGroupLayout({
   sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
 })
@@ -39,5 +41,12 @@ export function createSobelRenderPipeline(
     targets: { format: presentationFormat },
   })
   const bindGroup = root.createBindGroup(sobelRenderLayout, resources)
-  return { pipeline, bindGroup, layout: sobelRenderLayout }
+  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
+    pipeline
+      .with(enc)
+      .withColorAttachment(colorAttachment as never)
+      .with(bindGroup)
+      .draw(3)
+  }
+  return { encodeToCanvas, layout: sobelRenderLayout }
 }
