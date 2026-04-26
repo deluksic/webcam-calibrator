@@ -169,3 +169,28 @@ export function createGridVizPipeline(
     primitive: { topology: 'triangle-strip' },
   })
 }
+
+/** Allocates quad + uniform storage; render pipeline for AprilTag overlay. */
+export function createGridVizStage(
+  root: TgpuRoot,
+  width: number,
+  height: number,
+  presentationFormat: GPUTextureFormat,
+) {
+  const quadCornersBuffer = root.createBuffer(GridDataSchema).$usage('storage')
+  const { gridVizLayout } = createGridVizLayouts()
+  const gridVizDebugModeBuffer = root.createBuffer(d.u32).$usage('uniform')
+  gridVizDebugModeBuffer.write(0)
+  const gridVizPipeline = createGridVizPipeline(root, gridVizLayout, width, height, presentationFormat)
+  const gridVizBindGroup = root.createBindGroup(gridVizLayout, {
+    quads: quadCornersBuffer,
+    failInterrogate: gridVizDebugModeBuffer,
+  })
+  return {
+    quadCornersBuffer,
+    gridVizLayout,
+    gridVizDebugModeBuffer,
+    gridVizPipeline,
+    gridVizBindGroup,
+  }
+}

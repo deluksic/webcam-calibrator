@@ -13,7 +13,7 @@ export type ExtentRow = d.Infer<typeof ExtentEntry>
  * Uses the same bboxes that appear in the debug view.
  */
 export async function readExtentDataForQuads(pipeline: CameraPipeline): Promise<ExtentRow[]> {
-  const all = await pipeline.extentBuffer.read()
+  const all = await pipeline.extent.extentBuffer.read()
   return all.filter((e) => e.minX !== MAX_U32)
 }
 
@@ -28,9 +28,9 @@ export function enqueueReadbackCopies(
   labelStaging: GPUBuffer,
   filteredStaging: GPUBuffer,
 ) {
-  const labelStorage = pipeline.compactLabelBuffer.buffer as GPUBuffer
+  const labelStorage = pipeline.compact.compactLabelBuffer.buffer
   enc.copyBufferToBuffer(labelStorage, 0, labelStaging, 0, labelStorage.size)
-  const edgeStorage = pipeline.filteredBuffer.buffer as GPUBuffer
+  const edgeStorage = pipeline.nms.filteredBuffer.buffer
   enc.copyBufferToBuffer(edgeStorage, 0, filteredStaging, 0, edgeStorage.size)
 }
 
@@ -67,7 +67,7 @@ export async function readDetection(
     (q) => q.area < pipeline.width * pipeline.height * 0.25,
   )
 
-  const extentData: ExtentRow[] = await pipeline.extentBuffer.read()
+  const extentData: ExtentRow[] = await pipeline.extent.extentBuffer.read()
 
   return { quads, extentData, dilatedGradients: dilatedCopy, labelData: labelDataCopy }
 }

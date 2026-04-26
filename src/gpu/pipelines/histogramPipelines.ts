@@ -1,14 +1,31 @@
 // Histogram pipelines: reset and accumulate
-import type { TgpuRoot } from 'typegpu'
+import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
-import { atomicAdd, atomicStore, length } from 'typegpu/std'
+import { atomicAdd, atomicLoad, atomicStore, length, log2 } from 'typegpu/std'
 
-import { HISTOGRAM_BINS } from '@/gpu/pipelines/constants'
+import { HISTOGRAM_BINS, HIST_HEIGHT, HIST_WIDTH } from '@/gpu/pipelines/constants'
 
-export function createHistogramResetPipeline(
-  root: TgpuRoot,
-  histogramResetLayout: ReturnType<typeof tgpu.bindGroupLayout>,
-) {
+export const histogramStorageSchema = d.arrayOf(d.atomic(d.u32), HISTOGRAM_BINS)
+
+export const histogramComputeLayout = tgpu.bindGroupLayout({
+  sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+  histogram: { storage: histogramStorageSchema, access: 'mutable' },
+})
+
+export const histogramResetLayout = tgpu.bindGroupLayout({
+  histogram: { storage: histogramStorageSchema, access: 'mutable' },
+})
+
+export const histogramDisplayLayout = tgpu.bindGroupLayout({
+  histogram: { storage: histogramStorageSchema, access: 'mutable' },
+  thresholdBin: { uniform: d.u32 },
+})
+
+export type HistogramResetBindResources = ExtractBindGroupInputFromLayout<typeof histogramResetLayout.entries>
+export type HistogramComputeBindResources = ExtractBindGroupInputFromLayout<typeof histogramComputeLayout.entries>
+export type HistogramDisplayBindResources = ExtractBindGroupInputFromLayout<typeof histogramDisplayLayout.entries>
+
+export function createHistogramResetPipeline(root: TgpuRoot) {
   const histogramResetKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [1, 1, 1],
@@ -18,18 +35,13 @@ export function createHistogramResetPipeline(
     if (d.i32(binIdx) >= d.i32(HISTOGRAM_BINS)) {
       return
     }
-    atomicStore(histogramResetLayout.$.histogram[binIdx], d.u32(0))
+    atomicStore(histogramResetLayout.$.histogram[binIdx]!, d.u32(0))
   })
 
   return root.createComputePipeline({ compute: histogramResetKernel })
 }
 
-export function createHistogramAccumulatePipeline(
-  root: TgpuRoot,
-  histogramLayout: ReturnType<typeof tgpu.bindGroupLayout>,
-  width: number,
-  height: number,
-) {
+export function createHistogramAccumulatePipeline(root: TgpuRoot, width: number, height: number) {
   const histogramKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [16, 16, 1],
@@ -54,7 +66,7 @@ export function createHistogramAccumulatePipeline(
 
         const idx = d.u32(d.i32(py) * d.i32(width) + d.i32(px))
         // Clamp magnitude to [0, 1] to prevent overflow into last bucket
-        let mag = length(histogramLayout.$.sobelBuffer[idx])
+        let mag = length(histogramComputeLayout.$.sobelBuffer[idx]!)
         if (mag > d.f32(1.0)) {
           mag = d.f32(1.0)
         }
@@ -64,10 +76,129 @@ export function createHistogramAccumulatePipeline(
           clampedBin = d.u32(numBinsI - d.i32(1))
         }
 
-        atomicAdd(histogramLayout.$.histogram[clampedBin], d.u32(1))
+        atomicAdd(histogramComputeLayout.$.histogram[clampedBin]!, d.u32(1))
       }
     }
   })
 
   return root.createComputePipeline({ compute: histogramKernel })
+}
+
+const { floor } = Math
+
+/** Histogram bar chart (instance draw into hist canvas). */
+export function createHistogramRenderPipeline(
+  root: TgpuRoot,
+  presentationFormat: GPUTextureFormat,
+  totalPixels: number,
+) {
+  const maxCount = floor(totalPixels * 0.1)
+
+  const histogramVert = tgpu.vertexFn({
+    in: {
+      vertexIndex: d.builtin.vertexIndex,
+      instanceIndex: d.builtin.instanceIndex,
+    },
+    out: {
+      uv: d.vec2f,
+      barIndex: d.location(1, d.f32),
+      position: d.builtin.position,
+    },
+  })((i) => {
+    'use gpu'
+    const idx = i.vertexIndex
+
+    const uvs = [
+      d.vec2f(0.0, 0.0),
+      d.vec2f(1.0, 0.0),
+      d.vec2f(1.0, 1.0),
+      d.vec2f(0.0, 0.0),
+      d.vec2f(1.0, 1.0),
+      d.vec2f(0.0, 1.0),
+    ]
+    const uv = uvs[idx]!
+    const histW = d.f32(HIST_WIDTH)
+    const histH = d.f32(HIST_HEIGHT)
+    const numBars = d.f32(HISTOGRAM_BINS)
+    const barW = histW / numBars
+
+    const barPxX = d.f32(i.instanceIndex) * barW + uv.x * barW
+    const barPxY = uv.y * histH
+    const clipX = (barPxX / histW) * d.f32(2.0) - d.f32(1.0)
+    const clipY = (barPxY / histH) * d.f32(2.0) - d.f32(1.0)
+
+    return {
+      uv,
+      barIndex: d.f32(i.instanceIndex),
+      position: d.vec4f(clipX, clipY, d.f32(0), d.f32(1)),
+    }
+  })
+
+  const histogramFrag = tgpu.fragmentFn({
+    in: { uv: d.location(0, d.vec2f), barIndex: d.location(1, d.f32) },
+    out: d.vec4f,
+  })((i) => {
+    'use gpu'
+    const bin = d.u32(i.barIndex)
+    const countU32 = atomicLoad(histogramDisplayLayout.$.histogram[bin]!)
+
+    const countF = d.f32(countU32)
+    const logCountPlus1 = log2(countF + d.f32(1.0))
+    const logMax = log2(d.f32(maxCount) + d.f32(1.0))
+    const normalizedHeight = logCountPlus1 / logMax
+
+    const isThreshold = bin >= histogramDisplayLayout.$.thresholdBin
+
+    if (i.uv.y > normalizedHeight) {
+      if (isThreshold) {
+        return d.vec4f(d.f32(1.0), d.f32(0.0), d.f32(0.0), d.f32(1))
+      }
+      return d.vec4f(d.f32(0.1), d.f32(0.1), d.f32(0.15), d.f32(0))
+    }
+
+    if (isThreshold) {
+      return d.vec4f(d.f32(1.0), d.f32(0.0), d.f32(0.0), d.f32(1))
+    }
+    return d.vec4f(d.f32(0.29), d.f32(0.62), d.f32(1.0), d.f32(1))
+  })
+
+  return root.createRenderPipeline({
+    vertex: histogramVert,
+    fragment: histogramFrag,
+    targets: { format: presentationFormat },
+  })
+}
+
+/** Allocates histogram storage, compute + bar-chart render pipelines, and bind groups; reads `sobelBuffer` (upstream). */
+export function createHistogramStage(
+  root: TgpuRoot,
+  width: number,
+  height: number,
+  sobelBuffer: HistogramComputeBindResources['sobelBuffer'],
+  presentationFormat: GPUTextureFormat,
+) {
+  const buffer = root.createBuffer(histogramStorageSchema).$usage('storage')
+  const thresholdBinBuffer = root.createBuffer(d.u32).$usage('uniform')
+  const resetPipeline = createHistogramResetPipeline(root)
+  const resetBindGroup = root.createBindGroup(histogramResetLayout, { histogram: buffer })
+  const computePipeline = createHistogramAccumulatePipeline(root, width, height)
+  const computeBindGroup = root.createBindGroup(histogramComputeLayout, {
+    sobelBuffer,
+    histogram: buffer,
+  })
+  const displayBindGroup = root.createBindGroup(histogramDisplayLayout, {
+    histogram: buffer,
+    thresholdBin: thresholdBinBuffer,
+  })
+  const displayPipeline = createHistogramRenderPipeline(root, presentationFormat, width * height)
+  return {
+    buffer,
+    thresholdBinBuffer,
+    resetPipeline,
+    resetBindGroup,
+    computePipeline,
+    computeBindGroup,
+    displayPipeline,
+    displayBindGroup,
+  }
 }

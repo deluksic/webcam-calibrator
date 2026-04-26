@@ -9,16 +9,16 @@ import {
   POINTER_JUMP_ITERATIONS,
   computeDispatch2d,
 } from '@/gpu/pipelines/constants'
+import { createCopyBindGroup } from '@/gpu/pipelines/copyPipeline'
 import {
   DECODED_TAG_ID_UNKNOWN,
   type QuadData,
   MAX_INSTANCES,
   type GridVizFailInterrogateMode,
 } from '@/gpu/pipelines/gridVizPipeline'
+import type { ReprojPairGpu } from '@/gpu/pipelines/reprojectionOverlayPipeline'
 import { tryComputeHomography } from '@/lib/geometry'
 import type { ReprojectionOverlayPair } from '@/lib/reprojectionLive'
-
-import type { ReprojPairGpu } from '@/gpu/pipelines/reprojectionOverlayPipeline'
 
 import { MAX_DETECTED_TAGS, MAX_EXTENT_COMPONENTS, type CameraPipeline, type DisplayMode } from './cameraPipeline'
 
@@ -36,7 +36,7 @@ let nextFrameId = 0
 /**
  * Append the external-texture copy and the full compute chain to `enc`.
  * Does not submit, does not draw to the canvas.
- * After this call `pipeline.compactLabelBuffer` and `pipeline.filteredBuffer`
+ * After this call `pipeline.compact.compactLabelBuffer` and `pipeline.nms.filteredBuffer`
  * contain the results for this frame.
  *
  * When `slot` is provided the matching copies are also appended so that slot's
@@ -54,18 +54,15 @@ export function runCompute(
   threshold: number,
   slot?: FrameSlot,
 ) {
-  const copyBindGroup = root.createBindGroup(pipeline.copyLayoutTemplate, {
-    cameraTex: root.device.importExternalTexture({ source: video }),
-    sampler: pipeline.sampler,
-  })
+  const copyBindGroup = createCopyBindGroup(root, video)
 
-  pipeline.thresholdBuffer.write(threshold)
-  pipeline.thresholdBinBuffer.write(round(threshold * 255))
+  pipeline.nms.thresholdBuffer.write(threshold)
+  pipeline.histogram.thresholdBinBuffer.write(round(threshold * 255))
 
   // RENDER: Copy external → grayTex (MUST happen before compute)
-  pipeline.copyPipeline
+  pipeline.ingest.copyPipeline
     .with(enc)
-    .withColorAttachment({ view: pipeline.grayTex.createView() })
+    .withColorAttachment({ view: pipeline.ingest.grayTex.createView() })
     .with(copyBindGroup)
     .draw(3)
 
@@ -74,38 +71,41 @@ export function runCompute(
   const [wgX, wgY] = computeDispatch2d(pipeline.width, pipeline.height)
   const area = pipeline.width * pipeline.height
 
-  pipeline.grayPipeline.with(computePass).with(pipeline.grayTexToBufferBindGroup).dispatchWorkgroups(wgX, wgY)
-  pipeline.sobelPipeline.with(computePass).with(pipeline.sobelBindGroup).dispatchWorkgroups(wgX, wgY)
-  pipeline.histogramResetPipeline
+  pipeline.gray.pipeline.with(computePass).with(pipeline.gray.bindGroup).dispatchWorkgroups(wgX, wgY)
+  pipeline.sobel.pipeline.with(computePass).with(pipeline.sobel.bindGroup).dispatchWorkgroups(wgX, wgY)
+  pipeline.histogram.resetPipeline
     .with(computePass)
-    .with(pipeline.histogramResetBindGroup)
+    .with(pipeline.histogram.resetBindGroup)
     .dispatchWorkgroups(HISTOGRAM_BINS)
-  pipeline.histogramPipeline.with(computePass).with(pipeline.histogramComputeBindGroup).dispatchWorkgroups(wgX, wgY)
-  pipeline.edgeFilterPipeline.with(computePass).with(pipeline.edgeFilterBindGroup).dispatchWorkgroups(wgX, wgY)
+  pipeline.histogram.computePipeline
+    .with(computePass)
+    .with(pipeline.histogram.computeBindGroup)
+    .dispatchWorkgroups(wgX, wgY)
+  pipeline.nms.pipeline.with(computePass).with(pipeline.nms.bindGroup).dispatchWorkgroups(wgX, wgY)
 
   // Pointer-jump connected component labeling
-  pipeline.pointerJumpInitPipeline
+  pipeline.pointerJump.pointerJumpInitPipeline
     .with(computePass)
-    .with(pipeline.pointerJumpInitBindGroup)
+    .with(pipeline.pointerJump.pointerJumpInitBindGroup)
     .dispatchWorkgroups(wgX, wgY)
   let pj = 0
   for (let s = 0; s < POINTER_JUMP_ITERATIONS; s++) {
-    pipeline.pointerJumpStepPipeline
+    pipeline.pointerJump.pointerJumpStepPipeline
       .with(computePass)
-      .with(pipeline.pointerJumpPingPongBindGroups[pj]!)
+      .with(pipeline.pointerJump.pointerJumpPingPongBindGroups[pj]!)
       .dispatchWorkgroups(wgX, wgY)
     pj ^= 1
-    pipeline.pointerJumpLabelsToAtomicPipeline
+    pipeline.pointerJump.pointerJumpLabelsToAtomicPipeline
       .with(computePass)
-      .with(pipeline.pointerJumpLabelsToAtomicBindGroups[pj]!)
+      .with(pipeline.pointerJump.pointerJumpLabelsToAtomicBindGroups[pj]!)
       .dispatchWorkgroups(wgX, wgY)
-    pipeline.pointerJumpParentTightenPipeline
+    pipeline.pointerJump.pointerJumpParentTightenPipeline
       .with(computePass)
-      .with(pipeline.pointerJumpParentTightenBindGroups[pj]!)
+      .with(pipeline.pointerJump.pointerJumpParentTightenBindGroups[pj]!)
       .dispatchWorkgroups(wgX, wgY)
-    pipeline.pointerJumpAtomicToLabelsPipeline
+    pipeline.pointerJump.pointerJumpAtomicToLabelsPipeline
       .with(computePass)
-      .with(pipeline.pointerJumpAtomicToLabelsBindGroups[pj]!)
+      .with(pipeline.pointerJump.pointerJumpAtomicToLabelsBindGroups[pj]!)
       .dispatchWorkgroups(wgX, wgY)
   }
 
@@ -113,19 +113,28 @@ export function runCompute(
   // Always runs — needed for extent tracking (labels must fit in extent buffer).
   // Reads pointerJumpBuffer0, which holds the converged result because
   // POINTER_JUMP_ITERATIONS is even (pj === 0 on exit).
-  pipeline.compactResetPipeline
+  pipeline.compact.compactResetPipeline
     .with(computePass)
-    .with(pipeline.compactResetBindGroup)
+    .with(pipeline.compact.compactResetBindGroup)
     .dispatchWorkgroups(ceil(area / COMPUTE_WORKGROUP_SIZE))
-  pipeline.compactClaimPipeline.with(computePass).with(pipeline.compactClaimBindGroup).dispatchWorkgroups(wgX, wgY)
-  pipeline.compactRemapPipeline.with(computePass).with(pipeline.compactRemapBindGroup).dispatchWorkgroups(wgX, wgY)
+  pipeline.compact.compactClaimPipeline
+    .with(computePass)
+    .with(pipeline.compact.compactClaimBindGroup)
+    .dispatchWorkgroups(wgX, wgY)
+  pipeline.compact.compactRemapPipeline
+    .with(computePass)
+    .with(pipeline.compact.compactRemapBindGroup)
+    .dispatchWorkgroups(wgX, wgY)
 
   // Extent tracking on compact labels
-  pipeline.extentResetPipeline
+  pipeline.extent.extentResetPipeline
     .with(computePass)
-    .with(pipeline.extentResetBindGroup)
+    .with(pipeline.extent.extentResetBindGroup)
     .dispatchWorkgroups(ceil(MAX_EXTENT_COMPONENTS / COMPUTE_WORKGROUP_SIZE))
-  pipeline.extentTrackPipeline.with(computePass).with(pipeline.extentTrackBindGroup).dispatchWorkgroups(wgX, wgY)
+  pipeline.extent.extentTrackPipeline
+    .with(computePass)
+    .with(pipeline.extent.extentTrackBindGroup)
+    .dispatchWorkgroups(wgX, wgY)
 
   computePass.end()
 
@@ -140,7 +149,7 @@ export function runCompute(
 /**
  * Append display-mode render passes and the histogram draw to `enc`.
  * After this the caller should submit `enc`.
- * `pipeline.compactLabelBuffer` is used for label/debug modes (always the
+ * `pipeline.compact.compactLabelBuffer` is used for label/debug modes (always the
  * compact output after `runCompute`).
  *
  * Only non-grid modes are accepted. Grid mode is handled by `presentGridFrame`
@@ -155,10 +164,10 @@ export function presentFrame(
 ) {
   if (displayMode === 'edges') {
     try {
-      pipeline.sobelRenderPipeline
+      pipeline.render.sobel.pipeline
         .with(enc)
         .withColorAttachment({ view: pipeline.context })
-        .with(pipeline.sobelRenderBindGroup)
+        .with(pipeline.render.sobel.bindGroup)
         .draw(3)
     } catch (e) {
       const msg = `[camera] sobelRender failed: ${e}`
@@ -167,10 +176,10 @@ export function presentFrame(
     }
   } else if (displayMode === 'nms') {
     try {
-      pipeline.edgesPipeline
+      pipeline.render.edges.pipeline
         .with(enc)
         .withColorAttachment({ view: pipeline.context })
-        .with(pipeline.edgesBindGroup)
+        .with(pipeline.render.edges.bindGroup)
         .draw(3)
     } catch (e) {
       const msg = `[camera] edgesPipeline (nms) failed: ${e}`
@@ -178,11 +187,11 @@ export function presentFrame(
       onError?.(msg)
     }
   } else if (displayMode === 'labels' || displayMode === 'debug') {
-    const labelVizBindGroup = root.createBindGroup(pipeline.labelVizLayout, {
-      labelBuffer: pipeline.compactLabelBuffer,
+    const labelVizBindGroup = root.createBindGroup(pipeline.render.labelViz.layout, {
+      labelBuffer: pipeline.compact.compactLabelBuffer,
     })
     try {
-      pipeline.labelVizPipeline
+      pipeline.render.labelViz.pipeline
         .with(enc)
         .withColorAttachment({ view: pipeline.context })
         .with(labelVizBindGroup)
@@ -194,10 +203,10 @@ export function presentFrame(
     }
   } else {
     try {
-      pipeline.grayRenderPipeline
+      pipeline.render.grayscale.pipeline
         .with(enc)
         .withColorAttachment({ view: pipeline.context })
-        .with(pipeline.grayRenderBindGroup)
+        .with(pipeline.render.grayscale.bindGroup)
         .draw(3)
     } catch (e) {
       const msg = `[camera] grayRender fallback failed: ${e}`
@@ -207,10 +216,10 @@ export function presentFrame(
   }
 
   if (pipeline.histContext) {
-    pipeline.histogramDisplayPipeline
+    pipeline.histogram.displayPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.histContext })
-      .with(pipeline.histogramDisplayBindGroup)
+      .with(pipeline.histogram.displayBindGroup)
       .draw(6, HISTOGRAM_BINS)
   }
 }
@@ -273,7 +282,7 @@ export function updateQuadCornersBuffer(
     })
   }
 
-  pipeline.quadCornersBuffer.write(data)
+  pipeline.grid.quadCornersBuffer.write(data)
 }
 
 /** Upload `{ original, reprojected }` pairs for the GPU reprojection overlay; pads to `MAX_INSTANCES`. */
@@ -295,13 +304,13 @@ export function updateReprojectionOverlayBuffer(
   for (let i = capped; i < MAX_INSTANCES; i++) {
     data.push({ original: dead, reprojected: dead })
   }
-  pipeline.reprojOverlayBuffer.write(data)
-  pipeline.reprojOverlayDrawState.instanceCount = capped
+  pipeline.reproj.reprojOverlayBuffer.write(data)
+  pipeline.reproj.reprojOverlayDrawState.instanceCount = capped
 }
 
 /** Grid overlay: 0 = legacy fail colors, 1 = red highlights insufficient-edge failures, 2 = blue highlights line-fit failures. */
 export function setGridVizFailInterrogate(pipeline: CameraPipeline, mode: GridVizFailInterrogateMode): void {
-  pipeline.gridVizDebugModeBuffer.write(mode)
+  pipeline.grid.gridVizDebugModeBuffer.write(mode)
 }
 
 /**
@@ -313,39 +322,51 @@ export function setGridVizFailInterrogate(pipeline: CameraPipeline, mode: GridVi
 export function presentGridFrame(root: TgpuRoot, pipeline: CameraPipeline, slot: FrameSlot): void {
   const enc = root.device.createCommandEncoder({ label: 'grid frame present' })
 
-  pipeline.grayRenderPipeline
+  pipeline.render.grayscale.pipeline
     .with(enc)
     .withColorAttachment({ view: pipeline.context, loadOp: 'load', storeOp: 'store' })
     .with(slot.grayRenderBindGroup)
     .draw(3)
 
   try {
-    pipeline.gridVizPipeline
+    pipeline.grid.gridVizPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.context, loadOp: 'load', storeOp: 'store' })
-      .with(pipeline.gridVizBindGroup)
+      .with(pipeline.grid.gridVizBindGroup)
       .draw(4, MAX_DETECTED_TAGS)
   } catch (e) {
     console.error('[presentGridFrame] gridViz failed:', e)
   }
 
-  const reprojN = pipeline.reprojOverlayDrawState.instanceCount
+  const reprojN = pipeline.reproj.reprojOverlayDrawState.instanceCount
   if (reprojN > 0) {
     const load = { view: pipeline.context, loadOp: 'load' as const, storeOp: 'store' as const }
     try {
-      pipeline.reprojOriginalPipeline.with(enc).withColorAttachment(load).with(pipeline.reprojOverlayBindGroup).draw(4, reprojN)
-      pipeline.reprojTargetPipeline.with(enc).withColorAttachment(load).with(pipeline.reprojOverlayBindGroup).draw(4, reprojN)
-      pipeline.reprojLinesPipeline.with(enc).withColorAttachment(load).with(pipeline.reprojOverlayBindGroup).draw(2, reprojN)
+      pipeline.reproj.reprojOriginalPipeline
+        .with(enc)
+        .withColorAttachment(load)
+        .with(pipeline.reproj.reprojOverlayBindGroup)
+        .draw(4, reprojN)
+      pipeline.reproj.reprojTargetPipeline
+        .with(enc)
+        .withColorAttachment(load)
+        .with(pipeline.reproj.reprojOverlayBindGroup)
+        .draw(4, reprojN)
+      pipeline.reproj.reprojLinesPipeline
+        .with(enc)
+        .withColorAttachment(load)
+        .with(pipeline.reproj.reprojOverlayBindGroup)
+        .draw(2, reprojN)
     } catch (e) {
       console.error('[presentGridFrame] reprojection overlay failed:', e)
     }
   }
 
   if (pipeline.histContext) {
-    pipeline.histogramDisplayPipeline
+    pipeline.histogram.displayPipeline
       .with(enc)
       .withColorAttachment({ view: pipeline.histContext })
-      .with(pipeline.histogramDisplayBindGroup)
+      .with(pipeline.histogram.displayBindGroup)
       .draw(6, HISTOGRAM_BINS)
   }
 

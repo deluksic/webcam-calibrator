@@ -1,30 +1,37 @@
 // Grayscale render pipeline: grayBuffer → canvas
-import type { TgpuRoot } from 'typegpu'
+import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 
+export const grayRenderLayout = tgpu.bindGroupLayout({
+  grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+})
+
+export type GrayRenderBindResources = ExtractBindGroupInputFromLayout<typeof grayRenderLayout.entries>
+
 export function createGrayRenderPipeline(
   root: TgpuRoot,
-  grayLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   _height: number,
   presentationFormat: GPUTextureFormat,
+  resources: GrayRenderBindResources,
 ) {
   const grayFrag = tgpu.fragmentFn({
     in: { pos: d.builtin.position },
     out: d.vec4f,
   })((i) => {
     'use gpu'
-    const px = d.i32(i.pos.x)
-    const py = d.i32(i.pos.y)
-    const idx = py * width + px
-    const gray = grayLayout.$.grayBuffer[idx]
+    const pos = d.vec2i(i.pos.xy)
+    const idx = pos.y * width + pos.x
+    const gray = grayRenderLayout.$.grayBuffer[idx]!
     return d.vec4f(gray, gray, gray, 1)
   })
 
-  return root.createRenderPipeline({
+  const pipeline = root.createRenderPipeline({
     vertex: common.fullScreenTriangle,
     fragment: grayFrag,
     targets: { format: presentationFormat },
   })
+  const bindGroup = root.createBindGroup(grayRenderLayout, resources)
+  return { pipeline, bindGroup, layout: grayRenderLayout }
 }

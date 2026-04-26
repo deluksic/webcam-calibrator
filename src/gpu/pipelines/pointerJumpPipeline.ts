@@ -9,6 +9,7 @@ import { atomicLoad, atomicMin, atomicStore, length } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
 import { COMPUTE_WORKGROUP_SIZE } from '@/gpu/pipelines/constants'
+import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
 
 export function createPointerJumpLayouts() {
   const initLayout = tgpu.bindGroupLayout({
@@ -232,3 +233,111 @@ export function createPointerJumpAtomicToLabelsPipeline(
 
   return root.createComputePipeline({ compute: kernel })
 }
+
+/** Allocates label + atomic ping-pong buffers; reads NMS `filteredBuffer` (upstream). */
+export function createPointerJumpLabeling(
+  root: TgpuRoot,
+  width: number,
+  height: number,
+  filteredBuffer: EdgeFilterBindResources['filteredBuffer'],
+) {
+  const area = width * height
+  const pointerJumpBuffer0 = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
+  const pointerJumpBuffer1 = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
+  const pointerJumpAtomicBuffer = root.createBuffer(d.arrayOf(d.atomic(d.u32), area)).$usage('storage')
+
+  const {
+    initLayout: pointerJumpInitLayout,
+    stepLayout: pointerJumpStepLayout,
+    labelsToAtomicLayout: pointerJumpLabelsToAtomicLayout,
+    parentTightenLayout: pointerJumpParentTightenLayout,
+    atomicToLabelsLayout: pointerJumpAtomicToLabelsLayout,
+  } = createPointerJumpLayouts()
+  const pointerJumpInitPipeline = createPointerJumpInitPipeline(root, pointerJumpInitLayout, width, height)
+  const pointerJumpStepPipeline = createPointerJumpStepPipeline(root, pointerJumpStepLayout, width, height)
+  const pointerJumpLabelsToAtomicPipeline = createPointerJumpLabelsToAtomicPipeline(
+    root,
+    pointerJumpLabelsToAtomicLayout,
+    width,
+    height,
+  )
+  const pointerJumpParentTightenPipeline = createPointerJumpParentTightenPipeline(
+    root,
+    pointerJumpParentTightenLayout,
+    width,
+    height,
+  )
+  const pointerJumpAtomicToLabelsPipeline = createPointerJumpAtomicToLabelsPipeline(
+    root,
+    pointerJumpAtomicToLabelsLayout,
+    width,
+    height,
+  )
+
+  const pointerJumpInitBindGroup = root.createBindGroup(pointerJumpInitLayout, {
+    edgeBuffer: filteredBuffer,
+    labelBuffer: pointerJumpBuffer0,
+  })
+  const pointerJumpPingPongBindGroups = [
+    root.createBindGroup(pointerJumpStepLayout, {
+      edgeBuffer: filteredBuffer,
+      readBuffer: pointerJumpBuffer0,
+      writeBuffer: pointerJumpBuffer1,
+    }),
+    root.createBindGroup(pointerJumpStepLayout, {
+      edgeBuffer: filteredBuffer,
+      readBuffer: pointerJumpBuffer1,
+      writeBuffer: pointerJumpBuffer0,
+    }),
+  ]
+  const pointerJumpLabelsToAtomicBindGroups = [
+    root.createBindGroup(pointerJumpLabelsToAtomicLayout, {
+      source: pointerJumpBuffer0,
+      atomicLabels: pointerJumpAtomicBuffer,
+    }),
+    root.createBindGroup(pointerJumpLabelsToAtomicLayout, {
+      source: pointerJumpBuffer1,
+      atomicLabels: pointerJumpAtomicBuffer,
+    }),
+  ]
+  const pointerJumpParentTightenBindGroups = [
+    root.createBindGroup(pointerJumpParentTightenLayout, {
+      edgeBuffer: filteredBuffer,
+      labelRead: pointerJumpBuffer0,
+      atomicLabels: pointerJumpAtomicBuffer,
+    }),
+    root.createBindGroup(pointerJumpParentTightenLayout, {
+      edgeBuffer: filteredBuffer,
+      labelRead: pointerJumpBuffer1,
+      atomicLabels: pointerJumpAtomicBuffer,
+    }),
+  ]
+  const pointerJumpAtomicToLabelsBindGroups = [
+    root.createBindGroup(pointerJumpAtomicToLabelsLayout, {
+      atomicLabels: pointerJumpAtomicBuffer,
+      dest: pointerJumpBuffer0,
+    }),
+    root.createBindGroup(pointerJumpAtomicToLabelsLayout, {
+      atomicLabels: pointerJumpAtomicBuffer,
+      dest: pointerJumpBuffer1,
+    }),
+  ]
+
+  return {
+    pointerJumpBuffer0,
+    pointerJumpBuffer1,
+    pointerJumpAtomicBuffer,
+    pointerJumpInitPipeline,
+    pointerJumpInitBindGroup,
+    pointerJumpStepPipeline,
+    pointerJumpPingPongBindGroups,
+    pointerJumpLabelsToAtomicPipeline,
+    pointerJumpLabelsToAtomicBindGroups,
+    pointerJumpParentTightenPipeline,
+    pointerJumpParentTightenBindGroups,
+    pointerJumpAtomicToLabelsPipeline,
+    pointerJumpAtomicToLabelsBindGroups,
+  }
+}
+
+export type PointerJumpConvergedLabels = ReturnType<typeof createPointerJumpLabeling>['pointerJumpBuffer0']

@@ -220,3 +220,48 @@ export function createReprojectionOverlayLinesPipeline(
     primitive: { topology: 'line-list' },
   })
 }
+
+/** Allocates pair buffer + three draw pipelines for reprojection overlay. */
+export function createReprojectionOverlayStage(
+  root: TgpuRoot,
+  width: number,
+  height: number,
+  presentationFormat: GPUTextureFormat,
+) {
+  const reprojOverlayBuffer = root.createBuffer(ReprojOverlaySchema).$usage('storage')
+  const { reprojOverlayLayout } = createReprojectionOverlayLayouts()
+  const reprojOverlayBindGroup = root.createBindGroup(reprojOverlayLayout, {
+    pairs: reprojOverlayBuffer,
+  })
+  const reprojOriginalPipeline = createReprojectionOverlayOriginalPipeline(
+    root,
+    reprojOverlayLayout,
+    width,
+    height,
+    presentationFormat,
+  )
+  const reprojTargetPipeline = createReprojectionOverlayTargetPipeline(
+    root,
+    reprojOverlayLayout,
+    width,
+    height,
+    presentationFormat,
+  )
+  const reprojLinesPipeline = createReprojectionOverlayLinesPipeline(
+    root,
+    reprojOverlayLayout,
+    width,
+    height,
+    presentationFormat,
+  )
+  const reprojOverlayDrawState = { instanceCount: 0 }
+  return {
+    reprojOverlayBuffer,
+    reprojOverlayLayout,
+    reprojOverlayBindGroup,
+    reprojOriginalPipeline,
+    reprojTargetPipeline,
+    reprojLinesPipeline,
+    reprojOverlayDrawState,
+  }
+}

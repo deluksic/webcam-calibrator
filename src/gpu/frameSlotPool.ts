@@ -1,7 +1,8 @@
-import type { tgpu, TgpuRoot } from 'typegpu'
+import type { TgpuRoot } from 'typegpu'
 import { d } from 'typegpu'
 
 import type { CameraPipeline } from '@/gpu/cameraPipeline'
+import { grayRenderLayout } from '@/gpu/pipelines/grayRenderPipeline'
 
 export type FrameSlotState = 'free' | 'inflight' | 'display'
 
@@ -44,11 +45,10 @@ export function createFrameSlotPool(
   options: {
     width: number
     height: number
-    grayRenderLayout: ReturnType<typeof tgpu.bindGroupLayout>
     slotCount?: number
   },
 ): FrameSlotPool {
-  const { width, height, grayRenderLayout, slotCount = 3 } = options
+  const { width, height, slotCount = 3 } = options
   const area = width * height
 
   const slots: FrameSlot[] = Array.from({ length: slotCount }, () => {
@@ -108,14 +108,14 @@ export function createFrameSlotPool(
     },
 
     enqueueCopiesForSlot(enc, pip, slot) {
-      const grayStorage = pip.grayBuffer.buffer
+      const grayStorage = pip.gray.buffer.buffer
       const grayDst = slot.graySnapshot.buffer
       enc.copyBufferToBuffer(grayStorage, 0, grayDst, 0, grayStorage.size)
 
-      const labelStorage = pip.compactLabelBuffer.buffer
+      const labelStorage = pip.compact.compactLabelBuffer.buffer
       enc.copyBufferToBuffer(labelStorage, 0, slot.labelStaging, 0, labelStorage.size)
 
-      const edgeStorage = pip.filteredBuffer.buffer
+      const edgeStorage = pip.nms.filteredBuffer.buffer
       enc.copyBufferToBuffer(edgeStorage, 0, slot.filteredStaging, 0, edgeStorage.size)
     },
   }

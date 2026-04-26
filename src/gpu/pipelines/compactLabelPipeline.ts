@@ -18,6 +18,50 @@ import { atomicLoad, atomicStore, atomicAdd } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
 import { COMPUTE_WORKGROUP_SIZE } from '@/gpu/pipelines/constants'
+import type { PointerJumpConvergedLabels } from '@/gpu/pipelines/pointerJumpPipeline'
+
+/** Allocates remap buffers; reads converged `pointerJumpBuffer0` (upstream). */
+export function createCompactLabelStage(
+  root: TgpuRoot,
+  width: number,
+  height: number,
+  maxComponents: number,
+  pointerJumpBuffer0: PointerJumpConvergedLabels,
+) {
+  const area = width * height
+  const canonicalRootBuffer = root.createBuffer(d.arrayOf(d.atomic(d.u32), area)).$usage('storage')
+  const compactLabelBuffer = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
+  const compactCounterBuffer = root.createBuffer(d.atomic(d.u32)).$usage('storage')
+  const { resetLayout, claimLayout, remapLayout } = createCompactLabelLayouts()
+  const compactResetPipeline = createCanonicalResetPipeline(root, resetLayout, area)
+  const compactClaimPipeline = createCanonicalClaimPipeline(root, claimLayout, width, height, maxComponents)
+  const compactRemapPipeline = createRemapLabelPipeline(root, remapLayout, width, height)
+  const compactResetBindGroup = root.createBindGroup(resetLayout, {
+    compactCounter: compactCounterBuffer,
+    canonicalRoot: canonicalRootBuffer,
+  })
+  const compactClaimBindGroup = root.createBindGroup(claimLayout, {
+    labelBuffer: pointerJumpBuffer0,
+    compactCounter: compactCounterBuffer,
+    canonicalRoot: canonicalRootBuffer,
+  })
+  const compactRemapBindGroup = root.createBindGroup(remapLayout, {
+    labelBuffer: pointerJumpBuffer0,
+    compactLabelBuffer,
+    canonicalRoot: canonicalRootBuffer,
+  })
+  return {
+    canonicalRootBuffer,
+    compactLabelBuffer,
+    compactCounterBuffer,
+    compactResetPipeline,
+    compactClaimPipeline,
+    compactRemapPipeline,
+    compactResetBindGroup,
+    compactClaimBindGroup,
+    compactRemapBindGroup,
+  }
+}
 
 export function createCompactLabelLayouts() {
   const resetLayout = tgpu.bindGroupLayout({
@@ -140,3 +184,5 @@ export function createRemapLabelPipeline(
   })
   return root.createComputePipeline({ compute: kernel })
 }
+
+export type CompactLabelMapBuffer = ReturnType<typeof createCompactLabelStage>['compactLabelBuffer']

@@ -1,17 +1,44 @@
 // Merge edge responses only along the local edge tangent (perpendicular to Sobel gradient).
 // Skips neighbors that lie mostly along the gradient normal so the mask does not thicken.
 // Outputs gradient (vec2f) instead of scalar mask.
-import type { TgpuRoot } from 'typegpu'
+import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { abs, length, sqrt } from 'typegpu/std'
 
 import { EDGE_DILATE_THRESHOLD } from '@/gpu/pipelines/constants'
 
-export function createEdgeDilatePipeline(
+export const edgeDilateLayout = tgpu.bindGroupLayout({
+  src: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+  grad: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+  threshold: { uniform: d.f32 },
+  dst: { storage: d.arrayOf(d.vec2f), access: 'mutable' },
+})
+
+export type EdgeDilateBindResources = ExtractBindGroupInputFromLayout<typeof edgeDilateLayout.entries>
+
+/** Allocates dilated `buffer`; reads NMS output + threshold (upstream). */
+export function createEdgeDilateStage(
   root: TgpuRoot,
-  edgeDilateLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
+  filteredBuffer: EdgeDilateBindResources['src'],
+  thresholdBuffer: EdgeDilateBindResources['threshold'],
+) {
+  const buffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage('storage')
+  const { pipeline, bindGroup } = createEdgeDilatePipeline(root, width, height, {
+    src: filteredBuffer,
+    grad: filteredBuffer,
+    threshold: thresholdBuffer,
+    dst: buffer,
+  })
+  return { buffer, pipeline, bindGroup }
+}
+
+export function createEdgeDilatePipeline(
+  root: TgpuRoot,
+  width: number,
+  height: number,
+  resources: EdgeDilateBindResources,
 ) {
   const dilateKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
@@ -29,10 +56,10 @@ export function createEdgeDilatePipeline(
     const wU32 = d.u32(w)
     const idx = d.u32(y) * wU32 + d.u32(x)
 
-    const srcG = edgeDilateLayout.$.src[idx]
+    const srcG = edgeDilateLayout.$.src[idx]!
     const srcMag = length(srcG)
 
-    const g = edgeDilateLayout.$.grad[idx]
+    const g = edgeDilateLayout.$.grad[idx]!
     const gm = length(g)
     const eps = d.f32(1e-6)
 
@@ -68,10 +95,10 @@ export function createEdgeDilatePipeline(
             const align = abs(ux * ngx + uy * ngy)
             if (align <= d.f32(EDGE_DILATE_THRESHOLD)) {
               const nIdx = d.u32(ny2) * wU32 + d.u32(nx2)
-              const nm = length(edgeDilateLayout.$.src[nIdx])
+              const nm = length(edgeDilateLayout.$.src[nIdx]!)
               if (nm > bestMag) {
                 bestMag = nm
-                const ng = edgeDilateLayout.$.grad[nIdx]
+                const ng = edgeDilateLayout.$.grad[nIdx]!
                 bestGx = ng.x
                 bestGy = ng.y
               }
@@ -89,5 +116,7 @@ export function createEdgeDilatePipeline(
     edgeDilateLayout.$.dst[idx] = d.vec2f(bestGx2, bestGy2)
   })
 
-  return root.createComputePipeline({ compute: dilateKernel })
+  const pipeline = root.createComputePipeline({ compute: dilateKernel })
+  const bindGroup = root.createBindGroup(edgeDilateLayout, resources)
+  return { pipeline, bindGroup }
 }

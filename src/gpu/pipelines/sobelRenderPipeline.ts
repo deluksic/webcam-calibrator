@@ -1,15 +1,21 @@
 // Sobel buffer render pipeline: sobelBuffer → canvas
-import type { TgpuRoot } from 'typegpu'
+import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor, length } from 'typegpu/std'
 
+export const sobelRenderLayout = tgpu.bindGroupLayout({
+  sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+})
+
+export type SobelRenderBindResources = ExtractBindGroupInputFromLayout<typeof sobelRenderLayout.entries>
+
 export function createSobelRenderPipeline(
   root: TgpuRoot,
-  sobelLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
+  resources: SobelRenderBindResources,
 ) {
   const sobelFrag = tgpu.fragmentFn({
     in: { uv: d.location(0, d.vec2f) },
@@ -23,13 +29,15 @@ export function createSobelRenderPipeline(
     const px = d.u32(floor(clamp(i.uv.x * d.f32(wi), d.f32(0), maxPx)))
     const py = d.u32(floor(clamp(i.uv.y * d.f32(hi), d.f32(0), maxPy)))
     const idx = py * d.u32(wi) + px
-    const mag = length(sobelLayout.$.sobelBuffer[idx])
+    const mag = length(sobelRenderLayout.$.sobelBuffer[idx]!)
     return d.vec4f(mag, mag, mag, d.f32(1))
   })
 
-  return root.createRenderPipeline({
+  const pipeline = root.createRenderPipeline({
     vertex: common.fullScreenTriangle,
     fragment: sobelFrag,
     targets: { format: presentationFormat },
   })
+  const bindGroup = root.createBindGroup(sobelRenderLayout, resources)
+  return { pipeline, bindGroup, layout: sobelRenderLayout }
 }

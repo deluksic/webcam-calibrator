@@ -1,13 +1,32 @@
 // Sobel pipeline: grayBuffer → sobelBuffer
-import type { TgpuRoot } from 'typegpu'
+import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { clamp } from 'typegpu/std'
 
-export function createSobelPipeline(
+export const sobelLayout = tgpu.bindGroupLayout({
+  grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+  sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'mutable' },
+})
+
+export type SobelBindResources = ExtractBindGroupInputFromLayout<typeof sobelLayout.entries>
+
+/** Allocates `sobelBuffer`; reads `grayBuffer` (upstream). */
+export function createSobelStage(
   root: TgpuRoot,
-  sobelLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
+  grayBuffer: SobelBindResources['grayBuffer'],
+) {
+  const buffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage('storage')
+  const { pipeline, bindGroup } = createSobelPipeline(root, width, height, { grayBuffer, sobelBuffer: buffer })
+  return { buffer, pipeline, bindGroup }
+}
+
+export function createSobelPipeline(
+  root: TgpuRoot,
+  width: number,
+  height: number,
+  resources: SobelBindResources,
 ) {
   function sobelLoad(px: number, py: number, w: number, h: number) {
     'use gpu'
@@ -17,7 +36,7 @@ export function createSobelPipeline(
     const pyi = d.i32(py)
     const cx2 = clamp(pxi, d.i32(0), wi - d.i32(1))
     const cy2 = clamp(pyi, d.i32(0), hi - d.i32(1))
-    return sobelLayout.$.grayBuffer[d.u32(cy2 * wi + cx2)]
+    return sobelLayout.$.grayBuffer[d.u32(cy2 * wi + cx2)]!
   }
 
   const sobelKernel = tgpu.computeFn({
@@ -48,5 +67,7 @@ export function createSobelPipeline(
     sobelLayout.$.sobelBuffer[d.u32(y * w + x)] = d.vec2f(gx, gy)
   })
 
-  return root.createComputePipeline({ compute: sobelKernel })
+  const pipeline = root.createComputePipeline({ compute: sobelKernel })
+  const bindGroup = root.createBindGroup(sobelLayout, resources)
+  return { pipeline, bindGroup }
 }

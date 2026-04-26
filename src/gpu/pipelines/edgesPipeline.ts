@@ -1,16 +1,23 @@
 // Edge render pipeline: filteredBuffer + sobelBuffer → edges canvas
 // Colorizes edges by gradient direction using continuous HSV coloring.
-import type { TgpuRoot } from 'typegpu'
+import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { common } from 'typegpu'
 import { atan2, clamp, floor, length, max } from 'typegpu/std'
 
+export const edgesLayout = tgpu.bindGroupLayout({
+  sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+  filteredBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+})
+
+export type EdgesBindResources = ExtractBindGroupInputFromLayout<typeof edgesLayout.entries>
+
 export function createEdgesPipeline(
   root: TgpuRoot,
-  edgesLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
+  resources: EdgesBindResources,
 ) {
   const frag = tgpu.fragmentFn({
     in: { uv: d.location(0, d.vec2f) },
@@ -25,13 +32,13 @@ export function createEdgesPipeline(
     const py = d.u32(floor(clamp(i.uv.y * d.f32(hi), d.f32(0), maxPy)))
     const idx = py * d.u32(wi) + px
 
-    const magVec = edgesLayout.$.filteredBuffer[idx]
+    const magVec = edgesLayout.$.filteredBuffer[idx]!
     const mag = length(magVec)
     if (mag <= d.f32(0)) {
       return d.vec4f(d.f32(0.08), d.f32(0.08), d.f32(0.12), d.f32(1))
     }
 
-    const g = edgesLayout.$.sobelBuffer[idx]
+    const g = edgesLayout.$.sobelBuffer[idx]!
     const gm = length(g)
     const eps = d.f32(1e-6)
     const gxn = std.select(g.x / gm, d.f32(0), gm <= eps)
@@ -93,9 +100,11 @@ export function createEdgesPipeline(
     return d.vec4f(r, gV, b, d.f32(1))
   })
 
-  return root.createRenderPipeline({
+  const pipeline = root.createRenderPipeline({
     vertex: common.fullScreenTriangle,
     fragment: frag,
     targets: { format: presentationFormat },
   })
+  const bindGroup = root.createBindGroup(edgesLayout, resources)
+  return { pipeline, bindGroup, layout: edgesLayout }
 }

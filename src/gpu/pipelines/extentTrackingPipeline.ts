@@ -6,6 +6,7 @@ import { atomicMin, atomicMax, atomicStore } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
 import { COMPUTE_WORKGROUP_SIZE } from '@/gpu/pipelines/constants'
+import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
 
 export const MAX_U32 = 0xffffffff
 export const EXTENT_FIELDS = 4 as const
@@ -22,12 +23,43 @@ export const ExtentEntry = d.struct({
 // Layouts
 // ════════════════════════════════════════════════════════════════════════════
 
+export const extentResetLayout = tgpu.bindGroupLayout({
+  extentBuffer: { storage: d.arrayOf(ExtentEntry), access: 'mutable' },
+})
+
 export function createExtentTrackingLayouts() {
   const trackLayout = tgpu.bindGroupLayout({
     labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
     extentBuffer: { storage: d.arrayOf(ExtentEntry), access: 'mutable' },
   })
   return { trackLayout }
+}
+
+/** Allocates `extentBuffer`; reads compact `labelBuffer` (upstream). */
+export function createExtentTrackingStage(
+  root: TgpuRoot,
+  width: number,
+  height: number,
+  maxComponents: number,
+  compactLabelBuffer: CompactLabelMapBuffer,
+) {
+  const { trackLayout: extentTrackLayout } = createExtentTrackingLayouts()
+  const extentBuffer = root.createBuffer(d.arrayOf(ExtentEntry, maxComponents)).$usage('storage')
+  const extentResetPipeline = createExtentResetPipeline(root, extentResetLayout, maxComponents)
+  const extentTrackPipeline = createExtentTrackPipeline(root, extentTrackLayout, width, height, maxComponents)
+  const extentResetBindGroup = root.createBindGroup(extentResetLayout, { extentBuffer })
+  const extentTrackBindGroup = root.createBindGroup(extentTrackLayout, {
+    labelBuffer: compactLabelBuffer,
+    extentBuffer,
+  })
+  return {
+    extentBuffer,
+    extentTrackLayout,
+    extentResetPipeline,
+    extentResetBindGroup,
+    extentTrackPipeline,
+    extentTrackBindGroup,
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════

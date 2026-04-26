@@ -265,7 +265,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         return
       }
       extentReadPending = true
-      pip.extentBuffer
+      pip.extent.extentBuffer
         .read()
         .then((extentData: ExtentRow[]) => {
           if (disposed) {
@@ -422,7 +422,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         }
 
         // TODO: read using Uint32Array directly
-        void pip.histogramBuffer.read().then((bins) => {
+        void pip.histogram.buffer.read().then((bins) => {
           if (disposed) {
             return
           }

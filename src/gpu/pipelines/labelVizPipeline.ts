@@ -6,9 +6,12 @@ import { clamp, floor } from 'typegpu/std'
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
+export const labelVizLayout = tgpu.bindGroupLayout({
+  labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
+})
+
 export function createLabelVizPipeline(
   root: TgpuRoot,
-  labelVizLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
@@ -27,7 +30,7 @@ export function createLabelVizPipeline(
     const px = d.u32(floor(clamp(i.uv.x * d.f32(wi), d.f32(0), maxPx)))
     const py = d.u32(floor(clamp(i.uv.y * d.f32(hi), d.f32(0), maxPy)))
     const idx = py * d.u32(wi) + px
-    const label = labelVizLayout.$.labelBuffer[idx]
+    const label = labelVizLayout.$.labelBuffer[idx]!
 
     if (label === d.u32(COMPONENT_LABEL_INVALID)) {
       return d.vec4f(d.f32(0.12), d.f32(0.12), d.f32(0.14), d.f32(1))
@@ -37,9 +40,10 @@ export function createLabelVizPipeline(
     return d.vec4f(rgb, 1)
   })
 
-  return root.createRenderPipeline({
+  const pipeline = root.createRenderPipeline({
     vertex: common.fullScreenTriangle,
     fragment: labelVizFrag,
     targets: { format: presentationFormat },
   })
+  return { pipeline, layout: labelVizLayout }
 }

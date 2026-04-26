@@ -6,15 +6,40 @@
 //
 // Output: filteredBuffer[i] = suppressed gradient (vec2f; zero if not a local max or below threshold).
 // The edges display pipeline computes magnitude from length() on-the-fly.
-import type { TgpuRoot } from 'typegpu'
+import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { length, select } from 'typegpu/std'
 
-export function createEdgeFilterPipeline(
+export const edgeFilterLayout = tgpu.bindGroupLayout({
+  sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+  threshold: { uniform: d.f32 },
+  filteredBuffer: { storage: d.arrayOf(d.vec2f), access: 'mutable' },
+})
+
+export type EdgeFilterBindResources = ExtractBindGroupInputFromLayout<typeof edgeFilterLayout.entries>
+
+/** Allocates NMS `filteredBuffer` and edge-strength `threshold` uniform; reads `sobelBuffer` (upstream). */
+export function createEdgeFilterStage(
   root: TgpuRoot,
-  edgeFilterLayout: ReturnType<typeof tgpu.bindGroupLayout>,
   width: number,
   height: number,
+  sobelBuffer: EdgeFilterBindResources['sobelBuffer'],
+) {
+  const thresholdBuffer = root.createBuffer(d.f32).$usage('uniform')
+  const filteredBuffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage('storage')
+  const { pipeline, bindGroup } = createEdgeFilterPipeline(root, width, height, {
+    sobelBuffer,
+    threshold: thresholdBuffer,
+    filteredBuffer,
+  })
+  return { filteredBuffer, thresholdBuffer, pipeline, bindGroup }
+}
+
+export function createEdgeFilterPipeline(
+  root: TgpuRoot,
+  width: number,
+  height: number,
+  resources: EdgeFilterBindResources,
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
@@ -31,7 +56,7 @@ export function createEdgeFilterPipeline(
     const h = d.i32(height)
     const idx = d.u32(y) * d.u32(w) + d.u32(x)
 
-    const g = edgeFilterLayout.$.sobelBuffer[idx]
+    const g = edgeFilterLayout.$.sobelBuffer[idx]!
     const gm = length(g)
     const threshold = edgeFilterLayout.$.threshold
 
@@ -54,12 +79,12 @@ export function createEdgeFilterPipeline(
     let gmPos = d.f32(0)
     if (nxP >= d.i32(0) && nxP < w && nyP >= d.i32(0) && nyP < h) {
       const idxP = d.u32(nyP) * d.u32(w) + d.u32(nxP)
-      gmPos = length(edgeFilterLayout.$.sobelBuffer[idxP])
+      gmPos = length(edgeFilterLayout.$.sobelBuffer[idxP]!)
     }
     let gmNeg = d.f32(0)
     if (nxN >= d.i32(0) && nxN < w && nyN >= d.i32(0) && nyN < h) {
       const idxN = d.u32(nyN) * d.u32(w) + d.u32(nxN)
-      gmNeg = length(edgeFilterLayout.$.sobelBuffer[idxN])
+      gmNeg = length(edgeFilterLayout.$.sobelBuffer[idxN]!)
     }
 
     // Only suppress if neighbor is meaningfully stronger (not just slightly)
@@ -70,5 +95,7 @@ export function createEdgeFilterPipeline(
     edgeFilterLayout.$.filteredBuffer[idx] = select(g, d.vec2f(d.f32(0), d.f32(0)), suppressed)
   })
 
-  return root.createComputePipeline({ compute: kernel })
+  const pipeline = root.createComputePipeline({ compute: kernel })
+  const bindGroup = root.createBindGroup(edgeFilterLayout, resources)
+  return { pipeline, bindGroup }
 }
