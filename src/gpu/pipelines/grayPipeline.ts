@@ -2,8 +2,6 @@
 import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 
-import { WR, WG, WB } from '@/gpu/pipelines/constants'
-
 export function createGrayPipeline(
   root: TgpuRoot,
   grayTexToBufferLayout: ReturnType<typeof tgpu.bindGroupLayout>,
@@ -15,14 +13,14 @@ export function createGrayPipeline(
     workgroupSize: [16, 16, 1],
   })((input) => {
     'use gpu'
-    if (d.i32(input.gid.x) >= d.i32(width) || d.i32(input.gid.y) >= d.i32(height)) {
+    if (input.gid.x >= width || input.gid.y >= height) {
       return
     }
 
     const color = std.textureLoad(grayTexToBufferLayout.$.grayTex, input.gid.xy, 0)
-    const gray = color.r * d.f32(WR) + color.g * d.f32(WG) + color.b * d.f32(WB)
+    const gray = color.g
 
-    const idx = d.u32(d.i32(input.gid.y) * d.i32(width) + d.i32(input.gid.x))
+    const idx = input.gid.y * width + input.gid.x
     grayTexToBufferLayout.$.grayBuffer[idx] = gray
   })
 
