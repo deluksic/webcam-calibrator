@@ -201,12 +201,11 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
   })
 
   const log = (msg: string) => {
-    pipelineInteraction().onLog?.(msg)
+    props.onLog?.(msg)
   }
 
   const gpu = createMemo(async () => {
     try {
-      log('GPU init...')
       const g = await initGPU()
       log('GPU ready')
       return g
