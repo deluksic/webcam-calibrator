@@ -29,8 +29,8 @@ export function createGrayRenderPipeline(
     const gray = grayRenderLayout.$.grayBuffer[idx]!
     const t = grayRenderLayout.$.timeSec
     const uv = d.vec2f(i.pos.x / width, i.pos.y / height)
-    const stripePhase = std.fract((uv.x + uv.y) * 72 + t * 3.5)
-    const stripeMask = std.step(0.5, stripePhase)
+    const stripePhase = std.sin((uv.x + uv.y) * 300 + t * 6) + 0.5
+    const stripeMask = std.clamp(stripePhase / std.fwidth(stripePhase), 0, 1)
     const saturationMask = std.smoothstep(0.92, 0.98, gray)
     const hit = saturationMask * stripeMask
     const r = std.clamp(gray + hit * 0.52, 0, 1)
