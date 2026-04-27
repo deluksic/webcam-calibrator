@@ -7,6 +7,7 @@ import type { DetectedQuad } from '@/gpu/contour'
 import { calibrationQuadScore } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
 import type { TagObservation, CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
+import type { Point3 } from '@/lib/geometry'
 import { learnLayoutFromFrame, layoutToLabeledPoints, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 import { calibApi, type CalibrationResult } from '@/workers/calibrationClient'
@@ -213,7 +214,7 @@ function CalibrationView() {
     if (c.updatedTargetPoints.length < 4) {
       return layout()
     }
-    const refined = new Map<number, { x: number; y: number }[]>()
+    const refined = new Map<number, Point3[]>()
     for (const p of c.updatedTargetPoints) {
       const tagId = Math.floor(p.pointId / 10000)
       const cornerId = p.pointId % 10000
@@ -221,12 +222,12 @@ function CalibrationView() {
         continue
       }
       const corners = refined.get(tagId) ?? [
-        { x: 0, y: 0 },
-        { x: 0, y: 0 },
-        { x: 0, y: 0 },
-        { x: 0, y: 0 },
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 0 },
       ]
-      corners[cornerId] = { x: p.position.x, y: p.position.y }
+      corners[cornerId] = { x: p.position.x, y: p.position.y, z: p.position.z }
       refined.set(tagId, corners)
     }
     if (refined.size === 0) {

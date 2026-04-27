@@ -5,7 +5,7 @@ import CALIBRATE_WASM_PATH from '@deluksic/opencv-calibration-wasm/wasm/calibrat
 
 import type { DetectedQuad } from '@/gpu/contour'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
-import type { Point } from '@/lib/geometry'
+import type { Point, Point3 } from '@/lib/geometry'
 import type { Vec3, Mat3 } from '@/lib/opencvCalibration'
 import type { TargetLayout } from '@/lib/targetLayout'
 
@@ -120,8 +120,8 @@ function buildLivePose(
     for (let j = 0; j < 4; j++) {
       if (q.corners[j]) {
         const observed = q.corners[j]!
-        const plane = { x: pl[j]!.x, y: pl[j]!.y }
-        objectPoints.push([plane.x, plane.y, 0])
+        const pt = pl[j]! as Point3
+        objectPoints.push([pt.x, pt.y, pt.z])
         imagePoints.push([observed.x, observed.y])
       }
     }

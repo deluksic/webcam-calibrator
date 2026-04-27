@@ -10,7 +10,11 @@ export type Point = {
   x: number
   y: number
   score?: number
+  z?: number
 }
+
+/** 3D point for object model coordinates (requires z). */
+export type Point3 = { x: number; y: number; z: number }
 
 /** Quad corners in image / triangle-strip order: TL, TR, BL, BR. */
 export type Corners = [tl: Point, tr: Point, bl: Point, br: Point]

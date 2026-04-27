@@ -2,17 +2,20 @@
 
 import { invertMat3RowMajor } from '@/lib/aprilTagRaycast'
 import type { TagObservation, LabeledPoint } from '@/lib/calibrationTypes'
-import { applyHomography, tryComputeHomography, type Corners, type Mat3, type Point } from '@/lib/geometry'
+import { applyHomography, tryComputeHomography, type Mat3, type Point, type Point3 } from '@/lib/geometry'
 
-const UNIT_SQUARE: Corners = [
-  { x: 0, y: 0 },
-  { x: 1, y: 0 },
-  { x: 0, y: 1 },
-  { x: 1, y: 1 },
+/** Corners with required z-coordinate for 3D object model. */
+export type TargetCorners = [Point3, Point3, Point3, Point3]
+
+const UNIT_SQUARE: TargetCorners = [
+  { x: 0, y: 0, z: 0 },
+  { x: 1, y: 0, z: 0 },
+  { x: 0, y: 1, z: 0 },
+  { x: 1, y: 1, z: 0 },
 ]
 
-export type TargetLayout = Map<number, Corners>
-export type TargetLayoutEntry = { tagId: number; corners: Corners }
+export type TargetLayout = Map<number, TargetCorners>
+export type TargetLayoutEntry = { tagId: number; corners: TargetCorners }
 
 const POINT_ID_MULTIPLIER = 10000
 
@@ -32,14 +35,19 @@ export function learnLayoutFromFrame(tags: TagObservation[]): TargetLayout | und
     console.log(`[layout] Cannot invert anchor tag ${anchor.tagId} homography - singular matrix`)
     return undefined
   }
-  const m = new Map<number, Corners>()
+  const m = new Map<number, TargetCorners>()
   m.set(anchor.tagId, UNIT_SQUARE)
 
   // Map all other tags
   for (let i = 1; i < sorted.length; i++) {
     const t = sorted[i]!
     const c = t.corners
-    const mapped: Corners = [mapPt(hInv, c[0]!), mapPt(hInv, c[1]!), mapPt(hInv, c[2]!), mapPt(hInv, c[3]!)]
+    const mapped: TargetCorners = [
+      mapPt(hInv, c[0]!),
+      mapPt(hInv, c[1]!),
+      mapPt(hInv, c[2]!),
+      mapPt(hInv, c[3]!),
+    ]
     m.set(t.tagId, mapped)
   }
 
@@ -63,6 +71,6 @@ export function layoutToLabeledPoints(layout: TargetLayout): LabeledPoint[] {
   return result
 }
 
-function mapPt(h: Mat3, p: Point): Point {
-  return applyHomography(h, p.x, p.y)
+function mapPt(h: Mat3, p: Point): Point3 {
+  return { ...applyHomography(h, p.x, p.y), z: 0 }
 }
