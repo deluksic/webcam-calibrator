@@ -70,6 +70,11 @@ const initialCalibRun: CalibRun = {
 
 const RES = RESOLUTION_LADDER
 
+function resolutionLabel(res: string): string {
+  const ideal = (RES as Record<string, typeof RES['medium']>)[res]
+  return `${ideal?.width.ideal}×${ideal?.height.ideal ?? 0}`
+}
+
 function fmt(n: number | undefined, d: number) {
   if (n === undefined || !Number.isFinite(n)) {
     return '—'
@@ -374,26 +379,28 @@ function CalibrationView() {
       </p>
       <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
         <div class={styles.cameraBlock}>
-          <select
-            class={[pipelineStyles.cameraSelect, styles.calibrateCameraSelect]}
-            value={cam.selectedCameraDeviceId() ?? ''}
-            onChange={(e) => cam.setSelectedCameraDeviceId(e.currentTarget.value)}
-          >
-            <For each={devicesSorted()}>
-              {(item) => (
-                <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
-              )}
-            </For>
-          </select>
-          <select
-            class={pipelineStyles.cameraSelect}
-            value={cam.selectedResolution()}
-            onChange={(e) => cam.setSelectedResolution(e.currentTarget.value as Resolution)}
-          >
-            <For each={Object.keys(RES)} keyed={false}>
-              {(resolution) => <option value={resolution()}>{resolution()}</option>}
-            </For>
-          </select>
+          <div class={styles.cameraSelectsRow}>
+            <select
+              class={styles.cameraSelect}
+              value={cam.selectedCameraDeviceId() ?? ''}
+              onChange={(e) => cam.setSelectedCameraDeviceId(e.currentTarget.value)}
+            >
+              <For each={devicesSorted()}>
+                {(item) => (
+                  <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
+                )}
+              </For>
+            </select>
+            <select
+              class={styles.cameraSelect}
+              value={cam.selectedResolution()}
+              onChange={(e) => cam.setSelectedResolution(e.currentTarget.value as Resolution)}
+            >
+              <For each={Object.keys(RES)} keyed={false}>
+                {(resolution) => <option value={resolution()}>{resolutionLabel(resolution())}</option>}
+              </For>
+            </select>
+          </div>
           <LiveCameraPipeline
             displayMode={displayMode()}
             showFallbacks={false}

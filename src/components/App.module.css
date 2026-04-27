@@ -37,11 +37,11 @@
 .navBtnActive {
   color: var(--color-accent);
   background-color: var(--color-accent-muted);
+  transition: none;
 }
 
 .navBtnActive:hover {
   color: var(--color-accent-hover);
-  background-color: var(--color-accent-muted);
 }
 
 .version {

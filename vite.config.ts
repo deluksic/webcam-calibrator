@@ -30,7 +30,7 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    minify: true,
+    minify: false,
   },
   worker: {
     format: 'es',

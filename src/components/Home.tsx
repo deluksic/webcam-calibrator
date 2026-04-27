@@ -1,31 +1,11 @@
-import { For } from 'solid-js'
-
 import styles from './Home.module.css'
-
-const SUB_PAGES = [
-  {
-    id: 'calibration',
-    label: 'Calibration',
-    description: 'Set up your target and begin taking snapshots.',
-  },
-  {
-    id: 'results',
-    label: 'Results',
-    description: 'Review calibration results and test your camera.',
-  },
-  {
-    id: 'about',
-    label: 'About',
-    description: 'Learn how to use AprilTag calibration for AR/robotics.',
-  },
-]
 
 export function Home() {
   return (
     <div class={styles.root}>
-      <h1 class={styles.title}>AprilTag Camera Calibration</h1>
+      <h1 class={styles.title}>Camera Calibration</h1>
       <p class={styles.description}>
-        Calibrate cameras for AR/robotics using AprilTag fiducials. Optimized for solid, static targets.
+        Calibrate cameras for AR/robotics. Optimized for solid, static targets.
       </p>
 
       <div class={styles.setup}>
@@ -46,16 +26,13 @@ export function Home() {
         </ol>
       </div>
 
-      <div class={styles.links}>
-        <div class={styles.linksTitle}>Get started</div>
-        <For each={SUB_PAGES}>
-          {(item) => (
-            <a href={`#${item().id}`} class={styles.link}>
-              <div class={styles.linkLabel}>{item().label}</div>
-              <div class={styles.linkDesc}>{item().description}</div>
-            </a>
-          )}
-        </For>
+      <div class={styles.buttons}>
+        <a href="/target" class={styles.buttonPrimary}>
+          Show Target
+        </a>
+        <a href="/calibrate" class={styles.buttonPrimary}>
+          Calibrate
+        </a>
       </div>
     </div>
   )

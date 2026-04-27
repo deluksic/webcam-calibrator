@@ -1,4 +1,5 @@
-import { A, HashRouter, Route, type RouteSectionProps } from '@solidjs/router'
+import { A, HashRouter, Route, type RouteSectionProps, useCurrentMatches } from '@solidjs/router'
+import { createMemo } from 'solid-js'
 
 import { Home } from '@/components/Home'
 import { CalibrationView } from '@/components/CalibrationView'
@@ -10,33 +11,41 @@ import { VERSION } from '@/version'
 
 import styles from '@/components/App.module.css'
 
-import { useLocation } from '@solidjs/router'
-
 export function App() {
-  const location = useLocation()
+  const Layout = (props: RouteSectionProps) => {
+    const matches = useCurrentMatches()
+    const currentPath = createMemo(() => matches()[0]?.path || '/')
 
-  const isHome = location.pathname === '/' || location.pathname === '/target'
+    const isHome = createMemo(() => currentPath() === '/')
+    const isTarget = createMemo(() => currentPath() === '/target')
+    const isCalibrate = createMemo(() => currentPath() === '/calibrate')
+    const isResults = createMemo(() => currentPath() === '/results')
+    const isDebug = createMemo(() => currentPath() === '/debug')
 
-  const Layout = (props: RouteSectionProps) => (
-    <>
-      <nav class={styles.nav}>
-        <A href="/" class={isHome ? styles.navBtnActive : styles.navBtn}>
-          Home
-        </A>
-        <A href="/target" class={isHome ? styles.navBtn : styles.navBtn}>
-          Target
-        </A>
-        <A href="/calibrate" class={isHome ? styles.navBtn : styles.navBtn}>
-          Calibrate
-        </A>
-        <A href="/results" class={isHome ? styles.navBtn : styles.navBtn}>
-          Results
-        </A>
-        <span class={styles.version}>{VERSION}</span>
-      </nav>
-      <main class={styles.main}>{props.children}</main>
-    </>
-  )
+    return (
+      <>
+        <nav class={styles.nav}>
+          <A href="/" class={[styles.navBtn, { [styles.navBtnActive]: isHome() }]}>
+            Home
+          </A>
+          <A href="/target" class={[styles.navBtn, { [styles.navBtnActive]: isTarget() }]}>
+            Target
+          </A>
+          <A href="/calibrate" class={[styles.navBtn, { [styles.navBtnActive]: isCalibrate() }]}>
+            Calibrate
+          </A>
+          <A href="/results" class={[styles.navBtn, { [styles.navBtnActive]: isResults() }]}>
+            Results
+          </A>
+          <A href="/debug" class={[styles.navBtn, { [styles.navBtnActive]: isDebug() }]}>
+            Debug
+          </A>
+          <span class={styles.version}>{VERSION}</span>
+        </nav>
+        <main class={styles.main}>{props.children}</main>
+      </>
+    )
+  }
 
   return (
     <CameraStreamProvider>
