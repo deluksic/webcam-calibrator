@@ -53,6 +53,11 @@ export function codeToPattern(code: bigint): TagPattern {
   return pattern
 }
 
+/** Row-major 6×6 0/1 interior pattern for tag36h11 `id` (border is implicit). */
+export function tagIdPattern(id: number): TagPattern {
+  return codeToPattern(tag36h11Code(id))
+}
+
 /**
  * Fast popcount for 64-bit BigInt.
  */

@@ -7,16 +7,14 @@ import type { DisplayMode } from '@/gpu/cameraPipeline'
 import type { DetectedQuad } from '@/gpu/contour'
 import { calibrationQuadScore } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
-import type { TagObservation, CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
-import type { Point3 } from '@/lib/geometry'
-import { learnLayoutFromFrame, layoutToLabeledPoints, type TargetLayout } from '@/lib/targetLayout'
+import type { TagObservation, CalibrationFrameObservation, ImageTag } from '@/lib/calibrationTypes'
+import { learnLayoutFromFrame, layoutToObjectTags, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 import { calibApi, type CalibrationResult } from '@/workers/calibrationClient'
 
 import { RESOLUTION_LADDER, type Resolution } from './camera/cameraStreamAcquire'
 
 import styles from '@/components/CalibrationView.module.css'
-import pipelineStyles from '@/components/camera/LiveCameraPipeline.module.css'
 
 function deviceScore(d: MediaDeviceInfo): number {
   const label = d.label.toLowerCase()
@@ -72,7 +70,7 @@ const initialCalibRun: CalibRun = {
 const RES = RESOLUTION_LADDER
 
 function resolutionLabel(res: string): string {
-  const ideal = (RES as Record<string, typeof RES['medium']>)[res]
+  const ideal = (RES as Record<string, (typeof RES)['medium']>)[res]
   return `${ideal?.width.ideal}×${ideal?.height.ideal ?? 0}`
 }
 
@@ -118,11 +116,9 @@ function CalibrationView() {
     return [...list].sort((a, b) => deviceScore(b) - deviceScore(a))
   })
 
-  // DAG: calib is a pure derivation of (collection, layout, framePool).
-  const calibSignal = createSignal<CalibrationResult | null>(null)
-  const [calib, setCalibInner] = calibSignal
+  const [calib, setCalibInner] = createSignal<CalibrationResult>()
 
-  const setCalib = (r: CalibrationResult | null) => {
+  const setCalib = (r: CalibrationResult | undefined) => {
     setCalibInner(r)
     setLatestCalibration(r)
   }
@@ -138,7 +134,7 @@ function CalibrationView() {
   ) => {
     if (collection === 'idle' || !lay || framePool.length < 1) {
       lastSolveKey = undefined
-      setCalib(null)
+      setCalib(undefined)
       return
     }
     // Collect all tagIds present in the layout
@@ -149,12 +145,10 @@ function CalibrationView() {
     // Filter framePool to only include points from tags in the layout
     const filteredPool: CalibrationFrameObservation[] = []
     for (const frame of framePool) {
-      const filteredPoints = frame.framePoints.filter((fp) => {
-        const tagId = Math.floor(fp.pointId / 10000)
-        return layoutTagIds.has(tagId)
-      })
-      if (filteredPoints.length >= 8) {
-        filteredPool.push({ frameId: frame.frameId, framePoints: filteredPoints })
+      const filteredTags = frame.tags.filter((ft) => layoutTagIds.has(ft.tagId))
+      const cornerCount = filteredTags.length * 4
+      if (cornerCount >= 8) {
+        filteredPool.push({ frameId: frame.frameId, tags: filteredTags })
       }
     }
     if (filteredPool.length < 3) {
@@ -169,7 +163,7 @@ function CalibrationView() {
     }
     lastSolveKey = solveKey
 
-    const layoutPoints = layoutToLabeledPoints(lay)
+    const layoutTagsModel = layoutToObjectTags(lay)
     const size = frameSize
     if (!size) {
       setCalib({ kind: 'error', reason: 'too-few-views', details: 'waiting-for-video-size' })
@@ -179,7 +173,7 @@ function CalibrationView() {
     const currentVersion = ++pendingVersion
     try {
       setSolveInFlight((n) => n + 1)
-      const result = await calibApi.solveCalibration(layoutPoints, filteredPool, {
+      const result = await calibApi.solveCalibration(layoutTagsModel, filteredPool, {
         width: w,
         height: h,
       })
@@ -223,24 +217,23 @@ function CalibrationView() {
     if (!c || c.kind !== 'ok' || !layout()) {
       return layout()
     }
-    if (c.updatedTargetPoints.length < 4) {
+    if (c.updatedTargets.length < 1) {
       return layout()
     }
-    const refined = new Map<number, Point3[]>()
-    for (const p of c.updatedTargetPoints) {
-      const tagId = Math.floor(p.pointId / 10000)
-      const cornerId = p.pointId % 10000
-      if (cornerId < 0 || cornerId > 3) {
-        continue
+    const refined = new Map<number, { x: number; y: number }[]>()
+    for (const t of c.updatedTargets) {
+      const { tagId, corners: objCorners } = t
+      for (let cornerId = 0; cornerId < 4; cornerId++) {
+        const p = objCorners[cornerId]!
+        const out = refined.get(tagId) ?? [
+          { x: 0, y: 0 },
+          { x: 0, y: 0 },
+          { x: 0, y: 0 },
+          { x: 0, y: 0 },
+        ]
+        out[cornerId] = { x: p.x, y: p.y }
+        refined.set(tagId, out)
       }
-      const corners = refined.get(tagId) ?? [
-        { x: 0, y: 0, z: 0 },
-        { x: 0, y: 0, z: 0 },
-        { x: 0, y: 0, z: 0 },
-        { x: 0, y: 0, z: 0 },
-      ]
-      corners[cornerId] = { x: p.position.x, y: p.position.y, z: p.position.z }
-      refined.set(tagId, corners)
     }
     if (refined.size === 0) {
       return layout()
@@ -311,22 +304,22 @@ function CalibrationView() {
       }
     }
 
-    // Convert tags to labeled points for this frame
-    const framePoints: FramePoint[] = []
-    for (const t of uniqueTags) {
-      const pointId = t.tagId * 10000
-      for (let j = 0; j < 4; j++) {
-        framePoints.push({
-          pointId: pointId + j,
-          imagePoint: t.corners[j]!,
-        })
-      }
-    }
+    const frameTagsModel = uniqueTags.map(
+      (t): ImageTag => ({
+        tagId: t.tagId,
+        corners: [
+          { ...t.corners[0]!, score: t.score },
+          { ...t.corners[1]!, score: t.score },
+          { ...t.corners[2]!, score: t.score },
+          { ...t.corners[3]!, score: t.score },
+        ],
+      }),
+    )
 
     setRun((r) => {
       const { next, evicted } = mergeCalibrationFramesTopK(
         r.framePool,
-        [{ frameId: Date.now(), framePoints }],
+        [{ frameId: Date.now(), tags: frameTagsModel }],
         DEFAULT_CALIBRATION_TOP_K,
       )
       return {
@@ -345,8 +338,8 @@ function CalibrationView() {
   const uniqueTagCount = createMemo(() => {
     const s = new Set<number>()
     for (const f of run().framePool) {
-      for (const fp of f.framePoints) {
-        s.add(Math.floor(fp.pointId / 10000))
+      for (const ft of f.tags) {
+        s.add(ft.tagId)
       }
     }
     return s.size
@@ -470,7 +463,7 @@ function CalibrationView() {
           onClick={() => {
             setLayout(undefined)
             setReproj(null)
-            setCalib(null)
+            setCalib(undefined)
             setRun({
               collection: 'idle',
               framePool: [],

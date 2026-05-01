@@ -4,13 +4,15 @@ export const DEFAULT_CALIBRATION_TOP_K = 10_000
 
 function frameTotalScore(f: CalibrationFrameObservation): number {
   let s = 0
-  for (const fp of f.framePoints) {
-    s += fp.imagePoint.score ?? 0
+  for (const ft of f.tags) {
+    for (const p of ft.corners) {
+      s += p.score ?? 0
+    }
   }
   return s
 }
 
-/** Lower total score evicted first; tie-break older `frameId` first, then more points first. */
+/** Lower total score evicted first; tie-break older `frameId` first, then more tag rows first. */
 function compareFrames(a: CalibrationFrameObservation, b: CalibrationFrameObservation): number {
   const as = frameTotalScore(a)
   const bs = frameTotalScore(b)
@@ -20,7 +22,7 @@ function compareFrames(a: CalibrationFrameObservation, b: CalibrationFrameObserv
   if (a.frameId !== b.frameId) {
     return a.frameId - b.frameId
   }
-  return a.framePoints.length - b.framePoints.length
+  return a.tags.length - b.tags.length
 }
 
 /**

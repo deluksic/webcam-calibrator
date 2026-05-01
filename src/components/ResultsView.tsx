@@ -6,24 +6,32 @@ import { initGPU } from '@/gpu/init'
 import { clearResultsAttachments } from '@/gpu/resultsViz_clear'
 import {
   MAX_RESULTS_MARKER_POINTS,
+  MAX_RESULTS_TAG_QUADS,
   allocAxisUni,
   allocMarkerUni,
   allocMarkersCenters,
+  allocTagQuadUni,
+  allocTagQuads,
   axisBindLayout,
   markersBindLayout,
+  tagQuadsBindLayout,
 } from '@/gpu/resultsVizLayouts'
 import {
   RESULTS_MSAA_SAMPLE_COUNT,
   createAxesResultsPipeline,
   createMarkerResultsPipeline,
+  createTagQuadsResultsPipeline,
   destroyGpuTexture,
   encodeResultsCanvasFrame,
 } from '@/gpu/resultsVizPipelines'
-import { writeResultsMarkerAndAxisUniforms } from '@/lib/resultsFrameUniforms'
+import { applyOrbitPitchVerticalPlane, applyOrbitYawWorldY } from '@/lib/orbitOrthoMath'
+import { writeResultsFrameUniforms } from '@/lib/resultsFrameUniforms'
+import type { Vec3Arg } from 'wgpu-matrix'
 import {
-  centroidOfUpdatedPoints,
+  calibrationDefinedCornerCount,
   markerCenterWritesForGpu,
   orthoExtentYForPoints,
+  tagQuadWritesForGpu,
 } from '@/lib/resultsSceneCpu'
 import { createDragHandler } from '@/utils/createDragHandler'
 import { createPinchHandler } from '@/utils/createPinchHandler'
@@ -33,15 +41,18 @@ import styles from '@/components/ResultsView.module.css'
 
 const { navigator } = globalThis
 
-function clampPitch(p: number) {
-  return Math.min(1.42, Math.max(-1.36, p))
-}
+/** Unit direction from board origin toward the camera (initial framing). */
+const DEFAULT_ORBIT_EYE_DIR: Vec3Arg = [0.563, 0.247, 0.788]
+
+/** Workspace for orbit drag: yaw step → pitch step (avoid per-move vec3 allocations). */
+const orbitAfterYaw: Vec3Arg = [0, 0, 0]
+const orbitAfterPitch: Vec3Arg = [0, 0, 0]
 
 type CalibrationScene = {
   ok: CalibrationOk
-  centroid: Float32Array
   baseOrthoExtentY: number
   centerWrites: ReturnType<typeof markerCenterWritesForGpu>
+  tagQuadWrites: ReturnType<typeof tagQuadWritesForGpu>
 }
 
 type GpuPack = {
@@ -52,11 +63,26 @@ type GpuPack = {
   depthTex: GPUTexture
   markerGpu: ReturnType<typeof createMarkerResultsPipeline>
   axesGpu: ReturnType<typeof createAxesResultsPipeline>
+  tagQuadsGpu: ReturnType<typeof createTagQuadsResultsPipeline>
   markersBg: object
   axisBg: object
+  tagQuadsBg: object
   markerUni: ReturnType<typeof allocMarkerUni>
   axisUni: ReturnType<typeof allocAxisUni>
+  tagQuadUni: ReturnType<typeof allocTagQuadUni>
   centersBuf: ReturnType<typeof allocMarkersCenters>
+  tagQuadsBuf: ReturnType<typeof allocTagQuads>
+}
+
+function downloadCalibrationOkJson(c: CalibrationOk) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const blob = new Blob([JSON.stringify(c, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `calibration-ok-${stamp}.json`
+  a.click()
+  queueMicrotask(() => URL.revokeObjectURL(url))
 }
 
 export function ResultsView() {
@@ -65,8 +91,11 @@ export function ResultsView() {
   const [gpuErr, setGpuErr] = createSignal('')
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>()
   const [gpuPack, setGpuPack] = createSignal<GpuPack>()
-  const [orbitYaw, setOrbitYaw] = createSignal(0.62)
-  const [orbitPitch, setOrbitPitch] = createSignal(0.25)
+  const [orbitEyeDir, setOrbitEyeDir] = createSignal<Vec3Arg>([
+    DEFAULT_ORBIT_EYE_DIR[0]!,
+    DEFAULT_ORBIT_EYE_DIR[1]!,
+    DEFAULT_ORBIT_EYE_DIR[2]!,
+  ])
   const [orbitZoom, setOrbitZoom] = createSignal(1)
 
   const startPinch = createPinchHandler((initEv) => {
@@ -99,17 +128,17 @@ export function ResultsView() {
     if (!c || c.kind !== 'ok') {
       return undefined
     }
-    const centroid = centroidOfUpdatedPoints(c)
     return {
       ok: c,
-      centroid,
-      baseOrthoExtentY: orthoExtentYForPoints(c, centroid),
-      centerWrites: markerCenterWritesForGpu(c, centroid),
+      baseOrthoExtentY: orthoExtentYForPoints(c),
+      centerWrites: markerCenterWritesForGpu(c),
+      tagQuadWrites: tagQuadWritesForGpu(c),
     }
   })
 
   /** Reset when GPU context is recreated so storage is re-uploaded before draw */
   let lastCentersUploadedFor: CalibrationScene | undefined
+  let lastTagQuadsUploadedFor: CalibrationScene | undefined
 
   let rafId = 0
   const stopRaf = () => {
@@ -139,7 +168,8 @@ export function ResultsView() {
       return
     }
 
-    const pointCount = Math.min(scene.ok.updatedTargetPoints.length, MAX_RESULTS_MARKER_POINTS)
+    const pointCount = Math.min(calibrationDefinedCornerCount(scene.ok), MAX_RESULTS_MARKER_POINTS)
+    const tagCount = Math.min(scene.tagQuadWrites.length, MAX_RESULTS_TAG_QUADS)
 
     if (lastCentersUploadedFor !== scene) {
       try {
@@ -150,10 +180,18 @@ export function ResultsView() {
       }
     }
 
-    writeResultsMarkerAndAxisUniforms({
+    if (lastTagQuadsUploadedFor !== scene) {
+      try {
+        gpu.tagQuadsBuf.write(scene.tagQuadWrites)
+        lastTagQuadsUploadedFor = scene
+      } catch (e) {
+        console.warn('[ResultsView] tag quad upload failed', e)
+      }
+    }
+
+    writeResultsFrameUniforms({
       aspectWidthOverHeight: el.width / el.height,
-      yawRad: orbitYaw(),
-      pitchRad: orbitPitch(),
+      orbitEyeDirUnit: orbitEyeDir(),
       baseOrthoExtentY: scene.baseOrthoExtentY,
       orthoZoom: orbitZoom(),
       viewportWidthPx: el.width,
@@ -161,6 +199,7 @@ export function ResultsView() {
       pointCount,
       markerUni: gpu.markerUni,
       axisUni: gpu.axisUni,
+      tagQuadUni: gpu.tagQuadUni,
     })
 
     encodeResultsCanvasFrame(
@@ -170,9 +209,12 @@ export function ResultsView() {
       depthView,
       gpu.markerGpu,
       gpu.axesGpu,
+      gpu.tagQuadsGpu,
       gpu.markersBg,
       gpu.axisBg,
+      gpu.tagQuadsBg,
       pointCount,
+      tagCount,
     )
   }
 
@@ -252,9 +294,12 @@ export function ResultsView() {
 
           const markerGpu = createMarkerResultsPipeline(rt, format)
           const axesGpu = createAxesResultsPipeline(rt, format)
+          const tagQuadsGpu = createTagQuadsResultsPipeline(rt, format)
           const markerUni = allocMarkerUni(rt)
           const axisUni = allocAxisUni(rt)
+          const tagQuadUni = allocTagQuadUni(rt)
           const centersBuf = allocMarkersCenters(rt)
+          const tagQuadsBuf = allocTagQuads(rt)
 
           const markersBg = rt.createBindGroup(markersBindLayout, {
             markerUniform: markerUni,
@@ -262,6 +307,10 @@ export function ResultsView() {
           })
           const axisBg = rt.createBindGroup(axisBindLayout, {
             axisUniform: axisUni,
+          })
+          const tagQuadsBg = rt.createBindGroup(tagQuadsBindLayout, {
+            tagQuadUniform: tagQuadUni,
+            tags: tagQuadsBuf,
           })
 
           el.addEventListener('touchstart', onTwoFingerTouch, { passive: false })
@@ -279,11 +328,15 @@ export function ResultsView() {
             depthTex: depthTexture,
             markerGpu,
             axesGpu,
+            tagQuadsGpu,
             markersBg,
             axisBg,
+            tagQuadsBg,
             markerUni,
             axisUni,
+            tagQuadUni,
             centersBuf,
+            tagQuadsBuf,
           })
 
           stopRaf()
@@ -298,6 +351,7 @@ export function ResultsView() {
       return () => {
         canceled = true
         lastCentersUploadedFor = undefined
+        lastTagQuadsUploadedFor = undefined
         stopRaf()
         resizeObs?.disconnect()
         el.removeEventListener('touchstart', onTwoFingerTouch)
@@ -314,10 +368,23 @@ export function ResultsView() {
     if (!c || c.kind !== 'ok') {
       return ''
     }
-    return `RMS ${c.rmsPx.toFixed(3)} px • ${c.extrinsics.length} views • ${c.updatedTargetPoints.length} points`
+    return `RMS ${c.rmsPx.toFixed(3)} px • ${c.extrinsics.length} views • ${calibrationDefinedCornerCount(c)} points`
   })
 
   const showCalibrateHint = createMemo(() => latestCalibration()?.kind !== 'ok')
+
+  const canExportCalibrationJson = createMemo(() => {
+    const c = latestCalibration()
+    return c !== undefined && c.kind === 'ok'
+  })
+
+  function exportCalibrationJson() {
+    const c = latestCalibration()
+    if (c === undefined || c.kind !== 'ok') {
+      return
+    }
+    downloadCalibrationOkJson(c)
+  }
 
   const onDragStartCanvas = createDragHandler((down) => {
     let lastX = down.clientX
@@ -329,9 +396,15 @@ export function ResultsView() {
         const dy = move.clientY - lastY
         lastX = move.clientX
         lastY = move.clientY
-        // Turntable: drag right → positive yaw; drag down → lower pitch (look more from above)
-        setOrbitYaw((y) => y + dx * sens)
-        setOrbitPitch((p) => clampPitch(p - dy * sens))
+        // Turntable: drag right → positive yaw around world Y; drag down → pitch in the current vertical plane
+        setOrbitEyeDir((dir) => {
+          const v = applyOrbitPitchVerticalPlane(
+            applyOrbitYawWorldY(dir, -dx * sens, orbitAfterYaw),
+            -dy * sens,
+            orbitAfterPitch,
+          )
+          return [v[0]!, v[1]!, v[2]!]
+        })
       },
     }
   })
@@ -340,7 +413,17 @@ export function ResultsView() {
     <div class={styles.root}>
       <Show when={!gpuErr()} fallback={<p class={styles.placeholderText}>{gpuErr() || 'Unavailable'}</p>}>
         <div class={styles.panel}>
-          <p class={[styles.meta, !statsLine() ? styles.metaHidden : false]}>{statsLine()}</p>
+          <div class={styles.toolbar}>
+            <p class={[styles.meta, !statsLine() ? styles.metaHidden : false]}>{statsLine()}</p>
+            <button
+              type="button"
+              class={styles.exportJsonBtn}
+              disabled={!canExportCalibrationJson()}
+              onClick={exportCalibrationJson}
+            >
+              Export JSON
+            </button>
+          </div>
           <Show when={showCalibrateHint()}>
             <p class={styles.hint}>
               After Calibrate reports a pooled ok solve, this view shows refined object points and axes. Reset on

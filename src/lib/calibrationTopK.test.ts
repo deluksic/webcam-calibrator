@@ -1,19 +1,22 @@
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
-import type { CalibrationFrameObservation, FramePoint } from '@/lib/calibrationTypes'
+import type { CalibrationFrameObservation } from '@/lib/calibrationTypes'
+import type { Corners } from '@/lib/geometry'
 
 function frame(frameId: number, tagScores: { tagId: number; score: number }[]): CalibrationFrameObservation {
-  const framePoints: FramePoint[] = []
-  for (const { tagId, score } of tagScores) {
-    const pointId = tagId * 10000
-    for (let j = 0; j < 4; j++) {
-      framePoints.push({ pointId: pointId + j, imagePoint: { x: 0, y: 0, score } })
-    }
-  }
+  const tags = tagScores.map(({ tagId, score }) => ({
+    tagId,
+    corners: [
+      { x: 0, y: 0, score },
+      { x: 0, y: 0, score },
+      { x: 0, y: 0, score },
+      { x: 0, y: 0, score },
+    ] satisfies Corners,
+  }))
   return {
     frameId,
-    framePoints,
+    tags,
   }
 }
 
@@ -33,7 +36,7 @@ describe('mergeCalibrationFramesTopK', () => {
     const b = mergeCalibrationFramesTopK(a.next, [frame(2, [{ tagId: 4, score: 0.2 }])], k)
     expect(b.evicted).toBe(1)
     expect(b.next.length).toBe(3)
-    const tagIds = b.next.flatMap((f) => f.framePoints.map((fp) => Math.floor(fp.pointId / 10000)))
+    const tagIds = b.next.flatMap((f) => f.tags.map((t) => t.tagId))
     expect(tagIds).not.toContain(4)
     expect(tagIds).toContain(1)
   })

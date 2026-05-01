@@ -13,9 +13,9 @@ import {
 import type { TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import { arrayOf, u16 } from 'typegpu/data'
-import { mul, select } from 'typegpu/std'
+import { clamp, floor, max, mul, select } from 'typegpu/std'
 
-import { MARKER_DISK_SUBDIV, axisBindLayout, markersBindLayout } from '@/gpu/resultsVizLayouts'
+import { MARKER_DISK_SUBDIV, axisBindLayout, markersBindLayout, tagQuadsBindLayout } from '@/gpu/resultsVizLayouts'
 
 /**
  * When true: marker pass draws one bright clip-space triangle and ignores projection/circle math.
@@ -30,6 +30,9 @@ const axisTriangleIndexU16 = new Uint16Array(lineSegmentIndices(AXIS_JOIN_MAX))
 
 /** Same as examples-from-typegpu/lines-combinations (MSAA x4). */
 export const RESULTS_MSAA_SAMPLE_COUNT = 4 as const
+
+/** NDC depth offset (× w) so marker disks win over coplanar tag quads; WebGPU nearer = smaller z. */
+const RESULTS_MARKER_DEPTH_BIAS_NDC = 0.0005 as const
 
 export function createMarkerResultsPipeline(root: TgpuRoot, presentationFormat: GPUTextureFormat) {
   if (RESULTS_MARKERS_CLIP_SPACE_DIAGNOSTIC_TRIANGLE) {
@@ -68,8 +71,8 @@ export function createMarkerResultsPipeline(root: TgpuRoot, presentationFormat: 
       },
       depthStencil: {
         format: 'depth24plus',
-        depthWriteEnabled: false,
-        depthCompare: 'always',
+        depthWriteEnabled: true,
+        depthCompare: 'less',
       },
       multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
     })
@@ -88,16 +91,21 @@ export function createMarkerResultsPipeline(root: TgpuRoot, presentationFormat: 
     'use gpu'
     const u = markersBindLayout.$.markerUniform
     const row = markersBindLayout.$.centers[instanceIndex]!
-    const pc = row.positionCentroidRelativeBoardUnits
-    const centerClip = mul(u.clipHomogeneousMatrixFromCentroidBoard, d.vec4f(pc.x, pc.y, pc.z, d.f32(1)))
+    const pc = row.positionBoardUnits
+    const centerClip = mul(u.clipHomogeneousMatrixFromBoard, d.vec4f(pc.x, -pc.y, pc.z, d.f32(1)))
     const unit = circle(vertexIndex)
     const half = u.viewportHalfSizePixels
     const rPx = u.markerDiskRadiusPixels
-    const dNdcX = unit.x * rPx / half.x
-    const dNdcY = unit.y * rPx / half.y
+    const dNdcX = (unit.x * rPx) / half.x
+    const dNdcY = (unit.y * rPx) / half.y
     const w = centerClip.w
     return {
-      clipPos: d.vec4f(centerClip.x + dNdcX * w, centerClip.y + dNdcY * w, centerClip.z, centerClip.w),
+      clipPos: d.vec4f(
+        centerClip.x + dNdcX * w,
+        centerClip.y + dNdcY * w,
+        centerClip.z - d.f32(RESULTS_MARKER_DEPTH_BIAS_NDC) * w,
+        centerClip.w,
+      ),
     }
   })
 
@@ -120,9 +128,8 @@ export function createMarkerResultsPipeline(root: TgpuRoot, presentationFormat: 
     },
     depthStencil: {
       format: 'depth24plus',
-      /** Circles example has no depth; depth test was hiding disks in the MSAA pass. */
-      depthWriteEnabled: false,
-      depthCompare: 'always',
+      depthWriteEnabled: true,
+      depthCompare: 'less',
     },
     multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
   })
@@ -152,14 +159,15 @@ export function createAxesResultsPipeline(root: TgpuRoot, presentationFormat: GP
   })(({ vertexIndex, instanceIndex }) => {
     'use gpu'
     const u = axisBindLayout.$.axisUniform
-    const M = u.clipHomogeneousMatrixFromCentroidBoard
-    const reach = u.worldAxisReachDistanceCentroidBoardUnits
-    const ex = d.vec4f(reach, 0, 0, 1)
-    const ey = d.vec4f(0, reach, 0, 1)
-    const ez = d.vec4f(0, 0, reach, 1)
+    const M = u.clipHomogeneousMatrixFromBoard
+    const reach = u.worldAxisReachDistanceBoardUnits
+    const o = u.axisOriginBoard
+    const ex = d.vec4f(o.x + reach, o.y, o.z, 1)
+    const ey = d.vec4f(o.x, o.y + reach, o.z, 1)
+    const ez = d.vec4f(o.x, o.y, o.z + reach, 1)
     const tipBoard = select(select(ex, ey, instanceIndex === d.u32(1)), ez, instanceIndex === d.u32(2))
 
-    const clipOrigin = mul(M, d.vec4f(0, 0, 0, 1))
+    const clipOrigin = mul(M, d.vec4f(o.x, o.y, o.z, 1))
     const clipTip = mul(M, tipBoard)
     const invWo = d.f32(1) / clipOrigin.w
     const invWt = d.f32(1) / clipTip.w
@@ -180,8 +188,19 @@ export function createAxesResultsPipeline(root: TgpuRoot, presentationFormat: GP
     const measured = result.vertexPosition
     const ndcExtrudedClipXY = d.vec2f(measured.x / halfWH.x, measured.y / halfWH.y)
 
+    const ndcZ0 = clipOrigin.z * invWo
+    const ndcZ1 = clipTip.z * invWt
+    const spine = tipPixelOffsetFromFramebufferCenter - originPixelOffsetFromFramebufferCenter
+    const spineLenSq = spine.x * spine.x + spine.y * spine.y
+    const fromO = d.vec2f(
+      measured.x - originPixelOffsetFromFramebufferCenter.x,
+      measured.y - originPixelOffsetFromFramebufferCenter.y,
+    )
+    const t = clamp((fromO.x * spine.x + fromO.y * spine.y) / max(spineLenSq, d.f32(1e-8)), d.f32(0), d.f32(1))
+    const ndcZ = ndcZ0 * (d.f32(1) - t) + ndcZ1 * t
+
     const w = result.w
-    const clipPos = d.vec4f(ndcExtrudedClipXY.x * w, ndcExtrudedClipXY.y * w, d.f32(0.5) * w, w)
+    const clipPos = d.vec4f(ndcExtrudedClipXY.x * w, ndcExtrudedClipXY.y * w, ndcZ * w, w)
 
     return {
       clipPos,
@@ -220,8 +239,8 @@ export function createAxesResultsPipeline(root: TgpuRoot, presentationFormat: GP
       },
       depthStencil: {
         format: 'depth24plus',
-        depthWriteEnabled: false,
-        depthCompare: 'always',
+        depthWriteEnabled: true,
+        depthCompare: 'less',
       },
       multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
     })
@@ -233,6 +252,88 @@ export function createAxesResultsPipeline(root: TgpuRoot, presentationFormat: GP
   }
 }
 
+/** Two triangles for a TL/TR/BL/BR quad: (TL, TR, BL), (BL, TR, BR). */
+const tagQuadIndexU16 = new Uint16Array([0, 1, 2, 2, 1, 3])
+
+export function createTagQuadsResultsPipeline(root: TgpuRoot, presentationFormat: GPUTextureFormat) {
+  const vert = tgpu.vertexFn({
+    in: {
+      vertexIndex: d.builtin.vertexIndex,
+      instanceIndex: d.builtin.instanceIndex,
+    },
+    out: {
+      clipPos: d.builtin.position,
+      uv: d.vec2f,
+      instanceIndexFlat: d.interpolate('flat', d.u32),
+    },
+  })(({ vertexIndex, instanceIndex }) => {
+    'use gpu'
+    const u = tagQuadsBindLayout.$.tagQuadUniform
+    const tag = tagQuadsBindLayout.$.tags[instanceIndex]!
+    const p = tag.corners[vertexIndex]!
+    const uvU = d.f32(vertexIndex & d.u32(1))
+    const uvV = d.f32(vertexIndex >> d.u32(1))
+    return {
+      clipPos: mul(u.clipHomogeneousMatrixFromBoard, d.vec4f(p.x, -p.y, p.z, d.f32(1))),
+      uv: d.vec2f(uvU, uvV),
+      instanceIndexFlat: instanceIndex,
+    }
+  })
+
+  const frag = tgpu.fragmentFn({
+    in: {
+      uv: d.vec2f,
+      instanceIndexFlat: d.interpolate('flat', d.u32),
+      frontFacing: d.builtin.frontFacing,
+    },
+    out: d.vec4f,
+  })(({ uv, instanceIndexFlat, frontFacing }) => {
+    'use gpu'
+    if (frontFacing) {
+      return d.vec4f(0, 0, 0, 1)
+    }
+    const cell = d.vec2i(floor(uv * d.f32(8)))
+    const onBorder = cell.x <= d.i32(0) || cell.x >= d.i32(7) || cell.y <= d.i32(0) || cell.y >= d.i32(7)
+    if (onBorder) {
+      return d.vec4f(0, 0, 0, 1)
+    }
+    const row = d.u32(cell.y - d.i32(1))
+    const col = d.u32(cell.x - d.i32(1))
+    const bitIndex = row * d.u32(6) + col
+    const tag = tagQuadsBindLayout.$.tags[instanceIndexFlat]!
+    const word = select(tag.packedPattern.x, tag.packedPattern.y, bitIndex >= d.u32(32))
+    const shift = select(bitIndex, bitIndex - d.u32(32), bitIndex >= d.u32(32))
+    const bit = (word >> shift) & d.u32(1)
+    const v = d.f32(bit)
+    return d.vec4f(v, v, v, 1)
+  })
+
+  const pipeline = root
+    .createRenderPipeline({
+      vertex: vert,
+      fragment: frag,
+      targets: {
+        format: presentationFormat,
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'none',
+      },
+      depthStencil: {
+        format: 'depth24plus',
+        depthWriteEnabled: true,
+        depthCompare: 'less',
+      },
+      multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
+    })
+    .withIndexBuffer(root.createBuffer(arrayOf(u16, tagQuadIndexU16.length), tagQuadIndexU16).$usage('index'))
+
+  return {
+    pipeline,
+    indexCount: tagQuadIndexU16.length,
+  }
+}
+
 export function encodeResultsCanvasFrame(
   root: TgpuRoot,
   context: GPUCanvasContext,
@@ -240,9 +341,12 @@ export function encodeResultsCanvasFrame(
   depthView: GPUTextureView,
   markerGpu: ReturnType<typeof createMarkerResultsPipeline>,
   axesGpu: ReturnType<typeof createAxesResultsPipeline>,
+  tagQuadsGpu: ReturnType<typeof createTagQuadsResultsPipeline>,
   markerBg: object,
   axisBg: object,
+  tagQuadsBg: object,
   markerInstances: number,
+  tagCount: number,
 ): void {
   const enc = root.device.createCommandEncoder({ label: 'results frame' })
   const resolveTarget = context.getCurrentTexture().createView()
@@ -252,7 +356,7 @@ export function encodeResultsCanvasFrame(
       {
         view: msaaColorView,
         resolveTarget,
-        clearValue: [0.05, 0.05, 0.065, 1],
+        clearValue: [0.1, 0.1, 0.2, 1],
         loadOp: 'clear',
         storeOp: 'discard',
       },
@@ -269,6 +373,12 @@ export function encodeResultsCanvasFrame(
     .with(pass)
     .with(axisBg as never)
     .drawIndexed(axesGpu.axisIndexCount, 3)
+  if (tagCount > 0) {
+    tagQuadsGpu.pipeline
+      .with(pass)
+      .with(tagQuadsBg as never)
+      .drawIndexed(tagQuadsGpu.indexCount, tagCount)
+  }
   markerGpu.pipeline
     .with(pass)
     .with(markerBg as never)

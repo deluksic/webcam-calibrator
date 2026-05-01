@@ -15,7 +15,7 @@ export function clearResultsAttachments(
       {
         view: msaaColorView,
         resolveTarget,
-        clearValue: [0.05, 0.05, 0.065, 1],
+        clearValue: [0.1, 0.1, 0.2, 1],
         loadOp: 'clear',
         storeOp: 'discard',
       },
