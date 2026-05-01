@@ -9,6 +9,7 @@ overrides:
   solid-js: 2.0.0-beta.7
   babel-preset-solid: 2.0.0-beta.7
   typescript: npm:tsover@latest
+  typegpu: 0.11.2
 
 importers:
 
@@ -23,6 +24,9 @@ importers:
       '@solidjs/web':
         specifier: 2.0.0-beta.7
         version: 2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7)
+      '@typegpu/geometry':
+        specifier: link:../TypeGPU/packages/typegpu-geometry
+        version: link:../TypeGPU/packages/typegpu-geometry
       comlink:
         specifier: ^4.4.2
         version: 4.4.2
@@ -30,8 +34,11 @@ importers:
         specifier: 2.0.0-beta.7
         version: 2.0.0-beta.7
       typegpu:
-        specifier: ^0.11.2
+        specifier: 0.11.2
         version: 0.11.2
+      wgpu-matrix:
+        specifier: ^3.4.2
+        version: 3.4.2
     devDependencies:
       '@testing-library/jest-dom':
         specifier: ^6.9.1
@@ -1631,7 +1638,7 @@ packages:
   unplugin-typegpu@0.11.0:
     resolution: {integrity: sha512-5uEOrSbs4H+hFqlMd7PcAQAIxJy5uMl5gGdZurI6NeyQWaNBxO4jkHFo/yrxjXpSiQFiz431j7sou2eSIjjzCA==}
     peerDependencies:
-      typegpu: ^0.11.0
+      typegpu: 0.11.2
 
   unplugin@2.3.11:
     resolution: {integrity: sha512-5uKD0nqiYVzlmCRs01Fhs2BdkEgBS3SAVP6ndrBsuK42iC2+JHyxM05Rm9G8+5mkmRtzMZGY8Ct5+mliZxU/Ww==}
@@ -1763,6 +1770,9 @@ packages:
 
   webpack-virtual-modules@0.6.2:
     resolution: {integrity: sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ==}
+
+  wgpu-matrix@3.4.2:
+    resolution: {integrity: sha512-IfZFbG7olEYBD76VCZy2TzqM57GKy3LT++AZh37tMHPPByO6R2h61zXGBZFNPi2IzxNivNi8y5dvze5PjaczjA==}
 
   whatwg-mimetype@5.0.0:
     resolution: {integrity: sha512-sXcNcHOC51uPGF0P/D4NVtrkjSU2fNsm9iog4ZvZJsL3rjoDAzXZhkm2MWt1y+PUdggKAYVoMAIYcs78wJ51Cw==}
@@ -3268,6 +3278,8 @@ snapshots:
   webidl-conversions@8.0.1: {}
 
   webpack-virtual-modules@0.6.2: {}
+
+  wgpu-matrix@3.4.2: {}
 
   whatwg-mimetype@5.0.0: {}
 

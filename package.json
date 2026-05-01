@@ -16,9 +16,11 @@
     "@deluksic/opencv-calibration-wasm": "^0.2.4",
     "@solidjs/router": "0.17.0-next.2",
     "@solidjs/web": "2.0.0-beta.7",
+    "@typegpu/geometry": "link:../TypeGPU/packages/typegpu-geometry",
     "comlink": "^4.4.2",
     "solid-js": "2.0.0-beta.7",
-    "typegpu": "^0.11.2"
+    "typegpu": "^0.11.2",
+    "wgpu-matrix": "^3.4.2"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
@@ -43,7 +45,8 @@
       "@solidjs/web": "2.0.0-beta.7",
       "solid-js": "2.0.0-beta.7",
       "babel-preset-solid": "2.0.0-beta.7",
-      "typescript": "npm:tsover@latest"
+      "typescript": "npm:tsover@latest",
+      "typegpu": "0.11.2"
     }
   }
 }

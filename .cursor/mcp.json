@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcpServers": {
+    "typegpu_inspector": {
+      "type": "local",
+      "command": "npx",
+      "args": ["typegpu-runtime-inspector-mcp@latest"],
+      "enabled": true
+    }
+  }
+}

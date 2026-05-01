@@ -1,5 +1,6 @@
 import { Errored, For, createMemo, createSignal, createEffect } from 'solid-js'
 
+import { useCalibrationLatest } from '@/components/calibration/CalibrationLatestContext'
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
@@ -92,6 +93,7 @@ function percentile(sorted: number[], p: number): number {
 
 function CalibrationView() {
   const cam = useCameraStream()
+  const { setLatestCalibration } = useCalibrationLatest()
   const [layout, setLayout] = createSignal<TargetLayout | undefined>(undefined)
   const [reproj, setReproj] = createSignal<{
     rms: number
@@ -118,7 +120,12 @@ function CalibrationView() {
 
   // DAG: calib is a pure derivation of (collection, layout, framePool).
   const calibSignal = createSignal<CalibrationResult | null>(null)
-  const [calib, setCalib] = calibSignal
+  const [calib, setCalibInner] = calibSignal
+
+  const setCalib = (r: CalibrationResult | null) => {
+    setCalibInner(r)
+    setLatestCalibration(r)
+  }
 
   // Track pending promise to avoid showing stale results
   let pendingVersion = 0
@@ -463,6 +470,7 @@ function CalibrationView() {
           onClick={() => {
             setLayout(undefined)
             setReproj(null)
+            setCalib(null)
             setRun({
               collection: 'idle',
               framePool: [],

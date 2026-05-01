@@ -1,10 +1,11 @@
 import { A, HashRouter, Route, type RouteSectionProps, useCurrentMatches } from '@solidjs/router'
 import { createMemo } from 'solid-js'
 
-import { Home } from '@/components/Home'
+import { CalibrationLatestProvider } from '@/components/calibration/CalibrationLatestContext'
 import { CalibrationView } from '@/components/CalibrationView'
 import { CameraStreamProvider } from '@/components/camera/CameraStreamContext'
 import { DebugView } from '@/components/DebugView'
+import { Home } from '@/components/Home'
 import { ResultsView } from '@/components/ResultsView'
 import { TargetView } from '@/components/TargetView'
 import { VERSION } from '@/version'
@@ -49,13 +50,15 @@ export function App() {
 
   return (
     <CameraStreamProvider>
-      <HashRouter root={Layout}>
-        <Route path="/" component={Home} />
-        <Route path="/target" component={TargetView} />
-        <Route path="/calibrate" component={CalibrationView} />
-        <Route path="/results" component={ResultsView} />
-        <Route path="/debug" component={DebugView} />
-      </HashRouter>
+      <CalibrationLatestProvider>
+        <HashRouter root={Layout}>
+          <Route path="/" component={Home} />
+          <Route path="/target" component={TargetView} />
+          <Route path="/calibrate" component={CalibrationView} />
+          <Route path="/results" component={ResultsView} />
+          <Route path="/debug" component={DebugView} />
+        </HashRouter>
+      </CalibrationLatestProvider>
     </CameraStreamProvider>
   )
 }
