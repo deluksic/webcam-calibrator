@@ -22,6 +22,7 @@ export type CalibrationOk = {
   K: CameraIntrinsics
   distortion: RationalDistortion8
   extrinsics: { frameId: number; R: Mat3; t: Vec3 }[]
+  /** Refined tags that appear in every solve view (subset of input `objectTags`). */
   updatedTargets: ObjectTag[]
   rmsPx: number
   perFrameRmsPx: [number, number][]
@@ -47,6 +48,22 @@ function unpackObjectPointRowKey(rowKey: number): { tagId: number; cornerId: num
     tagId: Math.trunc(rowKey / OBJECT_POINT_ROW_KEY_STRIDE),
     cornerId: rowKey % OBJECT_POINT_ROW_KEY_STRIDE,
   }
+}
+
+/** Tags that appear with all four corners in every frame (the intersection in `buildWasmInput`). */
+function tagIdsFullySharedAcrossViews(sharedObjectPointRowKeysSorted: number[]): Set<number> {
+  const cornerCountByTag = new Map<number, number>()
+  for (const rowKey of sharedObjectPointRowKeysSorted) {
+    const { tagId } = unpackObjectPointRowKey(rowKey)
+    cornerCountByTag.set(tagId, (cornerCountByTag.get(tagId) ?? 0) + 1)
+  }
+  const out = new Set<number>()
+  for (const [tagId, n] of cornerCountByTag) {
+    if (n === OBJECT_POINT_ROW_KEY_STRIDE) {
+      out.add(tagId)
+    }
+  }
+  return out
 }
 
 function rvecToMatrix(rvec: [number, number, number]): Mat3 {
@@ -211,7 +228,11 @@ const api: CalibWorkerApi = {
           corners[cornerId] = { x, y, z }
         }
       }
-      const updatedTargets = [...updatedTargetsMap.entries()].map(([tagId, corners]): ObjectTag => ({ tagId, corners }))
+      const tagsUsedInSolve = tagIdsFullySharedAcrossViews(sharedObjectPointRowKeysSorted)
+      const updatedTargets = [...updatedTargetsMap.entries()]
+        .filter(([tagId]) => tagsUsedInSolve.has(tagId))
+        .sort((a, b) => a[0] - b[0])
+        .map(([tagId, corners]): ObjectTag => ({ tagId, corners }))
 
       const refinedObjPointsAligned = imagePoints.map(() => refinedObjectPoints)
 

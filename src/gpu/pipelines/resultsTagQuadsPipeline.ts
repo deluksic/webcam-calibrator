@@ -123,7 +123,7 @@ export function createTagQuadsResultsStage(root: TgpuRoot, presentationFormat: G
       },
       out: {
         clipPos: d.builtin.position,
-        uv: d.vec2f,
+        uv: d.interpolate('linear, sample', d.vec2f),
         instanceIndexFlat: d.interpolate('flat', d.u32),
       },
     })(({ vertexIndex, instanceIndex }) => {
@@ -144,7 +144,8 @@ export function createTagQuadsResultsStage(root: TgpuRoot, presentationFormat: G
   const frag = tgpu
     .fragmentFn({
       in: {
-        uv: d.vec2f,
+        /** Per-sample UV so interior 6×6 grid edges antialias under MSAA (sample-rate shading). */
+        uv: d.interpolate('linear, sample', d.vec2f),
         instanceIndexFlat: d.interpolate('flat', d.u32),
         frontFacing: d.builtin.frontFacing,
       },

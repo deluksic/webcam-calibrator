@@ -22,6 +22,7 @@ import { writeAxisPassUniform } from '@/gpu/pipelines/resultsAxesPipeline'
 import { applyOrbitPitchVerticalPlane, applyOrbitYawWorldY } from '@/lib/orbitOrthoMath'
 import type { Vec3Arg } from 'wgpu-matrix'
 import { createDragHandler } from '@/utils/createDragHandler'
+import { createElementSize } from '@/utils/createElementSize'
 import { createPinchHandler } from '@/utils/createPinchHandler'
 import type { CalibrationOk } from '@/workers/calibration.worker'
 
@@ -49,6 +50,7 @@ export function ResultsView() {
 
   const [gpuErr, setGpuErr] = createSignal('')
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>()
+  const canvasSize = createElementSize(canvasEl)
   const [gpuPack, setGpuPack] = createSignal<ResultsCanvasPipeline>()
   const [orbitEyeDir, setOrbitEyeDir] = createSignal<Vec3Arg>([
     DEFAULT_ORBIT_EYE_DIR[0]!,
@@ -174,7 +176,6 @@ export function ResultsView() {
       }
 
       let canceled = false
-      let resizeObs: ResizeObserver | undefined
       let pip: ResultsCanvasPipeline | undefined
 
       void (async () => {
@@ -187,23 +188,7 @@ export function ResultsView() {
 
           const format = webgpu.getPreferredCanvasFormat()
 
-          const dpr = Math.min(2, globalThis.devicePixelRatio ?? 1)
-
           pip = createResultsCanvasPipeline(rt, el, format)
-
-          const resize = () => {
-            if (canceled || !pip) {
-              return
-            }
-            const rect = el.getBoundingClientRect()
-            el.width = Math.max(1, Math.round(rect.width * dpr))
-            el.height = Math.max(1, Math.round(rect.height * dpr))
-            pip.resize(el.width, el.height)
-          }
-
-          resize()
-          resizeObs = new ResizeObserver(resize)
-          resizeObs.observe(el)
 
           el.addEventListener('touchstart', onTwoFingerTouch, { passive: false })
           el.addEventListener('wheel', onWheelResults, { passive: false })
@@ -224,12 +209,28 @@ export function ResultsView() {
         lastCentersUploadedFor = undefined
         lastTagQuadsUploadedFor = undefined
         stopRaf()
-        resizeObs?.disconnect()
         el.removeEventListener('touchstart', onTwoFingerTouch)
         el.removeEventListener('wheel', onWheelResults)
         pip?.destroyTargets()
         setGpuPack(undefined)
       }
+    },
+  )
+
+  createEffect(
+    () => ({ el: canvasEl(), pip: gpuPack(), s: canvasSize() }),
+    ({ el, pip, s }) => {
+      if (!el || !pip || !s) {
+        return
+      }
+      const w = Math.max(1, Math.round(s.widthPX))
+      const h = Math.max(1, Math.round(s.heightPX))
+      if (el.width === w && el.height === h) {
+        return
+      }
+      el.width = w
+      el.height = h
+      pip.resize(w, h)
     },
   )
 

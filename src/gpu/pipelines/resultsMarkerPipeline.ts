@@ -1,23 +1,20 @@
 import { circle, circleVertexCount } from '@typegpu/geometry'
 import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
-import { mul, select } from 'typegpu/std'
+import { length, mix, mul, select, smoothstep } from 'typegpu/std'
 
-import {
-  resultsCameraBindLayout,
-  type ResultsCameraBindGroup,
-} from '@/gpu/pipelines/resultsCameraTransform'
+import { resultsCameraBindLayout, type ResultsCameraBindGroup } from '@/gpu/pipelines/resultsCameraTransform'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { cornersToVec3fArray } from '@/gpu/pipelines/resultsSceneCpu'
 import type { CalibrationOk } from '@/workers/calibration.worker'
 
 /** Triangulation subdiv for `circle()`; see `circleVertexCount`. */
-export const MARKER_DISK_SUBDIV = 2 as const
+export const MARKER_DISK_SUBDIV = 2
 
 /** Radius in framebuffer pixels (~CSS pixel at 1:1 backing store); disks are billboarded so size stays fixed on screen. */
-export const RESULTS_MARKER_DISK_RADIUS_PX = 8 as const
+export const RESULTS_MARKER_DISK_RADIUS_PX = 6
 
-export const MAX_RESULTS_MARKER_POINTS = 8192 as const
+export const MAX_RESULTS_MARKER_POINTS = 8192
 
 /** One calibration target in board space (storage buffer element). */
 export const MarkerCenter = d.struct({
@@ -162,7 +159,11 @@ export function createMarkerResultsStage(root: TgpuRoot, presentationFormat: GPU
         vertexIndex: d.builtin.vertexIndex,
         instanceIndex: d.builtin.instanceIndex,
       },
-      out: { clipPos: d.builtin.position },
+      out: {
+        clipPos: d.builtin.position,
+        /** Unit disk offset (circle perimeter verts); `length` after interpolation ≈ 0 at center, 1 at rim — same as axis `uv.y` for outline. */
+        diskUnit: d.vec2f,
+      },
     })(({ vertexIndex, instanceIndex }) => {
       'use gpu'
       const cam = resultsCameraBindLayout.$.transform
@@ -183,15 +184,22 @@ export function createMarkerResultsStage(root: TgpuRoot, presentationFormat: GPU
           centerClip.z - d.f32(RESULTS_MARKER_DEPTH_BIAS_NDC) * w,
           centerClip.w,
         ),
+        diskUnit: unit,
       }
     })
     .$uses({ camera: resultsCameraBindLayout, markers: markersBindLayout })
 
   const frag = tgpu.fragmentFn({
+    in: { diskUnit: d.vec2f },
     out: d.vec4f,
-  })(() => {
+  })(({ diskUnit }) => {
     'use gpu'
-    return d.vec4f(0.15, 0.92, 1.0, 1)
+    let rgb = d.vec3f(0.15, 0.92, 1.0)
+    const iy = length(diskUnit)
+    const outlineMix = smoothstep(0.7, 0.8, iy)
+    const outlineRgb = d.vec3f(0.05, 0.05, 0.07)
+    rgb = mix(rgb, outlineRgb, outlineMix)
+    return d.vec4f(rgb, 1)
   })
 
   const pipeline = root.createRenderPipeline({

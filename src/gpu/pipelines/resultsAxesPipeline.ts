@@ -11,12 +11,9 @@ import {
 import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import { arrayOf, u16 } from 'typegpu/data'
-import { clamp, max, mul, select } from 'typegpu/std'
+import { clamp, fwidth, max, min, mix, mul, select, smoothstep, sqrt } from 'typegpu/std'
 
-import {
-  resultsCameraBindLayout,
-  type ResultsCameraBindGroup,
-} from '@/gpu/pipelines/resultsCameraTransform'
+import { resultsCameraBindLayout, type ResultsCameraBindGroup } from '@/gpu/pipelines/resultsCameraTransform'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { WORLD_AXIS_HALF_LEN } from '@/lib/orbitOrthoMath'
 
@@ -48,8 +45,8 @@ function allocAxisPassUniform(root: TgpuRoot) {
 
 export type AxisPassUniformGpuBuffer = ReturnType<typeof allocAxisPassUniform>
 
-/** Half stroke width (~1.5 px) for axis arrows in framebuffer pixel space. */
-const axisPolylineHalfStrokePixels = 2 as const
+/** Half stroke width in framebuffer pixels (full line ≈ 2× this). */
+const axisPolylineHalfStrokePixels = 3.25 as const
 
 export function writeAxisPassUniform(buf: AxisPassUniformGpuBuffer): void {
   buf.write({
@@ -97,7 +94,10 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
       const originPixelOffsetFromFramebufferCenter = d.vec2f(ndcOrigin.x * halfWH.x, ndcOrigin.y * halfWH.y)
       const tipPixelOffsetFromFramebufferCenter = d.vec2f(ndcTip.x * halfWH.x, ndcTip.y * halfWH.y)
 
-      const rStroke = u.axisPolylineHalfStrokePixels
+      const spine = tipPixelOffsetFromFramebufferCenter - originPixelOffsetFromFramebufferCenter
+      const spineLenSq = spine.x * spine.x + spine.y * spine.y
+      const spineLen = sqrt(max(spineLenSq, d.f32(0)))
+      const rStroke = min(u.axisPolylineHalfStrokePixels, spineLen * d.f32(1 / 16))
       const A = LineControlPoint({ position: originPixelOffsetFromFramebufferCenter, radius: rStroke })
       const B = LineControlPoint({ position: originPixelOffsetFromFramebufferCenter, radius: rStroke })
       const C = LineControlPoint({ position: tipPixelOffsetFromFramebufferCenter, radius: rStroke })
@@ -110,14 +110,15 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
 
       const ndcZ0 = clipOrigin.z * invWo
       const ndcZ1 = clipTip.z * invWt
-      const spine = tipPixelOffsetFromFramebufferCenter - originPixelOffsetFromFramebufferCenter
-      const spineLenSq = spine.x * spine.x + spine.y * spine.y
       const fromO = d.vec2f(
         measured.x - originPixelOffsetFromFramebufferCenter.x,
         measured.y - originPixelOffsetFromFramebufferCenter.y,
       )
       const t = clamp((fromO.x * spine.x + fromO.y * spine.y) / max(spineLenSq, d.f32(1e-8)), d.f32(0), d.f32(1))
       const ndcZ = ndcZ0 * (d.f32(1) - t) + ndcZ1 * t
+
+      // `lineSegmentVariableWidth`: vertex 0/1 = spine (B/C); ≥2 = extrusion + caps. Interpolation gives smooth uv.y across the stroke.
+      const uvY = select(d.f32(0), d.f32(1), vertexIndex > d.u32(1))
 
       const w = result.w
       const clipPos = d.vec4f(ndcExtrudedClipXY.x * w, ndcExtrudedClipXY.y * w, ndcZ * w, w)
@@ -126,7 +127,7 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
         clipPos,
         instanceIndexFlat: instanceIndex,
         position: ndcExtrudedClipXY,
-        uv: d.vec2f(0, select(d.f32(0), d.f32(1), vertexIndex > 1)),
+        uv: d.vec2f(t, uvY),
       }
     })
     .$uses({ camera: resultsCameraBindLayout, axis: axisBindLayout })
@@ -134,13 +135,21 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
   const frag = tgpu.fragmentFn({
     in: {
       instanceIndexFlat: d.interpolate('flat', d.u32),
+      uv: d.vec2f,
     },
     out: d.vec4f,
-  })(({ instanceIndexFlat }) => {
+  })(({ instanceIndexFlat, uv }) => {
     'use gpu'
     let rgb = d.vec3f(1, 0.12, 0.12)
     rgb = select(rgb, d.vec3f(0.14, 0.98, 0.22), instanceIndexFlat === d.u32(1))
     rgb = select(rgb, d.vec3f(0.24, 0.38, 1), instanceIndexFlat === d.u32(2))
+
+    const iy = uv.y
+    const w = max(fwidth(iy), d.f32(0.001))
+    // Sharp rim at the outer edge (iy → 1); transition width ~1.5·fwidth for stable AA.
+    const outlineMix = smoothstep(d.f32(1) - w * d.f32(1.5), d.f32(1), iy)
+    const outlineRgb = d.vec3f(0.05, 0.05, 0.07)
+    rgb = mix(rgb, outlineRgb, outlineMix)
 
     return d.vec4f(rgb, 1)
   })

@@ -28,8 +28,9 @@ export type Corners3 = [tl: Point3, tr: Point3, bl: Point3, br: Point3]
 
 /**
  * Tags on the board in object space. Used as **`objectTags`** input to calibration (planar prior **`z = 0`**
- * from the current layout) and again on **`CalibrationOk.updatedTargets`** with the same shape: refined
- * **`corners`** from BA where optimized, otherwise unchanged from the prior passed in.
+ * from the current layout). **`CalibrationOk.updatedTargets`** uses the same shape but lists only tags that
+ * were **visible in every** pooled snapshot used by the solver (same set as the intersected object points);
+ * **`corners`** are the bundle-adjusted quad.
  */
 export interface ObjectTag {
   tagId: number
