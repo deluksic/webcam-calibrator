@@ -38,12 +38,12 @@ export function buildReprojectionOverlayPairs(
   quads: DetectedQuad[],
   _imageWidth: number,
   _imageHeight: number,
-): ReprojectionOverlayResult | null {
+): ReprojectionOverlayResult | undefined {
   void _imageWidth
   void _imageHeight
   const livePose = buildLivePose(layout, quads, k, distortion)
   if (!livePose) {
-    return null
+    return undefined
   }
   const { R, t, rvec, objectPoints, imagePoints, tagCount } = livePose
   const cameraMatrix: [[number, number, number], [number, number, number], [number, number, number]] = [
@@ -105,7 +105,7 @@ function buildLivePose(
   quads: DetectedQuad[],
   k: CameraIntrinsics,
   distortion: RationalDistortion8 | undefined,
-): LivePose | null {
+): LivePose | undefined {
   const objectPoints: [number, number, number][] = []
   const imagePoints: [number, number][] = []
 
@@ -128,7 +128,7 @@ function buildLivePose(
   }
 
   if (objectPoints.length < 4) {
-    return null
+    return undefined
   }
   const cameraMatrix: [[number, number, number], [number, number, number], [number, number, number]] = [
     [k.fx, 0, k.cx],
@@ -142,7 +142,7 @@ function buildLivePose(
     distortionCoefficients: distortion,
   })
   if (!pnp.success) {
-    return null
+    return undefined
   }
   const [rx, ry, rz] = pnp.rvec
   const [tx, ty, tz] = pnp.tvec

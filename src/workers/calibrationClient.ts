@@ -4,11 +4,11 @@ import type { CalibrationFrameObservation, ObjectTag } from '@/lib/calibrationTy
 
 import type { CalibWorkerApi, CalibrationResult, CalibrationOk, CalibrationErr } from './calibration.worker'
 
-let worker: Worker | null = null
-let proxy: Comlink.Remote<CalibWorkerApi> | null = null
+let worker: Worker | undefined
+let proxy: Comlink.Remote<CalibWorkerApi> | undefined
 
 function getWorker(): Comlink.Remote<CalibWorkerApi> {
-  if (!proxy) {
+  if (proxy === undefined) {
     worker = new Worker(new URL('./calibration.worker.ts', import.meta.url), { type: 'module' })
     proxy = Comlink.wrap<CalibWorkerApi>(worker)
   }

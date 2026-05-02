@@ -80,7 +80,7 @@ export function buildTagGrid(corners: Corners, divisions: number = 6): GridResul
       // Vertical line: from top edge to bottom edge at col position
       const vLine = lineFromPoints(topPoint, bottomPoint)
 
-      // Guard: either line can be null if endpoints are coincident (e.g. at quad corners)
+      // Guard: either line can be undefined if endpoints are coincident (e.g. at quad corners)
       if (!hLine || !vLine) {
         innerCorners.push({
           x: (topPoint.x + bottomPoint.x) / 2,

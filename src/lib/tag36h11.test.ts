@@ -106,7 +106,7 @@ describe('tag36h11', () => {
   })
 
   describe('decodeTag36h11', () => {
-    it('returns -1 for null pattern', () => {
+    it('returns -1 when pattern is undefined', () => {
       expect(decodeTag36h11(undefined)).toBe(-1)
     })
 

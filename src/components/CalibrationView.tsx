@@ -93,7 +93,7 @@ function percentile(sorted: number[], p: number): number {
 function CalibrationView() {
   const cam = useCameraStream()
   const { setLatestCalibration } = useCalibrationLatest()
-  const [layout, setLayout] = createSignal<TargetLayout | undefined>(undefined)
+  const [layout, setLayout] = createSignal<TargetLayout>()
   const [reproj, setReproj] = createSignal<{
     rms: number
     tagCount: number

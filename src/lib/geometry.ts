@@ -36,13 +36,13 @@ export type Line = {
 
 /**
  * Compute line coefficients from two points.
- * Returns null if points are coincident.
+ * Returns **`undefined`** if points are coincident.
  */
-export function lineFromPoints(p1: Point, p2: Point): Line | null {
+export function lineFromPoints(p1: Point, p2: Point): Line | undefined {
   const dx = p2.x - p1.x
   const dy = p2.y - p1.y
   if (abs(dx) < 1e-10 && abs(dy) < 1e-10) {
-    return null // coincident points
+    return undefined // coincident points
   }
   // Normalize: a² + b² = 1
   const len = sqrt(dx * dx + dy * dy)
@@ -55,12 +55,12 @@ export function lineFromPoints(p1: Point, p2: Point): Line | null {
 
 /**
  * Find intersection of two lines.
- * Returns null if lines are parallel.
+ * Returns **`undefined`** if lines are parallel.
  */
-export function lineIntersection(l1: Line, l2: Line): Point | null {
+export function lineIntersection(l1: Line, l2: Line): Point | undefined {
   const det = l1.a * l2.b - l1.b * l2.a
   if (abs(det) < 1e-10) {
-    return null // parallel or coincident
+    return undefined // parallel or coincident
   }
   // Lines are a x + b y + c = 0 (same as a x + b y = −c). Cramer gives:
   // x = (b1*c2 − c1*b2) / det,  y = (c1*a2 − a1*c2) / det

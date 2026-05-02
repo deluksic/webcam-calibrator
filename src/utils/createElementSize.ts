@@ -13,7 +13,7 @@ export type ElementSize = {
 }
 
 export function createElementSize(
-  target: Accessor<HTMLElement | null | undefined>,
+  target: Accessor<HTMLElement | undefined>,
   onChange?: (size: ElementSize) => void,
 ) {
   const [size, setSize] = createSignal<ElementSize>()

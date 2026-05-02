@@ -20,15 +20,15 @@ describe('geometry', () => {
   describe('lineFromPoints', () => {
     it('computes line from two points', () => {
       const line = lineFromPoints({ x: 0, y: 0 }, { x: 1, y: 1 })
-      expect(line).not.toBeNull()
+      expect(line).toBeDefined()
       // Line y = -x should have a = -b, c = 0
       expect(line!.a).toBeCloseTo(-0.707, 3)
       expect(line!.b).toBeCloseTo(0.707, 3)
     })
 
-    it('returns null for coincident points', () => {
+    it('returns undefined for coincident points', () => {
       const line = lineFromPoints({ x: 1, y: 1 }, { x: 1, y: 1 })
-      expect(line).toBeNull()
+      expect(line).toBeUndefined()
     })
   })
 
@@ -38,7 +38,7 @@ describe('geometry', () => {
       const l1 = { a: 0, b: 1, c: 0 } // y = 0
       const l2 = { a: 1, b: 0, c: 0 } // x = 0
       const intersection = lineIntersection(l1, l2)
-      expect(intersection).not.toBeNull()
+      expect(intersection).toBeDefined()
       expect(intersection!.x).toBeCloseTo(0, 5)
       expect(intersection!.y).toBeCloseTo(0, 5)
     })
@@ -47,16 +47,16 @@ describe('geometry', () => {
       const l1 = lineFromPoints({ x: 0, y: 0 }, { x: 100, y: 0 })!
       const l2 = lineFromPoints({ x: 50, y: 0 }, { x: 50, y: 100 })!
       const p = lineIntersection(l1, l2)
-      expect(p).not.toBeNull()
+      expect(p).toBeDefined()
       expect(p!.x).toBeCloseTo(50, 5)
       expect(p!.y).toBeCloseTo(0, 5)
     })
 
-    it('returns null for parallel lines', () => {
+    it('returns undefined for parallel lines', () => {
       const l1 = { a: 1, b: 0, c: 0 } // x = 0
       const l2 = { a: 2, b: 0, c: 1 } // 2x + 1 = 0 → x = -0.5 (parallel!)
       const intersection = lineIntersection(l1, l2)
-      expect(intersection).toBeNull()
+      expect(intersection).toBeUndefined()
     })
   })
 
@@ -253,7 +253,7 @@ describe('geometry', () => {
   })
 
   describe('tryComputeHomography', () => {
-    it('returns null for coincident corners (singular)', () => {
+    it('returns undefined for coincident corners (singular)', () => {
       const p = { x: 10, y: 20 }
       expect(tryComputeHomography([p, p, p, p] as Corners)).toBeUndefined()
     })
@@ -267,7 +267,7 @@ describe('geometry', () => {
       ]
       const a = tryComputeHomography(src)
       const b = computeHomography(src)
-      expect(a).not.toBeNull()
+      expect(a).toBeDefined()
       expect([...a!]).toEqual([...b])
     })
   })
