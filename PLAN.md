@@ -1,6 +1,6 @@
 # AprilTag grid overlay
 
-Wires each detected quad to a **7×7** line grid in image space with a homography from the unit square, rendered in the grid fragment shader (see [`gridVizPipeline.ts`](src/gpu/pipelines/gridVizPipeline.ts)).
+Wires each detected quad to a procedural UV grid (**`GRID_DIVISIONS` = 8** subdivisions per axis on the unit square, see [`gridVizPipeline.ts`](src/gpu/pipelines/gridVizPipeline.ts)), warped into image space with the per-quad homography in the fragment shader.
 
 **Data path:** `DetectedQuad` (CPU) → `computeHomography()` → `quadCornersBuffer` (GPU) → `gridVizPipeline` (vertex + fragment).
 

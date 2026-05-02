@@ -2,13 +2,13 @@
 
 ## Overview
 
-WebGPU runs the vision pipeline: grayscale, Sobel, histogram-driven threshold, NMS, connected components, compact labels, and extent boxes. The **grid** path adds async CPU work (`readDetection`) for regions, line-based corners, homography, and tag36h11 decode. A separate lens **solver** (intrinsics, distortion, bundle adjustment) is out of band for now.
+WebGPU runs the vision pipeline: ingest to luma, Sobel, histogram-driven threshold, NMS, pointer-jump connected components, compact labels, and extent boxes. The **grid** path adds async CPU work (`readDetection`) for regions, line-based corners, homography, and tag36h11 decode.
 
-**Calibrate** maintains a top‑K pool of per-tag scores from decoded frames. **Results** is the UI slot for future solved parameters and export.
+**Calibration** runs in a dedicated worker ([`calibration.worker.ts`](src/workers/calibration.worker.ts)) using `@deluksic/opencv-calibration-wasm`: intrinsics `K`, OpenCV **rational** distortion (`RationalDistortion8` in [`cameraModel.ts`](src/lib/cameraModel.ts)), and per-frame extrinsics. [`CalibrationView`](src/components/CalibrationView.tsx) calls `calibApi.solveCalibration` and pushes the latest [`CalibrationResult`](src/workers/calibration.worker.ts) into [`CalibrationLatestContext`](src/components/calibration/CalibrationLatestContext.tsx). **Calibrate** uses that `ok` model for a live **reprojection overlay** on the grid ([`reprojectionOverlayPipeline.ts`](src/gpu/pipelines/reprojectionOverlayPipeline.ts), wired from [`LiveCameraPipeline.tsx`](src/components/camera/LiveCameraPipeline.tsx)). **Results** reads the same context and renders a 3D summary plus JSON export ([`ResultsView.tsx`](src/components/results/ResultsView.tsx), [`exportCalibrationJson.ts`](src/components/results/exportCalibrationJson.ts)).
 
 ## App shell (Solid)
 
-- **Views** ([`App.tsx`](src/components/App.tsx)): **Target** (printable SVG), **Calibrate** ([`CalibrationView.tsx`](src/components/CalibrationView.tsx) — collection controls, top‑K pool, stats; adaptive threshold uses the same histogram as **Debug** but the histogram is not shown on this page), **Results** (solver output TBD), **Debug** ([`DebugView.tsx`](src/components/DebugView.tsx) — mode switcher, histogram, optional bbox-style overlay, logs).
+- **Views** ([`App.tsx`](src/components/App.tsx)): **Home** ([`Home.tsx`](src/components/Home.tsx)), **Target** (printable SVG), **Calibrate** ([`CalibrationView.tsx`](src/components/CalibrationView.tsx) — collection controls, top‑K pool, stats, live solve + reprojection when `CalibrationResult` is `ok`; adaptive threshold uses the same histogram as **Debug** but the histogram is not shown on this page), **Results** ([`ResultsView.tsx`](src/components/results/ResultsView.tsx) — 3D orbit scene + export when latest result is `ok`), **Debug** ([`DebugView.tsx`](src/components/DebugView.tsx) — mode switcher, histogram, optional bbox-style overlay, logs).
 - **Camera** — [`CameraStreamProvider`](src/components/camera/CameraStreamContext.tsx) at the app root; stream acquisition and device constraints in [`cameraStreamAcquire.ts`](src/components/camera/cameraStreamAcquire.ts).
 - **Live WebGPU path** — [`LiveCameraPipeline.tsx`](src/components/camera/LiveCameraPipeline.tsx) for both Calibrate and Debug.
 
@@ -23,12 +23,14 @@ Product summary and roadmap: [`docs/plan.md`](docs/plan.md).
 
 ## Pipeline (per frame)
 
+Compute order matches [`encodeCameraCompute`](src/gpu/cameraComputeEncoding.ts): one command encoder submits **ingest → gray → Sobel → histogram accumulate → NMS → labeling chain** in a single compute pass (then optional slot copies for **grid**).
+
 ```
-Frame
+Video frame → ingest (external texture → luma)
   ↓
-Sobel → histogram (drives edge threshold in CPU)
+Grayscale → Sobel → histogram (GPU accumulate; CPU reads bins and sets threshold)
   ↓
-NMS + edge filter
+NMS + edge filter (threshold uniform written from CPU each frame)
   ↓
 Pointer-jump labeling (raw per-pixel labels)
   ↓
@@ -36,8 +38,10 @@ Canonical labeling (compact 0..N-1)
   ↓
 Extent tracking
   ↓
-Render (mode-specific)
+Render / readback (mode-specific)
 ```
+
+An **edge dilate** stage exists on [`CameraPipeline`](src/gpu/cameraPipeline.ts) but is **not** enqueued in the live path; labeling and grid readback use the **NMS `filteredBuffer`** directly.
 
 ### Pointer-jump labeling
 
