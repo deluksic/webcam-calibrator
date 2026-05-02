@@ -19,7 +19,7 @@
     "@typegpu/geometry": "link:../TypeGPU/packages/typegpu-geometry",
     "comlink": "^4.4.2",
     "solid-js": "2.0.0-beta.7",
-    "typegpu": "^0.11.2",
+    "typegpu": "link:../TypeGPU/packages/typegpu",
     "wgpu-matrix": "^3.4.2"
   },
   "devDependencies": {

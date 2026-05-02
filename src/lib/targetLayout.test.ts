@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { TagObservation } from '@/lib/calibrationTypes'
 import type { Corners } from '@/lib/geometry'
+import type { Corners3 } from '@/lib/calibrationTypes'
 import { learnLayoutFromFrame } from '@/lib/targetLayout'
 
 const sq = (o: { x: number; y: number }): Corners => [
@@ -11,7 +12,7 @@ const sq = (o: { x: number; y: number }): Corners => [
   { x: 200 + o.x, y: 200 + o.y },
 ]
 
-function layoutCornerMeanXY(L: Map<number, Corners>): { x: number; y: number } {
+function layoutCornerMeanXY(L: Map<number, Corners3>): { x: number; y: number } {
   let sx = 0
   let sy = 0
   let n = 0

@@ -8,6 +8,7 @@ import type { DetectedQuad } from '@/gpu/contour'
 import { calibrationQuadScore } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
 import type { TagObservation, CalibrationFrameObservation, ImageTag } from '@/lib/calibrationTypes'
+import type { Corners3 } from '@/lib/calibrationTypes'
 import { learnLayoutFromFrame, layoutToObjectTags, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 import { calibApi, type CalibrationResult } from '@/workers/calibrationClient'
@@ -98,7 +99,7 @@ function CalibrationView() {
     tagCount: number
     tiltDeg: number
     dist: number
-  } | null>(null)
+  }>()
   const [currentTagged, setCurrentTagged] = createSignal<DetectedQuad[]>([])
   const [videoFrameSize, setVideoFrameSize] = createSignal<{ width: number; height: number }>()
   const [run, setRun] = createSignal<CalibRun>({
@@ -203,7 +204,7 @@ function CalibrationView() {
   const calibratedExtrinsics = createMemo(() => {
     const c = calib()
     if (!c || c.kind !== 'ok') {
-      return null
+      return undefined
     }
     const result: Map<number, { R: Mat3; t: Vec3 }> = new Map()
     for (const ext of c.extrinsics) {
@@ -220,25 +221,15 @@ function CalibrationView() {
     if (c.updatedTargets.length < 1) {
       return layout()
     }
-    const refined = new Map<number, { x: number; y: number }[]>()
+    const refined = new Map<number, Corners3>()
     for (const t of c.updatedTargets) {
       const { tagId, corners: objCorners } = t
-      for (let cornerId = 0; cornerId < 4; cornerId++) {
-        const p = objCorners[cornerId]!
-        const out = refined.get(tagId) ?? [
-          { x: 0, y: 0 },
-          { x: 0, y: 0 },
-          { x: 0, y: 0 },
-          { x: 0, y: 0 },
-        ]
-        out[cornerId] = { x: p.x, y: p.y }
-        refined.set(tagId, out)
-      }
+      refined.set(tagId, [{ ...objCorners[0]! }, { ...objCorners[1]! }, { ...objCorners[2]! }, { ...objCorners[3]! }])
     }
     if (refined.size === 0) {
       return layout()
     }
-    return refined as TargetLayout
+    return refined
   })
 
   const onQuadDetection = (quads: DetectedQuad[]) => {
@@ -351,8 +342,8 @@ function CalibrationView() {
     if (!c || c.kind === 'error' || !res) {
       return {
         line1: c?.kind === 'error' ? `Solver: ${c.reason}${c.details ? ` (${c.details})` : ''}` : 'Solver: —',
-        k: null as null,
-        rms: null as null,
+        k: undefined as undefined,
+        rms: undefined as undefined,
       }
     }
     const { width, height } = res
@@ -462,7 +453,7 @@ function CalibrationView() {
           disabled={isSolving()}
           onClick={() => {
             setLayout(undefined)
-            setReproj(null)
+            setReproj(undefined)
             setCalib(undefined)
             setRun({
               collection: 'idle',

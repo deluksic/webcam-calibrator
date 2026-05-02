@@ -117,7 +117,7 @@ export type LiveCameraPipelineProps = {
   onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number }) => void
   /** When set, feed GPU reprojection overlay and report live metrics. */
   liveCalibration?: () => { k: CameraIntrinsics; distortion?: RationalDistortion8; layout: TargetLayout } | undefined
-  onReprojectionFrame?: (m: { rms: number; tagCount: number; tiltDeg: number; dist: number } | null) => void
+  onReprojectionFrame?: (m: { rms: number; tagCount: number; tiltDeg: number; dist: number } | undefined) => void
   onFrameSize?: (size: { width: number; height: number }) => void
   /** Called when snapshot button is pressed - passes current tagged quads. */
   onQuadSnapshotRequest?: () => void
@@ -344,13 +344,13 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
             } else {
               updateReprojectionOverlayBuffer(pip, [], 0)
               if (typeof pi.onReprojectionFrame === 'function') {
-                pi.onReprojectionFrame(null)
+                pi.onReprojectionFrame(undefined)
               }
             }
           } else {
             updateReprojectionOverlayBuffer(pip, [], 0)
             if (typeof pi.onReprojectionFrame === 'function') {
-              pi.onReprojectionFrame(null)
+              pi.onReprojectionFrame(undefined)
             }
           }
 
