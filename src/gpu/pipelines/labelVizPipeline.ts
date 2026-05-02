@@ -47,11 +47,7 @@ export function createLabelVizPipeline(
     targets: { format: presentationFormat },
   })
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment, bindGroup: unknown) => {
-    pipeline
-      .with(enc)
-      .withColorAttachment(colorAttachment as never)
-      .with(bindGroup as never)
-      .draw(3)
+    pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)
   }
   return { encodeToCanvas, layout: labelVizLayout }
 }

@@ -342,8 +342,8 @@ function CalibrationView() {
     if (!c || c.kind === 'error' || !res) {
       return {
         line1: c?.kind === 'error' ? `Solver: ${c.reason}${c.details ? ` (${c.details})` : ''}` : 'Solver: —',
-        k: undefined as undefined,
-        rms: undefined as undefined,
+        k: undefined,
+        rms: undefined,
       }
     }
     const { width, height } = res

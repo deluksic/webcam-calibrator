@@ -1,43 +1,31 @@
 import { Show, createEffect, createMemo, createSignal } from 'solid-js'
-import type { TgpuRoot } from 'typegpu'
 
 import { useCalibrationLatest } from '@/components/calibration/CalibrationLatestContext'
+import { downloadCalibrationOkJson } from '@/components/results/exportCalibrationJson'
 import { initGPU } from '@/gpu/init'
-import { clearResultsAttachments } from '@/gpu/resultsViz_clear'
+import { createResultsCanvasPipeline, type ResultsCanvasPipeline } from '@/gpu/resultsCanvasPipeline'
+import { writeResultsCameraTransform } from '@/gpu/pipelines/resultsCameraTransform'
 import {
+  markerCenterWritesForGpu,
   MAX_RESULTS_MARKER_POINTS,
-  MAX_RESULTS_TAG_QUADS,
-  allocAxisUni,
-  allocMarkerUni,
-  allocMarkersCenters,
-  allocTagQuadUni,
-  allocTagQuads,
-  axisBindLayout,
-  markersBindLayout,
-  tagQuadsBindLayout,
-} from '@/gpu/resultsVizLayouts'
-import {
-  RESULTS_MSAA_SAMPLE_COUNT,
-  createAxesResultsPipeline,
-  createMarkerResultsPipeline,
-  createTagQuadsResultsPipeline,
-  destroyGpuTexture,
-  encodeResultsCanvasFrame,
-} from '@/gpu/resultsVizPipelines'
-import { applyOrbitPitchVerticalPlane, applyOrbitYawWorldY } from '@/lib/orbitOrthoMath'
-import { writeResultsFrameUniforms } from '@/lib/resultsFrameUniforms'
-import type { Vec3Arg } from 'wgpu-matrix'
+  writeMarkerPassUniform,
+} from '@/gpu/pipelines/resultsMarkerPipeline'
 import {
   calibrationDefinedCornerCount,
-  markerCenterWritesForGpu,
   orthoExtentYForPoints,
+} from '@/gpu/pipelines/resultsSceneCpu'
+import {
+  MAX_RESULTS_TAG_QUADS,
   tagQuadWritesForGpu,
-} from '@/lib/resultsSceneCpu'
+} from '@/gpu/pipelines/resultsTagQuadsPipeline'
+import { writeAxisPassUniform } from '@/gpu/pipelines/resultsAxesPipeline'
+import { applyOrbitPitchVerticalPlane, applyOrbitYawWorldY } from '@/lib/orbitOrthoMath'
+import type { Vec3Arg } from 'wgpu-matrix'
 import { createDragHandler } from '@/utils/createDragHandler'
 import { createPinchHandler } from '@/utils/createPinchHandler'
 import type { CalibrationOk } from '@/workers/calibration.worker'
 
-import styles from '@/components/ResultsView.module.css'
+import styles from '@/components/results/ResultsView.module.css'
 
 const { navigator } = globalThis
 
@@ -55,42 +43,12 @@ type CalibrationScene = {
   tagQuadWrites: ReturnType<typeof tagQuadWritesForGpu>
 }
 
-type GpuPack = {
-  root: TgpuRoot
-  context: GPUCanvasContext
-  format: GPUTextureFormat
-  msaaColorTex: GPUTexture
-  depthTex: GPUTexture
-  markerGpu: ReturnType<typeof createMarkerResultsPipeline>
-  axesGpu: ReturnType<typeof createAxesResultsPipeline>
-  tagQuadsGpu: ReturnType<typeof createTagQuadsResultsPipeline>
-  markersBg: object
-  axisBg: object
-  tagQuadsBg: object
-  markerUni: ReturnType<typeof allocMarkerUni>
-  axisUni: ReturnType<typeof allocAxisUni>
-  tagQuadUni: ReturnType<typeof allocTagQuadUni>
-  centersBuf: ReturnType<typeof allocMarkersCenters>
-  tagQuadsBuf: ReturnType<typeof allocTagQuads>
-}
-
-function downloadCalibrationOkJson(c: CalibrationOk) {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const blob = new Blob([JSON.stringify(c, undefined, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `calibration-ok-${stamp}.json`
-  a.click()
-  queueMicrotask(() => URL.revokeObjectURL(url))
-}
-
 export function ResultsView() {
   const { latestCalibration } = useCalibrationLatest()
 
   const [gpuErr, setGpuErr] = createSignal('')
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>()
-  const [gpuPack, setGpuPack] = createSignal<GpuPack>()
+  const [gpuPack, setGpuPack] = createSignal<ResultsCanvasPipeline>()
   const [orbitEyeDir, setOrbitEyeDir] = createSignal<Vec3Arg>([
     DEFAULT_ORBIT_EYE_DIR[0]!,
     DEFAULT_ORBIT_EYE_DIR[1]!,
@@ -146,8 +104,8 @@ export function ResultsView() {
   }
 
   function tick(): void {
-    const gpu = gpuPack()
-    if (!gpu) {
+    const pip = gpuPack()
+    if (!pip) {
       return
     }
 
@@ -158,13 +116,10 @@ export function ResultsView() {
       return
     }
 
-    const depthView = gpu.depthTex.createView()
-    const msaaColorView = gpu.msaaColorTex.createView()
-
     const scene = calibrationScene()
 
     if (!scene) {
-      clearResultsAttachments(gpu.root, gpu.context, msaaColorView, depthView)
+      pip.clearAttachments()
       return
     }
 
@@ -173,7 +128,7 @@ export function ResultsView() {
 
     if (lastCentersUploadedFor !== scene) {
       try {
-        gpu.centersBuf.write(scene.centerWrites)
+        pip.centersBuf.write(scene.centerWrites)
         lastCentersUploadedFor = scene
       } catch (e) {
         console.warn('[ResultsView] center upload failed', e)
@@ -182,40 +137,26 @@ export function ResultsView() {
 
     if (lastTagQuadsUploadedFor !== scene) {
       try {
-        gpu.tagQuadsBuf.write(scene.tagQuadWrites)
+        pip.tagQuadsBuf.write(scene.tagQuadWrites)
         lastTagQuadsUploadedFor = scene
       } catch (e) {
         console.warn('[ResultsView] tag quad upload failed', e)
       }
     }
 
-    writeResultsFrameUniforms({
+    writeResultsCameraTransform({
       aspectWidthOverHeight: el.width / el.height,
       orbitEyeDirUnit: orbitEyeDir(),
       baseOrthoExtentY: scene.baseOrthoExtentY,
       orthoZoom: orbitZoom(),
       viewportWidthPx: el.width,
       viewportHeightPx: el.height,
-      pointCount,
-      markerUni: gpu.markerUni,
-      axisUni: gpu.axisUni,
-      tagQuadUni: gpu.tagQuadUni,
+      cameraUniform: pip.cameraUniform,
     })
+    writeMarkerPassUniform(pip.markerUniform, pointCount)
+    writeAxisPassUniform(pip.axisUniform)
 
-    encodeResultsCanvasFrame(
-      gpu.root,
-      gpu.context,
-      msaaColorView,
-      depthView,
-      gpu.markerGpu,
-      gpu.axesGpu,
-      gpu.tagQuadsGpu,
-      gpu.markersBg,
-      gpu.axisBg,
-      gpu.tagQuadsBg,
-      pointCount,
-      tagCount,
-    )
+    pip.encodeScene(pointCount, tagCount)
   }
 
   createEffect(
@@ -232,8 +173,7 @@ export function ResultsView() {
 
       let canceled = false
       let resizeObs: ResizeObserver | undefined
-      let depthTexture: GPUTexture | undefined
-      let msaaColorTexture: GPUTexture | undefined
+      let pip: ResultsCanvasPipeline | undefined
 
       void (async () => {
         try {
@@ -244,100 +184,29 @@ export function ResultsView() {
           }
 
           const format = webgpu.getPreferredCanvasFormat()
-          const ctx = el.getContext('webgpu')
-          if (!ctx) {
-            setGpuErr('Could not create WebGPU context.')
-            return
-          }
-          rt.configureContext({ canvas: el, format, alphaMode: 'opaque' })
 
           const dpr = Math.min(2, globalThis.devicePixelRatio ?? 1)
 
+          pip = createResultsCanvasPipeline(rt, el, format)
+
           const resize = () => {
-            if (canceled) {
+            if (canceled || !pip) {
               return
             }
             const rect = el.getBoundingClientRect()
             el.width = Math.max(1, Math.round(rect.width * dpr))
             el.height = Math.max(1, Math.round(rect.height * dpr))
-
-            destroyGpuTexture(depthTexture)
-            destroyGpuTexture(msaaColorTexture)
-            msaaColorTexture = rt.device.createTexture({
-              label: 'results-msaa',
-              size: [el.width, el.height, 1],
-              format,
-              sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
-              usage: GPUTextureUsage.RENDER_ATTACHMENT,
-            })
-            depthTexture = rt.device.createTexture({
-              label: 'results-depth',
-              size: [el.width, el.height],
-              usage: GPUTextureUsage.RENDER_ATTACHMENT,
-              format: 'depth24plus',
-              sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
-            })
-            setGpuPack((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    depthTex: depthTexture!,
-                    msaaColorTex: msaaColorTexture!,
-                  }
-                : prev,
-            )
+            pip.resize(el.width, el.height)
           }
 
           resize()
           resizeObs = new ResizeObserver(resize)
           resizeObs.observe(el)
 
-          const markerGpu = createMarkerResultsPipeline(rt, format)
-          const axesGpu = createAxesResultsPipeline(rt, format)
-          const tagQuadsGpu = createTagQuadsResultsPipeline(rt, format)
-          const markerUni = allocMarkerUni(rt)
-          const axisUni = allocAxisUni(rt)
-          const tagQuadUni = allocTagQuadUni(rt)
-          const centersBuf = allocMarkersCenters(rt)
-          const tagQuadsBuf = allocTagQuads(rt)
-
-          const markersBg = rt.createBindGroup(markersBindLayout, {
-            markerUniform: markerUni,
-            centers: centersBuf,
-          })
-          const axisBg = rt.createBindGroup(axisBindLayout, {
-            axisUniform: axisUni,
-          })
-          const tagQuadsBg = rt.createBindGroup(tagQuadsBindLayout, {
-            tagQuadUniform: tagQuadUni,
-            tags: tagQuadsBuf,
-          })
-
           el.addEventListener('touchstart', onTwoFingerTouch, { passive: false })
           el.addEventListener('wheel', onWheelResults, { passive: false })
 
-          if (!depthTexture || !msaaColorTexture) {
-            return
-          }
-
-          setGpuPack({
-            root: rt,
-            context: ctx,
-            format,
-            msaaColorTex: msaaColorTexture,
-            depthTex: depthTexture,
-            markerGpu,
-            axesGpu,
-            tagQuadsGpu,
-            markersBg,
-            axisBg,
-            tagQuadsBg,
-            markerUni,
-            axisUni,
-            tagQuadUni,
-            centersBuf,
-            tagQuadsBuf,
-          })
+          setGpuPack(pip)
 
           stopRaf()
           rafId = requestAnimationFrame(tick)
@@ -356,8 +225,7 @@ export function ResultsView() {
         resizeObs?.disconnect()
         el.removeEventListener('touchstart', onTwoFingerTouch)
         el.removeEventListener('wheel', onWheelResults)
-        destroyGpuTexture(depthTexture)
-        destroyGpuTexture(msaaColorTexture)
+        pip?.destroyTargets()
         setGpuPack(undefined)
       }
     },
@@ -396,7 +264,6 @@ export function ResultsView() {
         const dy = move.clientY - lastY
         lastX = move.clientX
         lastY = move.clientY
-        // Turntable: drag right → positive yaw around world Y; drag down → pitch in the current vertical plane
         setOrbitEyeDir((dir) => {
           const v = applyOrbitPitchVerticalPlane(
             applyOrbitYawWorldY(dir, -dx * sens, orbitAfterYaw),

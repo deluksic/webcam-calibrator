@@ -191,11 +191,7 @@ export function createGridVizStage(
     failInterrogate: gridVizDebugModeBuffer,
   })
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
-    gridVizPipeline
-      .with(enc)
-      .withColorAttachment(colorAttachment as never)
-      .with(gridVizBindGroup)
-      .draw(4, MAX_INSTANCES)
+    gridVizPipeline.with(enc).withColorAttachment(colorAttachment).with(gridVizBindGroup).draw(4, MAX_INSTANCES)
   }
   return {
     quadCornersBuffer,

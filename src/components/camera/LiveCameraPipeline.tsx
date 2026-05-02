@@ -116,7 +116,7 @@ export type LiveCameraPipelineProps = {
   onLog: (msg: string) => void
   onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number }) => void
   /** When set, feed GPU reprojection overlay and report live metrics. */
-  liveCalibration?: () => { k: CameraIntrinsics; distortion?: RationalDistortion8; layout: TargetLayout } | undefined
+  liveCalibration: () => { k: CameraIntrinsics; distortion?: RationalDistortion8; layout: TargetLayout } | undefined
   onReprojectionFrame?: (m: { rms: number; tagCount: number; tiltDeg: number; dist: number } | undefined) => void
   onFrameSize?: (size: { width: number; height: number }) => void
   /** Called when snapshot button is pressed - passes current tagged quads. */
@@ -299,7 +299,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         return
       }
       const pi = pipelineInteraction()
-      const liveCalib = typeof pi.liveCalibration === 'function' ? pi.liveCalibration() : undefined
+      const liveCalib = pi.liveCalibration()
 
       detectForSlot(gNow, pip, slot)
         .then((result) => {

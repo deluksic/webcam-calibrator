@@ -46,11 +46,7 @@ export function createGrayRenderPipeline(
   })
   const bindGroup = root.createBindGroup(grayRenderLayout, resources)
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment, bg: unknown = bindGroup) => {
-    pipeline
-      .with(enc)
-      .withColorAttachment(colorAttachment as never)
-      .with(bg as never)
-      .draw(3)
+    pipeline.with(enc).withColorAttachment(colorAttachment).with(bg).draw(3)
   }
   return { bindGroup, encodeToCanvas, layout: grayRenderLayout }
 }

@@ -6,7 +6,7 @@ import { CalibrationView } from '@/components/CalibrationView'
 import { CameraStreamProvider } from '@/components/camera/CameraStreamContext'
 import { DebugView } from '@/components/DebugView'
 import { Home } from '@/components/Home'
-import { ResultsView } from '@/components/ResultsView'
+import { ResultsView } from '@/components/results/ResultsView'
 import { TargetView } from '@/components/TargetView'
 import { VERSION } from '@/version'
 
@@ -26,19 +26,19 @@ export function App() {
     return (
       <>
         <nav class={styles.nav}>
-          <A href="/" class={[styles.navBtn, { [styles.navBtnActive]: isHome() }]}>
+          <A href="/" class={[styles.navBtn, isHome() && styles.navBtnActive]}>
             Home
           </A>
-          <A href="/target" class={[styles.navBtn, { [styles.navBtnActive]: isTarget() }]}>
+          <A href="/target" class={[styles.navBtn, isTarget() && styles.navBtnActive]}>
             Target
           </A>
-          <A href="/calibrate" class={[styles.navBtn, { [styles.navBtnActive]: isCalibrate() }]}>
+          <A href="/calibrate" class={[styles.navBtn, isCalibrate() && styles.navBtnActive]}>
             Calibrate
           </A>
-          <A href="/results" class={[styles.navBtn, { [styles.navBtnActive]: isResults() }]}>
+          <A href="/results" class={[styles.navBtn, isResults() && styles.navBtnActive]}>
             Results
           </A>
-          <A href="/debug" class={[styles.navBtn, { [styles.navBtnActive]: isDebug() }]}>
+          <A href="/debug" class={[styles.navBtn, isDebug() && styles.navBtnActive]}>
             Debug
           </A>
           <span class={styles.version}>{VERSION}</span>

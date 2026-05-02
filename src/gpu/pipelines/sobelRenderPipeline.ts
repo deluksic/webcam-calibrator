@@ -42,11 +42,7 @@ export function createSobelRenderPipeline(
   })
   const bindGroup = root.createBindGroup(sobelRenderLayout, resources)
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
-    pipeline
-      .with(enc)
-      .withColorAttachment(colorAttachment as never)
-      .with(bindGroup)
-      .draw(3)
+    pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)
   }
   return { encodeToCanvas, layout: sobelRenderLayout }
 }

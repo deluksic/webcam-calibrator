@@ -208,11 +208,7 @@ export function createHistogramStage(
     computePipeline.with(pass).with(computeBindGroup).dispatchWorkgroups(wgX, wgY)
   }
   const encodeDisplay = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
-    displayPipeline
-      .with(enc)
-      .withColorAttachment(colorAttachment as never)
-      .with(displayBindGroup)
-      .draw(6, HISTOGRAM_BINS)
+    displayPipeline.with(enc).withColorAttachment(colorAttachment).with(displayBindGroup).draw(6, HISTOGRAM_BINS)
   }
   return {
     buffer,

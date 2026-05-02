@@ -109,11 +109,7 @@ export function createEdgesPipeline(
   })
   const bindGroup = root.createBindGroup(edgesLayout, resources)
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
-    pipeline
-      .with(enc)
-      .withColorAttachment(colorAttachment as never)
-      .with(bindGroup)
-      .draw(3)
+    pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)
   }
   return { encodeToCanvas, layout: edgesLayout }
 }

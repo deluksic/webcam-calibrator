@@ -264,7 +264,7 @@ export function createReprojectionOverlayStage(
     if (instanceCount <= 0) {
       return
     }
-    const att = colorAttachment as never
+    const att = colorAttachment
     reprojOriginalPipeline.with(enc).withColorAttachment(att).with(reprojOverlayBindGroup).draw(4, instanceCount)
     reprojTargetPipeline.with(enc).withColorAttachment(att).with(reprojOverlayBindGroup).draw(4, instanceCount)
     reprojLinesPipeline.with(enc).withColorAttachment(att).with(reprojOverlayBindGroup).draw(2, instanceCount)
