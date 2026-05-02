@@ -15,7 +15,7 @@ import {
   orthoExtentYForPoints,
 } from '@/gpu/pipelines/resultsSceneCpu'
 import {
-  MAX_RESULTS_TAG_QUADS,
+  tagQuadDrawCountForGpu,
   tagQuadWritesForGpu,
 } from '@/gpu/pipelines/resultsTagQuadsPipeline'
 import { writeAxisPassUniform } from '@/gpu/pipelines/resultsAxesPipeline'
@@ -41,6 +41,7 @@ type CalibrationScene = {
   baseOrthoExtentY: number
   centerWrites: ReturnType<typeof markerCenterWritesForGpu>
   tagQuadWrites: ReturnType<typeof tagQuadWritesForGpu>
+  tagQuadDrawCount: number
 }
 
 export function ResultsView() {
@@ -91,6 +92,7 @@ export function ResultsView() {
       baseOrthoExtentY: orthoExtentYForPoints(c),
       centerWrites: markerCenterWritesForGpu(c),
       tagQuadWrites: tagQuadWritesForGpu(c),
+      tagQuadDrawCount: tagQuadDrawCountForGpu(c),
     }
   })
 
@@ -124,7 +126,7 @@ export function ResultsView() {
     }
 
     const pointCount = Math.min(calibrationDefinedCornerCount(scene.ok), MAX_RESULTS_MARKER_POINTS)
-    const tagCount = Math.min(scene.tagQuadWrites.length, MAX_RESULTS_TAG_QUADS)
+    const tagCount = scene.tagQuadDrawCount
 
     if (lastCentersUploadedFor !== scene) {
       try {

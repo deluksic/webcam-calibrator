@@ -3,7 +3,10 @@ import { d, tgpu } from 'typegpu'
 import { arrayOf, u16 } from 'typegpu/data'
 import { floor, mul, select } from 'typegpu/std'
 
-import { resultsCameraBindLayout } from '@/gpu/pipelines/resultsCameraTransform'
+import {
+  resultsCameraBindLayout,
+  type ResultsCameraBindGroup,
+} from '@/gpu/pipelines/resultsCameraTransform'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { cornersToVec3fArray } from '@/gpu/pipelines/resultsSceneCpu'
 import { tagIdPattern } from '@/lib/tag36h11'
@@ -59,10 +62,32 @@ function packTagPattern(tagId: number): d.v2u {
   return d.vec2u(lo, hi)
 }
 
-/** One row per calibrated tag: board-space corners + packed bit pattern. */
+/** Instance count for `encodeScene` / indexed draw (valid tags only; cap matches buffer prefix). */
+export function tagQuadDrawCountForGpu(ok: CalibrationOk): number {
+  let n = 0
+  for (const t of ok.updatedTargets) {
+    if (!t?.corners) {
+      continue
+    }
+    n++
+    if (n >= MAX_RESULTS_TAG_QUADS) {
+      return MAX_RESULTS_TAG_QUADS
+    }
+  }
+  return n
+}
+
+/**
+ * Full storage buffer upload: one row per calibrated tag, then padded to `MAX_RESULTS_TAG_QUADS`
+ * with degenerate off-board quads. TypeGPU’s buffer writer indexes every array element; a short
+ * array left `undefined` slots and triggered the fallback writer (`reading 'corners'`).
+ */
 export function tagQuadWritesForGpu(ok: CalibrationOk): TagQuadRow[] {
   const rows: TagQuadRow[] = []
   for (const t of ok.updatedTargets) {
+    if (!t?.corners) {
+      continue
+    }
     if (rows.length >= MAX_RESULTS_TAG_QUADS) {
       break
     }
@@ -70,6 +95,14 @@ export function tagQuadWritesForGpu(ok: CalibrationOk): TagQuadRow[] {
       corners: cornersToVec3fArray(t.corners),
       packedPattern: packTagPattern(t.tagId),
     })
+  }
+  const deadCorner = d.vec3f(0, 0, -1e9)
+  const dead = TagQuad({
+    corners: [deadCorner, deadCorner, deadCorner, deadCorner],
+    packedPattern: d.vec2u(0, 0),
+  })
+  for (let i = rows.length; i < MAX_RESULTS_TAG_QUADS; i++) {
+    rows.push(dead)
   }
   return rows
 }
@@ -159,7 +192,7 @@ export function createTagQuadsResultsStage(root: TgpuRoot, presentationFormat: G
     .withIndexBuffer(root.createBuffer(arrayOf(u16, tagQuadIndexU16.length), tagQuadIndexU16).$usage('index'))
 
   const indexCount = tagQuadIndexU16.length
-  const encodeToPass = (pass: GPURenderPassEncoder, cameraBg: object, tagCount: number) => {
+  const encodeToPass = (pass: GPURenderPassEncoder, cameraBg: ResultsCameraBindGroup, tagCount: number) => {
     if (tagCount <= 0) {
       return
     }

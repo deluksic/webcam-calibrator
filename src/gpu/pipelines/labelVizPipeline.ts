@@ -1,15 +1,16 @@
-import type { TgpuRoot } from 'typegpu'
+import type { ColorAttachment, TgpuBindGroup, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
-import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
 export const labelVizLayout = tgpu.bindGroupLayout({
   labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
 })
+
+export type LabelVizBindGroup = TgpuBindGroup<typeof labelVizLayout.entries>
 
 export function createLabelVizPipeline(
   root: TgpuRoot,
@@ -46,7 +47,7 @@ export function createLabelVizPipeline(
     fragment: labelVizFrag,
     targets: { format: presentationFormat },
   })
-  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment, bindGroup: unknown) => {
+  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment, bindGroup: LabelVizBindGroup) => {
     pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)
   }
   return { encodeToCanvas, layout: labelVizLayout }

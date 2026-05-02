@@ -13,7 +13,10 @@ import { d, tgpu } from 'typegpu'
 import { arrayOf, u16 } from 'typegpu/data'
 import { clamp, max, mul, select } from 'typegpu/std'
 
-import { resultsCameraBindLayout } from '@/gpu/pipelines/resultsCameraTransform'
+import {
+  resultsCameraBindLayout,
+  type ResultsCameraBindGroup,
+} from '@/gpu/pipelines/resultsCameraTransform'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { WORLD_AXIS_HALF_LEN } from '@/lib/orbitOrthoMath'
 
@@ -165,7 +168,7 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
     .withIndexBuffer(root.createBuffer(arrayOf(u16, axisTriangleIndexU16.length), axisTriangleIndexU16).$usage('index'))
 
   const axisIndexCount = axisTriangleIndexU16.length
-  const encodeToPass = (pass: GPURenderPassEncoder, cameraBg: object) => {
+  const encodeToPass = (pass: GPURenderPassEncoder, cameraBg: ResultsCameraBindGroup) => {
     pipeline.with(pass).with(cameraBg).with(axisBg).drawIndexed(axisIndexCount, 3)
   }
   return { axisUniform, encodeToPass }

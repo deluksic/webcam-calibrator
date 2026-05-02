@@ -1,10 +1,8 @@
 // Sobel buffer render pipeline: sobelBuffer → canvas
-import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
+import type { ColorAttachment, ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor, length } from 'typegpu/std'
-
-import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 
 export const sobelRenderLayout = tgpu.bindGroupLayout({
   sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
@@ -41,7 +39,7 @@ export function createSobelRenderPipeline(
     targets: { format: presentationFormat },
   })
   const bindGroup = root.createBindGroup(sobelRenderLayout, resources)
-  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
+  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment) => {
     pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)
   }
   return { encodeToCanvas, layout: sobelRenderLayout }

@@ -3,7 +3,10 @@ import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import { mul, select } from 'typegpu/std'
 
-import { resultsCameraBindLayout } from '@/gpu/pipelines/resultsCameraTransform'
+import {
+  resultsCameraBindLayout,
+  type ResultsCameraBindGroup,
+} from '@/gpu/pipelines/resultsCameraTransform'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { cornersToVec3fArray } from '@/gpu/pipelines/resultsSceneCpu'
 import type { CalibrationOk } from '@/workers/calibration.worker'
@@ -146,7 +149,7 @@ export function createMarkerResultsStage(root: TgpuRoot, presentationFormat: GPU
       multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
     })
 
-    const encodeToPass = (pass: GPURenderPassEncoder, _cameraBg: object, _markerInstances: number) => {
+    const encodeToPass = (pass: GPURenderPassEncoder, _cameraBg: ResultsCameraBindGroup, _markerInstances: number) => {
       pipeline.with(pass).draw(3, 1)
     }
     return { markerUniform, centersBuf, encodeToPass }
@@ -209,7 +212,7 @@ export function createMarkerResultsStage(root: TgpuRoot, presentationFormat: GPU
     multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
   })
 
-  const encodeToPass = (pass: GPURenderPassEncoder, cameraBg: object, markerInstances: number) => {
+  const encodeToPass = (pass: GPURenderPassEncoder, cameraBg: ResultsCameraBindGroup, markerInstances: number) => {
     const count = markerInstancesForEncode(markerInstances)
     pipeline.with(pass).with(cameraBg).with(markersBg).draw(diskVerts, count)
   }

@@ -1,11 +1,9 @@
 // Reprojection error overlay: instanced circles + instanced line-list, one shared storage buffer.
-import type { TgpuRoot } from 'typegpu'
+import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { clamp, fwidth, length, max, mul, select, sub } from 'typegpu/std'
 
 import { MAX_INSTANCES } from '@/gpu/pipelines/gridVizPipeline'
-import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
-
 const ReprojPairStruct = d.struct({
   original: d.vec2f,
   /** Reprojected point in image space (`target` is reserved in WGSL). */
@@ -206,9 +204,8 @@ export function createReprojectionOverlayLinesPipeline(
   const frag = tgpu.fragmentFn({
     in: { fragPos: d.builtin.position },
     out: d.vec4f,
-  })(({ fragPos }) => {
+  })(() => {
     'use gpu'
-    void fragPos
     const rgb = d.vec3f(1, 0.45, 0.15)
     const a = d.f32(0.88)
     return d.vec4f(mul(rgb, a), a)
@@ -256,11 +253,7 @@ export function createReprojectionOverlayStage(
     presentationFormat,
   )
   const reprojOverlayDrawState = { instanceCount: 0 }
-  const encodeOverlayToCanvas = (
-    enc: GPUCommandEncoder,
-    colorAttachment: RenderColorAttachment,
-    instanceCount: number,
-  ) => {
+  const encodeOverlayToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment, instanceCount: number) => {
     if (instanceCount <= 0) {
       return
     }

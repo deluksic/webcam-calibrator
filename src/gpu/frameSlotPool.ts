@@ -3,13 +3,11 @@ import { d } from 'typegpu'
 
 import type { CameraPipeline } from '@/gpu/cameraPipeline'
 import { grayRenderLayout } from '@/gpu/pipelines/grayRenderPipeline'
-import type { GrayRenderBindResources } from '@/gpu/pipelines/grayRenderPipeline'
+import type { GrayRenderBindGroup, GrayRenderBindResources } from '@/gpu/pipelines/grayRenderPipeline'
 
 export type FrameSlotState = 'free' | 'inflight' | 'display'
 
-// Inferred types from the factory — avoid spelling out deep TypeGPU generics.
 type GraySnapshot = ReturnType<TgpuRoot['createBuffer']>
-type GrayRenderBindGroup = ReturnType<TgpuRoot['createBindGroup']>
 
 export interface FrameSlot {
   graySnapshot: GraySnapshot

@@ -1,9 +1,12 @@
 // Grayscale render pipeline: grayBuffer → canvas
-import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
+import type {
+  ColorAttachment,
+  ExtractBindGroupInputFromLayout,
+  TgpuBindGroup,
+  TgpuRoot,
+} from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { common } from 'typegpu'
-
-import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 
 export const grayRenderLayout = tgpu.bindGroupLayout({
   grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
@@ -11,6 +14,8 @@ export const grayRenderLayout = tgpu.bindGroupLayout({
 })
 
 export type GrayRenderBindResources = ExtractBindGroupInputFromLayout<typeof grayRenderLayout.entries>
+
+export type GrayRenderBindGroup = TgpuBindGroup<typeof grayRenderLayout.entries>
 
 export function createGrayRenderPipeline(
   root: TgpuRoot,
@@ -45,7 +50,11 @@ export function createGrayRenderPipeline(
     targets: { format: presentationFormat },
   })
   const bindGroup = root.createBindGroup(grayRenderLayout, resources)
-  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment, bg: unknown = bindGroup) => {
+  const encodeToCanvas = (
+    enc: GPUCommandEncoder,
+    colorAttachment: ColorAttachment,
+    bg: GrayRenderBindGroup = bindGroup,
+  ) => {
     pipeline.with(enc).withColorAttachment(colorAttachment).with(bg).draw(3)
   }
   return { bindGroup, encodeToCanvas, layout: grayRenderLayout }

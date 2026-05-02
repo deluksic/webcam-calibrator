@@ -5,6 +5,7 @@ export default defineConfig({
   categories: {
     correctness: 'error',
   },
+  ignorePatterns: ['examples-from-typegpu'],
   jsPlugins: ['eslint-plugin-typegpu'],
   rules: {
     curly: 'error',

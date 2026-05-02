@@ -134,6 +134,7 @@ export function DebugView() {
             showHistogramCanvas
             stream={cam.stream()}
             onLog={log}
+            liveCalibration={() => undefined}
           />
         </div>
       </Errored>

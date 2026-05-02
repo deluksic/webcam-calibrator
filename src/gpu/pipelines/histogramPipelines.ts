@@ -1,9 +1,7 @@
 // Histogram pipelines: reset and accumulate
-import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
+import type { ColorAttachment, ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { atomicAdd, atomicLoad, atomicStore, length, log2 } from 'typegpu/std'
-
-import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 
 /** Bin count for magnitude histogram and bar-chart vertex instances. */
 export const HISTOGRAM_BINS = 256
@@ -207,7 +205,7 @@ export function createHistogramStage(
     resetPipeline.with(pass).with(resetBindGroup).dispatchWorkgroups(HISTOGRAM_BINS)
     computePipeline.with(pass).with(computeBindGroup).dispatchWorkgroups(wgX, wgY)
   }
-  const encodeDisplay = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
+  const encodeDisplay = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment) => {
     displayPipeline.with(enc).withColorAttachment(colorAttachment).with(displayBindGroup).draw(6, HISTOGRAM_BINS)
   }
   return {

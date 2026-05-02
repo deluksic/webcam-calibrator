@@ -1,7 +1,6 @@
-import type { TgpuRoot } from 'typegpu'
+import type { ColorAttachment, TgpuRoot } from 'typegpu'
 
 import type { FrameSlot } from '@/gpu/frameSlotPool'
-import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 
 import type { CameraPipeline, NonGridDisplayMode } from './cameraPipeline'
 
@@ -15,7 +14,7 @@ export function encodePresentNonGrid(
   onError?: (msg: string) => void,
 ): void {
   pipeline.grayRenderTimeBuffer.write(timeSec)
-  const mainAttachment: RenderColorAttachment = { view: pipeline.context }
+  const mainAttachment: ColorAttachment = { view: pipeline.context }
 
   if (displayMode === 'edges') {
     try {
@@ -71,7 +70,7 @@ export function encodeAndSubmitGridPresent(
   const enc = root.device.createCommandEncoder({ label: 'grid frame present' })
   pipeline.grayRenderTimeBuffer.write(timeSec)
 
-  const loadMain: RenderColorAttachment = { view: pipeline.context, loadOp: 'load', storeOp: 'store' }
+  const loadMain: ColorAttachment = { view: pipeline.context, loadOp: 'load', storeOp: 'store' }
   pipeline.render.grayscale.encodeToCanvas(enc, loadMain, slot.grayRenderBindGroup)
 
   try {

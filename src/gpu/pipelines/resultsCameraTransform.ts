@@ -1,4 +1,4 @@
-import type { TgpuRoot } from 'typegpu'
+import type { TgpuBindGroup, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import type { Mat4Arg, Vec3Arg } from 'wgpu-matrix'
 
@@ -14,6 +14,8 @@ export const resultsCameraBindLayout = tgpu
     transform: { uniform: ResultsCameraUniformStruct },
   })
   .$idx(0)
+
+export type ResultsCameraBindGroup = TgpuBindGroup<typeof resultsCameraBindLayout.entries>
 
 export function allocResultsCameraUniform(root: TgpuRoot) {
   return root.createBuffer(ResultsCameraUniformStruct).$usage('uniform')

@@ -1,9 +1,8 @@
 // Grid visualization pipeline: instanced quad rendering via homography warping
-import type { TgpuRoot } from 'typegpu'
+import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { abs, floor, fract, min, max, dpdx, dpdy, mul } from 'typegpu/std'
 
-import type { RenderColorAttachment } from '@/gpu/renderEncodeTypes'
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
 export const GRID_DIVISIONS = 8
@@ -190,7 +189,7 @@ export function createGridVizStage(
     quads: quadCornersBuffer,
     failInterrogate: gridVizDebugModeBuffer,
   })
-  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: RenderColorAttachment) => {
+  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment) => {
     gridVizPipeline.with(enc).withColorAttachment(colorAttachment).with(gridVizBindGroup).draw(4, MAX_INSTANCES)
   }
   return {
