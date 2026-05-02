@@ -9,7 +9,7 @@ overrides:
   solid-js: 2.0.0-beta.7
   babel-preset-solid: 2.0.0-beta.7
   typescript: npm:tsover@latest
-  typegpu: 0.11.2
+  typegpu: link:../TypeGPU/packages/typegpu
 
 importers:
 
@@ -34,8 +34,8 @@ importers:
         specifier: 2.0.0-beta.7
         version: 2.0.0-beta.7
       typegpu:
-        specifier: 0.11.2
-        version: 0.11.2
+        specifier: link:../TypeGPU/packages/typegpu
+        version: link:../TypeGPU/packages/typegpu
       wgpu-matrix:
         specifier: ^3.4.2
         version: 3.4.2
@@ -78,7 +78,7 @@ importers:
         version: tsover@6.0.0
       unplugin-typegpu:
         specifier: ^0.11.0
-        version: 0.11.0(typegpu@0.11.2)
+        version: 0.11.0(typegpu@TypeGPU+packages+typegpu)
       vite:
         specifier: ^7.3.2
         version: 7.3.2(@types/node@25.6.0)(tsx@4.21.0)
@@ -1605,9 +1605,6 @@ packages:
     peerDependencies:
       typescript: '>=4.8.4'
 
-  tsover-runtime@0.0.6:
-    resolution: {integrity: sha512-5h/j9l4SwMSVfTMLVC/d+dkRjgh2xj+WHkivs5hhSwqACbG3JKXxp+9jneRoT07oJRHb97b5nKafsPtZEAdQMg==}
-
   tsover@6.0.0:
     resolution: {integrity: sha512-E51e1sMdrvBd2kVeNs2I3Kj7VdCivrwTmw89RYICmiWmtufI3EtywWgRAARFuVTZc3oKrkS1czNsVNLg0Zwv4A==}
     hasBin: true
@@ -1621,13 +1618,6 @@ packages:
     resolution: {integrity: sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==}
     engines: {node: '>= 0.8.0'}
 
-  typed-binary@4.3.3:
-    resolution: {integrity: sha512-W2hLsSzt3k/tg38gDE4Fn/QiwcoqGuUHBc2cb3mXuH7KcYxe/GM57vzW14s2/bawB4R5knGgGq8Xb57vsaJ4Sg==}
-
-  typegpu@0.11.2:
-    resolution: {integrity: sha512-wJeYeW25uidpNMyD4+5lehn39qd9iVpH5gXuJNwHYSOig69xHSLMBeHy6XnbiBdh+F5fh9dDehdVARl9g7n2qw==}
-    engines: {node: '>=12.20.0'}
-
   undici-types@7.19.2:
     resolution: {integrity: sha512-qYVnV5OEm2AW8cJMCpdV20CDyaN3g0AjDlOGf1OW4iaDEx8MwdtChUp4zu4H0VP3nDRF/8RKWH+IPp9uW0YGZg==}
 
@@ -1638,7 +1628,7 @@ packages:
   unplugin-typegpu@0.11.0:
     resolution: {integrity: sha512-5uEOrSbs4H+hFqlMd7PcAQAIxJy5uMl5gGdZurI6NeyQWaNBxO4jkHFo/yrxjXpSiQFiz431j7sou2eSIjjzCA==}
     peerDependencies:
-      typegpu: 0.11.2
+      typegpu: ^0.11.0
 
   unplugin@2.3.11:
     resolution: {integrity: sha512-5uKD0nqiYVzlmCRs01Fhs2BdkEgBS3SAVP6ndrBsuK42iC2+JHyxM05Rm9G8+5mkmRtzMZGY8Ct5+mliZxU/Ww==}
@@ -3138,8 +3128,6 @@ snapshots:
     dependencies:
       typescript: tsover@6.0.0
 
-  tsover-runtime@0.0.6: {}
-
   tsover@6.0.0:
     dependencies:
       minimatch: 9.0.9
@@ -3156,19 +3144,11 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
 
-  typed-binary@4.3.3: {}
-
-  typegpu@0.11.2:
-    dependencies:
-      tinyest: 0.3.1
-      tsover-runtime: 0.0.6
-      typed-binary: 4.3.3
-
   undici-types@7.19.2: {}
 
   undici@7.25.0: {}
 
-  unplugin-typegpu@0.11.0(typegpu@0.11.2):
+  unplugin-typegpu@0.11.0(typegpu@TypeGPU+packages+typegpu):
     dependencies:
       '@babel/parser': 7.29.2
       '@babel/traverse': 7.29.0
@@ -3180,7 +3160,7 @@ snapshots:
       picomatch: 4.0.4
       tinyest: 0.3.1
       tinyest-for-wgsl: 0.3.2
-      typegpu: 0.11.2
+      typegpu: link:../TypeGPU/packages/typegpu
       unplugin: 3.0.0
     transitivePeerDependencies:
       - supports-color

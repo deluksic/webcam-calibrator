@@ -11,8 +11,9 @@ export function Home() {
       <div class={styles.setup}>
         <h2 class={styles.setupTitle}>What you need</h2>
         <p class={styles.setupText}>
-          Two devices: a camera (phone or webcam) and a target display (phone, tablet, or computer).
-          They can be the same device or different ones.
+          A camera (webcam or phone) and a target display.
+          Works with phones, tablets, computers, or printed paper.
+          Same device works. Avoid reflections. Slight warp tolerated.
         </p>
       </div>
 

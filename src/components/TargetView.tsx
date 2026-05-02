@@ -174,7 +174,7 @@ export function TargetView() {
         </div>
 
         <div class={styles.info}>
-          <p>Print at 100% scale for accurate sizing.</p>
+          <p>Press <span class={styles.kbd}>Ctrl + P</span> to print</p>
         </div>
       </aside>
     </div>

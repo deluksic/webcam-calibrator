@@ -15,6 +15,13 @@
   position: sticky;
   top: 0;
   z-index: var(--z-raised);
+  line-height: 0;
+}
+
+@media print {
+  .nav {
+    display: none;
+  }
 }
 
 .navBtn {
@@ -49,6 +56,19 @@
   font-size: var(--text-xs);
   font-family: var(--font-mono);
   color: var(--color-text-muted);
+}
+
+.githubLink {
+  display: inline-flex;
+  align-items: center;
+  margin-right: var(--space-1);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.githubLink:hover {
+  color: var(--color-primary);
 }
 
 .main {

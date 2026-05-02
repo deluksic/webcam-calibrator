@@ -46,7 +46,8 @@
       "solid-js": "2.0.0-beta.7",
       "babel-preset-solid": "2.0.0-beta.7",
       "typescript": "npm:tsover@latest",
-      "typegpu": "0.11.2"
+      "typegpu": "link:../TypeGPU/packages/typegpu",
+      "@typegpu/geometry": "link:../TypeGPU/packages/typegpu-geometry"
     }
   }
 }

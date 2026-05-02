@@ -373,6 +373,7 @@ function CalibrationView() {
           <div class={styles.cameraSelectsRow}>
             <select
               class={styles.cameraSelect}
+              style="max-width: none"
               value={cam.selectedCameraDeviceId() ?? ''}
               onChange={(e) => cam.setSelectedCameraDeviceId(e.currentTarget.value)}
             >
