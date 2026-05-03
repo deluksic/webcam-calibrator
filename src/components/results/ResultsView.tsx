@@ -1,6 +1,9 @@
+import { A } from '@solidjs/router'
 import { Show, createEffect, createMemo, createSignal } from 'solid-js'
 
-import { useCalibrationLatest } from '@/components/calibration/CalibrationLatestContext'
+import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
+import { CalibrationLibraryPanel } from '@/components/calibration/CalibrationLibraryPanel'
+import { useCalibrationLibrary } from '@/components/calibration/CalibrationLibraryContext'
 import { downloadCalibrationOkJson } from '@/components/results/exportCalibrationJson'
 import { initGPU } from '@/gpu/init'
 import { createResultsCanvasPipeline, type ResultsCanvasPipeline } from '@/gpu/resultsCanvasPipeline'
@@ -25,6 +28,7 @@ import { createDragHandler } from '@/utils/createDragHandler'
 import { createElementSize } from '@/utils/createElementSize'
 import { createPinchHandler } from '@/utils/createPinchHandler'
 import type { CalibrationOk } from '@/workers/calibration.worker'
+import type { CalibrationResult } from '@/workers/calibrationClient'
 
 import styles from '@/components/results/ResultsView.module.css'
 
@@ -46,7 +50,19 @@ type CalibrationScene = {
 }
 
 export function ResultsView() {
-  const { latestCalibration } = useCalibrationLatest()
+  const { latestCalibration, latestCalibrationMeta } = useCalibrationRun()
+  const calibrationLibrary = useCalibrationLibrary()
+
+  const displayCalibration = createMemo((): CalibrationResult | undefined => {
+    const sid = calibrationLibrary.selectedId()
+    if (sid) {
+      const e = calibrationLibrary.entries().find((x) => x.id === sid)
+      if (e?.result.kind === 'ok') {
+        return e.result
+      }
+    }
+    return latestCalibration()
+  })
 
   const [gpuErr, setGpuErr] = createSignal('')
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>()
@@ -85,7 +101,7 @@ export function ResultsView() {
   }
 
   const calibrationScene = createMemo((): CalibrationScene | undefined => {
-    const c = latestCalibration()
+    const c = displayCalibration()
     if (!c || c.kind !== 'ok') {
       return undefined
     }
@@ -235,22 +251,50 @@ export function ResultsView() {
   )
 
   const statsLine = createMemo(() => {
-    const c = latestCalibration()
+    const c = displayCalibration()
     if (!c || c.kind !== 'ok') {
       return ''
     }
     return `RMS ${c.rmsPx.toFixed(3)} px • ${c.extrinsics.length} views • ${calibrationDefinedCornerCount(c)} points`
   })
 
-  const showCalibrateHint = createMemo(() => latestCalibration()?.kind !== 'ok')
+  const hasOkDisplay = createMemo(() => displayCalibration()?.kind === 'ok')
 
   const canExportCalibrationJson = createMemo(() => {
-    const c = latestCalibration()
+    const c = displayCalibration()
     return c !== undefined && c.kind === 'ok'
   })
 
-  function exportCalibrationJson() {
+  const canSaveToLibrary = createMemo(() => {
+    if (calibrationLibrary.selectedId()) {
+      return false
+    }
     const c = latestCalibration()
+    if (!c || c.kind !== 'ok') {
+      return false
+    }
+    const nValid = latestCalibrationMeta()?.validSolveFrameCount ?? c.extrinsics.length
+    return nValid >= 4
+  })
+
+  function saveCurrentSolveToLibrary() {
+    if (!canSaveToLibrary()) {
+      return
+    }
+    const c = latestCalibration()
+    if (!c || c.kind !== 'ok') {
+      return
+    }
+    const meta = latestCalibrationMeta()
+    calibrationLibrary.addFromCurrentSolve({
+      result: c,
+      validSolveFrameCount: meta?.validSolveFrameCount ?? c.extrinsics.length,
+      video: meta?.video,
+    })
+  }
+
+  function exportCalibrationJson() {
+    const c = displayCalibration()
     if (c === undefined || c.kind !== 'ok') {
       return
     }
@@ -285,19 +329,62 @@ export function ResultsView() {
         <div class={styles.panel}>
           <div class={styles.toolbar}>
             <p class={[styles.meta, !statsLine() ? styles.metaHidden : false]}>{statsLine()}</p>
-            <button
-              type="button"
-              class={styles.exportJsonBtn}
-              disabled={!canExportCalibrationJson()}
-              onClick={exportCalibrationJson}
-            >
-              Export JSON
-            </button>
+            <div class={styles.toolbarActions}>
+              <Show when={!calibrationLibrary.selectedId()}>
+                <A
+                  href="/calibrate"
+                  class={styles.continueCalibration}
+                  title="Open the live camera capture and calibration flow"
+                >
+                  Continue Calibration
+                </A>
+              </Show>
+              <Show when={calibrationLibrary.selectedId()}>
+                <button
+                  type="button"
+                  class={styles.secondaryBtn}
+                  title="Show the latest calibration from Calibrate when it is available"
+                  onClick={() => calibrationLibrary.setSelectedId(undefined)}
+                >
+                  Use latest solve
+                </button>
+              </Show>
+              <Show when={!calibrationLibrary.selectedId()}>
+                <button
+                  type="button"
+                  class={styles.exportJsonBtn}
+                  disabled={!canSaveToLibrary()}
+                  title={
+                    canSaveToLibrary()
+                      ? 'Copy this calibration into Saved calibrations below'
+                      : 'Need a finished calibration with at least four solver-ready views from Calibrate'
+                  }
+                  onClick={() => saveCurrentSolveToLibrary()}
+                >
+                  Save to library
+                </button>
+              </Show>
+              <button
+                type="button"
+                class={styles.exportJsonBtn}
+                disabled={!canExportCalibrationJson()}
+                onClick={exportCalibrationJson}
+              >
+                Export JSON
+              </button>
+            </div>
           </div>
-          <Show when={showCalibrateHint()}>
+          <Show when={!hasOkDisplay()}>
             <p class={styles.hint}>
-              After Calibrate reports a pooled ok solve, this view shows refined object points and axes. Reset on
-              Calibrate clears results.
+              When calibration data is available (from <strong>Calibrate</strong> or a saved entry below), this view
+              shows refined tag corners and axes. Nothing is wrong yet if you are still setting up—run Calibrate, or pick
+              a saved calibration.
+            </p>
+          </Show>
+          <Show when={hasOkDisplay()}>
+            <p class={styles.successLine}>
+              Drag to orbit the board (touch: two-finger drag; pinch or scroll to zoom). Use <strong>Export JSON</strong>{' '}
+              when you are done.
             </p>
           </Show>
           <div class={styles.canvasViewport}>
@@ -309,6 +396,7 @@ export function ResultsView() {
               onPointerDown={(e) => onDragStartCanvas(e)}
             />
           </div>
+          <CalibrationLibraryPanel />
         </div>
       </Show>
     </div>

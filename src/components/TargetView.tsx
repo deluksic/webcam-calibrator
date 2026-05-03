@@ -1,4 +1,5 @@
-import { For, createSignal, createMemo } from 'solid-js'
+import { A } from '@solidjs/router'
+import { For, Show, createSignal, createMemo } from 'solid-js'
 
 import { selectRandomTags } from '@/lib/april-tag-gen'
 import { gridVizFillRgbCss } from '@/lib/hashStableColor'
@@ -6,12 +7,15 @@ import { TAG36H11_COUNT, tagIdPattern } from '@/lib/tag36h11'
 
 import styles from '@/components/TargetView.module.css'
 
+import { loadUserGuidancePrefs, patchUserGuidancePrefs } from '@/lib/userGuidancePrefs'
+
 export function TargetView() {
   const [cols, setCols] = createSignal(4)
   const [rows, setRows] = createSignal(3)
   const [spacing, setSpacing] = createSignal(1.5)
   const [checkerboard, setCheckerboard] = createSignal(false)
   const [randomSeed, setRandomSeed] = createSignal(Date.now())
+  const [hideTips, setHideTips] = createSignal(loadUserGuidancePrefs().hideTargetTips === true)
 
   const tagSize = 40
 
@@ -95,6 +99,29 @@ export function TargetView() {
 
       <aside class={styles.controls}>
         <h2 class={styles.title}>Target Settings</h2>
+
+        <p class={styles.nextStep}>
+          Next: on the camera device, open <A href="/calibrate">Calibrate</A> and capture the board from several angles.
+        </p>
+
+        <Show when={!hideTips()}>
+          <div class={styles.tip}>
+            <p class={styles.tipText}>
+              Changing grid size or <strong>Randomize Tags</strong> changes tag IDs — finish or reset the session on
+              Calibrate before doing that, or the camera side will be out of sync.
+            </p>
+            <button
+              type="button"
+              class={styles.tipDismiss}
+              onClick={() => {
+                patchUserGuidancePrefs({ hideTargetTips: true })
+                setHideTips(true)
+              }}
+            >
+              Hide tip
+            </button>
+          </div>
+        </Show>
 
         <div class={styles.field}>
           <label class={styles.label}>Grid Size</label>

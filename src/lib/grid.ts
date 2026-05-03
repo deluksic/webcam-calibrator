@@ -389,6 +389,24 @@ function classifyModuleFromPosNeg(whiteCount: number, blackCount: number, minVot
  * color. **`-2`** (tie with enough votes) is skipped — neighbor homogeneity is a poor stand-in for
  * conflicting directional evidence, and dictionary decode already treats **`-2`** as an unknown bit.
  */
+/**
+ * After {@link fillUnknownNeighbors6}: reject patterns with unresolved weak cells (`-1`) or too many tied cells (`-2`).
+ * Used to drop junk quads before dictionary decode and UI.
+ */
+export function votePatternAcceptable(pattern: TagPattern, maxTieCells: number = 2): boolean {
+  let ties = 0
+  for (let i = 0; i < 36; i++) {
+    const v = pattern[i]
+    if (v === -1) {
+      return false
+    }
+    if (v === -2) {
+      ties++
+    }
+  }
+  return ties <= maxTieCells
+}
+
 export function fillUnknownNeighbors6(pattern: TagPattern): void {
   const idx = (r: number, c: number) => r * 6 + c
   const next = [...pattern] as TagPattern

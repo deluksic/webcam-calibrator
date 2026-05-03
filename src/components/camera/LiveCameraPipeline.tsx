@@ -12,12 +12,14 @@ import type { DetectedQuad } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
 import { MAX_U32 } from '@/gpu/pipelines/extentTrackingPipeline'
-import { MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
+import { DECODED_TAG_ID_DICT_MISS, MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import { buildReprojectionOverlayPairs, cameraDistanceFromT, cameraTiltDegFromR } from '@/lib/reprojectionLive'
 import type { TargetLayout } from '@/lib/targetLayout'
 import { createElementSize } from '@/utils/createElementSize'
+
+import { CalibrateFocusOverlay } from '@/components/calibration/CalibrateFocusOverlay'
 import { createFrameLoop } from '@/utils/createFrameLoop'
 
 import styles from '@/components/camera/LiveCameraPipeline.module.css'
@@ -91,9 +93,10 @@ function TagIdGridOverlay(props: { quads: DetectedQuad[]; scale: { x: number; y:
           }
           return '?'
         }
+        const dictMiss = () => (quad().vizTagId ?? 0) === (DECODED_TAG_ID_DICT_MISS >>> 0)
         return (
           <div
-            class={styles.tagIdOverlay}
+            class={[styles.tagIdOverlay, dictMiss() && styles.tagIdOverlayDictMiss]}
             style={{
               '--tag-x': `${cx() * props.scale.x}px`,
               '--tag-y': `${cy() * props.scale.y}px`,
@@ -123,6 +126,10 @@ export type LiveCameraPipelineProps = {
   onQuadSnapshotRequest?: () => void
   /** Extra controls (camera select, mode buttons, …). */
   toolbar?: JSX.Element
+  /** Advisory 75%×75% framing guide over the **displayed** canvas (same box as tag overlays). */
+  showFocusOverlay?: boolean
+  /** Short line centered in the strip below the focus rect (inside canvas). */
+  focusBottomHint?: () => JSX.Element | undefined
 }
 
 export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
@@ -136,6 +143,8 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
   })
 
   /** Props read in memos/JSX; also snapshotted for onFrame / async .then (non-tracking). */
+  const focusBottomHintContent = createMemo(() => props.focusBottomHint?.())
+
   const pipelineInteraction = createMemo(() => ({
     onLog: props.onLog,
     displayMode: props.displayMode,
@@ -314,7 +323,13 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
             const ok = q.hasCorners && q.cornerDebug && q.cornerDebug.failureCode === 0
             return {
               ...q,
-              vizTagId: ok && typeof q.decodedTagId === 'number' ? q.decodedTagId : undefined,
+              vizTagId: ok
+                ? typeof q.decodedTagId === 'number'
+                  ? q.decodedTagId
+                  : q.vizTagId !== undefined
+                    ? q.vizTagId
+                    : undefined
+                : undefined,
             }
           })
 
@@ -365,7 +380,9 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               if (sf) {
                 return true
               }
-              return typeof q.decodedTagId === 'number'
+              return (
+                typeof q.decodedTagId === 'number' || (q.vizTagId ?? 0) === (DECODED_TAG_ID_DICT_MISS >>> 0)
+              )
             }),
           )
 
@@ -441,13 +458,23 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           {props.toolbar}
         </div>
         <div class={styles.feedContainer}>
-          <canvas ref={setCanvasElement} class={styles.feedCanvas} />
-          <Show when={props.displayMode === 'debug'}>
-            <QuadCandidateOverlay bboxes={bboxes()} scale={scale()} />
-          </Show>
-          <Show when={props.displayMode === 'grid'}>
-            <TagIdGridOverlay quads={gridOverlayQuads()} scale={scale()} />
-          </Show>
+          <div class={styles.feedCanvasWrap}>
+            <canvas ref={setCanvasElement} class={styles.feedCanvas} />
+            <Show when={props.showFocusOverlay}>
+              <CalibrateFocusOverlay />
+            </Show>
+            <Show when={focusBottomHintContent()}>
+              <div class={styles.focusBottomHint} role="note">
+                <span class={styles.focusBottomHintText}>{focusBottomHintContent()}</span>
+              </div>
+            </Show>
+            <Show when={props.displayMode === 'debug'}>
+              <QuadCandidateOverlay bboxes={bboxes()} scale={scale()} />
+            </Show>
+            <Show when={props.displayMode === 'grid'}>
+              <TagIdGridOverlay quads={gridOverlayQuads()} scale={scale()} />
+            </Show>
+          </div>
         </div>
       </div>
       <div class={[styles.feedPanel, styles.feedPanelSide]}>

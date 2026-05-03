@@ -12,8 +12,10 @@ import {
   imageSobelToTagGradient,
   minQuadEdgeLengthPx,
   primaryModuleFromUv,
+  votePatternAcceptable,
 } from '@/lib/grid'
 import type { TagPattern } from '@/lib/tag36h11'
+import { tagIdPattern } from '@/lib/tag36h11'
 
 const { max, abs } = Math
 
@@ -318,6 +320,27 @@ describe('grid', () => {
       expect(mask[10]).toBe(1)
       expect(mask[11]).toBe(0)
       expect(mask[0]).toBe(0)
+    })
+  })
+
+  describe('votePatternAcceptable', () => {
+    it('rejects inner 6×6 with any -1', () => {
+      const p = [...tagIdPattern(0)] as TagPattern
+      p[5] = -1
+      expect(votePatternAcceptable(p)).toBe(false)
+    })
+
+    it('accepts decoded-style pattern', () => {
+      const p = [...tagIdPattern(0)] as TagPattern
+      expect(votePatternAcceptable(p)).toBe(true)
+    })
+
+    it('allows at most maxTieCells ties (-2)', () => {
+      const p = [...tagIdPattern(0)] as TagPattern
+      p[0] = -2
+      p[1] = -2
+      expect(votePatternAcceptable(p, 2)).toBe(true)
+      expect(votePatternAcceptable(p, 1)).toBe(false)
     })
   })
 

@@ -25,6 +25,9 @@
 }
 
 .navBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
@@ -34,6 +37,10 @@
   transition:
     color var(--duration-fast) var(--ease-out),
     background-color var(--duration-fast) var(--ease-out);
+}
+
+.navBtnCalibrate {
+  position: relative;
 }
 
 .navBtn:hover {
@@ -49,6 +56,20 @@
 
 .navBtnActive:hover {
   color: var(--color-accent-hover);
+}
+
+/* Absolutely positioned so .nav line-height: 0 still governs bar height; 4px so it reads as a hint, not a chip */
+.navSessionDot {
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  width: 4px;
+  height: 4px;
+  margin: 0;
+  border-radius: 50%;
+  background-color: var(--color-accent);
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 
 .version {
@@ -76,4 +97,5 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }

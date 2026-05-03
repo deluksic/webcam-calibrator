@@ -1,9 +1,16 @@
 .feedContainer {
-  position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+/* Shrink-wraps to the displayed canvas so absolute overlays (focus rect, tags) share its box */
+.feedCanvasWrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
 }
 
 .feedRow {
@@ -189,6 +196,47 @@
     -1px 1px 1px #fff8,
     1px 1px 1px #fff8;
   white-space: nowrap;
+}
+
+.tagIdOverlayDictMiss {
+  color: #9a3412;
+}
+
+/* Bottom strip below the 75%-height centered focus rect (50% + 37.5% from top) */
+.focusBottomHint {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% + 37.5%);
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-2) var(--space-1);
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+/* One flex child so fragment nodes are not laid out as separate flex items (smushes inline text). */
+.focusBottomHintText {
+  max-width: 100%;
+  min-width: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: #fff;
+  text-align: center;
+  text-wrap: balance;
+  text-shadow:
+    0 0 10px rgb(0 0 0 / 85%),
+    0 1px 3px rgb(0 0 0 / 90%),
+    0 0 1px rgb(0 0 0 / 100%);
+}
+
+.focusBottomHintText strong,
+.focusBottomHintText b {
+  font-weight: 700;
+  color: #fff;
 }
 
 .reprojChip {

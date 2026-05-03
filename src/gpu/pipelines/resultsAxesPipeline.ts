@@ -18,7 +18,7 @@ import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { WORLD_AXIS_HALF_LEN } from '@/lib/orbitOrthoMath'
 
 /** Join triangle allowance for stroked-axis extrusion (@typegpu/geometry lines combo). */
-const AXIS_JOIN_MAX = 6
+const AXIS_JOIN_MAX = 3
 
 const axisTriangleIndexU16 = new Uint16Array(lineSegmentIndices(AXIS_JOIN_MAX))
 
@@ -156,7 +156,7 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
 
   const pipeline = root
     .with(joinSlot, joins.round)
-    .with(startCapSlot, caps.butt)
+    .with(startCapSlot, caps.round)
     .with(endCapSlot, caps.arrow)
     .createRenderPipeline({
       vertex: vert,

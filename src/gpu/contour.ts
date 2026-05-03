@@ -1,8 +1,9 @@
 // Contour detection: CPU region extraction + quad fitting (labels from GPU pointer-jump).
 
+import { DECODED_TAG_ID_DICT_MISS } from '@/gpu/pipelines/gridVizPipeline'
 import { findCornersFromEdgesWithDebug, type CornerDebugInfo, rotateRing } from '@/lib/corners'
 import type { Corners } from '@/lib/geometry'
-import { decodeTagPattern } from '@/lib/grid'
+import { decodeTagPatternWithVoteMaps, votePatternAcceptable } from '@/lib/grid'
 import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
 
 const { min, max, floor } = Math
@@ -195,7 +196,12 @@ export function validateAndFilterQuads(
       })
       continue
     }
-    const pattern = decodeTagPattern(corners, sobelData, width, undefined, imageHeight)
+    // No edge mask here: masking to component Sobel pixels was dropping too many samples → weak cells
+    // (`-1`) and votePatternAcceptable rejected every quad. Same sampling as legacy `decodeTagPattern`.
+    const { pattern } = decodeTagPatternWithVoteMaps(corners, sobelData, width, undefined, imageHeight)
+    if (!votePatternAcceptable(pattern)) {
+      continue
+    }
     const decoded = decodeTag36h11AnyRotation(pattern, ALLOWED_ERROR_COUNT)
     if (decoded) {
       corners = rotateRing(corners, decoded.rotation)
@@ -209,7 +215,9 @@ export function validateAndFilterQuads(
       pattern,
       hasCorners: true,
       cornerDebug: debug,
-      ...(decoded ? { decodedTagId: decoded.id, decodedRotation: decoded.rotation } : {}),
+      ...(decoded
+        ? { decodedTagId: decoded.id, decodedRotation: decoded.rotation }
+        : { vizTagId: DECODED_TAG_ID_DICT_MISS >>> 0 }),
     })
   }
 

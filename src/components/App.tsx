@@ -1,7 +1,8 @@
 import { A, HashRouter, Route, type RouteSectionProps, useCurrentMatches } from '@solidjs/router'
-import { createMemo } from 'solid-js'
+import { Show, createMemo } from 'solid-js'
 
-import { CalibrationLatestProvider } from '@/components/calibration/CalibrationLatestContext'
+import { CalibrationLibraryProvider } from '@/components/calibration/CalibrationLibraryContext'
+import { CalibrationRunProvider, useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
 import { CalibrationView } from '@/components/CalibrationView'
 import { CameraStreamProvider } from '@/components/camera/CameraStreamContext'
 import { DebugView } from '@/components/DebugView'
@@ -22,6 +23,11 @@ export function App() {
   const Layout = (props: RouteSectionProps) => {
     const matches = useCurrentMatches()
     const currentPath = createMemo(() => matches()[0]?.path || '/')
+    const runCtx = useCalibrationRun()
+    const calibrateNavLabel = createMemo(() => {
+      const active = runCtx.calibrationSessionActive()
+      return active ? 'Calibrate, calibration session in progress' : 'Calibrate'
+    })
 
     const isHome = createMemo(() => currentPath() === '/')
     const isTarget = createMemo(() => currentPath() === '/target')
@@ -38,8 +44,15 @@ export function App() {
           <A href="/target" class={[styles.navBtn, isTarget() && styles.navBtnActive]}>
             Target
           </A>
-          <A href="/calibrate" class={[styles.navBtn, isCalibrate() && styles.navBtnActive]}>
+          <A
+            href="/calibrate"
+            class={[styles.navBtn, styles.navBtnCalibrate, isCalibrate() && styles.navBtnActive]}
+            aria-label={calibrateNavLabel()}
+          >
             Calibrate
+            <Show when={runCtx.calibrationSessionActive()}>
+              <span class={styles.navSessionDot} title="Calibration session in progress" aria-hidden="true" />
+            </Show>
           </A>
           <A href="/results" class={[styles.navBtn, isResults() && styles.navBtnActive]}>
             Results
@@ -59,15 +72,17 @@ export function App() {
 
   return (
     <CameraStreamProvider>
-      <CalibrationLatestProvider>
-        <HashRouter root={Layout}>
-          <Route path="/" component={Home} />
-          <Route path="/target" component={TargetView} />
-          <Route path="/calibrate" component={CalibrationView} />
-          <Route path="/results" component={ResultsView} />
-          <Route path="/debug" component={DebugView} />
-        </HashRouter>
-      </CalibrationLatestProvider>
+      <CalibrationRunProvider>
+        <CalibrationLibraryProvider>
+          <HashRouter root={Layout}>
+            <Route path="/" component={Home} />
+            <Route path="/target" component={TargetView} />
+            <Route path="/calibrate" component={CalibrationView} />
+            <Route path="/results" component={ResultsView} />
+            <Route path="/debug" component={DebugView} />
+          </HashRouter>
+        </CalibrationLibraryProvider>
+      </CalibrationRunProvider>
     </CameraStreamProvider>
   )
 }

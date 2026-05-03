@@ -2,6 +2,11 @@
 @import './design-system.css';
 
 /* ─── Global base styles ─────────────────── */
+html {
+  /* Avoid layout jump when vertical scrollbar appears as content height changes */
+  scrollbar-gutter: stable;
+}
+
 html,
 body {
   background-color: var(--color-bg-primary);
@@ -9,6 +14,8 @@ body {
   font-family: var(--font-sans);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 /* ─── Focus visible ─────────────────────── */

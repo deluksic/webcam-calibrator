@@ -31,6 +31,9 @@ export type QuadData = d.Infer<typeof QuadData>
 /** Sentinel: no decoded id (GPU draws black, no hash). */
 export const DECODED_TAG_ID_UNKNOWN = 0xffff_ffff
 
+/** Vote pattern passed quality gate but dictionary decode failed — distinct tint in grid viz + “?” label. */
+export const DECODED_TAG_ID_DICT_MISS = 0xffff_fffe
+
 export const GridDataSchema = d.arrayOf(QuadData, MAX_INSTANCES)
 
 /** 0 = legacy RGB fail tint; 1 = interrogate FAIL_INSUFFICIENT_EDGES (red hit / black miss); 2 = interrogate FAIL_LINE_FIT_FAILED (blue). */
@@ -129,6 +132,11 @@ export function createGridVizPipeline(
     const ddy = dpdy(uv)
     const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS)
     const a = 0.2 + 0.75 * grid
+
+    if (failureCode === d.u32(0) && decodedTagId === d.u32(0xfffffffe)) {
+      const amber = d.vec3f(0.92, 0.62, 0.18)
+      return d.vec4f(mul(amber, d.vec3f(0.5, 0.5, 0.5)), 0.32 + 0.68 * grid)
+    }
 
     if (failureCode === d.u32(0) && decodedTagId !== d.u32(0xffffffff)) {
       const rgb = stableHashToRgb01(decodedTagId)

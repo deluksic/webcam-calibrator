@@ -72,4 +72,4 @@ export function buildOrbitClipMatrix(
   mat4.multiply(projMat, viewMat, mvpOut)
 }
 
-export const WORLD_AXIS_HALF_LEN = 5
+export const WORLD_AXIS_HALF_LEN = 3

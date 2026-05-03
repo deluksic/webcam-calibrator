@@ -1,17 +1,21 @@
-import { Errored, For, createMemo, createSignal, createEffect } from 'solid-js'
+import { A } from '@solidjs/router'
+import { Errored, For, Show, createMemo, createSignal } from 'solid-js'
 
-import { useCalibrationLatest } from '@/components/calibration/CalibrationLatestContext'
+import { CalibrateGuidancePanel, type GuidanceBand } from '@/components/calibration/CalibrateGuidancePanel'
+import { useCalibrationLibrary } from '@/components/calibration/CalibrationLibraryContext'
+import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
 import type { DetectedQuad } from '@/gpu/contour'
 import { calibrationQuadScore } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
-import type { TagObservation, CalibrationFrameObservation, ImageTag } from '@/lib/calibrationTypes'
+import type { TagObservation, ImageTag } from '@/lib/calibrationTypes'
 import type { Corners3 } from '@/lib/calibrationTypes'
-import { learnLayoutFromFrame, layoutToObjectTags, type TargetLayout } from '@/lib/targetLayout'
+import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
+import { learnLayoutFromFrame, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
-import { calibApi, type CalibrationResult } from '@/workers/calibrationClient'
+import type { CalibrationResult } from '@/workers/calibrationClient'
 
 import { RESOLUTION_LADDER, type Resolution } from './camera/cameraStreamAcquire'
 
@@ -38,36 +42,6 @@ function deviceScore(d: MediaDeviceInfo): number {
   return score
 }
 
-type Collection = 'idle' | 'running' | 'paused'
-
-type CalibRunStats = {
-  framesProcessed: number
-  framesAccepted: number
-  frameRejections: number
-  quadRejects: number
-  evictions: number
-  manualSnapshots: number
-}
-
-type CalibRun = {
-  collection: Collection
-  framePool: CalibrationFrameObservation[]
-  stats: CalibRunStats
-}
-
-const initialCalibRun: CalibRun = {
-  collection: 'idle',
-  framePool: [],
-  stats: {
-    framesProcessed: 0,
-    framesAccepted: 0,
-    frameRejections: 0,
-    quadRejects: 0,
-    evictions: 0,
-    manualSnapshots: 0,
-  },
-}
-
 const RES = RESOLUTION_LADDER
 
 function resolutionLabel(res: string): string {
@@ -90,10 +64,28 @@ function percentile(sorted: number[], p: number): number {
   return sorted[idx]!
 }
 
+function isProgressShapedError(c: CalibrationResult | undefined): boolean {
+  return c?.kind === 'error' && c.reason === 'too-few-views'
+}
+
+type SnapshotFeedback = { kind: 'idle' } | { kind: 'fail'; message: string }
+
+type CalibMetricsRow =
+  | { solverSummary: string }
+  | {
+      solverSummary: string
+      fxfy: string
+      cxyc: string
+      fov: string
+      ratio: string
+      off: string
+    }
+
 function CalibrationView() {
   const cam = useCameraStream()
-  const { setLatestCalibration } = useCalibrationLatest()
-  const [layout, setLayout] = createSignal<TargetLayout>()
+  const runCtx = useCalibrationRun()
+  const calibrationLibrary = useCalibrationLibrary()
+  const [snapshotFeedback, setSnapshotFeedback] = createSignal<SnapshotFeedback>({ kind: 'idle' })
   const [reproj, setReproj] = createSignal<{
     rms: number
     tagCount: number
@@ -101,108 +93,16 @@ function CalibrationView() {
     dist: number
   }>()
   const [currentTagged, setCurrentTagged] = createSignal<DetectedQuad[]>([])
-  const [videoFrameSize, setVideoFrameSize] = createSignal<{ width: number; height: number }>()
-  const [run, setRun] = createSignal<CalibRun>({
-    collection: 'idle',
-    framePool: [],
-    stats: { ...initialCalibRun.stats },
-  })
-  const [solveInFlight, setSolveInFlight] = createSignal(0)
 
   const displayMode = createMemo<DisplayMode>(() => 'grid')
-  const isSolving = createMemo(() => solveInFlight() > 0)
 
   const devicesSorted = createMemo(() => {
     const list = cam.devices()
     return [...list].sort((a, b) => deviceScore(b) - deviceScore(a))
   })
 
-  const [calib, setCalibInner] = createSignal<CalibrationResult>()
-
-  const setCalib = (r: CalibrationResult | undefined) => {
-    setCalibInner(r)
-    setLatestCalibration(r)
-  }
-
-  // Track pending promise to avoid showing stale results
-  let pendingVersion = 0
-  let lastSolveKey: string | undefined
-  const updateCalib = async (
-    collection: string,
-    lay: TargetLayout | undefined,
-    framePool: CalibrationFrameObservation[],
-    frameSize: { width: number; height: number },
-  ) => {
-    if (collection === 'idle' || !lay || framePool.length < 1) {
-      lastSolveKey = undefined
-      setCalib(undefined)
-      return
-    }
-    // Collect all tagIds present in the layout
-    const layoutTagIds = new Set<number>()
-    for (const tagId of lay.keys()) {
-      layoutTagIds.add(tagId)
-    }
-    // Filter framePool to only include points from tags in the layout
-    const filteredPool: CalibrationFrameObservation[] = []
-    for (const frame of framePool) {
-      const filteredTags = frame.tags.filter((ft) => layoutTagIds.has(ft.tagId))
-      const cornerCount = filteredTags.length * 4
-      if (cornerCount >= 8) {
-        filteredPool.push({ frameId: frame.frameId, tags: filteredTags })
-      }
-    }
-    if (filteredPool.length < 3) {
-      lastSolveKey = undefined
-      setCalib({ kind: 'error', reason: 'too-few-views' })
-      return
-    }
-
-    const solveKey = `${collection}|${lay.size}|${filteredPool.map((f) => f.frameId).join(',')}`
-    if (solveKey === lastSolveKey) {
-      return
-    }
-    lastSolveKey = solveKey
-
-    const layoutTagsModel = layoutToObjectTags(lay)
-    const size = frameSize
-    if (!size) {
-      setCalib({ kind: 'error', reason: 'too-few-views', details: 'waiting-for-video-size' })
-      return
-    }
-    const { width: w, height: h } = size
-    const currentVersion = ++pendingVersion
-    try {
-      setSolveInFlight((n) => n + 1)
-      const result = await calibApi.solveCalibration(layoutTagsModel, filteredPool, {
-        width: w,
-        height: h,
-      })
-      if (currentVersion === pendingVersion) {
-        setCalib(result)
-      }
-    } catch (err) {
-      console.error('[CalibrationView] calibration failed', err)
-      if (currentVersion === pendingVersion) {
-        setCalib({ kind: 'error', reason: 'singular', details: String(err) })
-      }
-    } finally {
-      setSolveInFlight((n) => Math.max(0, n - 1))
-    }
-  }
-
-  // Re-run calibration when inputs change
-  createEffect(
-    () => ({ run: run(), layout: layout(), frameSize: videoFrameSize() }),
-    ({ run, layout, frameSize }) => {
-      if (frameSize) {
-        updateCalib(run.collection, layout, run.framePool, frameSize)
-      }
-    },
-  )
-
   const calibratedExtrinsics = createMemo(() => {
-    const c = calib()
+    const c = runCtx.calib()
     if (!c || c.kind !== 'ok') {
       return undefined
     }
@@ -214,12 +114,13 @@ function CalibrationView() {
   })
 
   const calibratedLayout = createMemo<TargetLayout | undefined>(() => {
-    const c = calib()
-    if (!c || c.kind !== 'ok' || !layout()) {
-      return layout()
+    const c = runCtx.calib()
+    const lay = runCtx.layout()
+    if (!c || c.kind !== 'ok' || !lay) {
+      return lay
     }
     if (c.updatedTargets.length < 1) {
-      return layout()
+      return lay
     }
     const refined = new Map<number, Corners3>()
     for (const t of c.updatedTargets) {
@@ -227,31 +128,28 @@ function CalibrationView() {
       refined.set(tagId, [{ ...objCorners[0]! }, { ...objCorners[1]! }, { ...objCorners[2]! }, { ...objCorners[3]! }])
     }
     if (refined.size === 0) {
-      return layout()
+      return lay
     }
     return refined
   })
 
-  const onQuadDetection = (quads: DetectedQuad[]) => {
-    setRun((r) => ({
-      ...r,
-      stats: { ...r.stats, framesProcessed: r.stats.framesProcessed + 1 },
-    }))
-    setCurrentTagged(quads)
-  }
-
-  const handleSnapshotClick = () => {
-    const tagged = currentTagged()
-    console.log(`[CalibrationView snapshot] tagged.length=${tagged.length}`)
-    const r = run()
+  const attemptAddPooledFrame = (tagged: DetectedQuad[], source: 'manual' | 'autoFirst'): boolean => {
+    const r = runCtx.run()
     if (r.collection !== 'running') {
-      console.log(`[CalibrationView snapshot] not running, skipping`)
-      return
+      if (source === 'manual') {
+        setSnapshotFeedback({ kind: 'fail', message: 'Press Start before capturing snapshots.' })
+      }
+      return false
     }
 
     if (tagged.length < 1) {
-      console.log(`[CalibrationView snapshot] no tagged quads, skipping`)
-      return
+      if (source === 'manual') {
+        setSnapshotFeedback({
+          kind: 'fail',
+          message: 'No tag quads in this frame—check lighting, focus, and that the target fills the view.',
+        })
+      }
+      return false
     }
 
     const tags: TagObservation[] = []
@@ -267,10 +165,16 @@ function CalibrationView() {
     }
 
     if (tags.length < 1) {
-      return
+      if (source === 'manual') {
+        setSnapshotFeedback({
+          kind: 'fail',
+          message:
+            'Need at least one decoded tag ID in view (not only ?). Improve lighting or center the board; ? marks are not used for layout yet.',
+        })
+      }
+      return false
     }
 
-    // Keep one observation per tag id (highest score) to avoid duplicate-id collapse.
     const tagsById = new Map<number, TagObservation>()
     for (const tag of tags) {
       const prev = tagsById.get(tag.tagId)
@@ -280,19 +184,28 @@ function CalibrationView() {
     }
     const uniqueTags = [...tagsById.values()]
 
-    // Build layout from the first 2 tags if needed
-    if (!layout()) {
+    if (!runCtx.layout()) {
       if (uniqueTags.length < 2) {
-        console.log(`[CalibrationView snapshot] need at least 2 unique tag IDs for layout, skipping`)
-        return
+        if (source === 'manual') {
+          setSnapshotFeedback({
+            kind: 'fail',
+            message:
+              'Need two different tag IDs visible to learn the board layout before the first snapshot can be saved.',
+          })
+        }
+        return false
       }
       const L = learnLayoutFromFrame(uniqueTags)
-      if (L) {
-        setLayout(L)
-      } else {
-        console.log(`[CalibrationView snapshot] failed to learn layout, skipping`)
-        return
+      if (!L) {
+        if (source === 'manual') {
+          setSnapshotFeedback({
+            kind: 'fail',
+            message: 'Could not learn layout from this frame—try a clearer view with two or more tags.',
+          })
+        }
+        return false
       }
+      runCtx.setLayout(L)
     }
 
     const frameTagsModel = uniqueTags.map(
@@ -307,28 +220,59 @@ function CalibrationView() {
       }),
     )
 
-    setRun((r) => {
+    runCtx.setRun((prev) => {
       const { next, evicted } = mergeCalibrationFramesTopK(
-        r.framePool,
+        prev.framePool,
         [{ frameId: Date.now(), tags: frameTagsModel }],
         DEFAULT_CALIBRATION_TOP_K,
       )
       return {
-        ...r,
+        ...prev,
         framePool: next,
         stats: {
-          ...r.stats,
-          manualSnapshots: r.stats.manualSnapshots + 1,
-          framesAccepted: r.stats.framesAccepted + 1,
-          evictions: r.stats.evictions + evicted,
+          ...prev.stats,
+          framesAccepted: prev.stats.framesAccepted + 1,
+          evictions: prev.stats.evictions + evicted,
         },
       }
     })
+    setSnapshotFeedback({ kind: 'idle' })
+    return true
   }
+
+  const onQuadDetection = (quads: DetectedQuad[]) => {
+    runCtx.setRun((r) => ({
+      ...r,
+      stats: { ...r.stats, framesProcessed: r.stats.framesProcessed + 1 },
+    }))
+    setCurrentTagged(quads)
+
+    const rNow = runCtx.run()
+    if (rNow.collection === 'running' && rNow.framePool.length < 1) {
+      attemptAddPooledFrame(quads, 'autoFirst')
+    }
+  }
+
+  const handleSnapshotClick = () => {
+    attemptAddPooledFrame(currentTagged(), 'manual')
+  }
+
+  /** Same notion as first snapshot: need two distinct decoded IDs to learn layout (not "?"). */
+  const decodedUniqueTagCountOnFrame = createMemo(() => {
+    const ids = new Set<number>()
+    for (const q of currentTagged()) {
+      if (typeof q.decodedTagId === 'number') {
+        ids.add(q.decodedTagId)
+      }
+    }
+    return ids.size
+  })
+
+  const canPressStart = createMemo(() => decodedUniqueTagCountOnFrame() >= 2)
 
   const uniqueTagCount = createMemo(() => {
     const s = new Set<number>()
-    for (const f of run().framePool) {
+    for (const f of runCtx.run().framePool) {
       for (const ft of f.tags) {
         s.add(ft.tagId)
       }
@@ -336,15 +280,139 @@ function CalibrationView() {
     return s.size
   })
 
-  const calibBlock = createMemo(() => {
-    const c = calib()
-    const res = videoFrameSize()
-    if (!c || c.kind === 'error' || !res) {
+  const validSolveCount = createMemo(() => countValidSolveFrames(runCtx.run().framePool, runCtx.layout()))
+
+  const canResetSession = createMemo(() => {
+    const r = runCtx.run()
+    if (r.collection === 'running') {
+      return true
+    }
+    if (r.framePool.length > 0) {
+      return true
+    }
+    if (runCtx.layout()) {
+      return true
+    }
+    if (runCtx.calib()) {
+      return true
+    }
+    return false
+  })
+
+  const canOpenResults = createMemo(() => {
+    const c = runCtx.calib()
+    return c?.kind === 'ok' && validSolveCount() >= 4
+  })
+
+  const resultsTooltip = createMemo(() => {
+    if (canOpenResults()) {
+      return 'View 3D calibration and export JSON'
+    }
+    const c = runCtx.calib()
+    if (c?.kind === 'error' && !isProgressShapedError(c)) {
+      return 'Fix the calibration or capture new views before opening Results'
+    }
+    const n = validSolveCount()
+    if (c?.kind === 'ok' && n < 4) {
+      return `${n} of 4 solver-ready views — add a few more snapshots`
+    }
+    return 'Results unlocks after calibration stabilizes with at least four usable views'
+  })
+
+  const guidanceCore = createMemo((): { band: GuidanceBand; lines: string[] } => {
+    const r = runCtx.run()
+    const lay = runCtx.layout()
+    const c = runCtx.calib()
+    const solving = runCtx.isSolving()
+    const nValid = validSolveCount()
+    const poolN = r.framePool.length
+
+    if (solving) {
+      return { band: 'progress', lines: ['Solving…', 'Keep capturing if you like—new frames queue for the next pass.'] }
+    }
+
+    if (r.collection === 'idle' && poolN < 1) {
       return {
-        line1: c?.kind === 'error' ? `Solver: ${c.reason}${c.details ? ` (${c.details})` : ''}` : 'Solver: —',
-        k: undefined,
-        rms: undefined,
+        band: 'progress',
+        lines: ['Sharp view of 2+ tags? Press Start. Vary pose between snapshots.'],
       }
+    }
+
+    if (r.collection === 'running' && poolN < 1) {
+      return {
+        band: 'progress',
+        lines: ['First snapshot auto when 2+ tag IDs decode in one frame.', 'Move between shots for varied views.'],
+      }
+    }
+
+    if (c?.kind === 'error' && isProgressShapedError(c)) {
+      return {
+        band: 'progress',
+        lines: [
+          `${nValid} solver-ready, ${poolN} in pool — need more overlap.`,
+          'Add snapshots until the solve stabilizes (Results needs 4 good views when ok).',
+        ],
+      }
+    }
+
+    if (c?.kind === 'error') {
+      const detail = c.details ? ` (${c.details})` : ''
+      return {
+        band: 'needs-attention',
+        lines: [`Solve failed: ${c.reason}${detail}.`, 'Try new angles, check Target IDs, or Reset.'],
+      }
+    }
+
+    if (c?.kind === 'ok' && nValid < 4) {
+      return {
+        band: 'progress',
+        lines: [
+          `${nValid}/4 overlapping views for Results—add snapshots from new poses.`,
+          'Then open Results when ready.',
+        ],
+      }
+    }
+
+    if (c?.kind === 'ok') {
+      const rms = fmt(c.rmsPx, 3)
+      return {
+        band: 'progress',
+        lines: [
+          `RMS ${rms} px · ${c.extrinsics.length} view(s).`,
+          'Open Results for the 3D view and JSON export.',
+        ],
+      }
+    }
+
+    return {
+      band: 'progress',
+      lines: [
+        `Pool ${poolN}; layout tags ${lay ? lay.size : '—'}.`,
+        'Frames missing shared tags stay in the pool but may not feed the solver yet.',
+      ],
+    }
+  })
+
+  const guidance = createMemo((): { band: GuidanceBand; lines: string[] } => {
+    const inner = guidanceCore()
+    const lines = [...inner.lines]
+    const snap = snapshotFeedback()
+    if (snap.kind === 'fail') {
+      lines.push(snap.message)
+    }
+    return { band: inner.band, lines }
+  })
+
+  const calibBlock = createMemo((): CalibMetricsRow => {
+    const c = runCtx.calib()
+    const res = runCtx.videoFrameSize()
+    if (c?.kind === 'error') {
+      return {
+        solverSummary: `Solver: ${c.reason}${c.details ? ` (${c.details})` : ''}`,
+      }
+    }
+    if (!c || c.kind !== 'ok' || !res) {
+      return { solverSummary: 'Solver: —' }
     }
     const { width, height } = res
     const fovX = (2 * Math.atan((0.5 * width) / c.K.fx) * 180) / Math.PI
@@ -352,22 +420,17 @@ function CalibrationView() {
     const p50 = percentile(vals, 0.5)
     const p95 = percentile(vals, 0.95)
     return {
-      line1: `ok  RMS ${fmt(c.rmsPx, 3)} px  med ${fmt(p50, 3)}  p95 ${fmt(p95, 3)}  views ${c.extrinsics.length}`,
-      fov: fmt(fovX, 1),
+      solverSummary: `RMS ${fmt(c.rmsPx, 3)} px · med ${fmt(p50, 3)} · p95 ${fmt(p95, 3)} · ${c.extrinsics.length} view(s)`,
       fxfy: `${fmt(c.K.fx, 1)} / ${fmt(c.K.fy, 1)}`,
       cxyc: `${fmt(c.K.cx, 1)}, ${fmt(c.K.cy, 1)}`,
+      fov: fmt(fovX, 1),
       ratio: (c.K.fy / c.K.fx).toFixed(3),
       off: `${fmt(c.K.cx - width / 2, 1)}, ${fmt(c.K.cy - height / 2, 1)}`,
-      rms: c.rmsPx,
     }
   })
 
   return (
     <div class={styles.root}>
-      <p class={styles.hint}>
-        Use valid AprilTags with <strong>unique</strong> IDs on a stiff, static target. Press <strong>Start</strong>{' '}
-        with 2+ tags visible; move the camera for varied views (3+ frames) to solve intrinsics.
-      </p>
       <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
         <div class={styles.cameraBlock}>
           <div class={styles.cameraSelectsRow}>
@@ -397,19 +460,31 @@ function CalibrationView() {
             displayMode={displayMode()}
             showFallbacks={false}
             showHistogramCanvas={false}
+            showFocusOverlay={runCtx.run().framePool.length < 1}
+            focusBottomHint={() => {
+              const r = runCtx.run()
+              if (r.collection === 'idle' && r.framePool.length < 1) {
+                return (
+                  <>
+                    Center the target in the guide, then press <b>Start</b>
+                  </>
+                )
+              }
+              return undefined
+            }}
             stream={cam.stream()}
             onQuadDetection={onQuadDetection}
             onLog={console.log}
             liveCalibration={() => {
               const l = calibratedLayout()
-              const c = calib()
+              const c = runCtx.calib()
               if (!l || !c || c.kind !== 'ok') {
                 return undefined
               }
               return { k: c.K, distortion: c.distortion, layout: l, extrinsics: calibratedExtrinsics() }
             }}
             onReprojectionFrame={(m) => setReproj(m)}
-            onFrameSize={setVideoFrameSize}
+            onFrameSize={runCtx.setVideoFrameSize}
             onQuadSnapshotRequest={handleSnapshotClick}
           />
         </div>
@@ -418,160 +493,113 @@ function CalibrationView() {
       <div class={styles.controls}>
         <button
           type="button"
-          class={run().collection === 'running' ? styles.btnActive : styles.btn}
-          disabled={isSolving()}
+          class={[
+            runCtx.run().collection === 'running' || (runCtx.run().collection === 'idle' && canPressStart())
+              ? styles.btnActive
+              : styles.btn,
+            (runCtx.isSolving() || (runCtx.run().collection === 'idle' && !canPressStart())) && styles.btnDisabled,
+          ]}
+          disabled={runCtx.isSolving() || (runCtx.run().collection === 'idle' && !canPressStart())}
+          title={
+            runCtx.run().collection === 'running'
+              ? 'Add current frame to the pool'
+              : canPressStart()
+                ? 'Begin a new capture session'
+                : 'Need at least two decoded tag IDs visible in the frame'
+          }
           onClick={() => {
-            if (run().collection === 'running') {
+            if (runCtx.run().collection === 'running') {
               handleSnapshotClick()
               return
             }
-            setLayout(undefined)
-            setRun((r) => {
-              if (r.collection === 'idle' || r.collection === 'paused') {
-                return {
-                  collection: 'running',
-                  framePool: [],
-                  stats: { ...initialCalibRun.stats },
-                }
-              }
-              return r
-            })
+            if (!canPressStart()) {
+              return
+            }
+            setSnapshotFeedback({ kind: 'idle' })
+            calibrationLibrary.setSelectedId(undefined)
+            runCtx.startSession()
+            // Same frame as Start — do not wait for the next onQuadDetection tick.
+            attemptAddPooledFrame(currentTagged(), 'autoFirst')
           }}
         >
-          {run().collection === 'running' ? `Snapshot (${run().stats.manualSnapshots})` : 'Start'}
+          {runCtx.run().collection === 'running' ? `Snapshot (${runCtx.run().stats.framesAccepted})` : 'Start'}
         </button>
-        <button
-          type="button"
-          class={[styles.btn, (run().collection !== 'running' || isSolving()) && styles.btnDisabled]}
-          disabled={run().collection !== 'running' || isSolving()}
-          onClick={() => setRun((r) => (r.collection === 'running' ? { ...r, collection: 'paused' } : r))}
+        <Show
+          when={canOpenResults() && !runCtx.isSolving()}
+          fallback={
+            <span
+              class={[styles.btn, styles.btnDisabled, styles.resultsStub]}
+              title={resultsTooltip()}
+              aria-disabled="true"
+            >
+              Results
+            </span>
+          }
         >
-          Pause
-        </button>
+          <A href="/results" class={[styles.btn, styles.resultsLink]} title={resultsTooltip()}>
+            Results
+          </A>
+        </Show>
         <button
           type="button"
-          class={[styles.btn, isSolving() && styles.btnDisabled]}
-          disabled={isSolving()}
+          class={[styles.btn, (runCtx.isSolving() || !canResetSession()) && styles.btnDisabled]}
+          disabled={runCtx.isSolving() || !canResetSession()}
+          title={
+            canResetSession()
+              ? 'Clear pool, layout, and latest Results data'
+              : 'Nothing to reset yet'
+          }
           onClick={() => {
-            setLayout(undefined)
             setReproj(undefined)
-            setCalib(undefined)
-            setRun({
-              collection: 'idle',
-              framePool: [],
-              stats: { ...initialCalibRun.stats },
-            })
+            setSnapshotFeedback({ kind: 'idle' })
+            runCtx.resetSession()
           }}
         >
           Reset
         </button>
       </div>
 
-      <div class={styles.stats}>
-        <div>
-          Pool: {run().framePool.length} / {DEFAULT_CALIBRATION_TOP_K} frames
-        </div>
-        <div>Layout tags: {layout() ? layout()!.size : '—'}</div>
-        <div>Unique tag IDs in pool: {uniqueTagCount()}</div>
-        <div>Frames processed: {run().stats.framesProcessed}</div>
-        <div>Frames accepted: {run().stats.framesAccepted}</div>
-        <div>Frame rejections: {run().stats.frameRejections}</div>
-        <div>Quad rejects: {run().stats.quadRejects}</div>
-        <div>Top-K evictions: {run().stats.evictions}</div>
-        <div class={styles.statsSection}>Pooled solve</div>
-        <div>{calibBlock().line1}</div>
-        <div>
-          <span style="color: var(--color-success)">ok</span> RMS{' '}
-          <span>
-            {(() => {
-              const c = calib()
-              return c?.kind === 'ok' ? fmt(c!.rmsPx, 3) : '—'
-            })()}
-          </span>
-          <span style="color: var(--color-text-muted)"> px</span> med{' '}
-          <span>
-            {(() => {
-              const c = calib()
-              return c?.kind === 'ok'
-                ? fmt(
-                    percentile(
-                      c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b),
-                      0.5,
-                    ),
-                    3,
-                  )
-                : '—'
-            })()}
-          </span>
-          {' p95 '}
-          <span>
-            {(() => {
-              const c = calib()
-              return c?.kind === 'ok'
-                ? fmt(
-                    percentile(
-                      c.perFrameRmsPx.map(([, v]) => v).sort((a, b) => a - b),
-                      0.95,
-                    ),
-                    3,
-                  )
-                : '—'
-            })()}
-          </span>
-          {' views '}
-          <span>
-            {(() => {
-              const c = calib()
-              return c?.kind === 'ok' ? c!.extrinsics.length : '—'
-            })()}
-          </span>
-        </div>
-        <div>
-          fx / fy:{' '}
-          {(() => {
-            const c = calib()
-            return c?.kind === 'ok' ? calibBlock().fxfy : '—'
-          })()}{' '}
-          px
-        </div>
-        <div>
-          cx, cy:{' '}
-          {(() => {
-            const c = calib()
-            return c?.kind === 'ok' ? calibBlock().cxyc : '—'
-          })()}
-        </div>
-        <div>
-          H FOV (x):{' '}
-          {(() => {
-            const c = calib()
-            return c?.kind === 'ok' ? calibBlock().fov : '—'
-          })()}
-          °
-        </div>
-        <div>
-          fy/fx:{' '}
-          {(() => {
-            const c = calib()
-            return c?.kind === 'ok' ? calibBlock().ratio : '—'
-          })()}
-        </div>
-        <div>
-          pp offset (cx-W/2, cy-H/2):{' '}
-          {(() => {
-            const c = calib()
-            return c?.kind === 'ok' ? calibBlock().off : '—'
-          })()}
-        </div>
-        <div class={styles.statsSection}>Live frame</div>
-        <div>
-          RMS: {reproj() ? fmt(reproj()!.rms, 3) : '—'} px | tags: {reproj() ? reproj()!.tagCount : '—'}
-        </div>
-        <div>
-          ‖t‖: {reproj() ? fmt(reproj()!.dist, 3) : '—'} (tag units) | tilt:{' '}
-          {reproj() ? fmt(reproj()!.tiltDeg, 1) : '—'}°
-        </div>
+      <div class={styles.guidanceSlot}>
+        <CalibrateGuidancePanel band={() => guidance().band} lines={() => guidance().lines} />
       </div>
+
+      <details class={styles.advanced}>
+        <summary>Advanced metrics</summary>
+        <div class={styles.stats}>
+          <div>
+            Solver-ready (Results): {validSolveCount()} / 4 · Pool {runCtx.run().framePool.length} /{' '}
+            {DEFAULT_CALIBRATION_TOP_K} · Layout {runCtx.layout()?.size ?? '—'} tags · {uniqueTagCount()} IDs in pool
+          </div>
+          <div>
+            Stream: {runCtx.run().stats.framesProcessed} frames · {runCtx.run().stats.framesAccepted} snapshots ·{' '}
+            {runCtx.run().stats.evictions} Top-K evictions
+          </div>
+          <div class={styles.statsSection}>Worker solve</div>
+          <div>{calibBlock().solverSummary}</div>
+          {(() => {
+            const b = calibBlock()
+            if (!('fxfy' in b)) {
+              return null
+            }
+            return (
+              <>
+                <div>
+                  fx / fy: {b.fxfy} px
+                </div>
+                <div>cx, cy: {b.cxyc}</div>
+                <div>H FOV (x): {b.fov}°</div>
+                <div>fy/fx: {b.ratio}</div>
+                <div>Principal point offset (cx−W/2, cy−H/2): {b.off}</div>
+              </>
+            )
+          })()}
+          <div class={styles.statsSection}>Live reprojection</div>
+          <div>
+            RMS {reproj() ? fmt(reproj()!.rms, 3) : '—'} px · tags {reproj() ? reproj()!.tagCount : '—'} · ‖t‖{' '}
+            {reproj() ? fmt(reproj()!.dist, 3) : '—'} · tilt {reproj() ? fmt(reproj()!.tiltDeg, 1) : '—'}°
+          </div>
+        </div>
+      </details>
     </div>
   )
 }

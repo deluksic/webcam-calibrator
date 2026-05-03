@@ -41,6 +41,55 @@
   gap: var(--space-3);
 }
 
+.toolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.continueCalibration {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-primary);
+  color: #fff;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md, 6px);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.continueCalibration:hover {
+  filter: brightness(1.06);
+}
+
+.secondaryBtn {
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 6px);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.secondaryBtn:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.04));
+}
+
+.secondaryBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .meta {
   margin: 0;
   font-size: var(--text-sm);
@@ -65,6 +114,7 @@
 .exportJsonBtn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 .metaHidden {
@@ -78,6 +128,13 @@
   margin: 0;
   font-size: var(--text-sm);
   color: var(--color-text-muted);
+}
+
+.successLine {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: var(--leading-relaxed, 1.5);
 }
 
 .canvas {
