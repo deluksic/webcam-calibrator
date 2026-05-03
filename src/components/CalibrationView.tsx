@@ -1,85 +1,25 @@
 import { A } from '@solidjs/router'
-import { Errored, For, Show, createMemo, createSignal } from 'solid-js'
+import { Errored, Show, createMemo, createSignal } from 'solid-js'
 
 import { CalibrateGuidancePanel, type GuidanceBand } from '@/components/calibration/CalibrateGuidancePanel'
+import { CalibrationAdvancedMetrics, type CalibMetricsRow } from '@/components/calibration/CalibrationAdvancedMetrics'
 import { useCalibrationLibrary } from '@/components/calibration/CalibrationLibraryContext'
 import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
+import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
-import type { DisplayMode } from '@/gpu/cameraPipeline'
 import type { DetectedQuad } from '@/gpu/contour'
 import { calibrationQuadScore } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
 import type { TagObservation, ImageTag } from '@/lib/calibrationTypes'
 import type { Corners3 } from '@/lib/calibrationTypes'
 import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
+import { isProgressShapedError, percentile, type SnapshotFeedback } from '@/lib/calibrationViewUtils'
+import { formatFixed } from '@/lib/formatFixed'
 import { learnLayoutFromFrame, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
-import type { CalibrationResult } from '@/workers/calibrationClient'
-
-import { RESOLUTION_LADDER, type Resolution } from './camera/cameraStreamAcquire'
 
 import styles from '@/components/CalibrationView.module.css'
-
-function deviceScore(d: MediaDeviceInfo): number {
-  const label = d.label.toLowerCase()
-  let score = 0
-  if (label.includes('back') || label.includes('rear')) {
-    score += 100
-  }
-  if (label.includes('wide')) {
-    score += 50
-  }
-  if (label.includes('ultra')) {
-    score += 30
-  }
-  if (label.includes('tele')) {
-    score -= 20
-  }
-  if (label.includes('front') || label.includes('user')) {
-    score -= 100
-  }
-  return score
-}
-
-const RES = RESOLUTION_LADDER
-
-function resolutionLabel(res: string): string {
-  const ideal = (RES as Record<string, (typeof RES)['medium']>)[res]
-  return `${ideal?.width.ideal}×${ideal?.height.ideal ?? 0}`
-}
-
-function fmt(n: number | undefined, d: number) {
-  if (n === undefined || !Number.isFinite(n)) {
-    return '—'
-  }
-  return n.toFixed(d)
-}
-
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) {
-    return 0
-  }
-  const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))))
-  return sorted[idx]!
-}
-
-function isProgressShapedError(c: CalibrationResult | undefined): boolean {
-  return c?.kind === 'error' && c.reason === 'too-few-views'
-}
-
-type SnapshotFeedback = { kind: 'idle' } | { kind: 'fail'; message: string }
-
-type CalibMetricsRow =
-  | { solverSummary: string }
-  | {
-      solverSummary: string
-      fxfy: string
-      cxyc: string
-      fov: string
-      ratio: string
-      off: string
-    }
 
 function CalibrationView() {
   const cam = useCameraStream()
@@ -93,13 +33,6 @@ function CalibrationView() {
     dist: number
   }>()
   const [currentTagged, setCurrentTagged] = createSignal<DetectedQuad[]>([])
-
-  const displayMode = createMemo<DisplayMode>(() => 'grid')
-
-  const devicesSorted = createMemo(() => {
-    const list = cam.devices()
-    return [...list].sort((a, b) => deviceScore(b) - deviceScore(a))
-  })
 
   const calibratedExtrinsics = createMemo(() => {
     const c = runCtx.calib()
@@ -374,13 +307,10 @@ function CalibrationView() {
     }
 
     if (c?.kind === 'ok') {
-      const rms = fmt(c.rmsPx, 3)
+      const rms = formatFixed(c.rmsPx, 3)
       return {
         band: 'progress',
-        lines: [
-          `RMS ${rms} px · ${c.extrinsics.length} view(s).`,
-          'Open Results for the 3D view and JSON export.',
-        ],
+        lines: [`RMS ${rms} px · ${c.extrinsics.length} view(s).`, 'Open Results for the 3D view and JSON export.'],
       }
     }
 
@@ -420,12 +350,12 @@ function CalibrationView() {
     const p50 = percentile(vals, 0.5)
     const p95 = percentile(vals, 0.95)
     return {
-      solverSummary: `RMS ${fmt(c.rmsPx, 3)} px · med ${fmt(p50, 3)} · p95 ${fmt(p95, 3)} · ${c.extrinsics.length} view(s)`,
-      fxfy: `${fmt(c.K.fx, 1)} / ${fmt(c.K.fy, 1)}`,
-      cxyc: `${fmt(c.K.cx, 1)}, ${fmt(c.K.cy, 1)}`,
-      fov: fmt(fovX, 1),
+      solverSummary: `RMS ${formatFixed(c.rmsPx, 3)} px · med ${formatFixed(p50, 3)} · p95 ${formatFixed(p95, 3)} · ${c.extrinsics.length} view(s)`,
+      fxfy: `${formatFixed(c.K.fx, 1)} / ${formatFixed(c.K.fy, 1)}`,
+      cxyc: `${formatFixed(c.K.cx, 1)}, ${formatFixed(c.K.cy, 1)}`,
+      fov: formatFixed(fovX, 1),
       ratio: (c.K.fy / c.K.fx).toFixed(3),
-      off: `${fmt(c.K.cx - width / 2, 1)}, ${fmt(c.K.cy - height / 2, 1)}`,
+      off: `${formatFixed(c.K.cx - width / 2, 1)}, ${formatFixed(c.K.cy - height / 2, 1)}`,
     }
   })
 
@@ -433,31 +363,9 @@ function CalibrationView() {
     <div class={styles.root}>
       <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
         <div class={styles.cameraBlock}>
-          <div class={styles.cameraSelectsRow}>
-            <select
-              class={styles.cameraSelect}
-              style="max-width: none"
-              value={cam.selectedCameraDeviceId() ?? ''}
-              onChange={(e) => cam.setSelectedCameraDeviceId(e.currentTarget.value)}
-            >
-              <For each={devicesSorted()}>
-                {(item) => (
-                  <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
-                )}
-              </For>
-            </select>
-            <select
-              class={styles.cameraSelect}
-              value={cam.selectedResolution()}
-              onChange={(e) => cam.setSelectedResolution(e.currentTarget.value as Resolution)}
-            >
-              <For each={Object.keys(RES)} keyed={false}>
-                {(resolution) => <option value={resolution()}>{resolutionLabel(resolution())}</option>}
-              </For>
-            </select>
-          </div>
+          <CameraStreamSelects />
           <LiveCameraPipeline
-            displayMode={displayMode()}
+            displayMode="grid"
             showFallbacks={false}
             showHistogramCanvas={false}
             showFocusOverlay={runCtx.run().framePool.length < 1}
@@ -544,11 +452,7 @@ function CalibrationView() {
           type="button"
           class={[styles.btn, (runCtx.isSolving() || !canResetSession()) && styles.btnDisabled]}
           disabled={runCtx.isSolving() || !canResetSession()}
-          title={
-            canResetSession()
-              ? 'Clear pool, layout, and latest Results data'
-              : 'Nothing to reset yet'
-          }
+          title={canResetSession() ? 'Clear pool, layout, and latest Results data' : 'Nothing to reset yet'}
           onClick={() => {
             setReproj(undefined)
             setSnapshotFeedback({ kind: 'idle' })
@@ -563,43 +467,14 @@ function CalibrationView() {
         <CalibrateGuidancePanel band={() => guidance().band} lines={() => guidance().lines} />
       </div>
 
-      <details class={styles.advanced}>
-        <summary>Advanced metrics</summary>
-        <div class={styles.stats}>
-          <div>
-            Solver-ready (Results): {validSolveCount()} / 4 · Pool {runCtx.run().framePool.length} /{' '}
-            {DEFAULT_CALIBRATION_TOP_K} · Layout {runCtx.layout()?.size ?? '—'} tags · {uniqueTagCount()} IDs in pool
-          </div>
-          <div>
-            Stream: {runCtx.run().stats.framesProcessed} frames · {runCtx.run().stats.framesAccepted} snapshots ·{' '}
-            {runCtx.run().stats.evictions} Top-K evictions
-          </div>
-          <div class={styles.statsSection}>Worker solve</div>
-          <div>{calibBlock().solverSummary}</div>
-          {(() => {
-            const b = calibBlock()
-            if (!('fxfy' in b)) {
-              return null
-            }
-            return (
-              <>
-                <div>
-                  fx / fy: {b.fxfy} px
-                </div>
-                <div>cx, cy: {b.cxyc}</div>
-                <div>H FOV (x): {b.fov}°</div>
-                <div>fy/fx: {b.ratio}</div>
-                <div>Principal point offset (cx−W/2, cy−H/2): {b.off}</div>
-              </>
-            )
-          })()}
-          <div class={styles.statsSection}>Live reprojection</div>
-          <div>
-            RMS {reproj() ? fmt(reproj()!.rms, 3) : '—'} px · tags {reproj() ? reproj()!.tagCount : '—'} · ‖t‖{' '}
-            {reproj() ? fmt(reproj()!.dist, 3) : '—'} · tilt {reproj() ? fmt(reproj()!.tiltDeg, 1) : '—'}°
-          </div>
-        </div>
-      </details>
+      <CalibrationAdvancedMetrics
+        run={runCtx.run()}
+        validSolveCount={validSolveCount()}
+        uniqueTagCount={uniqueTagCount()}
+        layoutSize={runCtx.layout()?.size}
+        calibBlock={calibBlock()}
+        reproj={reproj()}
+      />
     </div>
   )
 }

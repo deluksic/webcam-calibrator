@@ -42,11 +42,6 @@
   width: 100%;
 }
 
-.debugCameraSelect {
-  max-width: min(100%, 320px);
-  width: 100%;
-}
-
 .debugModeRow {
   display: flex;
   flex-direction: row;

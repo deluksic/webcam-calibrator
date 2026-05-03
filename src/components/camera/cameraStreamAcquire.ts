@@ -6,6 +6,12 @@ export const RESOLUTION_LADDER = {
   low: { width: { ideal: 640 }, height: { ideal: 480 } },
 } satisfies Record<string, MediaTrackConstraints>
 
+/** Human-readable size label for a resolution ladder key (e.g. for `<select>` options). */
+export function resolutionLabel(key: string): string {
+  const ideal = RESOLUTION_LADDER[key as Resolution]
+  return `${ideal?.width.ideal}×${ideal?.height.ideal ?? 0}`
+}
+
 /**
  * Open a video-only stream for `deviceId` (exact), trying size ideals then falling back.
  */
