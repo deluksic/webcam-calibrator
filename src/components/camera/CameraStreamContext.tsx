@@ -46,9 +46,14 @@ export function useCameraStream(): CameraStreamContextValue {
 export function CameraStreamProvider(props: ParentProps) {
   const [registeredCameraUsers, setRegisteredCameraUsers] = createSignal(new Set<symbol>(), { equals: false })
   const cameraIsNeeded = createMemo(() => registeredCameraUsers().size > 0)
+  const cameraIsNeededLatch = createMemo<boolean>((prev) => prev || cameraIsNeeded())
   const [selectedResolution, setSelectedResolution] = createSignal<Resolution>('low')
 
   const [devices, setDevices] = createSignal<MediaDeviceInfo[]>(async () => {
+    if (!untrack(cameraIsNeededLatch)) {
+      cameraIsNeededLatch()
+      return []
+    }
     await primeCameraPermission()
     const list = await listVideoInputDevices()
     return [...list].sort((a, b) => cameraDeviceScore(b) - cameraDeviceScore(a))
