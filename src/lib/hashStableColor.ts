@@ -15,9 +15,33 @@ export function stableHashU32Cpu(x: number): number {
   return (h3 ^ (h3 >>> 16)) >>> 0
 }
 
+const GRID_SENTINEL_FF = 0xffff_ffff
+const GRID_SENTINEL_FFFE = 0xffff_fffe
+const GRID_SENTINEL_FFFD = 0xffff_fffd
+
+/**
+ * u32 for grid tint hash: standard ids unchanged; **custom** ids are negative on CPU (`-1 - payload`) and
+ * must not use `>>> 0` (that becomes `UNKNOWN`). Maps to a deterministic non-sentinel u32.
+ */
+export function tagIdToGridVizU32(tagId: number): number {
+  if (tagId >= 0) {
+    return tagId >>> 0
+  }
+  const payload = -tagId - 1
+  if (payload < 0 || payload >= 2 ** 36 || !Number.isFinite(payload)) {
+    return GRID_SENTINEL_FFFD
+  }
+  const mixed = (payload ^ 0xca7c0de) >>> 0
+  let h = stableHashU32Cpu(mixed ^ stableHashU32Cpu((payload ^ (payload >>> 16)) >>> 0))
+  if (h === GRID_SENTINEL_FF || h === GRID_SENTINEL_FFFE) {
+    h = GRID_SENTINEL_FFFD
+  }
+  return h >>> 0
+}
+
 /** `rgb(...)` matching `gridVizPipeline` fill (`stableHashToRgb01` × 0.55). */
 export function gridVizFillRgbCss(tagId: number): string {
-  const h = stableHashU32Cpu(tagId >>> 0)
+  const h = stableHashU32Cpu(tagIdToGridVizU32(tagId))
   const k = GRID_VIZ_RGB_SCALE
   const r = round(((h & 255) / 255) * k * 255)
   const g = round((((h >>> 8) & 255) / 255) * k * 255)

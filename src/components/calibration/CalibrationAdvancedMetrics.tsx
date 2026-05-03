@@ -32,9 +32,6 @@ export type CalibrationAdvancedMetricsProps = {
 }
 
 export function CalibrationAdvancedMetrics(props: CalibrationAdvancedMetricsProps) {
-  const b = props.calibBlock
-  const reproj = props.reproj
-
   return (
     <details class={styles.advanced}>
       <summary>Advanced metrics</summary>
@@ -48,22 +45,21 @@ export function CalibrationAdvancedMetrics(props: CalibrationAdvancedMetricsProp
           {props.run.stats.evictions} Top-K evictions
         </div>
         <div class={styles.statsSection}>Worker solve</div>
-        <div>{b.solverSummary}</div>
-        {'fxfy' in b ? (
+        <div>{props.calibBlock.solverSummary}</div>
+        {'fxfy' in props.calibBlock ? (
           <>
-            <div>
-              fx / fy: {b.fxfy} px
-            </div>
-            <div>cx, cy: {b.cxyc}</div>
-            <div>H FOV (x): {b.fov}°</div>
-            <div>fy/fx: {b.ratio}</div>
-            <div>Principal point offset (cx−W/2, cy−H/2): {b.off}</div>
+            <div>fx / fy: {props.calibBlock.fxfy} px</div>
+            <div>cx, cy: {props.calibBlock.cxyc}</div>
+            <div>H FOV (x): {props.calibBlock.fov}°</div>
+            <div>fy/fx: {props.calibBlock.ratio}</div>
+            <div>Principal point offset (cx−W/2, cy−H/2): {props.calibBlock.off}</div>
           </>
         ) : null}
         <div class={styles.statsSection}>Live reprojection</div>
         <div>
-          RMS {reproj ? formatFixed(reproj.rms, 3) : '—'} px · tags {reproj ? reproj.tagCount : '—'} · ‖t‖{' '}
-          {reproj ? formatFixed(reproj.dist, 3) : '—'} · tilt {reproj ? formatFixed(reproj.tiltDeg, 1) : '—'}°
+          RMS {props.reproj ? formatFixed(props.reproj.rms, 3) : '—'} px · tags{' '}
+          {props.reproj ? props.reproj.tagCount : '—'} · ‖t‖ {props.reproj ? formatFixed(props.reproj.dist, 3) : '—'} ·
+          tilt {props.reproj ? formatFixed(props.reproj.tiltDeg, 1) : '—'}°
         </div>
       </div>
     </details>

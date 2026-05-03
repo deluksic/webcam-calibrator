@@ -1,6 +1,6 @@
 {
   "name": "webcam-calibrator",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -13,7 +13,7 @@
     "test:decode": "vitest run src/tests/decode"
   },
   "dependencies": {
-    "@deluksic/opencv-calibration-wasm": "^0.2.4",
+    "@deluksic/opencv-calibration-wasm": "^0.2.5",
     "@solidjs/router": "0.17.0-next.2",
     "@solidjs/web": "2.0.0-beta.7",
     "@typegpu/geometry": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry",

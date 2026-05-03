@@ -4,7 +4,14 @@ import { DECODED_TAG_ID_DICT_MISS } from '@/gpu/pipelines/gridVizPipeline'
 import { findCornersFromEdgesWithDebug, type CornerDebugInfo, rotateRing } from '@/lib/corners'
 import type { Corners } from '@/lib/geometry'
 import { decodeTagPatternWithVoteMaps, votePatternAcceptable } from '@/lib/grid'
-import { decodeTag36h11AnyRotation, type TagPattern } from '@/lib/tag36h11'
+import { patternIsFullyBinary } from '@/lib/tagModuleCell'
+import {
+  canonicalizeBinaryPatternMinCode,
+  customTagIdFromCanonicalCode,
+  decodeTag36h11AnyRotation,
+  matchCustomCodewordsAnyRotation,
+  type TagPattern,
+} from '@/lib/tag36h11'
 
 const { min, max, floor } = Math
 
@@ -12,6 +19,15 @@ const { min, max, floor } = Math
 export const ALLOWED_ERROR_COUNT = 3
 
 export const COMPONENT_LABEL_INVALID = 0xffffffff
+
+export type DecodedTagKind = 'tag36h11' | 'custom'
+
+export interface QuadDecodeOptions {
+  /** True once a target layout exists for the calibration session. */
+  layoutEstablished?: boolean
+  /** Canonical 36-bit codewords for session custom tags (from layout). */
+  sessionCustomCodewords?: bigint[]
+}
 
 export interface DetectedQuad {
   corners: Corners
@@ -24,15 +40,17 @@ export interface DetectedQuad {
   cornerDebug: CornerDebugInfo | undefined
   /** Test / viz: random or decoded id for GPU hash + HTML label (omit = unknown/black). */
   vizTagId?: number
-  /** tag36h11 id when `decodeTag36h11AnyRotation` succeeds on `pattern`. */
+  /** Decoded tag id (tag36h11 or custom range). */
   decodedTagId?: number
   /** Clockwise quarter-turns (0–3) from pattern grid to canonical tag orientation. */
   decodedRotation?: number
+  /** Source of {@link decodedTagId} when set. */
+  decodedTagKind?: DecodedTagKind
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CPU-side processing: Extract quads from labeled image
-// ──────────────────────────────────────���──────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface RegionData {
   label: number
@@ -138,6 +156,7 @@ export function validateAndFilterQuads(
   width: number,
   minArea: number,
   maxArea: number,
+  decodeOptions?: QuadDecodeOptions,
 ): DetectedQuad[] {
   const quads: DetectedQuad[] = []
   const imageHeight = floor(labelData.length / width)
@@ -196,16 +215,44 @@ export function validateAndFilterQuads(
       })
       continue
     }
-    // No edge mask here: masking to component Sobel pixels was dropping too many samples → weak cells
-    // (`-1`) and votePatternAcceptable rejected every quad. Same sampling as legacy `decodeTagPattern`.
+
     const { pattern } = decodeTagPatternWithVoteMaps(corners, sobelData, width, undefined, imageHeight)
     if (!votePatternAcceptable(pattern)) {
       continue
     }
-    const decoded = decodeTag36h11AnyRotation(pattern, ALLOWED_ERROR_COUNT)
-    if (decoded) {
-      corners = rotateRing(corners, decoded.rotation)
+
+    let decodedTagId: number | undefined
+    let decodedRotation: number | undefined
+    let decodedTagKind: DecodedTagKind | undefined
+
+    const t36 = decodeTag36h11AnyRotation(pattern, ALLOWED_ERROR_COUNT)
+    if (t36) {
+      corners = rotateRing(corners, t36.rotation)
+      decodedTagId = t36.id
+      decodedRotation = t36.rotation
+      decodedTagKind = 'tag36h11'
+    } else if (patternIsFullyBinary(pattern)) {
+      const canon = canonicalizeBinaryPatternMinCode(pattern)
+      if (canon) {
+        corners = rotateRing(corners, canon.rotation)
+        decodedTagId = customTagIdFromCanonicalCode(canon.code)
+        decodedRotation = canon.rotation
+        decodedTagKind = 'custom'
+      }
+    } else if (
+      decodeOptions?.layoutEstablished &&
+      decodeOptions.sessionCustomCodewords &&
+      decodeOptions.sessionCustomCodewords.length > 0
+    ) {
+      const custom = matchCustomCodewordsAnyRotation(pattern, decodeOptions.sessionCustomCodewords, ALLOWED_ERROR_COUNT)
+      if (custom) {
+        corners = rotateRing(corners, custom.rotation)
+        decodedTagId = custom.tagId
+        decodedRotation = custom.rotation
+        decodedTagKind = 'custom'
+      }
     }
+
     quads.push({
       corners,
       label: region.label,
@@ -215,8 +262,8 @@ export function validateAndFilterQuads(
       pattern,
       hasCorners: true,
       cornerDebug: debug,
-      ...(decoded
-        ? { decodedTagId: decoded.id, decodedRotation: decoded.rotation }
+      ...(decodedTagId !== undefined
+        ? { decodedTagId, decodedRotation, decodedTagKind }
         : { vizTagId: DECODED_TAG_ID_DICT_MISS >>> 0 }),
     })
   }

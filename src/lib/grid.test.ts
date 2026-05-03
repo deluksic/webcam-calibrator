@@ -324,10 +324,10 @@ describe('grid', () => {
   })
 
   describe('votePatternAcceptable', () => {
-    it('rejects inner 6×6 with any -1', () => {
+    it('accepts weak cells (-1)', () => {
       const p = [...tagIdPattern(0)] as TagPattern
       p[5] = -1
-      expect(votePatternAcceptable(p)).toBe(false)
+      expect(votePatternAcceptable(p)).toBe(true)
     })
 
     it('accepts decoded-style pattern', () => {

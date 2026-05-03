@@ -1,6 +1,6 @@
 import type { d, TgpuRoot } from 'typegpu'
 
-import { type DetectedQuad, extractRegions, validateAndFilterQuads } from '@/gpu/contour'
+import { type DetectedQuad, type QuadDecodeOptions, extractRegions, validateAndFilterQuads } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import type { ExtentEntry } from '@/gpu/pipelines/extentTrackingPipeline'
 import { MAX_U32 } from '@/gpu/pipelines/extentTrackingPipeline'
@@ -46,6 +46,7 @@ export async function readDetection(
   pipeline: CameraPipeline,
   labelStaging: GPUBuffer,
   filteredStaging: GPUBuffer,
+  decodeOptions?: QuadDecodeOptions,
 ): Promise<{
   quads: DetectedQuad[]
   extentData: ExtentRow[]
@@ -64,9 +65,15 @@ export async function readDetection(
 
   const regions = extractRegions(labelDataCopy, pipeline.width, pipeline.height, dilatedCopy)
   const maxArea = pipeline.width * pipeline.height * 0.5
-  const quads = validateAndFilterQuads(regions, dilatedCopy, labelDataCopy, pipeline.width, 400, maxArea).filter(
-    (q) => q.area < pipeline.width * pipeline.height * 0.25,
-  )
+  const quads = validateAndFilterQuads(
+    regions,
+    dilatedCopy,
+    labelDataCopy,
+    pipeline.width,
+    400,
+    maxArea,
+    decodeOptions,
+  ).filter((q) => q.area < pipeline.width * pipeline.height * 0.25)
 
   const extentData: ExtentRow[] = await pipeline.extent.extentBuffer.read()
 
@@ -82,6 +89,7 @@ export async function detectForSlot(
   root: TgpuRoot,
   pipeline: CameraPipeline,
   slot: FrameSlot,
+  decodeOptions?: QuadDecodeOptions,
 ): Promise<{
   quads: ReturnType<typeof validateAndFilterQuads>
   extentData: ExtentRow[]
@@ -95,6 +103,7 @@ export async function detectForSlot(
     pipeline,
     slot.labelStaging,
     slot.filteredStaging,
+    decodeOptions,
   )
   return { quads, extentData, dilatedGradients, labelData, frameId: slot.frameId, slot }
 }

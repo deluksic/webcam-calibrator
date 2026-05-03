@@ -1,6 +1,8 @@
 import type { JSX } from 'solid-js'
 import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 
+import { CalibrateFocusOverlay } from '@/components/calibration/CalibrateFocusOverlay'
+import { type Bbox, QuadCandidateOverlay, TagIdGridOverlay } from '@/components/camera/LiveCameraPipelineOverlays'
 import { encodeCameraCompute } from '@/gpu/cameraComputeEncoding'
 import { detectForSlot } from '@/gpu/cameraDetection'
 import type { ExtentRow } from '@/gpu/cameraDetection'
@@ -8,23 +10,18 @@ import { updateQuadCornersBuffer, updateReprojectionOverlayBuffer } from '@/gpu/
 import { createCameraPipeline } from '@/gpu/cameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
 import { encodeAndSubmitGridPresent, encodePresentNonGrid } from '@/gpu/cameraPresentEncoding'
-import type { DetectedQuad } from '@/gpu/contour'
+import type { DetectedQuad, QuadDecodeOptions } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
 import { MAX_U32 } from '@/gpu/pipelines/extentTrackingPipeline'
 import { DECODED_TAG_ID_DICT_MISS, MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
+import type { CustomTagOverlaySession } from '@/lib/customTagOverlaySession'
 import { buildReprojectionOverlayPairs, cameraDistanceFromT, cameraTiltDegFromR } from '@/lib/reprojectionLive'
+import { patternHasWeakOrTie } from '@/lib/tagModuleCell'
 import type { TargetLayout } from '@/lib/targetLayout'
 import { createElementSize } from '@/utils/createElementSize'
-
-import { CalibrateFocusOverlay } from '@/components/calibration/CalibrateFocusOverlay'
-import {
-  type Bbox,
-  QuadCandidateOverlay,
-  TagIdGridOverlay,
-} from '@/components/camera/LiveCameraPipelineOverlays'
 import { createFrameLoop } from '@/utils/createFrameLoop'
 
 import styles from '@/components/camera/LiveCameraPipeline.module.css'
@@ -44,12 +41,16 @@ export type LiveCameraPipelineProps = {
   onFrameSize?: (size: { width: number; height: number }) => void
   /** Called when snapshot button is pressed - passes current tagged quads. */
   onQuadSnapshotRequest?: () => void
+  /** Optional session-scoped custom-tag dictionary for fuzzy re-decode after layout exists. */
+  quadDecodeOptions?: () => QuadDecodeOptions | undefined
   /** Extra controls (camera select, mode buttons, …). */
   toolbar?: JSX.Element
   /** Advisory 75%×75% framing guide over the **displayed** canvas (same box as tag overlays). */
   showFocusOverlay?: boolean
   /** Short line centered in the strip below the focus rect (inside canvas). */
   focusBottomHint?: () => JSX.Element | undefined
+  /** Calibrate: `*` / `*0`… for custom (negative) tag ids; omit in Debug to show technical labels. */
+  customTagOverlay?: () => CustomTagOverlaySession
 }
 
 export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
@@ -73,6 +74,8 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     onReprojectionFrame: props.onReprojectionFrame,
     onQuadDetection: props.onQuadDetection,
     onQuadSnapshotRequest: props.onQuadSnapshotRequest,
+    quadDecodeOptions: props.quadDecodeOptions,
+    customTagOverlay: props.customTagOverlay,
   }))
 
   const videoElement = createMemo(async () => {
@@ -230,7 +233,8 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       const pi = pipelineInteraction()
       const liveCalib = pi.liveCalibration()
 
-      detectForSlot(gNow, pip, slot)
+      const decodeOpts = pi.quadDecodeOptions?.()
+      detectForSlot(gNow, pip, slot, decodeOpts)
         .then((result) => {
           if (disposed) {
             pip.frameSlotPool.releaseSlot(slot)
@@ -297,12 +301,13 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               if (!q?.hasCorners || q.cornerDebug?.failureCode !== 0) {
                 return false
               }
+              if (patternHasWeakOrTie(q.pattern)) {
+                return false
+              }
               if (sf) {
                 return true
               }
-              return (
-                typeof q.decodedTagId === 'number' || (q.vizTagId ?? 0) === (DECODED_TAG_ID_DICT_MISS >>> 0)
-              )
+              return typeof q.decodedTagId === 'number' || (q.vizTagId ?? 0) === DECODED_TAG_ID_DICT_MISS >>> 0
             }),
           )
 
@@ -392,7 +397,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               <QuadCandidateOverlay bboxes={bboxes()} scale={scale()} />
             </Show>
             <Show when={props.displayMode === 'grid'}>
-              <TagIdGridOverlay quads={gridOverlayQuads()} scale={scale()} />
+              <TagIdGridOverlay quads={gridOverlayQuads()} scale={scale()} customTagOverlay={props.customTagOverlay} />
             </Show>
           </div>
         </div>

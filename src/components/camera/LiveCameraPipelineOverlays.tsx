@@ -1,11 +1,15 @@
+import type { Component } from 'solid-js'
 import { For, createMemo } from 'solid-js'
 
 import type { DetectedQuad } from '@/gpu/contour'
-import { DECODED_TAG_ID_DICT_MISS } from '@/gpu/pipelines/gridVizPipeline'
+import type { CustomTagOverlaySession } from '@/lib/customTagOverlaySession'
+import { displayLabelForTagId } from '@/lib/tag36h11'
 
 import styles from '@/components/camera/LiveCameraPipeline.module.css'
 
 const { max, abs } = Math
+
+export type { CustomTagOverlaySession }
 
 export type Bbox = {
   minX: number
@@ -56,7 +60,11 @@ export function QuadCandidateOverlay(props: { bboxes: Bbox[]; scale: { x: number
   )
 }
 
-export function TagIdGridOverlay(props: { quads: DetectedQuad[]; scale: { x: number; y: number } }) {
+export const TagIdGridOverlay: Component<{
+  quads: DetectedQuad[]
+  scale: { x: number; y: number }
+  customTagOverlay?: () => CustomTagOverlaySession
+}> = (props) => {
   return (
     <For each={props.quads} keyed={false}>
       {(quad) => {
@@ -68,15 +76,26 @@ export function TagIdGridOverlay(props: { quads: DetectedQuad[]; scale: { x: num
 
         const label = () => {
           const q = quad()
-          if (typeof q.decodedTagId === 'number') {
-            return String(q.decodedTagId)
+          const id = q.decodedTagId
+          if (typeof id !== 'number') {
+            // Dict miss after filter = fully binary unknown codeword — not red “?”.
+            return '*'
           }
-          return '?'
+          const ot = props.customTagOverlay?.()
+          if (id < 0 && ot) {
+            if (!ot.collectionRunning || !ot.firstCustomTakeDone) {
+              return '*'
+            }
+            const idx = ot.sessionIndexByCustomTagId.get(id)
+            return idx === undefined ? '?' : `*${idx}`
+          }
+          return displayLabelForTagId(id)
         }
-        const dictMiss = () => (quad().vizTagId ?? 0) === (DECODED_TAG_ID_DICT_MISS >>> 0)
+        const id = () => quad().decodedTagId
+        const customStyled = () => typeof id() === 'number' && id()! < 0 && props.customTagOverlay !== undefined
         return (
           <div
-            class={[styles.tagIdOverlay, dictMiss() && styles.tagIdOverlayDictMiss]}
+            class={[styles.tagIdOverlay, customStyled() && styles.tagIdOverlayCustom]}
             style={{
               '--tag-x': `${cx() * props.scale.x}px`,
               '--tag-y': `${cy() * props.scale.y}px`,

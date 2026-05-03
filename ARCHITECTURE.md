@@ -105,7 +105,7 @@ After corners (fitted or bbox), `validateAndFilterQuads` runs grid + dictionary 
 
 3. **Dictionary** — `decodeTag36h11AnyRotation(pattern, maxError)` with `maxError = ALLOWED_ERROR_COUNT` (**3**, [`contour.ts`](src/gpu/contour.ts)) over 587 tag36h11 words in [`tag36h11.ts`](src/lib/tag36h11.ts).
 
-4. **Outputs** — `DetectedQuad` carries `pattern`, optional `decodedTagId` / `decodedRotation`. UI shows the id or **`?`**. `updateQuadCornersBuffer` sends `vizTagId` to the instanced `decodedTagId` (`0xFFFFFFFF` = unknown, black fill in the shader); known IDs are tinted with `stableHashToRgb01`.
+4. **Outputs** — `DetectedQuad` carries `pattern`, optional `decodedTagId` / `decodedRotation`. **tag36h11** ids are **non-negative**; **custom** (non-dictionary) tags use **negative** `decodedTagId` (payload encoded as `-1 - code`). The **Calibrate** live grid overlay shows dictionary tags as **plain numbers**; **custom** tags show **`*0`, `*1`, …** (session index, **light blue** text and **blue** shadow) after the first **running** frame that observes any custom tag, and **`*?`** before that or while the camera preview runs **before Start**. **Debug** camera omits this mapping and uses technical labels for negatives. Otherwise the UI shows the id or **`?`**. `updateQuadCornersBuffer` sends `vizTagId` to the instanced `decodedTagId` (`0xFFFFFFFF` = unknown, black fill in the shader); known IDs are tinted with `stableHashToRgb01`.
 
 Tuning is primarily GPU NMS and corner geometry; an optional `edgeMask` is available in code but the live path passes none.
 

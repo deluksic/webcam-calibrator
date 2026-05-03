@@ -3,13 +3,10 @@ import { d, tgpu } from 'typegpu'
 import { arrayOf, u16 } from 'typegpu/data'
 import { floor, mul, select } from 'typegpu/std'
 
-import {
-  resultsCameraBindLayout,
-  type ResultsCameraBindGroup,
-} from '@/gpu/pipelines/resultsCameraTransform'
+import { resultsCameraBindLayout, type ResultsCameraBindGroup } from '@/gpu/pipelines/resultsCameraTransform'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { cornersToVec3fArray } from '@/gpu/pipelines/resultsSceneCpu'
-import { tagIdPattern } from '@/lib/tag36h11'
+import { patternForResolvedTagId } from '@/lib/tag36h11'
 import type { CalibrationOk } from '@/workers/calibration.worker'
 
 export const MAX_RESULTS_TAG_QUADS = 2048 as const
@@ -46,7 +43,7 @@ export type TagQuadsResultsBuffer = ReturnType<typeof allocTagQuads>
 
 /** Pack the row-major 6×6 0/1 interior pattern (36 bits) into `vec2u` (lo: bits 0..31, hi: 32..35). */
 function packTagPattern(tagId: number): d.v2u {
-  const pattern = tagIdPattern(tagId)
+  const pattern = patternForResolvedTagId(tagId)
   let lo = 0
   let hi = 0
   for (let i = 0; i < 36; i++) {
@@ -134,7 +131,7 @@ export function createTagQuadsResultsStage(root: TgpuRoot, presentationFormat: G
       const uvU = d.f32(vertexIndex & d.u32(1))
       const uvV = d.f32(vertexIndex >> d.u32(1))
       return {
-        clipPos: mul(cam.clipHomogeneousMatrixFromBoard, d.vec4f(p.x, -p.y, p.z, d.f32(1))),
+        clipPos: mul(cam.clipHomogeneousMatrixFromBoard, d.vec4f(p.x, -p.y, -p.z, d.f32(1))),
         uv: d.vec2f(uvU, uvV),
         instanceIndexFlat: instanceIndex,
       }

@@ -9,6 +9,7 @@ import {
 } from '@/gpu/pipelines/gridVizPipeline'
 import type { ReprojPairGpu } from '@/gpu/pipelines/reprojectionOverlayPipeline'
 import { tryComputeHomography } from '@/lib/geometry'
+import { tagIdToGridVizU32 } from '@/lib/hashStableColor'
 import type { ReprojectionOverlayPair } from '@/lib/reprojectionLive'
 
 import type { CameraPipeline } from './cameraPipeline'
@@ -32,7 +33,14 @@ export function updateQuadCornersBuffer(
     const quad = filtered[i]!
     const H = tryComputeHomography(quad.corners)
     const debug = quad.cornerDebug
-    const tagId = quad.vizTagId !== undefined ? quad.vizTagId >>> 0 : DECODED_TAG_ID_UNKNOWN
+    let gridTagU32: number
+    if (typeof quad.decodedTagId === 'number') {
+      gridTagU32 = tagIdToGridVizU32(quad.decodedTagId)
+    } else if (quad.vizTagId !== undefined) {
+      gridTagU32 = quad.vizTagId >>> 0
+    } else {
+      gridTagU32 = DECODED_TAG_ID_UNKNOWN
+    }
 
     data.push({
       homography: H
@@ -44,7 +52,7 @@ export function updateQuadCornersBuffer(
         minR2: debug ? debug.minR2 : 0,
         intersectionCount: debug ? debug.intersectionCount : 0,
       },
-      decodedTagId: d.u32(tagId),
+      decodedTagId: d.u32(gridTagU32),
     })
   }
 

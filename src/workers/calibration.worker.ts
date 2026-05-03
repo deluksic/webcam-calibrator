@@ -2,9 +2,15 @@ import { initCalibrator } from '@deluksic/opencv-calibration-wasm'
 import CALIBRATE_WASM_PATH from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
 import * as Comlink from 'comlink'
 
+import { calibratorInitOptions } from '@/lib/calibratorWasmInit'
 import type { CalibrationFrameObservation, Corners3, ObjectTag } from '@/lib/calibrationTypes'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import type { Point } from '@/lib/geometry'
+import {
+  OBJECT_POINT_ROW_KEY_STRIDE,
+  objectPointRowKey,
+  unpackObjectPointRowKey,
+} from '@/lib/objectPointRowKey'
 
 export interface CalibWorkerApi {
   solveCalibration(
@@ -35,20 +41,6 @@ export type CalibrationErr = {
 }
 
 export type CalibrationResult = CalibrationOk | CalibrationErr
-
-/** > max corner index (3). Row key = `tagId * STRIDE + cornerId` (same order as `(tagId, cornerId)` lexicographic). */
-const OBJECT_POINT_ROW_KEY_STRIDE = 4
-
-function objectPointRowKey(tagId: number, cornerId: number): number {
-  return tagId * OBJECT_POINT_ROW_KEY_STRIDE + cornerId
-}
-
-function unpackObjectPointRowKey(rowKey: number): { tagId: number; cornerId: number } {
-  return {
-    tagId: Math.trunc(rowKey / OBJECT_POINT_ROW_KEY_STRIDE),
-    cornerId: rowKey % OBJECT_POINT_ROW_KEY_STRIDE,
-  }
-}
 
 /** Tags that appear with all four corners in every frame (the intersection in `buildWasmInput`). */
 function tagIdsFullySharedAcrossViews(sharedObjectPointRowKeysSorted: number[]): Set<number> {
@@ -207,7 +199,7 @@ const api: CalibWorkerApi = {
 
       const { objectPoints, imagePoints, frameIds, sharedObjectPointRowKeysSorted } = wasmInput
 
-      const calibrator = await initCalibrator({ wasmPath: CALIBRATE_WASM_PATH })
+      const calibrator = await initCalibrator(calibratorInitOptions(CALIBRATE_WASM_PATH))
 
       const wasmResult = calibrator.calibrateCameraRO({
         objectPoints,

@@ -9,7 +9,16 @@ import {
   decodeTag36h11AnyRotation,
   tag36h11Code,
   TAG36H11_COUNT,
+  canonicalCodeToLabel,
+  labelToCanonicalCode,
+  customTagIdFromCanonicalCode,
+  canonicalCodeFromCustomTagId,
+  canonicalizeBinaryPatternMinCode,
+  matchCustomCodewordsAnyRotation,
+  displayLabelForTagId,
+  patternForResolvedTagId,
 } from '@/lib/tag36h11'
+import { TAG_MODULE_CELL, type TagPattern } from '@/lib/tagModuleCell'
 
 describe('tag36h11', () => {
   describe('hammingDistance', () => {
@@ -143,6 +152,46 @@ describe('tag36h11', () => {
       expect(m).not.toBeNull()
       expect(m!.id).toBe(tagId)
       expect(m!.rotation).toBe(2)
+    })
+  })
+
+  describe('custom tag ids and labels', () => {
+    it('round-trips canonical code through base64url label', () => {
+      const code = 0x123456789n
+      const label = canonicalCodeToLabel(code)
+      expect(labelToCanonicalCode(label)).toBe(code)
+    })
+
+    it('maps custom id to code and display label', () => {
+      const code = 42n
+      const id = customTagIdFromCanonicalCode(code)
+      expect(canonicalCodeFromCustomTagId(id)).toBe(code)
+      expect(displayLabelForTagId(id)).toBe(canonicalCodeToLabel(code))
+      expect(displayLabelForTagId(0)).toBe('0')
+    })
+
+    it('patternForResolvedTagId supports custom ids for GPU packing', () => {
+      const code = 0xdeadbeefn & ((1n << 36n) - 1n)
+      const id = customTagIdFromCanonicalCode(code)
+      const pat = patternForResolvedTagId(id)
+      expect(patternToCode(pat)).toBe(code)
+    })
+
+    it('canonicalizeBinaryPatternMinCode picks min code rotation', () => {
+      const p = Array(36).fill(TAG_MODULE_CELL.black) as TagPattern
+      p[0] = TAG_MODULE_CELL.white
+      const c = canonicalizeBinaryPatternMinCode(p)
+      expect(c).toBeDefined()
+    })
+
+    it('matchCustomCodewordsAnyRotation matches session codeword with weak cell', () => {
+      const code = 0xabcdef012n
+      const full = codeToPattern(code)
+      const noisy = [...full] as TagPattern
+      noisy[10] = TAG_MODULE_CELL.weak
+      const m = matchCustomCodewordsAnyRotation(noisy, [code], 3)
+      expect(m).toBeDefined()
+      expect(m!.tagId).toBe(customTagIdFromCanonicalCode(code))
     })
   })
 })

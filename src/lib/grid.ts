@@ -4,7 +4,7 @@
 import { imagePixelToUnitSquareUv } from '@/lib/aprilTagRaycast'
 import { length, lineFromPoints, lineIntersection, tryComputeHomography } from '@/lib/geometry'
 import type { Corners, Mat3, Point } from '@/lib/geometry'
-import type { TagPattern } from '@/lib/tag36h11'
+import { TAG_MODULE_CELL, type TagModuleCell, type TagPattern } from '@/lib/tagModuleCell'
 
 const { min, max, abs, floor, ceil, round } = Math
 
@@ -370,18 +370,18 @@ function decodeMinVoteTotalFromShortestEdgePx(lMinPx: number): number {
   return max(2, round(DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE * lMinPx))
 }
 
-function classifyModuleFromPosNeg(whiteCount: number, blackCount: number, minVoteTotal: number): 0 | 1 | -1 | -2 {
+function classifyModuleFromPosNeg(whiteCount: number, blackCount: number, minVoteTotal: number): TagModuleCell {
   const sum = whiteCount + blackCount
   if (sum < minVoteTotal) {
-    return -1
+    return TAG_MODULE_CELL.weak
   }
   if (blackCount > whiteCount) {
-    return 0
+    return TAG_MODULE_CELL.black
   }
   if (whiteCount > blackCount) {
-    return 1
+    return TAG_MODULE_CELL.white
   }
-  return -2
+  return TAG_MODULE_CELL.tie
 }
 
 /**
@@ -390,21 +390,20 @@ function classifyModuleFromPosNeg(whiteCount: number, blackCount: number, minVot
  * conflicting directional evidence, and dictionary decode already treats **`-2`** as an unknown bit.
  */
 /**
- * After {@link fillUnknownNeighbors6}: reject patterns with unresolved weak cells (`-1`) or too many tied cells (`-2`).
- * Used to drop junk quads before dictionary decode and UI.
+ * Reject when there are too many vote ties (`-2`). Weak (`-1`) cells are always allowed after
+ * {@link fillUnknownNeighbors6} and wildcard dictionary decode. Up to `maxTieCells` ties match legacy behavior.
  */
 export function votePatternAcceptable(pattern: TagPattern, maxTieCells: number = 2): boolean {
   let ties = 0
   for (let i = 0; i < 36; i++) {
-    const v = pattern[i]
-    if (v === -1) {
-      return false
-    }
-    if (v === -2) {
+    if (pattern[i] === TAG_MODULE_CELL.tie) {
       ties++
+      if (ties > maxTieCells) {
+        return false
+      }
     }
   }
-  return ties <= maxTieCells
+  return true
 }
 
 export function fillUnknownNeighbors6(pattern: TagPattern): void {
@@ -412,31 +411,31 @@ export function fillUnknownNeighbors6(pattern: TagPattern): void {
   const next = [...pattern] as TagPattern
   for (let r = 0; r < 6; r++) {
     for (let c = 0; c < 6; c++) {
-      if (pattern[idx(r, c)] !== -1) {
+      if (pattern[idx(r, c)] !== TAG_MODULE_CELL.weak) {
         continue
       }
       const vals: number[] = []
       if (r > 0) {
         const v = pattern[idx(r - 1, c)]
-        if (v === 0 || v === 1) {
+        if (v === TAG_MODULE_CELL.black || v === TAG_MODULE_CELL.white) {
           vals.push(v)
         }
       }
       if (r < 5) {
         const v = pattern[idx(r + 1, c)]
-        if (v === 0 || v === 1) {
+        if (v === TAG_MODULE_CELL.black || v === TAG_MODULE_CELL.white) {
           vals.push(v)
         }
       }
       if (c > 0) {
         const v = pattern[idx(r, c - 1)]
-        if (v === 0 || v === 1) {
+        if (v === TAG_MODULE_CELL.black || v === TAG_MODULE_CELL.white) {
           vals.push(v)
         }
       }
       if (c < 5) {
         const v = pattern[idx(r, c + 1)]
-        if (v === 0 || v === 1) {
+        if (v === TAG_MODULE_CELL.black || v === TAG_MODULE_CELL.white) {
           vals.push(v)
         }
       }
@@ -445,7 +444,7 @@ export function fillUnknownNeighbors6(pattern: TagPattern): void {
       }
       const first = vals[0]!
       if (vals.every((x) => x === first)) {
-        next[idx(r, c)] = first as 0 | 1
+        next[idx(r, c)] = first as TagModuleCell
       }
     }
   }
@@ -648,6 +647,8 @@ export function decodeTagPatternWithVoteMaps(
     }
   }
 
+  fillUnknownNeighbors6(pattern)
+  fillUnknownNeighbors6(pattern)
   fillUnknownNeighbors6(pattern)
   return { pattern, whiteModuleCount, blackModuleCount, uvProximityMax, minVoteTotal }
 }

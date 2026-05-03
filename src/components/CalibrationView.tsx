@@ -16,6 +16,7 @@ import type { Corners3 } from '@/lib/calibrationTypes'
 import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
 import { isProgressShapedError, percentile, type SnapshotFeedback } from '@/lib/calibrationViewUtils'
 import { formatFixed } from '@/lib/formatFixed'
+import { canonicalCodeFromCustomTagId, isCustomTagId } from '@/lib/tag36h11'
 import { learnLayoutFromFrame, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 
@@ -174,6 +175,7 @@ function CalibrationView() {
   }
 
   const onQuadDetection = (quads: DetectedQuad[]) => {
+    runCtx.noteCustomTagsFromDetection(quads)
     runCtx.setRun((r) => ({
       ...r,
       stats: { ...r.stats, framesProcessed: r.stats.framesProcessed + 1 },
@@ -323,7 +325,7 @@ function CalibrationView() {
     }
   })
 
-  const guidance = createMemo((): { band: GuidanceBand; lines: string[] } => {
+  const guidance = createMemo(() => {
     const inner = guidanceCore()
     const lines = [...inner.lines]
     const snap = snapshotFeedback()
@@ -368,6 +370,7 @@ function CalibrationView() {
             displayMode="grid"
             showFallbacks={false}
             showHistogramCanvas={false}
+            customTagOverlay={runCtx.customTagOverlaySession}
             showFocusOverlay={runCtx.run().framePool.length < 1}
             focusBottomHint={() => {
               const r = runCtx.run()
@@ -394,6 +397,22 @@ function CalibrationView() {
             onReprojectionFrame={(m) => setReproj(m)}
             onFrameSize={runCtx.setVideoFrameSize}
             onQuadSnapshotRequest={handleSnapshotClick}
+            quadDecodeOptions={() => {
+              const lay = runCtx.layout()
+              const sessionCustomCodewords: bigint[] = []
+              if (lay) {
+                for (const id of lay.keys()) {
+                  if (isCustomTagId(id)) {
+                    const c = canonicalCodeFromCustomTagId(id)
+                    if (c !== undefined) {
+                      sessionCustomCodewords.push(c)
+                    }
+                  }
+                }
+                return { layoutEstablished: true, sessionCustomCodewords }
+              }
+              return { layoutEstablished: false, sessionCustomCodewords }
+            }}
           />
         </div>
       </Errored>
@@ -464,7 +483,7 @@ function CalibrationView() {
       </div>
 
       <div class={styles.guidanceSlot}>
-        <CalibrateGuidancePanel band={() => guidance().band} lines={() => guidance().lines} />
+        <CalibrateGuidancePanel band={guidance().band} lines={guidance().lines} />
       </div>
 
       <CalibrationAdvancedMetrics

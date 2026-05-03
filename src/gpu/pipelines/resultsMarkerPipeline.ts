@@ -170,7 +170,7 @@ export function createMarkerResultsStage(root: TgpuRoot, presentationFormat: GPU
       const m = markersBindLayout.$.markers
       const row = markersBindLayout.$.centers[instanceIndex]!
       const pc = row.positionBoardUnits
-      const centerClip = mul(cam.clipHomogeneousMatrixFromBoard, d.vec4f(pc.x, -pc.y, pc.z, d.f32(1)))
+      const centerClip = mul(cam.clipHomogeneousMatrixFromBoard, d.vec4f(pc.x, -pc.y, -pc.z, d.f32(1)))
       const unit = circle(vertexIndex)
       const half = cam.viewportHalfSizePixels
       const rPx = m.markerDiskRadiusPixels
