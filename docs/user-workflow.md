@@ -26,7 +26,7 @@ Copy in the app follows two bands: **progress** (keep going—you are not being 
 1. **Saved calibrations** lists saved runs and a built-in **Demo calibration** row so the 3D view is never empty on first load. Pick **Show** on a row to drive the orbit view, or **Use latest solve** to show the latest calibration from **Calibrate** when available.
 2. **Drag** (or pinch / scroll) to orbit. **Export JSON** exports the calibration currently shown (selected library entry, or **latest** when no library row is selected).
 3. While **latest** is active (not viewing a saved row): **Save to library** stores the current calibration (same readiness rules as unlocking **Results**), and **Continue Calibration** links back to **Calibrate**. Those actions are hidden when a saved entry is selected—use **Use latest solve** first if needed.
-4. **Compare with** two saved entries shows a small intrinsics table.
+4. **Compare** on saved rows adds them to the comparison set (letters **A**, **B**, …). As soon as at least one **ok** run is in the set, a small intrinsics table appears (one column first—add more runs for side-by-side columns). **Clear comparison** empties the set.
 
 ## 4. Reset
 

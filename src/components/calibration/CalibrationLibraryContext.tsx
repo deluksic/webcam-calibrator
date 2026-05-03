@@ -5,18 +5,23 @@ import { createCalibrationLibraryEntry, type CalibrationLibraryEntry } from '@/l
 import { createDemoCalibrationLibraryEntry } from '@/lib/demoCalibrationExample'
 import type { CalibrationResult } from '@/workers/calibrationClient'
 
+/** Max columns in the intrinsics comparison table (labels A–…). */
+export const CALIBRATION_COMPARE_MAX = 8
+
 type LibraryState = {
   entries: CalibrationLibraryEntry[]
   selectedId: string | undefined
-  compareId: string | undefined
+  /** Ordered selection: column A, B, C, … */
+  compareIds: string[]
 }
 
 export type CalibrationLibraryContextValue = {
   entries: () => CalibrationLibraryEntry[]
   selectedId: () => string | undefined
-  compareId: () => string | undefined
+  compareIds: () => string[]
   setSelectedId: (id: string | undefined) => void
-  setCompareId: (id: string | undefined) => void
+  toggleCompareId: (id: string) => void
+  clearCompare: () => void
   addFromCurrentSolve: (args: {
     result: CalibrationResult
     validSolveFrameCount: number
@@ -42,12 +47,12 @@ export function CalibrationLibraryProvider(props: ParentProps) {
   const [store, setStore] = createStore<LibraryState>({
     entries: [demoEntry],
     selectedId: demoEntry.id,
-    compareId: undefined,
+    compareIds: [],
   })
 
   const entries = createMemo(() => store.entries)
   const selectedId = createMemo(() => store.selectedId)
-  const compareId = createMemo(() => store.compareId)
+  const compareIds = createMemo(() => store.compareIds)
 
   const setSelectedId = (id: string | undefined) => {
     setStore((s) => {
@@ -55,9 +60,24 @@ export function CalibrationLibraryProvider(props: ParentProps) {
     })
   }
 
-  const setCompareId = (id: string | undefined) => {
+  const toggleCompareId = (id: string) => {
     setStore((s) => {
-      s.compareId = id
+      const entry = s.entries.find((e) => e.id === id)
+      if (!entry || entry.result.kind !== 'ok') {
+        return
+      }
+      const i = s.compareIds.indexOf(id)
+      if (i >= 0) {
+        s.compareIds = s.compareIds.filter((x) => x !== id)
+      } else if (s.compareIds.length < CALIBRATION_COMPARE_MAX) {
+        s.compareIds = [...s.compareIds, id]
+      }
+    })
+  }
+
+  const clearCompare = () => {
+    setStore((s) => {
+      s.compareIds = []
     })
   }
 
@@ -81,9 +101,7 @@ export function CalibrationLibraryProvider(props: ParentProps) {
       if (s.selectedId === id) {
         s.selectedId = next[0]?.id
       }
-      if (s.compareId === id) {
-        s.compareId = next.find((e) => e.id !== s.selectedId)?.id
-      }
+      s.compareIds = s.compareIds.filter((cid) => cid !== id && next.some((e) => e.id === cid))
     })
   }
 
@@ -100,9 +118,10 @@ export function CalibrationLibraryProvider(props: ParentProps) {
   const value: CalibrationLibraryContextValue = {
     entries,
     selectedId,
-    compareId,
+    compareIds,
     setSelectedId,
-    setCompareId,
+    toggleCompareId,
+    clearCompare,
     addFromCurrentSolve,
     remove,
     rename,

@@ -120,27 +120,110 @@
   background: color-mix(in srgb, var(--color-error) 12%, transparent);
 }
 
-.compareBar {
+.compareBtn {
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.compareBtn:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.compareBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.compareBtnActive {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  color: var(--color-accent);
+  background: var(--color-accent-muted);
+}
+
+.compareBoard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   margin-top: var(--space-4);
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-border);
 }
 
-.compareLabel {
+.compareFooter {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
+  justify-content: flex-start;
 }
 
-.compareSelect {
-  max-width: 20rem;
-  padding: var(--space-2);
+.clearCompareBtn {
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-  background: var(--color-bg);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.clearCompareBtn:hover {
   color: var(--color-text);
+  border-color: var(--color-border);
+  background: var(--color-bg-tertiary);
+}
+
+.compareLetterTag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.375rem;
+  height: 1.375rem;
+  padding: 0 0.35rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-text-inverse);
+}
+
+.compareLetterTag[data-slot='0'] {
+  background: #5b8af0;
+}
+
+.compareLetterTag[data-slot='1'] {
+  background: #34d399;
+}
+
+.compareLetterTag[data-slot='2'] {
+  background: #fbbf24;
+  color: #0a0a0b;
+}
+
+.compareLetterTag[data-slot='3'] {
+  background: #f472b6;
+}
+
+.compareLetterTag[data-slot='4'] {
+  background: #a78bfa;
+}
+
+.compareLetterTag[data-slot='5'] {
+  background: #38bdf8;
+}
+
+.compareLetterTag[data-slot='6'] {
+  background: #fb923c;
+}
+
+.compareLetterTag[data-slot='7'] {
+  background: #94a3b8;
+}
+
+.compareTh {
+  vertical-align: middle;
 }
 
 .compareTable {
