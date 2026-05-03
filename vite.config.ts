@@ -10,6 +10,8 @@ import { buildHashPlugin } from './src/plugins/buildHash'
 const root = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
+  // GitHub project pages: set VITE_BASE_URL=/<repo>/ in CI (see .github/workflows)
+  base: process.env.VITE_BASE_URL || '/',
   resolve: {
     alias: {
       '@': path.resolve(root, 'src'),
