@@ -1,6 +1,8 @@
-# webcam-calibrator
+# Webcam Calibrator
 
 In-browser camera calibration against **AprilTag36h11** targets. Detection and the live pipeline run on the **WebGPU** stack in your browser; there is no server.
+
+[Webcam Calibrator](https://deluksic.github.io/webcam-calibrator)
 
 **Requires:** a recent Chromium-class browser with WebGPU (Chrome/Edge 113+, or Firefox Nightly with WebGPU enabled).
 
