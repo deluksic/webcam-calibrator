@@ -50,8 +50,7 @@ export function CameraStreamProvider(props: ParentProps) {
   const [selectedResolution, setSelectedResolution] = createSignal<Resolution>('low')
 
   const [devices, setDevices] = createSignal<MediaDeviceInfo[]>(async () => {
-    if (!untrack(cameraIsNeededLatch)) {
-      cameraIsNeededLatch()
+    if (!cameraIsNeededLatch()) {
       return []
     }
     await primeCameraPermission()

@@ -1,6 +1,6 @@
 {
   "name": "webcam-calibrator",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -42,7 +42,9 @@
   },
   "pnpm": {
     "peerDependencyRules": {
-      "allowAny": ["typegpu"]
+      "allowAny": [
+        "typegpu"
+      ]
     },
     "overrides": {
       "@solidjs/web": "2.0.0-beta.7",
