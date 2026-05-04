@@ -5,8 +5,6 @@ import typegpuPlugin from 'unplugin-typegpu/vite'
 import { defineConfig } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 
-import { buildHashPlugin } from './src/plugins/buildHash'
-
 const root = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
@@ -21,7 +19,6 @@ export default defineConfig({
     // tsover(), disabled because slow
     typegpuPlugin(),
     solidPlugin(),
-    buildHashPlugin(),
   ],
   server: {
     port: 5173,

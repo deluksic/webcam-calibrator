@@ -12,7 +12,7 @@ Deploy by serving the `dist/` output as static files (any static host or CDN).
 
 ## Versioning
 
-Build hash is injected at build time (`src/plugins/buildHash.ts`). The browser console shows `[build] <hash>` so you can confirm which build is running.
+Build hash is inferred from the entry module script URL (e.g. `index-<hash>.js`). The browser console shows `[build] <hash>` so you can confirm which build is running.
 
 ---
 
