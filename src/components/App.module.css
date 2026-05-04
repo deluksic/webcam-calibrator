@@ -99,3 +99,9 @@
   flex-direction: column;
   min-width: 0;
 }
+
+.routeLoading {
+  padding: var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

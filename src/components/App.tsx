@@ -1,17 +1,18 @@
 import { A, HashRouter, Route, type RouteSectionProps, useCurrentMatches } from '@solidjs/router'
-import { Show, createMemo } from 'solid-js'
+import { Loading, Show, createMemo, lazy } from 'solid-js'
 
 import { CalibrationLibraryProvider } from '@/components/calibration/CalibrationLibraryContext'
 import { CalibrationRunProvider, useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
-import { CalibrationView } from '@/components/CalibrationView'
 import { CameraStreamProvider } from '@/components/camera/CameraStreamContext'
-import { DebugView } from '@/components/DebugView'
 import { Home } from '@/components/Home'
-import { ResultsView } from '@/components/results/ResultsView'
 import { TargetView } from '@/components/TargetView'
 import { VERSION } from '@/version'
 
 import styles from '@/components/App.module.css'
+
+const CalibrationView = lazy(() => import('@/components/CalibrationView').then((m) => ({ default: m.CalibrationView })))
+const ResultsView = lazy(() => import('@/components/results/ResultsView').then((m) => ({ default: m.ResultsView })))
+const DebugView = lazy(() => import('@/components/DebugView').then((m) => ({ default: m.DebugView })))
 
 const GitHubIcon = () => (
   <svg viewBox="0 0 128 128" width="32" height="32" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -61,7 +62,12 @@ export function App() {
             Debug
           </A>
           <span class={styles.version}>{VERSION}</span>
-          <a href="https://github.com/deluksic/webcam-calibrator" target="_blank" rel="noopener noreferrer" class={styles.githubLink}>
+          <a
+            href="https://github.com/deluksic/webcam-calibrator"
+            target="_blank"
+            rel="noopener noreferrer"
+            class={styles.githubLink}
+          >
             <GitHubIcon />
           </a>
         </nav>
@@ -75,11 +81,13 @@ export function App() {
       <CalibrationRunProvider>
         <CalibrationLibraryProvider>
           <HashRouter root={Layout}>
-            <Route path="/" component={Home} />
-            <Route path="/target" component={TargetView} />
-            <Route path="/calibrate" component={CalibrationView} />
-            <Route path="/results" component={ResultsView} />
-            <Route path="/debug" component={DebugView} />
+            <Loading fallback={<div class={styles.routeLoading}>Loading…</div>}>
+              <Route path="/" component={Home} />
+              <Route path="/target" component={TargetView} />
+              <Route path="/calibrate" component={CalibrationView} />
+              <Route path="/results" component={ResultsView} />
+              <Route path="/debug" component={DebugView} />
+            </Loading>
           </HashRouter>
         </CalibrationLibraryProvider>
       </CalibrationRunProvider>
