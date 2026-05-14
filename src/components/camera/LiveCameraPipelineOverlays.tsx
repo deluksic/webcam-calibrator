@@ -1,5 +1,5 @@
 import type { Component } from 'solid-js'
-import { For, createMemo } from 'solid-js'
+import { For, Show, createMemo } from 'solid-js'
 
 import type { DetectedQuad } from '@/gpu/contour'
 import type { CustomTagOverlaySession } from '@/lib/customTagOverlaySession'
@@ -75,35 +75,38 @@ export const TagIdGridOverlay: Component<{
           max(abs(c()[0].y - c()[1].y), abs(c()[1].y - c()[2].y), abs(c()[2].y - c()[3].y), abs(c()[3].y - c()[0].y))
 
         const label = () => {
-          const q = quad()
-          const id = q.decodedTagId
-          if (typeof id !== 'number') {
-            // Dict miss after filter = fully binary unknown codeword — not red “?”.
-            return '*'
+          const id = quad().decodedTagId
+          if (id === undefined) {
+            return undefined
           }
-          const ot = props.customTagOverlay?.()
-          if (id < 0 && ot) {
-            if (!ot.collectionRunning || !ot.firstCustomTakeDone) {
+          if (id < 0) {
+            const ot = props.customTagOverlay?.()
+            if (!ot) {
+              return '*'
+            }
+            if (!ot.collectionRunning) {
               return '*'
             }
             const idx = ot.sessionIndexByCustomTagId.get(id)
-            return idx === undefined ? '?' : `*${idx}`
+            return idx === undefined ? '*' : `*${idx}`
           }
           return displayLabelForTagId(id)
         }
         const id = () => quad().decodedTagId
         const customStyled = () => typeof id() === 'number' && id()! < 0 && props.customTagOverlay !== undefined
         return (
-          <div
-            class={[styles.tagIdOverlay, customStyled() && styles.tagIdOverlayCustom]}
-            style={{
-              '--tag-x': `${cx() * props.scale.x}px`,
-              '--tag-y': `${cy() * props.scale.y}px`,
-              '--tag-size': `${height() * props.scale.y}px`,
-            }}
-          >
-            {label()}
-          </div>
+          <Show when={label() !== undefined}>
+            <div
+              class={[styles.tagIdOverlay, customStyled() && styles.tagIdOverlayCustom]}
+              style={{
+                '--tag-x': `${cx() * props.scale.x}px`,
+                '--tag-y': `${cy() * props.scale.y}px`,
+                '--tag-size': `${height() * props.scale.y}px`,
+              }}
+            >
+              {label()}
+            </div>
+          </Show>
         )
       }}
     </For>

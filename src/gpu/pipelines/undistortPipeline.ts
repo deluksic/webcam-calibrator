@@ -1,6 +1,7 @@
 import type { ColorAttachment, TgpuRoot, TgpuTextureView } from 'typegpu'
 import { d, tgpu, std, common } from 'typegpu'
 
+import { forwardDistortNormalized } from '@/gpu/shaders/forwardRationalDistortion'
 import { PinholeIntrinsicsGpu, RationalDistortion8Gpu } from '@/gpu/schemas/cameraGpuUniforms'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 
@@ -60,15 +61,9 @@ export function createUndistortPipeline(
     const xn = (uOut - intr.cx) / intr.fx
     const yn = (vOut - intr.cy) / intr.fy
 
-    const r2 = xn * xn + yn * yn
-    const r4 = r2 * r2
-    const r6 = r4 * r2
-
-    const radialNum = d.f32(1) + dist.k1 * r2 + dist.k2 * r4 + dist.k3 * r6
-    const radialDen = d.f32(1) + dist.k4 * r2 + dist.k5 * r4 + dist.k6 * r6
-
-    const xd = (xn * radialNum) / radialDen + d.f32(2) * dist.p1 * xn * yn + dist.p2 * (r2 + d.f32(2) * xn * xn)
-    const yd = (yn * radialNum) / radialDen + dist.p1 * (r2 + d.f32(2) * yn * yn) + d.f32(2) * dist.p2 * xn * yn
+    const xyD = forwardDistortNormalized(d.vec2f(xn, yn), dist)
+    const xd = xyD.x
+    const yd = xyD.y
 
     const uSrc = xd * intr.fx + intr.cx
     const vSrc = yd * intr.fy + intr.cy

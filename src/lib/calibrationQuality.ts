@@ -1,4 +1,5 @@
 import type { DetectedQuad } from '@/gpu/contour'
+import { acceptQuadForTagUse } from '@/lib/acceptQuadForTagUse'
 import { length, type Corners } from '@/lib/geometry'
 
 const { min, max, abs } = Math
@@ -27,13 +28,10 @@ export function calibrationQuadScore(q: DetectedQuad): number {
 }
 
 export function acceptQuadForCalibration(q: DetectedQuad): boolean {
+  if (!acceptQuadForTagUse(q, false)) {
+    return false
+  }
   if (q.decodedTagId === undefined) {
-    return false
-  }
-  if (!q.hasCorners) {
-    return false
-  }
-  if (!q || q.cornerDebug?.failureCode !== 0) {
     return false
   }
   const minR2 = q.cornerDebug.minR2

@@ -14,13 +14,13 @@ import type { DetectedQuad, QuadDecodeOptions } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
 import { MAX_U32 } from '@/gpu/pipelines/extentTrackingPipeline'
-import { DECODED_TAG_ID_DICT_MISS, MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
+import { MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
 import { writeUndistortUniform } from '@/gpu/pipelines/undistortPipeline'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import type { CustomTagOverlaySession } from '@/lib/customTagOverlaySession'
 import { buildReprojectionOverlayPairs, cameraDistanceFromT, cameraTiltDegFromR } from '@/lib/reprojectionLive'
-import { patternHasWeakOrTie } from '@/lib/tagModuleCell'
+import { acceptQuadForTagUse } from '@/lib/acceptQuadForTagUse'
 import type { TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 import { createElementSize } from '@/utils/createElementSize'
@@ -58,7 +58,7 @@ export type LiveCameraPipelineProps = {
   showFocusOverlay?: boolean
   /** Short line centered in the strip below the focus rect (inside canvas). */
   focusBottomHint?: () => JSX.Element | undefined
-  /** Calibrate: `*` / `*0`… for custom (negative) tag ids; omit in Debug to show technical labels. */
+  /** Calibrate: `*` / `*0`… for custom (negative) tag ids while session is running; omit in Debug to show technical labels. */
   customTagOverlay?: () => CustomTagOverlaySession
 }
 
@@ -275,11 +275,12 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           updateQuadCornersBuffer(pip, tagged, sf)
 
           if (liveCalib?.layout) {
+            const accepted = tagged.filter((q) => acceptQuadForTagUse(q, sf))
             const built = buildReprojectionOverlayPairs(
               liveCalib.layout,
               liveCalib.k,
               liveCalib.distortion,
-              tagged,
+              accepted,
               width,
               height,
             )
@@ -309,20 +310,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           pip.frameSlotPool.swapDisplaySlot(slot)
           encodeAndSubmitGridPresent(gNow, pip, slot, performance.now() * 0.001)
 
-          setGridOverlayQuads(
-            tagged.filter((q) => {
-              if (!q?.hasCorners || q.cornerDebug?.failureCode !== 0) {
-                return false
-              }
-              if (patternHasWeakOrTie(q.pattern)) {
-                return false
-              }
-              if (sf) {
-                return true
-              }
-              return typeof q.decodedTagId === 'number' || (q.vizTagId ?? 0) === DECODED_TAG_ID_DICT_MISS >>> 0
-            }),
-          )
+          setGridOverlayQuads(tagged.filter((q) => acceptQuadForTagUse(q, sf)))
 
           pi.onQuadDetection?.(tagged, { frameId: slot.frameId })
         })

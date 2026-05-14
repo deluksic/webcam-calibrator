@@ -2,8 +2,10 @@ import { oklabToRgb } from '@typegpu/color'
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import { common, std } from 'typegpu'
+import { abs, clamp, fwidth, length, max, round, select } from 'typegpu/std'
 
 import { PinholeIntrinsicsGpu, RationalDistortion8Gpu } from '@/gpu/schemas/cameraGpuUniforms'
+import { forwardDistortNormalized } from '@/gpu/shaders/forwardRationalDistortion'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 
 const DistortionViewportGpu = d.struct({
@@ -56,6 +58,22 @@ export function updateDistortionUniform(buf: DistortionUniformGpuBuffer, params:
 }
 
 /**
+ * Single spacing of |Δ| isolines (step = 1/invStep px). Plateau + linear rim; returns mask in [0, 1].
+ * `fw` must be `fwidth` of the **original** smooth scalar field (e.g. |Δ|), never of `abs`/`round` outputs.
+ */
+const isoLevelPlateauMask = tgpu.fn(
+  [d.f32, d.f32, d.f32, d.f32, d.f32],
+  d.f32,
+)((mag, invStep, coreK, edgeK, fw) => {
+  'use gpu'
+  const dist = abs(mag * invStep - round(mag * invStep)) / invStep
+  const fwSafe = max(fw, d.f32(1e-4))
+  const core = coreK * fwSafe
+  const edge = edgeK * fwSafe
+  return d.f32(1) - clamp((dist - core) / edge, d.f32(0), d.f32(1))
+})
+
+/**
  * Fullscreen distortion field visualization. Exposes CPU uniform updates and pass encoding only;
  * bind group and pipeline stay internal (same pattern as {@link createMarkerResultsStage}).
  */
@@ -91,25 +109,22 @@ export function createDistortionFieldStage(root: TgpuRoot, presentationFormat: G
     const ox = (canvasW - scaledW) * d.f32(0.5)
     const oy = (canvasH - scaledH) * d.f32(0.5)
 
-    if (px < ox || px >= ox + scaledW || py < oy || py >= oy + scaledH) {
-      return d.vec4f(d.f32(0.02), d.f32(0.02), d.f32(0.05), d.f32(1))
-    }
+    const inside = px >= ox && px < ox + scaledW && py >= oy && py < oy + scaledH
 
-    const xnPx = ((px - ox) / scaledW) * videoW
-    const ynPx = ((py - oy) / scaledH) * videoH
+    /** Clamped canvas coords so distortion math stays continuous at the letterbox edge (derivatives). */
+    const eps = d.f32(1e-4)
+    const pxC = clamp(px, ox + eps, ox + scaledW - eps)
+    const pyC = clamp(py, oy + eps, oy + scaledH - eps)
+
+    const xnPx = ((pxC - ox) / scaledW) * videoW
+    const ynPx = ((pyC - oy) / scaledH) * videoH
 
     const xn = (xnPx - intr.cx) / intr.fx
     const yn = (ynPx - intr.cy) / intr.fy
 
-    const r2 = xn * xn + yn * yn
-    const r4 = r2 * r2
-    const r6 = r4 * r2
-
-    const radialNum = d.f32(1) + dist.k1 * r2 + dist.k2 * r4 + dist.k3 * r6
-    const radialDen = d.f32(1) + dist.k4 * r2 + dist.k5 * r4 + dist.k6 * r6
-
-    const xd = (xn * radialNum) / radialDen + d.f32(2) * dist.p1 * xn * yn + dist.p2 * (r2 + d.f32(2) * xn * xn)
-    const yd = (yn * radialNum) / radialDen + dist.p1 * (r2 + d.f32(2) * yn * yn) + d.f32(2) * dist.p2 * xn * yn
+    const xyD = forwardDistortNormalized(d.vec2f(xn, yn), dist)
+    const xd = xyD.x
+    const yd = xyD.y
 
     const dxPx = (xd - xn) * intr.fx * vp.scale
     const dyPx = (yd - yn) * intr.fy * vp.scale
@@ -117,8 +132,22 @@ export function createDistortionFieldStage(root: TgpuRoot, presentationFormat: G
     const a = std.clamp(dxPx, d.f32(-1), d.f32(1))
     const b = std.clamp(dyPx, d.f32(-1), d.f32(1))
 
-    const rgb = oklabToRgb(d.vec3f(d.f32(0.6), a, b))
-    return d.vec4f(rgb, d.f32(1))
+    /** Geometric |Δ| in image pixels (independent of visualization scale). */
+    const dispPhysX = (xd - xn) * intr.fx
+    const dispPhysY = (yd - yn) * intr.fy
+    const magPhys = length(d.vec2f(dispPhysX, dispPhysY))
+    const fw = max(fwidth(magPhys), d.f32(1e-4))
+
+    /** Two spacings: whole px vs 0.1 px; per-level mask [0,1] then brightness weights, then OkLab L scale. */
+    const isoMajor = isoLevelPlateauMask(magPhys, 1, 0.5, 1, fw)
+    const isoMinor = isoLevelPlateauMask(magPhys, 10, 0.1, 0.8, fw)
+    const tick = max(isoMajor, isoMinor * 0.5)
+    const labL = 0.6 - tick * 0.15
+    const rgb = oklabToRgb(d.vec3f(labL, a, b))
+
+    const bg = d.vec4f(0.02, 0.02, 0.05, 1)
+    const fg = d.vec4f(rgb, 1)
+    return select(bg, fg, inside)
   })
 
   const pipeline = root.createRenderPipeline({

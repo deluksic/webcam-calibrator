@@ -7,6 +7,7 @@ import {
   MAX_INSTANCES,
   type GridVizFailInterrogateMode,
 } from '@/gpu/pipelines/gridVizPipeline'
+import { acceptQuadForTagUse } from '@/lib/acceptQuadForTagUse'
 import type { ReprojPairGpu } from '@/gpu/pipelines/reprojectionOverlayPipeline'
 import { tryComputeHomography } from '@/lib/geometry'
 import { tagIdToGridVizU32 } from '@/lib/hashStableColor'
@@ -25,7 +26,7 @@ export function updateQuadCornersBuffer(
   quads: DetectedQuad[],
   showFallbacks: boolean = true,
 ): void {
-  const filtered = showFallbacks ? quads : quads.filter((q) => q.hasCorners && typeof q.decodedTagId === 'number')
+  const filtered = quads.filter((q) => acceptQuadForTagUse(q, showFallbacks))
   const count = min(filtered.length, MAX_INSTANCES)
 
   const data: QuadData[] = []

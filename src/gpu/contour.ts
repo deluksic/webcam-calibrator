@@ -210,7 +210,7 @@ export function validateAndFilterQuads(
         aspectRatio,
         area,
         pattern: undefined,
-        hasCorners: true,
+        hasCorners: false,
         cornerDebug: debug,
       })
       continue

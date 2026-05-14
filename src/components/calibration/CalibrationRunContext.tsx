@@ -3,6 +3,7 @@ import { createContext, createEffect, createMemo, createSignal, useContext } fro
 
 import { CameraStreamContext } from '@/components/camera/CameraStreamContext'
 import type { DetectedQuad } from '@/gpu/contour'
+import { acceptQuadForTagUse } from '@/lib/acceptQuadForTagUse'
 import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
 import type { CustomTagOverlaySession } from '@/lib/customTagOverlaySession'
 import type { CalibrationFrameObservation } from '@/lib/calibrationTypes'
@@ -196,6 +197,9 @@ export function CalibrationRunProvider(props: ParentProps) {
     }
     const customIds: number[] = []
     for (const q of quads) {
+      if (!acceptQuadForTagUse(q, false)) {
+        continue
+      }
       const id = q.decodedTagId
       if (typeof id === 'number' && id < 0) {
         customIds.push(id)
@@ -230,7 +234,6 @@ export function CalibrationRunProvider(props: ParentProps) {
 
   const customTagOverlaySession = createMemo((): CustomTagOverlaySession => ({
     collectionRunning: run().collection === 'running',
-    firstCustomTakeDone: firstCustomTakeDone(),
     sessionIndexByCustomTagId: customSessionIndexByTagId(),
   }))
 

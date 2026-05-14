@@ -9,6 +9,7 @@ import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
 import type { DetectedQuad } from '@/gpu/contour'
+import { acceptQuadForTagUse } from '@/lib/acceptQuadForTagUse'
 import { calibrationQuadScore } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
 import type { TagObservation, ImageTag } from '@/lib/calibrationTypes'
@@ -88,6 +89,9 @@ function CalibrationView() {
 
     const tags: TagObservation[] = []
     for (const q of tagged) {
+      if (!acceptQuadForTagUse(q, false)) {
+        continue
+      }
       if (typeof q.decodedTagId === 'number') {
         tags.push({
           tagId: q.decodedTagId,
@@ -196,6 +200,9 @@ function CalibrationView() {
   const decodedUniqueTagCountOnFrame = createMemo(() => {
     const ids = new Set<number>()
     for (const q of currentTagged()) {
+      if (!acceptQuadForTagUse(q, false)) {
+        continue
+      }
       if (typeof q.decodedTagId === 'number') {
         ids.add(q.decodedTagId)
       }
