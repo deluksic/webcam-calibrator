@@ -16,6 +16,7 @@
     "@deluksic/opencv-calibration-wasm": "^0.2.5",
     "@solidjs/router": "0.17.0-next.2",
     "@solidjs/web": "2.0.0-beta.7",
+    "@typegpu/color": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color",
     "@typegpu/geometry": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry",
     "comlink": "^4.4.2",
     "solid-js": "2.0.0-beta.7",
@@ -54,7 +55,11 @@
       "tinyest": "0.3.1",
       "tinyest-for-wgsl": "0.3.2",
       "typegpu": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu",
+      "@typegpu/color": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color",
       "@typegpu/geometry": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

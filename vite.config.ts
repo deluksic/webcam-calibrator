@@ -10,6 +10,12 @@ const root = path.dirname(fileURLToPath(import.meta.url))
 export default defineConfig({
   // GitHub project pages: set VITE_BASE_URL=/<repo>/ in CI (see .github/workflows)
   base: process.env.VITE_BASE_URL || '/',
+  // Git-linked TypeGPU packages ship TypeScript sources. In dev, Vite pre-bundles many
+  // deps with esbuild only (no unplugin-typegpu), so `tgpu.fn` / shader metadata breaks.
+  // Production uses Rollup + our plugins. Excluding these forces the transform pipeline in dev.
+  optimizeDeps: {
+    exclude: ['typegpu', '@typegpu/color', '@typegpu/geometry'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(root, 'src'),

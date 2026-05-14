@@ -26,7 +26,7 @@ export type CameraStreamContextValue = {
   unregisterCameraUsage: (id: symbol) => void
 }
 
-const CameraStreamContext = createContext<CameraStreamContextValue>()
+export const CameraStreamContext = createContext<CameraStreamContextValue>()
 
 export function useCameraStream(): CameraStreamContextValue {
   const id = Symbol('camera-usage')

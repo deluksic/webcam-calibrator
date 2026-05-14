@@ -1,53 +1,23 @@
 import { A } from '@solidjs/router'
 import { Show, createEffect, createMemo, createSignal } from 'solid-js'
 
-import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
-import { CalibrationLibraryPanel } from '@/components/calibration/CalibrationLibraryPanel'
 import { useCalibrationLibrary } from '@/components/calibration/CalibrationLibraryContext'
+import { CalibrationLibraryPanel } from '@/components/calibration/CalibrationLibraryPanel'
+import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
+import { ResultsDistortionCanvas } from '@/components/results/ResultsDistortionCanvas'
+import { ResultsOrbitCanvas } from '@/components/results/ResultsOrbitCanvas'
 import { downloadCalibrationOkJson } from '@/components/results/exportCalibrationJson'
+import { buildResultsCalibrationScene } from '@/components/results/resultsCalibrationScene'
 import { initGPU } from '@/gpu/init'
-import { createResultsCanvasPipeline, type ResultsCanvasPipeline } from '@/gpu/resultsCanvasPipeline'
-import { writeResultsCameraTransform } from '@/gpu/pipelines/resultsCameraTransform'
-import {
-  markerCenterWritesForGpu,
-  MAX_RESULTS_MARKER_POINTS,
-  writeMarkerPassUniform,
-} from '@/gpu/pipelines/resultsMarkerPipeline'
-import {
-  calibrationDefinedCornerCount,
-  orthoExtentYForPoints,
-} from '@/gpu/pipelines/resultsSceneCpu'
-import {
-  tagQuadDrawCountForGpu,
-  tagQuadWritesForGpu,
-} from '@/gpu/pipelines/resultsTagQuadsPipeline'
-import { writeAxisPassUniform } from '@/gpu/pipelines/resultsAxesPipeline'
-import { applyOrbitPitchVerticalPlane, applyOrbitYawWorldY } from '@/lib/orbitOrthoMath'
-import type { Vec3Arg } from 'wgpu-matrix'
-import { createDragHandler } from '@/utils/createDragHandler'
-import { createElementSize } from '@/utils/createElementSize'
-import { createPinchHandler } from '@/utils/createPinchHandler'
+import { calibrationDefinedCornerCount } from '@/gpu/pipelines/resultsSceneCpu'
+import type { TgpuRoot } from 'typegpu'
+
 import type { CalibrationOk } from '@/workers/calibration.worker'
 import type { CalibrationResult } from '@/workers/calibrationClient'
 
 import styles from '@/components/results/ResultsView.module.css'
 
 const { navigator } = globalThis
-
-/** Unit direction from board origin toward the camera (initial framing). */
-const DEFAULT_ORBIT_EYE_DIR: Vec3Arg = [0.563, 0.247, 0.788]
-
-/** Workspace for orbit drag: yaw step → pitch step (avoid per-move vec3 allocations). */
-const orbitAfterYaw: Vec3Arg = [0, 0, 0]
-const orbitAfterPitch: Vec3Arg = [0, 0, 0]
-
-type CalibrationScene = {
-  ok: CalibrationOk
-  baseOrthoExtentY: number
-  centerWrites: ReturnType<typeof markerCenterWritesForGpu>
-  tagQuadWrites: ReturnType<typeof tagQuadWritesForGpu>
-  tagQuadDrawCount: number
-}
 
 export function ResultsView() {
   const { latestCalibration, latestCalibrationMeta } = useCalibrationRun()
@@ -65,135 +35,20 @@ export function ResultsView() {
   })
 
   const [gpuErr, setGpuErr] = createSignal('')
-  const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>()
-  const canvasSize = createElementSize(canvasEl)
-  const [gpuPack, setGpuPack] = createSignal<ResultsCanvasPipeline>()
-  const [orbitEyeDir, setOrbitEyeDir] = createSignal<Vec3Arg>([
-    DEFAULT_ORBIT_EYE_DIR[0]!,
-    DEFAULT_ORBIT_EYE_DIR[1]!,
-    DEFAULT_ORBIT_EYE_DIR[2]!,
-  ])
-  const [orbitZoom, setOrbitZoom] = createSignal(1)
-
-  const startPinch = createPinchHandler((initEv) => {
-    let prevDist = initEv.distance
-    return {
-      onPinchMove(ev) {
-        const factor = prevDist > 1e-4 ? ev.distance / prevDist : 1
-        setOrbitZoom((z) => Math.min(22, Math.max(0.15, z * factor)))
-        prevDist = ev.distance
-      },
-    }
-  })
-
-  function onWheelResults(ev: WheelEvent) {
-    ev.preventDefault()
-    setOrbitZoom((z) => Math.min(22, Math.max(0.15, z * Math.exp(ev.deltaY * 0.0016))))
-  }
-
-  function onTwoFingerTouch(e: TouchEvent) {
-    const el = canvasEl()
-    if (!el || e.touches.length !== 2 || e.target !== el) {
-      return
-    }
-    e.preventDefault()
-    startPinch(e)
-  }
-
-  const calibrationScene = createMemo((): CalibrationScene | undefined => {
-    const c = displayCalibration()
-    if (!c || c.kind !== 'ok') {
-      return undefined
-    }
-    return {
-      ok: c,
-      baseOrthoExtentY: orthoExtentYForPoints(c),
-      centerWrites: markerCenterWritesForGpu(c),
-      tagQuadWrites: tagQuadWritesForGpu(c),
-      tagQuadDrawCount: tagQuadDrawCountForGpu(c),
-    }
-  })
-
-  /** Reset when GPU context is recreated so storage is re-uploaded before draw */
-  let lastCentersUploadedFor: CalibrationScene | undefined
-  let lastTagQuadsUploadedFor: CalibrationScene | undefined
-
-  let rafId = 0
-  const stopRaf = () => {
-    cancelAnimationFrame(rafId)
-  }
-
-  function tick(): void {
-    const pip = gpuPack()
-    if (!pip) {
-      return
-    }
-
-    rafId = requestAnimationFrame(tick)
-
-    const el = canvasEl()
-    if (!el || el.width < 8 || el.height < 8) {
-      return
-    }
-
-    const scene = calibrationScene()
-
-    if (!scene) {
-      pip.clearAttachments()
-      return
-    }
-
-    const pointCount = Math.min(calibrationDefinedCornerCount(scene.ok), MAX_RESULTS_MARKER_POINTS)
-    const tagCount = scene.tagQuadDrawCount
-
-    if (lastCentersUploadedFor !== scene) {
-      try {
-        pip.centersBuf.write(scene.centerWrites)
-        lastCentersUploadedFor = scene
-      } catch (e) {
-        console.warn('[ResultsView] center upload failed', e)
-      }
-    }
-
-    if (lastTagQuadsUploadedFor !== scene) {
-      try {
-        pip.tagQuadsBuf.write(scene.tagQuadWrites)
-        lastTagQuadsUploadedFor = scene
-      } catch (e) {
-        console.warn('[ResultsView] tag quad upload failed', e)
-      }
-    }
-
-    writeResultsCameraTransform({
-      aspectWidthOverHeight: el.width / el.height,
-      orbitEyeDirUnit: orbitEyeDir(),
-      baseOrthoExtentY: scene.baseOrthoExtentY,
-      orthoZoom: orbitZoom(),
-      viewportWidthPx: el.width,
-      viewportHeightPx: el.height,
-      cameraUniform: pip.cameraUniform,
-    })
-    writeMarkerPassUniform(pip.markerUniform, pointCount)
-    writeAxisPassUniform(pip.axisUniform)
-
-    pip.encodeScene(pointCount, tagCount)
-  }
+  const [gpuRoot, setGpuRoot] = createSignal<TgpuRoot>()
+  const [canvasFormat, setCanvasFormat] = createSignal<GPUTextureFormat>('bgra8unorm')
 
   createEffect(
-    () => canvasEl(),
-    (el) => {
-      if (!el) {
-        return
-      }
+    () => null,
+    () => {
+      let canceled = false
       const webgpu = navigator.gpu
       if (!webgpu) {
         queueMicrotask(() => setGpuErr('WebGPU is not available in this browser.'))
-        return
+        return () => {
+          canceled = true
+        }
       }
-
-      let canceled = false
-      let pip: ResultsCanvasPipeline | undefined
-
       void (async () => {
         try {
           setGpuErr('')
@@ -201,54 +56,32 @@ export function ResultsView() {
           if (canceled) {
             return
           }
-
-          const format = webgpu.getPreferredCanvasFormat()
-
-          pip = createResultsCanvasPipeline(rt, el, format)
-
-          el.addEventListener('touchstart', onTwoFingerTouch, { passive: false })
-          el.addEventListener('wheel', onWheelResults, { passive: false })
-
-          setGpuPack(pip)
-
-          stopRaf()
-          rafId = requestAnimationFrame(tick)
+          setCanvasFormat(webgpu.getPreferredCanvasFormat())
+          setGpuRoot(rt)
         } catch (e) {
           if (!canceled) {
             setGpuErr(`${e}`)
           }
         }
       })()
-
       return () => {
         canceled = true
-        lastCentersUploadedFor = undefined
-        lastTagQuadsUploadedFor = undefined
-        stopRaf()
-        el.removeEventListener('touchstart', onTwoFingerTouch)
-        el.removeEventListener('wheel', onWheelResults)
-        pip?.destroyTargets()
-        setGpuPack(undefined)
       }
     },
   )
 
-  createEffect(
-    () => ({ el: canvasEl(), pip: gpuPack(), s: canvasSize() }),
-    ({ el, pip, s }) => {
-      if (!el || !pip || !s) {
-        return
-      }
-      const w = Math.max(1, Math.round(s.widthPX))
-      const h = Math.max(1, Math.round(s.heightPX))
-      if (el.width === w && el.height === h) {
-        return
-      }
-      el.width = w
-      el.height = h
-      pip.resize(w, h)
-    },
-  )
+  const calibrationScene = createMemo(() => {
+    const c = displayCalibration()
+    if (!c || c.kind !== 'ok') {
+      return undefined
+    }
+    return buildResultsCalibrationScene(c)
+  })
+
+  const displayOk = createMemo((): CalibrationOk | undefined => {
+    const c = displayCalibration()
+    return c?.kind === 'ok' ? c : undefined
+  })
 
   const statsLine = createMemo(() => {
     const c = displayCalibration()
@@ -259,6 +92,14 @@ export function ResultsView() {
   })
 
   const hasOkDisplay = createMemo(() => displayCalibration()?.kind === 'ok')
+
+  const videoSize = createMemo(() => {
+    const c = displayCalibration()
+    if (c?.kind === 'ok') {
+      return c.imageSize
+    }
+    return undefined
+  })
 
   const canExportCalibrationJson = createMemo(() => {
     const c = displayCalibration()
@@ -300,28 +141,6 @@ export function ResultsView() {
     }
     downloadCalibrationOkJson(c)
   }
-
-  const onDragStartCanvas = createDragHandler((down) => {
-    let lastX = down.clientX
-    let lastY = down.clientY
-    const sens = 0.005
-    return {
-      onPointerMove(move) {
-        const dx = move.clientX - lastX
-        const dy = move.clientY - lastY
-        lastX = move.clientX
-        lastY = move.clientY
-        setOrbitEyeDir((dir) => {
-          const v = applyOrbitPitchVerticalPlane(
-            applyOrbitYawWorldY(dir, -dx * sens, orbitAfterYaw),
-            -dy * sens,
-            orbitAfterPitch,
-          )
-          return [v[0]!, v[1]!, v[2]!]
-        })
-      },
-    }
-  })
 
   return (
     <div class={styles.root}>
@@ -377,25 +196,27 @@ export function ResultsView() {
           <Show when={!hasOkDisplay()}>
             <p class={styles.hint}>
               When calibration data is available (from <strong>Calibrate</strong> or a saved entry below), this view
-              shows refined tag corners and axes. Nothing is wrong yet if you are still setting up—run Calibrate, or pick
-              a saved calibration.
+              shows refined tag corners and axes. Nothing is wrong yet if you are still setting up—run Calibrate, or
+              pick a saved calibration.
             </p>
           </Show>
           <Show when={hasOkDisplay()}>
             <p class={styles.successLine}>
-              Drag to orbit the board (touch: two-finger drag; pinch or scroll to zoom). Use <strong>Export JSON</strong>{' '}
-              when you are done.
+              Drag to orbit the board (touch: two-finger drag; pinch or scroll to zoom). The panel on the right shows
+              the distortion field. Use <strong>Export JSON</strong> when you are done.
             </p>
           </Show>
-          <div class={styles.canvasViewport}>
-            <canvas
-              class={styles.canvas}
-              ref={setCanvasEl}
-              tabindex={0}
-              aria-label="Calibration result orbit view"
-              onPointerDown={(e) => onDragStartCanvas(e)}
-            />
-          </div>
+          <Show when={gpuRoot()}>
+            <div class={styles.resultsCanvasRow}>
+              <ResultsOrbitCanvas root={gpuRoot()!} format={canvasFormat()} scene={calibrationScene()} />
+              <ResultsDistortionCanvas
+                root={gpuRoot()!}
+                format={canvasFormat()}
+                ok={displayOk()}
+                imageSize={videoSize()}
+              />
+            </div>
+          </Show>
           <CalibrationLibraryPanel />
         </div>
       </Show>

@@ -1,6 +1,7 @@
 import type { ParentProps } from 'solid-js'
 import { createContext, createEffect, createMemo, createSignal, useContext } from 'solid-js'
 
+import { CameraStreamContext } from '@/components/camera/CameraStreamContext'
 import type { DetectedQuad } from '@/gpu/contour'
 import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
 import type { CustomTagOverlaySession } from '@/lib/customTagOverlaySession'
@@ -73,6 +74,8 @@ export function useCalibrationRun(): CalibrationRunContextValue {
 }
 
 export function CalibrationRunProvider(props: ParentProps) {
+  const cameraStream = useContext(CameraStreamContext)
+  const selectedCameraDeviceId = () => cameraStream?.selectedCameraDeviceId()
   const [run, setRun] = createSignal<CalibRun>({ ...initialRun, stats: { ...initialCalibRunStats } })
   const [layout, setLayout] = createSignal<TargetLayout>()
   const [videoFrameSize, setVideoFrameSize] = createSignal<{ width: number; height: number }>()
@@ -108,6 +111,7 @@ export function CalibrationRunProvider(props: ParentProps) {
     lay: TargetLayout | undefined,
     framePool: CalibrationFrameObservation[],
     frameSize: { width: number; height: number },
+    cameraId: string | undefined,
   ) => {
     if (collection === 'idle' || !lay || framePool.length < 1) {
       lastSolveKey = undefined
@@ -132,7 +136,11 @@ export function CalibrationRunProvider(props: ParentProps) {
       return
     }
 
-    const solveKey = `${collection}|${lay.size}|${filteredPool.map((f) => f.frameId).join(',')}`
+    if (!cameraId) {
+      return
+    }
+
+    const solveKey = `${collection}|${cameraId}|${lay.size}|${filteredPool.map((f) => f.frameId).join(',')}`
     if (solveKey === lastSolveKey) {
       return
     }
@@ -143,10 +151,12 @@ export function CalibrationRunProvider(props: ParentProps) {
     const currentVersion = ++pendingVersion
     try {
       setSolveInFlight((n) => n + 1)
-      const result = await calibApi.solveCalibration(layoutTagsModel, filteredPool, {
-        width: w,
-        height: h,
-      })
+      const result = await calibApi.solveCalibration(
+        layoutTagsModel,
+        filteredPool,
+        { width: w, height: h },
+        cameraId,
+      )
       if (currentVersion === pendingVersion) {
         setCalib(result)
       }
@@ -161,10 +171,10 @@ export function CalibrationRunProvider(props: ParentProps) {
   }
 
   createEffect(
-    () => ({ r: run(), lay: layout(), frameSize: videoFrameSize() }),
-    ({ r, lay, frameSize }) => {
+    () => ({ r: run(), lay: layout(), frameSize: videoFrameSize(), cameraId: selectedCameraDeviceId() }),
+    ({ r, lay, frameSize, cameraId }) => {
       if (frameSize) {
-        void updateCalib(r.collection, lay, r.framePool, frameSize)
+        void updateCalib(r.collection, lay, r.framePool, frameSize, cameraId)
       }
     },
   )

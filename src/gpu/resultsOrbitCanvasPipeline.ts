@@ -17,7 +17,7 @@ function destroyGpuTexture(tex: GPUTexture | undefined) {
   tex?.destroy()
 }
 
-export interface ResultsCanvasPipeline {
+export interface ResultsOrbitCanvasPipeline {
   root: TgpuRoot
   context: GPUCanvasContext
   format: GPUTextureFormat
@@ -33,14 +33,13 @@ export interface ResultsCanvasPipeline {
 }
 
 /**
- * Results orbit canvas: shared camera bind group + three stages (each owns pipeline, pass bind group, encode).
- * Same responsibility split as {@link createCameraPipeline} vs {@link LiveCameraPipeline}.
+ * Results 3D orbit canvas: shared camera bind group + marker / tag / axis stages.
  */
-export function createResultsCanvasPipeline(
+export function createResultsOrbitCanvasPipeline(
   root: TgpuRoot,
   canvas: HTMLCanvasElement,
   format: GPUTextureFormat,
-): ResultsCanvasPipeline {
+): ResultsOrbitCanvasPipeline {
   root.configureContext({ canvas, format, alphaMode: 'opaque' })
   const ctx = canvas.getContext('webgpu')
   if (!ctx) {

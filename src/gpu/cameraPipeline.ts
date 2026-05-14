@@ -19,8 +19,12 @@ import { createPointerJumpLabeling } from '@/gpu/pipelines/pointerJumpPipeline'
 import { createReprojectionOverlayStage } from '@/gpu/pipelines/reprojectionOverlayPipeline'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
+import {
+  allocUndistortUniform,
+  createUndistortPipeline,
+} from '@/gpu/pipelines/undistortPipeline'
 
-export type DisplayMode = 'edges' | 'nms' | 'labels' | 'grayscale' | 'debug' | 'grid'
+export type DisplayMode = 'edges' | 'nms' | 'labels' | 'grayscale' | 'debug' | 'grid' | 'undistort'
 
 /** Display modes that paint synchronously to the main canvas (not grid). */
 export type NonGridDisplayMode = Exclude<DisplayMode, 'grid'>
@@ -69,6 +73,10 @@ export function createCameraPipeline(
     filteredBuffer: nms.filteredBuffer,
   })
 
+  const undistortUniform = allocUndistortUniform(root)
+  const undistortSourceView = ingest.grayTex.createView(d.texture2d(d.f32))
+  const undistort = createUndistortPipeline(root, undistortSourceView, presentationFormat, undistortUniform)
+
   const histContext = histCanvas ? root.configureContext({ canvas: histCanvas }) : undefined
 
   return {
@@ -97,7 +105,9 @@ export function createCameraPipeline(
       grayscale,
       sobel: sobelRender,
       filtered,
+      undistort,
     },
+    undistortUniform,
   }
 }
 

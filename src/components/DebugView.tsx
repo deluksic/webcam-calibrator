@@ -1,14 +1,17 @@
 import { Errored, For, createSignal } from 'solid-js'
 
-import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
+import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
+import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
+
 import pipelineStyles from '@/components/camera/LiveCameraPipeline.module.css'
 import styles from '@/components/DebugView.module.css'
 
 export function DebugView() {
   const cam = useCameraStream()
+  const runCtx = useCalibrationRun()
   const [logs, setLogs] = createSignal<string[]>([])
   const [displayMode, setDisplayMode] = createSignal<DisplayMode>('grid')
   const [showFallbacks, setShowFallbacks] = createSignal(false)
@@ -34,6 +37,13 @@ export function DebugView() {
                 onClick={() => setDisplayMode('grayscale')}
               >
                 Gray
+              </button>
+              <button
+                type="button"
+                class={displayMode() === 'undistort' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
+                onClick={() => setDisplayMode('undistort')}
+              >
+                Undistort
               </button>
               <button
                 type="button"
@@ -86,7 +96,13 @@ export function DebugView() {
             showHistogramCanvas
             stream={cam.stream()}
             onLog={log}
-            liveCalibration={() => undefined}
+            liveCalibration={() => {
+              const c = runCtx.calib()
+              if (!c || c.kind !== 'ok') {
+                return undefined
+              }
+              return { k: c.K, distortion: c.distortion }
+            }}
           />
         </div>
       </Errored>

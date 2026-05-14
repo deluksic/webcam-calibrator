@@ -12,9 +12,37 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  max-width: 960px;
+  max-width: 1120px;
   width: 100%;
   min-height: 0;
+}
+
+.resultsCanvasRow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-5);
+  width: 100%;
+  min-height: 0;
+}
+
+@media (min-width: 720px) {
+  .resultsCanvasRow {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.orbitPanel,
+.distortionPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.distortionScaleLabel {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .canvasViewport {
@@ -135,6 +163,19 @@
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   line-height: var(--leading-relaxed, 1.5);
+}
+
+.scaleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.scaleSlider {
+  width: 100px;
+  accent-color: var(--color-primary);
 }
 
 .canvas {

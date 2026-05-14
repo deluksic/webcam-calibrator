@@ -412,6 +412,8 @@ export function demoCalibrationOk(): CalibrationOk {
       [1777772016461, 0.16964926408295766],
       [1777772024747, 0.17041471063481553],
     ],
+    imageSize: { width: 640, height: 480 },
+    cameraId: 'demo',
   }
 }
 
@@ -422,8 +424,8 @@ export function createDemoCalibrationLibraryEntry() {
     ok,
     {
       validSolveFrameCount: Math.max(4, ok.extrinsics.length),
-      videoWidth: 1280,
-      videoHeight: 720,
+      videoWidth: 640,
+      videoHeight: 480,
     },
     'Demo calibration',
   )

@@ -135,3 +135,13 @@
   padding-top: var(--space-1);
   white-space: normal;
 }
+
+.undistortToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}

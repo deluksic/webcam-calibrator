@@ -17,6 +17,7 @@ export interface CalibWorkerApi {
     objectTags: ObjectTag[],
     frames: CalibrationFrameObservation[],
     imageSize: { width: number; height: number },
+    cameraId: string,
   ): Promise<CalibrationResult>
 }
 
@@ -32,6 +33,8 @@ export type CalibrationOk = {
   updatedTargets: ObjectTag[]
   rmsPx: number
   perFrameRmsPx: [number, number][]
+  imageSize: { width: number; height: number }
+  cameraId: string
 }
 
 export type CalibrationErr = {
@@ -180,6 +183,7 @@ const api: CalibWorkerApi = {
     objectTags: ObjectTag[],
     frames: CalibrationFrameObservation[],
     imageSize: { width: number; height: number },
+    cameraId: string,
   ): Promise<CalibrationResult> {
     try {
       const wasmInput = buildWasmInput(objectTags, frames)
@@ -275,6 +279,8 @@ const api: CalibWorkerApi = {
         updatedTargets,
         rmsPx,
         perFrameRmsPx,
+        imageSize,
+        cameraId,
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase()

@@ -12,6 +12,7 @@ overrides:
   tinyest: 0.3.1
   tinyest-for-wgsl: 0.3.2
   typegpu: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu
+  '@typegpu/color': github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color
   '@typegpu/geometry': github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry
 
 importers:
@@ -27,6 +28,9 @@ importers:
       '@solidjs/web':
         specifier: 2.0.0-beta.7
         version: 2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7)
+      '@typegpu/color':
+        specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color
+        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-color(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
       '@typegpu/geometry':
         specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry
         version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
@@ -878,6 +882,12 @@ packages:
   '@testing-library/jest-dom@6.9.1':
     resolution: {integrity: sha512-zIcONa+hVtVSSep9UT3jZ5rizo2BsxgyDYU7WFD5eICBE7no3881HGeb/QkGfsJs6JTkY1aQhT7rIPC7e+0nnA==}
     engines: {node: '>=14', npm: '>=6', yarn: '>=1'}
+
+  '@typegpu/color@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-color':
+    resolution: {path: /packages/typegpu-color, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67}
+    version: 0.11.0
+    peerDependencies:
+      typegpu: workspace:^
 
   '@typegpu/geometry@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry':
     resolution: {path: /packages/typegpu-geometry, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67}
@@ -2360,6 +2370,10 @@ snapshots:
       dom-accessibility-api: 0.6.3
       picocolors: 1.1.1
       redent: 3.0.0
+
+  '@typegpu/color@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-color(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
+    dependencies:
+      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
 
   '@typegpu/geometry@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
     dependencies:

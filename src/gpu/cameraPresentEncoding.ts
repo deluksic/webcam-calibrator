@@ -43,6 +43,14 @@ export function encodePresentNonGrid(
       console.error(msg)
       onError?.(msg)
     }
+  } else if (displayMode === 'undistort') {
+    try {
+      pipeline.render.undistort.encodeToCanvas(enc, mainAttachment)
+    } catch (e) {
+      const msg = `[camera] undistort render failed: ${e}`
+      console.error(msg)
+      onError?.(msg)
+    }
   } else {
     try {
       pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)

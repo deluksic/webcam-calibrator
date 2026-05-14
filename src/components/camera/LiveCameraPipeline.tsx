@@ -16,17 +16,26 @@ import { initGPU } from '@/gpu/init'
 import { MAX_U32 } from '@/gpu/pipelines/extentTrackingPipeline'
 import { DECODED_TAG_ID_DICT_MISS, MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
+import { writeUndistortUniform } from '@/gpu/pipelines/undistortPipeline'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import type { CustomTagOverlaySession } from '@/lib/customTagOverlaySession'
 import { buildReprojectionOverlayPairs, cameraDistanceFromT, cameraTiltDegFromR } from '@/lib/reprojectionLive'
 import { patternHasWeakOrTie } from '@/lib/tagModuleCell'
 import type { TargetLayout } from '@/lib/targetLayout'
+import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 import { createElementSize } from '@/utils/createElementSize'
 import { createFrameLoop } from '@/utils/createFrameLoop'
 
 import styles from '@/components/camera/LiveCameraPipeline.module.css'
 
 const { navigator, performance } = globalThis
+
+export type LiveCalibrationPayload = {
+  k: CameraIntrinsics
+  distortion?: RationalDistortion8
+  layout?: TargetLayout
+  extrinsics?: Map<number, { R: Mat3; t: Vec3 }>
+}
 
 export type LiveCameraPipelineProps = {
   displayMode: DisplayMode
@@ -36,7 +45,7 @@ export type LiveCameraPipelineProps = {
   onLog: (msg: string) => void
   onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number }) => void
   /** When set, feed GPU reprojection overlay and report live metrics. */
-  liveCalibration: () => { k: CameraIntrinsics; distortion?: RationalDistortion8; layout: TargetLayout } | undefined
+  liveCalibration: LiveCalibrationPayload | undefined | (() => LiveCalibrationPayload | undefined)
   onReprojectionFrame?: (m: { rms: number; tagCount: number; tiltDeg: number; dist: number } | undefined) => void
   onFrameSize?: (size: { width: number; height: number }) => void
   /** Called when snapshot button is pressed - passes current tagged quads. */
@@ -66,17 +75,21 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
   /** Props read in memos/JSX; also snapshotted for onFrame / async .then (non-tracking). */
   const focusBottomHintContent = createMemo(() => props.focusBottomHint?.())
 
-  const pipelineInteraction = createMemo(() => ({
-    onLog: props.onLog,
-    displayMode: props.displayMode,
-    showFallbacks: props.showFallbacks,
-    liveCalibration: props.liveCalibration,
-    onReprojectionFrame: props.onReprojectionFrame,
-    onQuadDetection: props.onQuadDetection,
-    onQuadSnapshotRequest: props.onQuadSnapshotRequest,
-    quadDecodeOptions: props.quadDecodeOptions,
-    customTagOverlay: props.customTagOverlay,
-  }))
+  const pipelineInteraction = createMemo(() => {
+    const lc = props.liveCalibration
+    const liveCalibration = lc === undefined ? undefined : typeof lc === 'function' ? lc() : lc
+    return {
+      onLog: props.onLog,
+      displayMode: props.displayMode,
+      showFallbacks: props.showFallbacks,
+      liveCalibration,
+      onReprojectionFrame: props.onReprojectionFrame,
+      onQuadDetection: props.onQuadDetection,
+      onQuadSnapshotRequest: props.onQuadSnapshotRequest,
+      quadDecodeOptions: props.quadDecodeOptions,
+      customTagOverlay: props.customTagOverlay,
+    }
+  })
 
   const videoElement = createMemo(async () => {
     const canvas = canvasElement()
@@ -231,7 +244,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         return
       }
       const pi = pipelineInteraction()
-      const liveCalib = pi.liveCalibration()
+      const liveCalib = pi.liveCalibration
 
       const decodeOpts = pi.quadDecodeOptions?.()
       detectForSlot(gNow, pip, slot, decodeOpts)
@@ -261,7 +274,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           // block so the GPU overlay always matches slot.graySnapshot.
           updateQuadCornersBuffer(pip, tagged, sf)
 
-          if (liveCalib) {
+          if (liveCalib?.layout) {
             const built = buildReprojectionOverlayPairs(
               liveCalib.layout,
               liveCalib.k,
@@ -350,6 +363,16 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           // If no slot is free, skip this frame entirely (backpressure).
         } else {
           // Non-grid modes: compute + present synchronously as before.
+          if (dm === 'undistort') {
+            const lc = pi.liveCalibration
+            const fs = frameSize()
+            writeUndistortUniform(pip.undistortUniform, {
+              K: lc?.k ?? { fx: 1, fy: 1, cx: 0, cy: 0 },
+              distortion: lc?.distortion ?? [0, 0, 0, 0, 0, 0, 0, 0],
+              width: fs?.width ?? 1,
+              height: fs?.height ?? 1,
+            })
+          }
           encodeCameraCompute(enc, gpuNow, pip, video, threshold())
           encodePresentNonGrid(enc, gpuNow, pip, dm, timeSec, (_err) => {})
           gpuNow.device.queue.submit([enc.finish()])

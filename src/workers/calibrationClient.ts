@@ -24,6 +24,7 @@ export interface CalibApi {
     objectTags: ObjectTag[],
     frames: CalibrationFrameObservation[],
     imageSize: { width: number; height: number },
+    cameraId: string,
   ): Promise<CalibrationResult>
 }
 
@@ -32,8 +33,9 @@ export const calibApi: CalibApi = {
     objectTags: ObjectTag[],
     frames: CalibrationFrameObservation[],
     imageSize: { width: number; height: number },
+    cameraId: string,
   ): Promise<CalibrationResult> {
     const w = getWorker()
-    return w.solveCalibration(objectTags, frames, imageSize)
+    return w.solveCalibration(objectTags, frames, imageSize, cameraId)
   },
 }
