@@ -178,6 +178,15 @@
   accent-color: var(--color-primary);
 }
 
+.colorModeSelect {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm, 4px);
+  padding: 2px 6px;
+  font-size: var(--text-sm);
+}
+
 .canvas {
   display: block;
   width: 100%;

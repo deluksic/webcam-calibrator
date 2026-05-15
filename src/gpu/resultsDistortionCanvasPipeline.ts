@@ -1,6 +1,10 @@
 import type { TgpuRoot } from 'typegpu'
 
-import { createDistortionFieldStage, type DistortionUniformGpuBuffer } from '@/gpu/pipelines/distortionFieldPipeline'
+import {
+  createDistortionFieldStage,
+  type DistortionColoringMode,
+  type DistortionUniformGpuBuffer,
+} from '@/gpu/pipelines/distortionFieldPipeline'
 
 export interface ResultsDistortionCanvasPipeline {
   root: TgpuRoot
@@ -16,6 +20,7 @@ export function createResultsDistortionCanvasPipeline(
   root: TgpuRoot,
   canvas: HTMLCanvasElement,
   format: GPUTextureFormat,
+  opts?: { coloring?: DistortionColoringMode },
 ): ResultsDistortionCanvasPipeline {
   root.configureContext({ canvas, format, alphaMode: 'opaque' })
   const ctx = canvas.getContext('webgpu')
@@ -24,7 +29,7 @@ export function createResultsDistortionCanvasPipeline(
   }
   const context: GPUCanvasContext = ctx
 
-  const stage = createDistortionFieldStage(root, format)
+  const stage = createDistortionFieldStage(root, format, { coloring: opts?.coloring })
 
   function encodeDistortionFrame() {
     const enc = root.device.createCommandEncoder({ label: 'distortion field' })

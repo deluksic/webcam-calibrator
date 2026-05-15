@@ -2,7 +2,8 @@ import { oklabToRgb } from '@typegpu/color'
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import { common, std } from 'typegpu'
-import { abs, clamp, exp, fwidth, length, max, min, round, select } from 'typegpu/std'
+import { abs, clamp, exp, fwidth, length, max, min, mix, pow, round, select } from 'typegpu/std'
+import { sdBox2d } from '@typegpu/sdf'
 
 import { PinholeIntrinsicsGpu, RationalDistortion8Gpu } from '@/gpu/schemas/cameraGpuUniforms'
 import { forwardDistortNormalized } from '@/gpu/shaders/forwardRationalDistortion'
@@ -12,8 +13,8 @@ const DistortionViewportGpu = d.struct({
   videoSize: d.vec2f,
   canvasSize: d.vec2f,
   scale: d.f32,
-  _pad0: d.f32,
-  _pad1: d.vec2f,
+  zoomOutFactor: d.f32,
+  _pad: d.vec2f,
 })
 
 const DistortionUniformStruct = d.struct({
@@ -40,6 +41,7 @@ export type DistortionFieldUniformParams = {
   videoHeight: number
   canvasWidth: number
   canvasHeight: number
+  zoomOutFactor: number
 }
 
 export function updateDistortionUniform(buf: DistortionUniformGpuBuffer, params: DistortionFieldUniformParams): void {
@@ -51,8 +53,8 @@ export function updateDistortionUniform(buf: DistortionUniformGpuBuffer, params:
       videoSize: d.vec2f(params.videoWidth, params.videoHeight),
       canvasSize: d.vec2f(params.canvasWidth, params.canvasHeight),
       scale: params.scale,
-      _pad0: 0,
-      _pad1: d.vec2f(0, 0),
+      zoomOutFactor: params.zoomOutFactor,
+      _pad: d.vec2f(0, 0),
     },
   })
 }
@@ -74,10 +76,73 @@ const isoLevelPlateauMask = tgpu.fn(
 })
 
 /**
+ * Coloring slot — swappable at pipeline creation.
+ * Signature: (labL, aRaw, bRaw, chromaMagRaw, dotToCenterRaw, magPhys) → vec3f RGB.
+ *
+ * `labL` is the isoline-darkened base lightness. `chromaMagRaw` is the raw (scaled)
+ * displacement magnitude. `dotToCenterRaw` is the normalized dot product in [-1, 1].
+ * `magPhys` is the geometric |Δ| in image pixels, independent of visualization scale.
+ */
+
+/** Hue+Chroma: soft-clamp magnitude, then OKLab a/b from displacement direction. */
+const colorHueChroma = tgpu.fn(
+  [d.f32, d.f32, d.f32, d.f32, d.f32, d.f32],
+  d.vec3f,
+)((labL, aRaw, bRaw, chromaMag) => {
+  const knee = d.f32(0.15)
+  const headroom = d.f32(0.05)
+  const over = max(chromaMag - knee, d.f32(0))
+  const clampedMag = min(chromaMag, knee + headroom * (d.f32(1) - exp(-over / headroom)))
+  const s = clampedMag / max(chromaMag, d.f32(1e-8))
+  return oklabToRgb(d.vec3f(labL, aRaw * s, bRaw * s))
+})
+
+/** Gray: scaled magnitude drives lightness (near-black → white). Isolines via labL. */
+const colorGray = tgpu.fn(
+  [d.f32, d.f32, d.f32, d.f32, d.f32, d.f32],
+  d.vec3f,
+)((labL, aRaw, bRaw, chromaMag) => {
+  const t = std.saturate(chromaMag / d.f32(0.2))
+  const L = std.saturate(mix(d.f32(0.02), d.f32(1), t) - (d.f32(0.6) - labL))
+  return oklabToRgb(d.vec3f(L, d.f32(0), d.f32(0)))
+})
+
+/** Radial: distortion toward center → red, away → blue, dark gray at zero → white at high magnitude. */
+const colorRadial = tgpu.fn(
+  [d.f32, d.f32, d.f32, d.f32, d.f32, d.f32],
+  d.vec3f,
+)((labL, aRaw, bRaw, chromaMag, dotToCenter) => {
+  const scaleFactor = std.saturate(chromaMag / d.f32(0.2))
+  const signedStrength = dotToCenter * scaleFactor * d.f32(0.3)
+  const aOut = max(d.f32(0), signedStrength)
+  const bOut = min(d.f32(0), signedStrength)
+  const L = std.saturate(mix(d.f32(0.05), labL, abs(signedStrength) * d.f32(5)))
+  return oklabToRgb(d.vec3f(L, aOut, bOut))
+})
+
+export const distortionColoringSlot = tgpu.slot(colorHueChroma)
+
+export type DistortionColoringMode = 'hueChroma' | 'gray' | 'radial'
+
+function coloringFn(mode: DistortionColoringMode) {
+  if (mode === 'gray') {
+    return colorGray
+  }
+  if (mode === 'radial') {
+    return colorRadial
+  }
+  return colorHueChroma
+}
+
+/**
  * Fullscreen distortion field visualization. Exposes CPU uniform updates and pass encoding only;
  * bind group and pipeline stay internal (same pattern as {@link createMarkerResultsStage}).
  */
-export function createDistortionFieldStage(root: TgpuRoot, presentationFormat: GPUTextureFormat) {
+export function createDistortionFieldStage(
+  root: TgpuRoot,
+  presentationFormat: GPUTextureFormat,
+  opts?: { coloring?: DistortionColoringMode },
+) {
   const frag = tgpu.fragmentFn({
     in: { pos: d.builtin.position },
     out: d.vec4f,
@@ -99,25 +164,20 @@ export function createDistortionFieldStage(root: TgpuRoot, presentationFormat: G
     const canvasAspect = canvasW / canvasH
     const videoAspect = videoW / videoH
 
-    let fitScale = canvasW / videoW
+    let baseFitScale = canvasW / videoW
     if (canvasAspect > videoAspect) {
-      fitScale = canvasH / videoH
+      baseFitScale = canvasH / videoH
     }
+    const fitScale = baseFitScale * vp.zoomOutFactor
 
     const scaledW = videoW * fitScale
     const scaledH = videoH * fitScale
     const ox = (canvasW - scaledW) * d.f32(0.5)
     const oy = (canvasH - scaledH) * d.f32(0.5)
 
-    const inside = px >= ox && px < ox + scaledW && py >= oy && py < oy + scaledH
-
-    /** Clamped canvas coords so distortion math stays continuous at the letterbox edge (derivatives). */
-    const eps = d.f32(1e-4)
-    const pxC = clamp(px, ox + eps, ox + scaledW - eps)
-    const pyC = clamp(py, oy + eps, oy + scaledH - eps)
-
-    const xnPx = ((pxC - ox) / scaledW) * videoW
-    const ynPx = ((pyC - oy) / scaledH) * videoH
+    /** Map canvas pixel to video pixel coords (no letterbox clamping — extends beyond frame). */
+    const xnPx = ((px - ox) / scaledW) * videoW
+    const ynPx = ((py - oy) / scaledH) * videoH
 
     const xn = (xnPx - intr.cx) / intr.fx
     const yn = (ynPx - intr.cy) / intr.fy
@@ -126,18 +186,10 @@ export function createDistortionFieldStage(root: TgpuRoot, presentationFormat: G
     const xd = xyD.x
     const yd = xyD.y
 
+    /** Raw displacement in OKLab chroma space (before any clamping). */
     const dxPx = (xd - xn) * intr.fx * vp.scale * d.f32(0.2)
     const dyPx = (yd - yn) * intr.fy * vp.scale * d.f32(0.2)
-
-    /** Soft-clamp chroma magnitude. Linear up to 0.15, asymptote at 0.2. */
-    const chromaMag = length(d.vec2f(dxPx, dyPx))
-    const knee = d.f32(0.15)
-    const headroom = d.f32(0.05)
-    const over = max(chromaMag - knee, d.f32(0))
-    const clampedMag = min(chromaMag, knee + headroom * (d.f32(1) - exp(-over / headroom)))
-    const scale = clampedMag / max(chromaMag, d.f32(1e-8))
-    const a = dxPx * scale
-    const b = dyPx * scale
+    const chromaMagRaw = length(d.vec2f(dxPx, dyPx))
 
     /** Geometric |Δ| in image pixels (independent of visualization scale). */
     const dispPhysX = (xd - xn) * intr.fx
@@ -145,19 +197,38 @@ export function createDistortionFieldStage(root: TgpuRoot, presentationFormat: G
     const magPhys = length(d.vec2f(dispPhysX, dispPhysY))
     const fw = max(fwidth(magPhys), d.f32(1e-4))
 
+    /** Raw normalized dot product: displacement direction vs toward-center direction, in [-1, 1]. */
+    const toCenterX = intr.cx - xnPx
+    const toCenterY = intr.cy - ynPx
+    const toCenterLen = max(length(d.vec2f(toCenterX, toCenterY)), d.f32(1e-8))
+    const dispLen = max(length(d.vec2f(dispPhysX, dispPhysY)), d.f32(1e-8))
+    const dotToCenterRaw =
+      (dispPhysX * toCenterX + dispPhysY * toCenterY) / (dispLen * toCenterLen)
+
     /** Two spacings: whole px vs 0.1 px; per-level mask [0,1] then brightness weights, then OkLab L scale. */
     const isoMajor = isoLevelPlateauMask(magPhys, 1, 0.5, 1, fw)
     const isoMinor = isoLevelPlateauMask(magPhys, 10, 0.1, 0.8, fw)
     const tick = max(isoMajor, isoMinor * 0.5)
     const labL = 0.6 - tick * 0.15
-    const rgb = oklabToRgb(d.vec3f(labL, a, b))
 
-    const bg = d.vec4f(0.02, 0.02, 0.05, 1)
+    const rgb = distortionColoringSlot.$(labL, dxPx, dyPx, chromaMagRaw, dotToCenterRaw, magPhys)
+
+    /** White gradient fading outward from the zoomed video area boundary (rounded SDF, ease-out). */
+    const relX = px - (ox + scaledW * d.f32(0.5))
+    const relY = py - (oy + scaledH * d.f32(0.5))
+    const halfW = scaledW * d.f32(0.5)
+    const halfH = scaledH * d.f32(0.5)
+    const sdf = sdBox2d(d.vec2f(relX, relY), d.vec2f(halfW, halfH))
+    const t = std.saturate(sdf / (scaledH * d.f32(0.25)))
+    const outlineMask = select(d.f32(0), d.f32(0.6) * pow(std.saturate(d.f32(1) - t), d.f32(3)), sdf >= d.f32(0))
+
     const fg = d.vec4f(rgb, 1)
-    return select(bg, fg, inside)
+    return mix(fg, d.vec4f(1, 1, 1, 1), d.vec4f(outlineMask, outlineMask, outlineMask, d.f32(0)))
   })
 
-  const pipeline = root.createRenderPipeline({
+  const rootWithSlot = opts?.coloring ? root.with(distortionColoringSlot, coloringFn(opts.coloring)) : root
+
+  const pipeline = rootWithSlot.createRenderPipeline({
     vertex: common.fullScreenTriangle,
     fragment: frag,
     targets: { format: presentationFormat },

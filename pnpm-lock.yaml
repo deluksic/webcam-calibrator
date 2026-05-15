@@ -34,6 +34,9 @@ importers:
       '@typegpu/geometry':
         specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry
         version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
+      '@typegpu/sdf':
+        specifier: ^0.11.1
+        version: 0.11.1(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
       comlink:
         specifier: ^4.4.2
         version: 4.4.2
@@ -894,6 +897,12 @@ packages:
     version: 0.11.0
     peerDependencies:
       typegpu: workspace:^
+
+  '@typegpu/sdf@0.11.1':
+    resolution: {integrity: sha512-FThfBk15JDWSaTuCbQ1ZZYoaa07qSnobyG2aKf+5jaNqH5r1iRxwWsHf0fDHifG8DqAuHFRkoNu2iwDCRpW8aw==}
+    version: 0.11.1
+    peerDependencies:
+      typegpu: ^0.11.2
 
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
@@ -2376,6 +2385,10 @@ snapshots:
       typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
 
   '@typegpu/geometry@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
+    dependencies:
+      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
+
+  '@typegpu/sdf@0.11.1(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
     dependencies:
       typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
 

@@ -2,6 +2,7 @@ import type { Component } from 'solid-js'
 import { createEffect, createSignal } from 'solid-js'
 import type { TgpuRoot } from 'typegpu'
 
+import type { DistortionColoringMode } from '@/gpu/pipelines/distortionFieldPipeline'
 import { updateDistortionUniform } from '@/gpu/pipelines/distortionFieldPipeline'
 import {
   createResultsDistortionCanvasPipeline,
@@ -21,6 +22,8 @@ export type ResultsDistortionCanvasProps = {
 
 export const ResultsDistortionCanvas: Component<ResultsDistortionCanvasProps> = (props) => {
   const [scaleExp, setScaleExp] = createSignal(0)
+  const [colorMode, setColorMode] = createSignal<DistortionColoringMode>('hueChroma')
+  const [zoomOut, setZoomOut] = createSignal(false)
   const [canvasEl, setCanvasEl] = createSignal<HTMLCanvasElement>()
   const canvasSize = createElementSize(canvasEl)
   const [pip, setPip] = createSignal<ResultsDistortionCanvasPipeline>()
@@ -30,8 +33,9 @@ export const ResultsDistortionCanvas: Component<ResultsDistortionCanvasProps> = 
       root: props.root,
       format: props.format,
       el: canvasEl(),
+      coloring: colorMode(),
     }),
-    ({ root, format, el }) => {
+    ({ root, format, el, coloring }) => {
       if (!root || !el) {
         return
       }
@@ -68,11 +72,12 @@ export const ResultsDistortionCanvas: Component<ResultsDistortionCanvasProps> = 
           videoHeight: vs.height,
           canvasWidth: cs.widthPX,
           canvasHeight: cs.heightPX,
+          zoomOutFactor: zoomOut() ? 0.5 : 1,
         })
         p.encodeDistortionFrame()
       }
 
-      const pipeline = createResultsDistortionCanvasPipeline(root, el, format)
+      const pipeline = createResultsDistortionCanvasPipeline(root, el, format, { coloring })
       setPip(pipeline)
 
       stopRaf()
@@ -111,7 +116,7 @@ export const ResultsDistortionCanvas: Component<ResultsDistortionCanvasProps> = 
       <div class={styles.canvasViewport}>
         <canvas class={styles.canvas} ref={setCanvasEl} tabindex={0} aria-label="Distortion field visualization" />
       </div>
-      <label class={styles.scaleRow}>
+      <div class={styles.scaleRow}>
         <span class={styles.distortionScaleLabel}>Distortion scale</span>
         <input
           type="range"
@@ -123,7 +128,22 @@ export const ResultsDistortionCanvas: Component<ResultsDistortionCanvasProps> = 
           onInput={(e) => setScaleExp(parseFloat(e.currentTarget.value))}
         />
         {(2 ** scaleExp()).toFixed(2)}x
-      </label>
+      </div>
+      <div class={styles.scaleRow}>
+        <label class={styles.distortionScaleLabel}>
+          <input type="checkbox" checked={zoomOut()} onChange={(e) => setZoomOut(e.currentTarget.checked)} />
+          {' '}Zoom out
+        </label>
+        <select
+          class={styles.colorModeSelect}
+          value={colorMode()}
+          onChange={(e) => setColorMode(e.currentTarget.value as DistortionColoringMode)}
+        >
+          <option value="hueChroma">Hue + Chroma</option>
+          <option value="gray">Gray</option>
+          <option value="radial">Radial</option>
+        </select>
+      </div>
     </div>
   )
 }
