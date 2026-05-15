@@ -126,8 +126,8 @@ export function createDistortionFieldStage(root: TgpuRoot, presentationFormat: G
     const xd = xyD.x
     const yd = xyD.y
 
-    const dxPx = (xd - xn) * intr.fx * vp.scale
-    const dyPx = (yd - yn) * intr.fy * vp.scale
+    const dxPx = (xd - xn) * intr.fx * vp.scale * d.f32(0.2)
+    const dyPx = (yd - yn) * intr.fy * vp.scale * d.f32(0.2)
 
     /** Soft-clamp chroma magnitude. Linear up to 0.15, asymptote at 0.2. */
     const chromaMag = length(d.vec2f(dxPx, dyPx))
