@@ -2,7 +2,7 @@ import { oklabToRgb } from '@typegpu/color'
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import { common, std } from 'typegpu'
-import { abs, clamp, fwidth, length, max, round, select } from 'typegpu/std'
+import { abs, clamp, exp, fwidth, length, max, min, round, select } from 'typegpu/std'
 
 import { PinholeIntrinsicsGpu, RationalDistortion8Gpu } from '@/gpu/schemas/cameraGpuUniforms'
 import { forwardDistortNormalized } from '@/gpu/shaders/forwardRationalDistortion'
@@ -129,8 +129,15 @@ export function createDistortionFieldStage(root: TgpuRoot, presentationFormat: G
     const dxPx = (xd - xn) * intr.fx * vp.scale
     const dyPx = (yd - yn) * intr.fy * vp.scale
 
-    const a = std.clamp(dxPx, d.f32(-1), d.f32(1))
-    const b = std.clamp(dyPx, d.f32(-1), d.f32(1))
+    /** Soft-clamp chroma magnitude. Linear up to 0.15, asymptote at 0.2. */
+    const chromaMag = length(d.vec2f(dxPx, dyPx))
+    const knee = d.f32(0.15)
+    const headroom = d.f32(0.05)
+    const over = max(chromaMag - knee, d.f32(0))
+    const clampedMag = min(chromaMag, knee + headroom * (d.f32(1) - exp(-over / headroom)))
+    const scale = clampedMag / max(chromaMag, d.f32(1e-8))
+    const a = dxPx * scale
+    const b = dyPx * scale
 
     /** Geometric |Δ| in image pixels (independent of visualization scale). */
     const dispPhysX = (xd - xn) * intr.fx
