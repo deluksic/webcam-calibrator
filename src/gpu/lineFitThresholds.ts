@@ -3,10 +3,6 @@
 export const ORIENT_HIST_BINS = 64
 export const MAX_EDGES_PER_LABEL = 4
 
-/** Circular triangular smooth: offsets in [-R..R], weight = R+1-|offset|. */
-export const ORIENT_HIST_SMOOTH_RADIUS = 3
-export const ORIENT_HIST_SMOOTH_TAP_COUNT = ORIENT_HIST_SMOOTH_RADIUS * 2 + 1
-
 export const ORIENT_PEAK_MIN_COUNT = 6
 /** Min circular bin distance between accepted peaks (~45° at 64 bins). */
 export const MIN_PEAK_BIN_SEPARATION = 8

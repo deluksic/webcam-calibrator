@@ -1,7 +1,7 @@
 // Per compact labelId: 64-bin oriented histogram → 4 peaks → per-pixel edgeId.
 import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
-import { abs, atomicAdd, atomicLoad, atomicStore, length } from 'typegpu/std'
+import { atomicAdd, atomicLoad, atomicStore, length } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
 import {
@@ -9,8 +9,6 @@ import {
   MIN_PEAK_BIN_SEPARATION,
   MIN_QUAD_EDGE_INLIERS,
   MIN_QUAD_VALID_EDGES,
-  ORIENT_HIST_SMOOTH_RADIUS,
-  ORIENT_HIST_SMOOTH_TAP_COUNT,
   ORIENT_PEAK_MIN_COUNT,
 } from '@/gpu/lineFitThresholds'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
@@ -63,10 +61,6 @@ function createEdgeHistogramClusterLayouts() {
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
     labelClusters: { storage: d.arrayOf(LabelOrientCluster), access: 'mutable' },
   })
-  const histSmoothLayout = tgpu.bindGroupLayout({
-    labelClusters: { storage: d.arrayOf(LabelOrientCluster), access: 'mutable' },
-    histSmoothScratch: { storage: d.arrayOf(d.u32), access: 'mutable' },
-  })
   const findPeaksLayout = tgpu.bindGroupLayout({
     labelClusters: { storage: d.arrayOf(LabelOrientCluster), access: 'mutable' },
   })
@@ -93,7 +87,6 @@ function createEdgeHistogramClusterLayouts() {
   return {
     histResetLayout,
     histAccumLayout,
-    histSmoothLayout,
     findPeaksLayout,
     compactQuadsLayout,
     writeQuadLabelMapLayout,
@@ -164,47 +157,6 @@ function createHistAccumPipeline(
 
     const bin = gradientOrientationBin(g)
     atomicAdd(layout.$.labelClusters[labelId]!.orientationHistogram[bin]!, d.u32(1))
-  })
-  return root.createComputePipeline({ compute: kernel })
-}
-
-function createHistSmoothPipeline(
-  root: TgpuRoot,
-  layout: ReturnType<typeof createEdgeHistogramClusterLayouts>['histSmoothLayout'],
-  maxComponents: number,
-) {
-  const smoothRadius = d.i32(ORIENT_HIST_SMOOTH_RADIUS)
-  const bins = d.i32(ORIENT_HIST_BINS)
-
-  const kernel = tgpu.computeFn({
-    in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [WORKGROUP_SIZE, 1, 1],
-  })((input) => {
-    'use gpu'
-    const labelId = d.u32(input.gid.x)
-    if (labelId >= d.u32(maxComponents)) {
-      return
-    }
-
-    const hist = layout.$.labelClusters[labelId]!.orientationHistogram
-    const scratchBase = labelId * d.u32(ORIENT_HIST_BINS)
-
-    for (const b of tgpu.unroll(std.range(0, ORIENT_HIST_BINS))) {
-      layout.$.histSmoothScratch[scratchBase + d.u32(b)] = atomicLoad(hist[d.u32(b)]!)
-    }
-
-    for (const b of tgpu.unroll(std.range(0, ORIENT_HIST_BINS))) {
-      const bi = d.i32(b)
-      let sum = d.u32(0)
-      for (const o of tgpu.unroll(std.range(0, ORIENT_HIST_SMOOTH_TAP_COUNT))) {
-        const off = d.i32(o) - smoothRadius
-        const w = d.u32(smoothRadius + d.i32(1) - abs(off))
-        const srcI = (bi + off + bins) % bins
-        const srcBin = d.u32(srcI)
-        sum = sum + layout.$.histSmoothScratch[scratchBase + srcBin]! * w
-      }
-      atomicStore(hist[d.u32(b)]!, sum)
-    }
   })
   return root.createComputePipeline({ compute: kernel })
 }
@@ -445,14 +397,9 @@ export function createEdgeHistogramClusterStage(
   const quadSourceLabelId = root.createBuffer(d.arrayOf(d.u32, MAX_QUADS)).$usage('storage')
   const quadCount = root.createBuffer(d.arrayOf(d.atomic(d.u32), 1)).$usage('storage')
   const quadLabelBuffer = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
-  const histSmoothScratch = root
-    .createBuffer(d.arrayOf(d.u32, maxComponents * ORIENT_HIST_BINS))
-    .$usage('storage')
-
   const layouts = createEdgeHistogramClusterLayouts()
   const histResetPipeline = createHistResetPipeline(root, layouts.histResetLayout, maxComponents)
   const histAccumPipeline = createHistAccumPipeline(root, layouts.histAccumLayout, width, height)
-  const histSmoothPipeline = createHistSmoothPipeline(root, layouts.histSmoothLayout, maxComponents)
   const findPeaksPipeline = createFindPeaksPipeline(root, layouts.findPeaksLayout, maxComponents)
   const compactQuadsPipeline = createCompactQuadsPipeline(root, layouts.compactQuadsLayout, maxComponents)
   const writeQuadLabelMapPipeline = createWriteQuadLabelMapPipeline(
@@ -480,10 +427,6 @@ export function createEdgeHistogramClusterStage(
     edgeBuffer: filteredBuffer,
     compactLabels: compactLabelBuffer,
     labelClusters,
-  })
-  const histSmoothBindGroup = root.createBindGroup(layouts.histSmoothLayout, {
-    labelClusters,
-    histSmoothScratch,
   })
   const findPeaksBindGroup = root.createBindGroup(layouts.findPeaksLayout, { labelClusters })
   const compactQuadsBindGroup = root.createBindGroup(layouts.compactQuadsLayout, {
@@ -514,7 +457,6 @@ export function createEdgeHistogramClusterStage(
   const encodeCompute = (pass: GPUComputePassEncoder) => {
     histResetPipeline.with(pass).with(histResetBindGroup).dispatchWorkgroups(labelWg)
     histAccumPipeline.with(pass).with(histAccumBindGroup).dispatchWorkgroups(wgX, wgY)
-    histSmoothPipeline.with(pass).with(histSmoothBindGroup).dispatchWorkgroups(labelWg)
     findPeaksPipeline.with(pass).with(findPeaksBindGroup).dispatchWorkgroups(labelWg)
     labelLineFit.encodeLabelLineFit(pass)
     compactQuadsPipeline.with(pass).with(compactQuadsBindGroup).dispatchWorkgroups(labelWg)
