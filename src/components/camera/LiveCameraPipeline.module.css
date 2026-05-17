@@ -125,6 +125,12 @@
   cursor: pointer;
 }
 
+.orientHistScroll {
+  max-height: min(70vh, 640px);
+  overflow: auto;
+  width: 100%;
+}
+
 .feedCanvas {
   display: block;
   width: auto;

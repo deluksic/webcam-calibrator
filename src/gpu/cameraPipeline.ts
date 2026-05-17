@@ -11,7 +11,7 @@ import { createEdgesPipeline } from '@/gpu/pipelines/edgesPipeline'
 import { createExtentTrackingStage, MAX_EXTENT_COMPONENTS } from '@/gpu/pipelines/extentTrackingPipeline'
 import { createFilteredRenderPipeline } from '@/gpu/pipelines/filteredRenderPipeline'
 import { createGrayStage } from '@/gpu/pipelines/grayPipeline'
-import { createGrayRenderPipeline } from '@/gpu/pipelines/grayRenderPipeline'
+import { createGrayRenderPipeline, GrayRenderParams } from '@/gpu/pipelines/grayRenderPipeline'
 import { createGridVizStage } from '@/gpu/pipelines/gridVizPipeline'
 import { createHistogramStage, HIST_HEIGHT, HIST_WIDTH } from '@/gpu/pipelines/histogramPipelines'
 import { createLabelVizPipeline } from '@/gpu/pipelines/labelVizPipeline'
@@ -41,7 +41,7 @@ export function createCameraPipeline(
   presentationFormat: GPUTextureFormat,
 ) {
   const context = root.configureContext({ canvas, alphaMode: 'premultiplied' })
-  const grayRenderTimeBuffer = root.createBuffer(d.f32).$usage('uniform')
+  const grayRenderParamsBuffer = root.createBuffer(GrayRenderParams).$usage('uniform')
 
   const ingest = createCopyIngest(root, width, height)
   const gray = createGrayStage(root, width, height, ingest.grayTex)
@@ -55,7 +55,7 @@ export function createCameraPipeline(
   const grid = createGridVizStage(root, width, height, presentationFormat)
   const reproj = createReprojectionOverlayStage(root, width, height, presentationFormat)
 
-  const frameSlotPool: FrameSlotPool = createFrameSlotPool(root, { width, height, grayRenderTimeBuffer })
+  const frameSlotPool: FrameSlotPool = createFrameSlotPool(root, { width, height, grayRenderParamsBuffer })
 
   const edges = createEdgesPipeline(root, width, height, presentationFormat, {
     sobelBuffer: sobel.buffer,
@@ -64,7 +64,7 @@ export function createCameraPipeline(
   const labelViz = createLabelVizPipeline(root, width, height, presentationFormat)
   const grayscale = createGrayRenderPipeline(root, width, height, presentationFormat, {
     grayBuffer: gray.buffer,
-    timeSec: grayRenderTimeBuffer,
+    params: grayRenderParamsBuffer,
   })
   const sobelRender = createSobelRenderPipeline(root, width, height, presentationFormat, {
     sobelBuffer: sobel.buffer,
@@ -88,7 +88,7 @@ export function createCameraPipeline(
     histHeight: HIST_HEIGHT,
     frameSlotPool,
     ingest,
-    grayRenderTimeBuffer,
+    grayRenderParamsBuffer,
     gray,
     sobel,
     nms,

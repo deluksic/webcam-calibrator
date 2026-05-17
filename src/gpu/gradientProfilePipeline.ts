@@ -1,0 +1,203 @@
+import type { TgpuRoot } from 'typegpu'
+import { d } from 'typegpu'
+
+import { createCompactLabelStage } from '@/gpu/pipelines/compactLabelPipeline'
+import { createCopyIngest } from '@/gpu/pipelines/copyPipeline'
+import { createEdgeLineFitStage } from '@/gpu/pipelines/edgeLineFitPipeline'
+import { createEdgeFilterStage } from '@/gpu/pipelines/edgeFilterPipeline'
+import { createEdgeFittedLineOverlayStage } from '@/gpu/pipelines/edgeFittedLineOverlayPipeline'
+import { createEdgeProfilePlotStage } from '@/gpu/pipelines/edgeProfilePlotPipeline'
+import { createEdgeProfileStage } from '@/gpu/pipelines/edgeProfilePipeline'
+import { createEdgesPipeline } from '@/gpu/pipelines/edgesPipeline'
+import { MAX_EXTENT_COMPONENTS } from '@/gpu/pipelines/extentTrackingPipeline'
+import { createFilteredRenderPipeline } from '@/gpu/pipelines/filteredRenderPipeline'
+import { createGrayStage } from '@/gpu/pipelines/grayPipeline'
+import { createGrayRenderPipeline, GrayRenderParams } from '@/gpu/pipelines/grayRenderPipeline'
+import {
+  createEdgeHistogramClusterStage,
+  MAX_FLAT_EDGES,
+} from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import { createHistogramStage, HIST_HEIGHT, HIST_WIDTH } from '@/gpu/pipelines/histogramPipelines'
+import { createLabelVizPipeline, createQuadsLabelVizPipeline } from '@/gpu/pipelines/labelVizPipeline'
+import { createOrientHistVizStage } from '@/gpu/pipelines/orientHistVizPipeline'
+import { createPointerJumpLabeling } from '@/gpu/pipelines/pointerJumpPipeline'
+import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
+import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
+import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
+
+export type GradientProfileDisplayMode =
+  | 'edges'
+  | 'nms'
+  | 'labels'
+  | 'quads'
+  | 'edgeLabels'
+  | 'grayscale'
+  | 'fittedLines'
+
+export type GradientProfileNonGridDisplayMode = GradientProfileDisplayMode
+
+function destroyGpuTexture(tex: GPUTexture | undefined) {
+  tex?.destroy()
+}
+
+export function createGradientProfilePipeline(
+  root: TgpuRoot,
+  cameraCanvas: HTMLCanvasElement,
+  orientHistCanvas: HTMLCanvasElement | undefined,
+  profileCanvas: HTMLCanvasElement,
+  histCanvas: HTMLCanvasElement | undefined,
+  width: number,
+  height: number,
+  presentationFormat: GPUTextureFormat,
+) {
+  const cameraContext = root.configureContext({ canvas: cameraCanvas, alphaMode: 'premultiplied' })
+  const profileContext = root.configureContext({ canvas: profileCanvas, alphaMode: 'premultiplied' })
+  const grayRenderParamsBuffer = root.createBuffer(GrayRenderParams).$usage('uniform')
+
+  const ingest = createCopyIngest(root, width, height)
+  const gray = createGrayStage(root, width, height, ingest.grayTex)
+  const sobel = createSobelStage(root, width, height, gray.buffer)
+  const nms = createEdgeFilterStage(root, width, height, sobel.buffer)
+  const histogram = createHistogramStage(root, width, height, sobel.buffer, presentationFormat)
+  const pointerJump = createPointerJumpLabeling(root, width, height, nms.filteredBuffer)
+  const compact = createCompactLabelStage(
+    root,
+    width,
+    height,
+    MAX_EXTENT_COMPONENTS,
+    pointerJump.pointerJumpBuffer0,
+  )
+  const edgeHistogram = createEdgeHistogramClusterStage(
+    root,
+    width,
+    height,
+    MAX_EXTENT_COMPONENTS,
+    nms.filteredBuffer,
+    compact.compactLabelBuffer,
+  )
+  const orientHistViz = orientHistCanvas
+    ? createOrientHistVizStage(
+        root,
+        edgeHistogram.labelClusters,
+        edgeHistogram.quadSourceLabelId,
+        edgeHistogram.quadCount,
+        presentationFormat,
+      )
+    : undefined
+  const lineFit = createEdgeLineFitStage(
+    root,
+    width,
+    height,
+    MAX_FLAT_EDGES,
+    nms.filteredBuffer,
+    edgeHistogram.packedEdgeLabels,
+  )
+  const profile = createEdgeProfileStage(
+    root,
+    width,
+    height,
+    MAX_FLAT_EDGES,
+    gray.buffer,
+    nms.filteredBuffer,
+    edgeHistogram.packedEdgeLabels,
+    lineFit.lineOut,
+  )
+  const profilePlot = createEdgeProfilePlotStage(root, presentationFormat)
+  const plotBindGroup = profilePlot.createPlotBindGroup(lineFit.lineOut, profile.profileAvg, profile.profileBuckets)
+
+  const edges = createEdgesPipeline(root, width, height, presentationFormat, {
+    sobelBuffer: sobel.buffer,
+    filteredBuffer: nms.filteredBuffer,
+  })
+  const labelViz = createLabelVizPipeline(root, width, height, presentationFormat)
+  const quadsLabelViz = createQuadsLabelVizPipeline(root, width, height, presentationFormat)
+  const grayscale = createGrayRenderPipeline(root, width, height, presentationFormat, {
+    grayBuffer: gray.buffer,
+    params: grayRenderParamsBuffer,
+  })
+  const sobelRender = createSobelRenderPipeline(root, width, height, presentationFormat, {
+    sobelBuffer: sobel.buffer,
+  })
+  const filtered = createFilteredRenderPipeline(root, width, height, presentationFormat, {
+    filteredBuffer: nms.filteredBuffer,
+  })
+  const fittedLines = createEdgeFittedLineOverlayStage(
+    root,
+    width,
+    height,
+    presentationFormat,
+    lineFit.lineOut,
+  )
+
+  const orientHistContext = orientHistCanvas
+    ? root.configureContext({ canvas: orientHistCanvas, alphaMode: 'premultiplied' })
+    : undefined
+  const histContext = histCanvas ? root.configureContext({ canvas: histCanvas }) : undefined
+
+  let msaaColorTex: GPUTexture | undefined
+  let profileWidth = 0
+  let profileHeight = 0
+
+  function resizeProfileTargets(w: number, h: number) {
+    if (w === profileWidth && h === profileHeight && msaaColorTex) {
+      return
+    }
+    profileWidth = w
+    profileHeight = h
+    destroyGpuTexture(msaaColorTex)
+    msaaColorTex = root.device.createTexture({
+      label: 'profile-plot-msaa',
+      size: [w, h, 1],
+      format: presentationFormat,
+      sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    })
+  }
+
+  return {
+    cameraContext,
+    orientHistContext,
+    profileContext,
+    histContext,
+    width,
+    height,
+    histWidth: HIST_WIDTH,
+    histHeight: HIST_HEIGHT,
+    ingest,
+    grayRenderParamsBuffer,
+    gray,
+    sobel,
+    nms,
+    histogram,
+    pointerJump,
+    compact,
+    edgeHistogram,
+    orientHistViz,
+    lineFit,
+    profile,
+    profilePlot,
+    plotBindGroup,
+    validEdgeCount: lineFit.validEdgeCount,
+    resizeProfileTargets,
+    get msaaColorTex() {
+      return msaaColorTex
+    },
+    render: {
+      edges,
+      labelViz,
+      quadsLabelViz,
+      grayscale,
+      sobel: sobelRender,
+      filtered,
+      fittedLines,
+    },
+    destroyProfileTargets() {
+      destroyGpuTexture(msaaColorTex)
+      msaaColorTex = undefined
+      profileWidth = 0
+      profileHeight = 0
+    },
+  }
+}
+
+export type GradientProfilePipeline = ReturnType<typeof createGradientProfilePipeline>

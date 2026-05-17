@@ -44,11 +44,11 @@ export function createFrameSlotPool(
   options: {
     width: number
     height: number
-    grayRenderTimeBuffer: GrayRenderBindResources['timeSec']
+    grayRenderParamsBuffer: GrayRenderBindResources['params']
     slotCount?: number
   },
 ): FrameSlotPool {
-  const { width, height, grayRenderTimeBuffer, slotCount = 3 } = options
+  const { width, height, grayRenderParamsBuffer, slotCount = 3 } = options
   const area = width * height
 
   const slots: FrameSlot[] = Array.from({ length: slotCount }, () => {
@@ -63,7 +63,7 @@ export function createFrameSlotPool(
     })
     const grayRenderBindGroup = root.createBindGroup(grayRenderLayout, {
       grayBuffer: graySnapshot,
-      timeSec: grayRenderTimeBuffer,
+      params: grayRenderParamsBuffer,
     })
     return {
       graySnapshot,

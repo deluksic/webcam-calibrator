@@ -13,6 +13,9 @@ import styles from '@/components/App.module.css'
 const CalibrationView = lazy(() => import('@/components/CalibrationView').then((m) => ({ default: m.CalibrationView })))
 const ResultsView = lazy(() => import('@/components/results/ResultsView').then((m) => ({ default: m.ResultsView })))
 const DebugView = lazy(() => import('@/components/DebugView').then((m) => ({ default: m.DebugView })))
+const GradientProfilesView = lazy(() =>
+  import('@/components/gradientProfiles/GradientProfilesView').then((m) => ({ default: m.GradientProfilesView })),
+)
 
 const GitHubIcon = () => (
   <svg viewBox="0 0 128 128" width="32" height="32" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -35,6 +38,7 @@ export function App() {
     const isCalibrate = createMemo(() => currentPath() === '/calibrate')
     const isResults = createMemo(() => currentPath() === '/results')
     const isDebug = createMemo(() => currentPath() === '/debug')
+    const isProfiles = createMemo(() => currentPath() === '/gradient-profiles')
 
     return (
       <>
@@ -60,6 +64,9 @@ export function App() {
           </A>
           <A href="/debug" class={[styles.navBtn, isDebug() && styles.navBtnActive]}>
             Debug
+          </A>
+          <A href="/gradient-profiles" class={[styles.navBtn, isProfiles() && styles.navBtnActive]}>
+            Profiles
           </A>
           <span class={styles.version}>{VERSION}</span>
           <a
@@ -87,6 +94,7 @@ export function App() {
               <Route path="/calibrate" component={CalibrationView} />
               <Route path="/results" component={ResultsView} />
               <Route path="/debug" component={DebugView} />
+              <Route path="/gradient-profiles" component={GradientProfilesView} />
             </Loading>
           </HashRouter>
         </CalibrationLibraryProvider>

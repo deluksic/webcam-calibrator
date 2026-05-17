@@ -13,7 +13,7 @@ export function encodePresentNonGrid(
   timeSec: number,
   onError?: (msg: string) => void,
 ): void {
-  pipeline.grayRenderTimeBuffer.write(timeSec)
+  pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 1 })
   const mainAttachment: ColorAttachment = { view: pipeline.context }
 
   if (displayMode === 'edges') {
@@ -76,7 +76,7 @@ export function encodeAndSubmitGridPresent(
   timeSec: number,
 ): void {
   const enc = root.device.createCommandEncoder({ label: 'grid frame present' })
-  pipeline.grayRenderTimeBuffer.write(timeSec)
+  pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 1 })
 
   const loadMain: ColorAttachment = { view: pipeline.context, loadOp: 'load', storeOp: 'store' }
   pipeline.render.grayscale.encodeToCanvas(enc, loadMain, slot.grayRenderBindGroup)

@@ -1,0 +1,10 @@
+---
+description: Do not run production build or dev server for verification unless the user asks
+alwaysApply: true
+---
+
+# No automatic build verification
+
+Do **not** run build, compile, or dev-server commands to verify changes unless the user explicitly asks. User is already likely running a dev server and does not need your additional check. You can run tsc.
+
+If verification seems necessary, ask the user or rely on their running dev server instead of starting one yourself.

@@ -8,9 +8,15 @@ import type {
 import { tgpu, d, std } from 'typegpu'
 import { common } from 'typegpu'
 
+export const GrayRenderParams = d.struct({
+  timeSec: d.f32,
+  /** Multiplier on sampled gray before toning (e.g. 0.35 under line overlays). */
+  grayScale: d.f32,
+})
+
 export const grayRenderLayout = tgpu.bindGroupLayout({
   grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
-  timeSec: { uniform: d.f32 },
+  params: { uniform: GrayRenderParams },
 })
 
 export type GrayRenderBindResources = ExtractBindGroupInputFromLayout<typeof grayRenderLayout.entries>
@@ -31,8 +37,8 @@ export function createGrayRenderPipeline(
     'use gpu'
     const pos = d.vec2i(i.pos.xy)
     const idx = pos.y * width + pos.x
-    const gray = grayRenderLayout.$.grayBuffer[idx]!
-    const t = grayRenderLayout.$.timeSec
+    const gray = grayRenderLayout.$.grayBuffer[idx]! * grayRenderLayout.$.params.grayScale
+    const t = grayRenderLayout.$.params.timeSec
     const uv = d.vec2f(i.pos.x / width, i.pos.y / height)
     const stripePhase = std.sin((uv.x + uv.y) * 300 + t * 6) + 0.5
     const stripeMask = std.clamp(stripePhase / std.fwidth(stripePhase), 0, 1)

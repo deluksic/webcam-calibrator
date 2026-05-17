@@ -17,7 +17,7 @@ export const EXTENT_FIELDS = 4 as const
  * Max labeled components with extent slots on GPU. Compact-label discards roots with
  * index ≥ this; extent buffer has this many entries. Keep in sync with compact pass.
  */
-export const MAX_EXTENT_COMPONENTS = 16384
+export const MAX_EXTENT_COMPONENTS = 2 << 10
 
 /** Extent entry stored in the extent buffer. */
 export const ExtentEntry = d.struct({
