@@ -1,9 +1,10 @@
-import { Errored, createSignal } from 'solid-js'
+import { Errored, Show, createSignal } from 'solid-js'
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
 import { GradientProfilesPipeline } from '@/components/gradientProfiles/GradientProfilesPipeline'
 import type { GradientProfileDisplayMode } from '@/gpu/gradientProfilePipeline'
+import { LINE_FIT_DEBUG_LEGEND } from '@/gpu/pipelines/lineFitDebugPipeline'
 
 import pipelineStyles from '@/components/camera/LiveCameraPipeline.module.css'
 import styles from '@/components/gradientProfiles/GradientProfilesView.module.css'
@@ -12,6 +13,7 @@ export function GradientProfilesView() {
   const cam = useCameraStream()
   const [displayMode, setDisplayMode] = createSignal<GradientProfileDisplayMode>('nms')
   const [validEdgeCount, setValidEdgeCount] = createSignal(0)
+  const [frozen, setFrozen] = createSignal(false)
 
   const log = (msg: string) => {
     console.log(msg)
@@ -27,6 +29,7 @@ export function GradientProfilesView() {
         <div class={styles.cameraBlock}>
           <GradientProfilesPipeline
             displayMode={displayMode()}
+            frozen={frozen()}
             showHistogramCanvas
             stream={cam.stream()}
             onLog={log}
@@ -34,6 +37,16 @@ export function GradientProfilesView() {
             toolbar={
               <div class={styles.toolbar}>
                 <CameraStreamSelects />
+                <div class={styles.modeRow}>
+                  <button
+                    type="button"
+                    class={frozen() ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
+                    onClick={() => setFrozen((f) => !f)}
+                    title={frozen() ? 'Resume live processing' : 'Freeze frame for inspection'}
+                  >
+                    {frozen() ? 'Resume' : 'Pause'}
+                  </button>
+                </div>
                 <div class={styles.modeRow}>
                   <button
                     type="button"
@@ -86,11 +99,30 @@ export function GradientProfilesView() {
                   >
                     Lines
                   </button>
+                  <button
+                    type="button"
+                    class={
+                      displayMode() === 'lineFitDebug' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
+                    }
+                    onClick={() => setDisplayMode('lineFitDebug')}
+                  >
+                    Line debug
+                  </button>
                 </div>
               </div>
             }
           />
           <p class={styles.status}>Valid edges (span ≥ 6px): {validEdgeCount()}</p>
+          <Show when={displayMode() === 'lineFitDebug'}>
+            <ul class={styles.debugLegend}>
+              {LINE_FIT_DEBUG_LEGEND.map((item) => (
+                <li class={styles.debugLegendItem}>
+                  <span class={styles.debugSwatch} style={{ background: item.color }} />
+                  {item.label}
+                </li>
+              ))}
+            </ul>
+          </Show>
         </div>
       </Errored>
     </div>

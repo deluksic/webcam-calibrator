@@ -24,6 +24,8 @@ const { navigator, performance } = globalThis
 
 export type GradientProfilesPipelineProps = {
   displayMode: GradientProfileDisplayMode
+  /** When true, skip ingest/compute and keep the last processed frame for inspection. */
+  frozen: boolean
   showHistogramCanvas: boolean
   stream: MediaStream | undefined
   onLog: (msg: string) => void
@@ -144,7 +146,9 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         }
 
         const enc = gNow.device.createCommandEncoder({ label: 'gradient profiles frame' })
-        encodeGradientProfileCompute(enc, gNow, pip, video, threshold())
+        if (!props.frozen) {
+          encodeGradientProfileCompute(enc, gNow, pip, video, threshold())
+        }
         encodeGradientProfileCameraPresent(enc, gNow, pip, props.displayMode, performance.now() * 0.001)
         if (pip.orientHistViz) {
           encodeOrientHistPresent(enc, pip)
@@ -153,6 +157,10 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
           encodeGradientProfilePlotPresent(enc, pip, profCanvas.width, profCanvas.height)
         }
         gNow.device.queue.submit([enc.finish()])
+
+        if (props.frozen) {
+          return
+        }
 
         void pip.validEdgeCount.read().then((v) => {
           if (!disposed) {
@@ -183,6 +191,7 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         <div class={pipelineStyles.feedHeader}>
           <span class={pipelineStyles.feedLabel}>
             Camera — {frameSize()?.width ?? '-'}×{frameSize()?.height ?? '-'}
+            {props.frozen ? ' (paused)' : ''}
           </span>
           {props.toolbar}
         </div>

@@ -6,10 +6,10 @@ import { atomicAdd, atomicStore } from 'typegpu/std'
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
 import {
   MAX_EDGES_PER_LABEL,
-  REQUIRED_ORIENTATION_PEAK_COUNT,
+  type QuadCountBuffer,
   type QuadPeakEdgeBuffer,
+  type QuadSourceLabelIdBuffer,
 } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
-import type { QuadCountBuffer, QuadSourceLabelIdBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import type { LabelLineOutBuffer } from '@/gpu/pipelines/labelLineFitPipeline'
 
 const WORKGROUP_SIZE = 16
@@ -160,11 +160,8 @@ function createScatterQuadLinesPipeline(
       return
     }
 
-    if (edgeId >= d.u32(REQUIRED_ORIENTATION_PEAK_COUNT)) {
-      return
-    }
-
-    const peakEdge = layout.$.quadPeakEdge[quadId * d.u32(REQUIRED_ORIENTATION_PEAK_COUNT) + edgeId]!
+    const quadBase = quadId * d.u32(MAX_EDGES_PER_LABEL)
+    const peakEdge = layout.$.quadPeakEdge[quadBase + edgeId]!
     if (peakEdge === d.u32(COMPONENT_LABEL_INVALID)) {
       return
     }

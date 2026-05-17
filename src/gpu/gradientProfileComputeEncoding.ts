@@ -26,6 +26,7 @@ export function encodeGradientProfileCompute(
   pipeline.pointerJump.encodeCompute(computePass)
   pipeline.compact.encodeCompute(computePass)
   pipeline.edgeHistogram.encodeCompute(computePass)
+  pipeline.lineFitDebug.encodeCompute(computePass)
   pipeline.orientHistViz?.encodePackCompute(computePass)
   pipeline.lineFit.encodeCompute(computePass)
   pipeline.profile.encodeCompute(computePass)

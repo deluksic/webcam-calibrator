@@ -1,5 +1,6 @@
 import type { TgpuRoot } from 'typegpu'
 
+import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { createCompactLabelStage } from '@/gpu/pipelines/compactLabelPipeline'
 import { createCopyIngest } from '@/gpu/pipelines/copyPipeline'
 import { createEdgeFilterStage } from '@/gpu/pipelines/edgeFilterPipeline'
@@ -8,6 +9,7 @@ import { createEdgeHistogramClusterStage, MAX_FLAT_EDGES } from '@/gpu/pipelines
 import { createEdgeLineFitStage } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { createEdgeProfileStage } from '@/gpu/pipelines/edgeProfilePipeline'
 import { createEdgeProfilePlotStage } from '@/gpu/pipelines/edgeProfilePlotPipeline'
+import { createLineFitDebugStage } from '@/gpu/pipelines/lineFitDebugPipeline'
 import { createEdgesPipeline } from '@/gpu/pipelines/edgesPipeline'
 import { MAX_EXTENT_COMPONENTS } from '@/gpu/pipelines/extentTrackingPipeline'
 import { createFilteredRenderPipeline } from '@/gpu/pipelines/filteredRenderPipeline'
@@ -29,6 +31,7 @@ export type GradientProfileDisplayMode =
   | 'edgeLabels'
   | 'grayscale'
   | 'fittedLines'
+  | 'lineFitDebug'
 
 export type GradientProfileNonGridDisplayMode = GradientProfileDisplayMode
 
@@ -111,7 +114,28 @@ export function createGradientProfilePipeline(
   const filtered = createFilteredRenderPipeline(root, width, height, presentationFormat, {
     filteredBuffer: nms.filteredBuffer,
   })
-  const fittedLines = createEdgeFittedLineOverlayStage(root, width, height, presentationFormat, lineFit.lineOut)
+  const fittedLineInstances = MAX_EXTENT_COMPONENTS * MAX_EDGES_PER_LABEL
+  const fittedLines = createEdgeFittedLineOverlayStage(
+    root,
+    width,
+    height,
+    presentationFormat,
+    edgeHistogram.labelLineOut,
+    fittedLineInstances,
+  )
+  const lineFitDebug = createLineFitDebugStage(
+    root,
+    width,
+    height,
+    presentationFormat,
+    nms.filteredBuffer,
+    compact.compactLabelBuffer,
+    edgeHistogram.labelClusters,
+    edgeHistogram.labelLineReduce,
+    edgeHistogram.labelLineOut,
+    edgeHistogram.labelToQuadId,
+    edgeHistogram.packedEdgeLabels,
+  )
 
   const orientHistContext = orientHistCanvas
     ? root.configureContext({ canvas: orientHistCanvas, alphaMode: 'premultiplied' })
@@ -162,6 +186,7 @@ export function createGradientProfilePipeline(
     profilePlot,
     plotBindGroup,
     validEdgeCount: lineFit.validEdgeCount,
+    lineFitDebug,
     resizeProfileTargets,
     get msaaColorTex() {
       return msaaColorTex

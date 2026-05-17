@@ -2,10 +2,19 @@ import { d, std, tgpu } from 'typegpu'
 import { atan2, cos, div, dot, length, sin } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import {
+  MAX_EDGES_PER_LABEL,
+  ORIENT_ASSIGN_MAX_BIN_DIST,
+  ORIENT_ASSIGN_MIN_ALIGN,
+  ORIENT_HIST_BINS,
+} from '@/gpu/lineFitThresholds'
 
-export const ORIENT_HIST_BINS = 32
-export const MAX_EDGES_PER_LABEL = 6
-export const ORIENT_ASSIGN_COS_THRESHOLD = 0.8
+export {
+  MAX_EDGES_PER_LABEL,
+  ORIENT_ASSIGN_MAX_BIN_DIST,
+  ORIENT_ASSIGN_MIN_ALIGN,
+  ORIENT_HIST_BINS,
+} from '@/gpu/lineFitThresholds'
 
 const PI = Math.PI
 
@@ -44,9 +53,8 @@ export const orientationBinToUnit = tgpu.fn(
   return d.vec2f(cos(theta), sin(theta))
 })
 
-/** Peak bins as fixed array (invalid = COMPONENT_LABEL_INVALID). */
-export const PeakBins6 = d.arrayOf(d.u32, MAX_EDGES_PER_LABEL)
-export const PeakDirs6 = d.arrayOf(d.vec2f, MAX_EDGES_PER_LABEL)
+export const PeakBins4 = d.arrayOf(d.u32, MAX_EDGES_PER_LABEL)
+export const PeakDirs4 = d.arrayOf(d.vec2f, MAX_EDGES_PER_LABEL)
 
 /** 3-bin circular centroid; falls back to bin center when total weight is zero. */
 export const peakDirFromLocalBins = tgpu.fn(
@@ -69,7 +77,7 @@ export const peakDirFromLocalBins = tgpu.fn(
   return d1
 })
 
-/** Dot of unit gradient with refined peak direction (−1 if |g| = 0). */
+/** Dot of unit gradient with peak direction (−1 if |g| = 0). */
 export const gradientPeakAlign = tgpu.fn(
   [d.vec2f, d.vec2f],
   d.f32,
@@ -83,34 +91,43 @@ export const gradientPeakAlign = tgpu.fn(
   return dot(n, peakDir)
 })
 
-/** Best-matching peak by gradient alignment (no 0.8 gate — gate pixels in line-fit passes). */
+/** Best peak with ĝ·peakDir ≥ minAlign; tie-break nearest histogram bin, then align. */
 export const assignPeakEdgeId = tgpu.fn(
-  [d.u32, PeakBins6, PeakDirs6, d.vec2f],
+  [d.u32, PeakBins4, PeakDirs4, d.vec2f, d.u32],
   d.u32,
-)((peakCount, peakBins, peakDirs, g) => {
+)((peakCount, peakBins, peakDirs, g, maxBinDist) => {
   'use gpu'
   const gLen = length(g)
   if (gLen <= d.f32(0)) {
-    return d.u32(COMPONENT_LABEL_INVALID)
+    return COMPONENT_LABEL_INVALID
   }
   const n = div(g, gLen)
   const pixelBin = gradientOrientationBin(g)
+  const minAlign = d.f32(ORIENT_ASSIGN_MIN_ALIGN)
 
   let edgeId = d.u32(COMPONENT_LABEL_INVALID)
-  let bestDot = d.f32(-1)
+  let bestInBin = false
   let bestDist = d.u32(ORIENT_HIST_BINS)
+  let bestDot = d.f32(-1)
+
   for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
     if (k < peakCount) {
-      const peakBin = peakBins[d.u32(k)]!
-      if (peakBin !== d.u32(COMPONENT_LABEL_INVALID)) {
-        const peakDir = peakDirs[d.u32(k)]!
-        const align = dot(n, peakDir)
-        const dist = circularBinDist(pixelBin, peakBin)
-        const pick = align > bestDot || (align === bestDot && dist < bestDist)
-        if (pick) {
-          bestDot = align
-          bestDist = dist
-          edgeId = d.u32(k)
+      const peakBin = peakBins[k]!
+      if (peakBin !== COMPONENT_LABEL_INVALID) {
+        const align = dot(n, peakDirs[k]!)
+        if (align >= minAlign) {
+          const dist = circularBinDist(pixelBin, peakBin)
+          const inBin = dist <= maxBinDist
+          const pick =
+            edgeId === COMPONENT_LABEL_INVALID ||
+            (inBin && !bestInBin) ||
+            (inBin === bestInBin && (dist < bestDist || (dist === bestDist && align > bestDot)))
+          if (pick) {
+            bestInBin = inBin
+            bestDist = dist
+            bestDot = align
+            edgeId = k
+          }
         }
       }
     }

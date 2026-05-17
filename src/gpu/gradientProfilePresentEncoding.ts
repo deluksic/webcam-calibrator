@@ -21,6 +21,11 @@ export function encodeGradientProfileCameraPresent(
   if (displayMode === 'fittedLines') {
     pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
     pipeline.render.fittedLines.encodeOverlay(enc, mainAttachment)
+  } else if (displayMode === 'lineFitDebug') {
+    pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 0.35 })
+    pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
+    pipeline.lineFitDebug.encodeToCanvas(enc, mainAttachment)
+    pipeline.render.fittedLines.encodeOverlay(enc, mainAttachment)
   } else if (displayMode === 'edges') {
     pipeline.render.sobel.encodeToCanvas(enc, mainAttachment)
   } else if (displayMode === 'nms') {
