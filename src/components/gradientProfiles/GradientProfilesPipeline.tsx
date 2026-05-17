@@ -136,8 +136,8 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         }
 
         const profSize = profileCanvasSize()
-        const profW = profSize?.width ?? profCanvas.clientWidth
-        const profH = profSize?.height ?? profCanvas.clientHeight
+        const profW = profSize?.widthPX ?? profSize?.width ?? profCanvas.clientWidth
+        const profH = profSize?.heightPX ?? profSize?.height ?? profCanvas.clientHeight
         if (profW > 0 && profH > 0) {
           profCanvas.width = Math.floor(profW)
           profCanvas.height = Math.floor(profH)

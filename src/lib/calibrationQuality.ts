@@ -34,7 +34,10 @@ export function acceptQuadForCalibration(q: DetectedQuad): boolean {
   if (q.decodedTagId === undefined) {
     return false
   }
-  const minR2 = q.cornerDebug.minR2
+  const minR2 = q.cornerDebug?.minR2
+  if (minR2 === undefined) {
+    return false
+  }
   if (minR2 < CALIB_MIN_MIN_R2) {
     return false
   }

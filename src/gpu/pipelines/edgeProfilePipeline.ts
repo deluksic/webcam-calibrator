@@ -12,6 +12,7 @@ import {
   PROFILE_NEIGHBORHOOD_HALF,
   type EdgeLineOutBuffer,
 } from '@/gpu/pipelines/edgeLineFitPipeline'
+import { lineDirDot } from '@/gpu/shaders/linePca'
 import type { GrayTexToBufferBindResources } from '@/gpu/pipelines/grayPipeline'
 
 export { PROFILE_BUCKET_COUNT, PROFILE_NEIGHBORHOOD_HALF } from '@/gpu/pipelines/edgeLineFitPipeline'
@@ -214,13 +215,11 @@ function createProfileAccumPipeline(
     const gLen = sqrt(bestSumGx * bestSumGx + bestSumGy * bestSumGy)
     const nnx = bestSumGx / gLen
     const nny = bestSumGy / gLen
-    const ttx = -nny
-    const tty = nnx
     const s = px * nnx + py * nny - bestNDotMean
     if (std.abs(s) > d.f32(halfW)) {
       return
     }
-    const t = px * ttx + py * tty
+    const t = lineDirDot(px, py, nnx, nny)
     if (t < bestTSampleMin || t > bestTSampleMax) {
       return
     }

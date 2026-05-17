@@ -1,7 +1,7 @@
-// Draw per-label fitted edge segments in image pixel space (tSampleMin → tSampleMax along tangent).
+// Draw per-label fitted edge segments in image pixel space (p0 → p1).
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
-import { max, mul, select, sqrt } from 'typegpu/std'
+import { abs, mul, select } from 'typegpu/std'
 
 import { EdgeLineEntry, type EdgeLineOutBuffer } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { MAX_FLAT_EDGES } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
@@ -43,25 +43,16 @@ export function createEdgeFittedLineOverlayStage(
     })(({ vertexIndex, instanceIndex }) => {
       'use gpu'
       const line = fittedLineLayout.$.lineOut[instanceIndex]!
-      const gLen = sqrt(line.sumGx * line.sumGx + line.sumGy * line.sumGy)
-      const valid = line.valid !== d.u32(0) && gLen >= d.f32(1e-8)
-      const invGLen = d.f32(1) / max(gLen, d.f32(1e-8))
-      const nx = line.sumGx * invGLen
-      const ny = line.sumGy * invGLen
-      const tx = -ny
-      const ty = nx
-      const p0 = d.vec2f(
-        line.tSampleMin * tx + line.nDotMean * nx,
-        line.tSampleMin * ty + line.nDotMean * ny,
-      )
-      const p1 = d.vec2f(
-        line.tSampleMax * tx + line.nDotMean * nx,
-        line.tSampleMax * ty + line.nDotMean * ny,
-      )
+      const p0 = d.vec2f(line.p0x, line.p0y)
+      const p1 = d.vec2f(line.p1x, line.p1y)
+      const span = abs(p1.x - p0.x) + abs(p1.y - p0.y)
+      const draw =
+        line.valid !== d.u32(0) || (line.count > d.u32(0) && span >= d.f32(0.5))
       const atEnd = vertexIndex === d.u32(1)
       const pLine = select(p0, p1, atEnd)
-      const p = select(d.vec2f(0, 0), pLine, valid)
-      return { clipPos: imagePxToClip(p, width, height) }
+      const clipOn = imagePxToClip(pLine, width, height)
+      const clipOff = d.vec4f(d.f32(-2), d.f32(-2), d.f32(0), d.f32(1))
+      return { clipPos: select(clipOff, clipOn, draw) }
     })
     .$uses({ lineOut: fittedLineLayout })
 

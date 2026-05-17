@@ -1,30 +1,41 @@
 // Per compact labelId: 32-bin circular gradient histogram → up to 6 peaks → per-pixel edgeId.
 import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
-import { atomicAdd, atomicLoad, atomicStore, atan2, cos, dot, length, sin } from 'typegpu/std'
+import { atomicAdd, atomicLoad, atomicStore, length, select } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
 import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
-import { MAX_EXTENT_COMPONENTS } from '@/gpu/pipelines/extentTrackingPipeline'
+import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
+import { createLabelLineFitStage } from '@/gpu/pipelines/labelLineFitPipeline'
+import {
+  circularBinDist,
+  gradientOrientationBin,
+  gradientPeakAlign,
+  MAX_EDGES_PER_LABEL,
+  ORIENT_ASSIGN_COS_THRESHOLD,
+  ORIENT_HIST_BINS,
+  peakDirFromLocalBins,
+} from '@/gpu/shaders/orientPeakAssign'
 
 const WORKGROUP_SIZE = 16
 
-export const ORIENT_HIST_BINS = 32
-export const MAX_EDGES_PER_LABEL = 6
+export { ORIENT_HIST_BINS, MAX_EDGES_PER_LABEL } from '@/gpu/shaders/orientPeakAssign'
 export const ORIENT_PEAK_MIN_COUNT = 3
-/** Min circular bin distance between accepted peaks (~45° at 32 bins). */
-export const MIN_PEAK_BIN_SEPARATION = 4
-/** Pixel must align with peak direction; dot(n_px, n_peak) >= this (0.707 ≈ 45° cone). */
-export const ORIENT_ASSIGN_COS_THRESHOLD = 0.707
-/** Components must have exactly this many orientation peaks to become a quad. */
+/** Min circular bin distance between accepted peaks. */
+export const MIN_PEAK_BIN_SEPARATION = 3
+export { ORIENT_ASSIGN_COS_THRESHOLD } from '@/gpu/shaders/orientPeakAssign'
+/** Max quad edge slots in flat buffers (profiles / packed labels). */
 export const REQUIRED_ORIENTATION_PEAK_COUNT = 4
-export const MAX_QUADS = MAX_EXTENT_COMPONENTS
+/** Min valid fitted peaks to compact a label into a quad (top-N by inlier, N ≤ 4). */
+export const MIN_QUAD_VALID_EDGES = 2
+export const MAX_QUADS = 2 << 9
 export const MAX_FLAT_EDGES = MAX_QUADS * MAX_EDGES_PER_LABEL
 
 export const LabelOrientCluster = d.struct({
   orientationHistogram: d.arrayOf(d.atomic(d.u32), ORIENT_HIST_BINS),
   peakBins: d.arrayOf(d.u32, MAX_EDGES_PER_LABEL),
+  peakDirs: d.arrayOf(d.vec2f, MAX_EDGES_PER_LABEL),
   peakCount: d.u32,
 })
 
@@ -32,40 +43,14 @@ export const LabelOrientCluster = d.struct({
 export const LabelOrientClusterReadonly = d.struct({
   orientationHistogram: d.arrayOf(d.u32, ORIENT_HIST_BINS),
   peakBins: d.arrayOf(d.u32, MAX_EDGES_PER_LABEL),
+  peakDirs: d.arrayOf(d.vec2f, MAX_EDGES_PER_LABEL),
   peakCount: d.u32,
-})
-
-const PI_F32 = d.f32(3.14159265)
-
-const gradientOrientationBin = tgpu.fn([d.f32, d.f32], d.u32)((gx, gy) => {
-  'use gpu'
-  const theta = atan2(gy, gx)
-  const scaled = (theta / PI_F32 + d.f32(1)) * d.f32(16)
-  let bin = d.u32(std.floor(scaled))
-  if (bin >= d.u32(ORIENT_HIST_BINS)) {
-    bin = d.u32(0)
-  }
-  return bin
-})
-
-const circularBinDist = tgpu.fn([d.u32, d.u32], d.u32)((a, b) => {
-  'use gpu'
-  const bins = d.u32(ORIENT_HIST_BINS)
-  const forward = (a + bins - b) % bins
-  const backward = (b + bins - a) % bins
-  return std.min(forward, backward)
-})
-
-/** Unit normal from histogram bin center (matches {@link gradientOrientationBin}). */
-const orientationBinToUnit = tgpu.fn([d.u32], d.vec2f)((bin) => {
-  'use gpu'
-  const theta = (d.f32(bin) + d.f32(0.5)) / d.f32(16) * PI_F32 - PI_F32
-  return d.vec2f(cos(theta), sin(theta))
 })
 
 function createEdgeHistogramClusterLayouts() {
   const histResetLayout = tgpu.bindGroupLayout({
     labelClusters: { storage: d.arrayOf(LabelOrientCluster), access: 'mutable' },
+    quadCount: { storage: d.arrayOf(d.u32, 1), access: 'mutable' },
   })
   const histAccumLayout = tgpu.bindGroupLayout({
     edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
@@ -77,9 +62,11 @@ function createEdgeHistogramClusterLayouts() {
   })
   const compactQuadsLayout = tgpu.bindGroupLayout({
     labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
+    labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
+    quadPeakEdge: { storage: d.arrayOf(d.u32), access: 'mutable' },
     labelToQuadId: { storage: d.arrayOf(d.u32), access: 'mutable' },
     quadSourceLabelId: { storage: d.arrayOf(d.u32), access: 'mutable' },
-    quadCount: { storage: d.arrayOf(d.u32, 1), access: 'mutable' },
+    quadCount: { storage: d.arrayOf(d.atomic(d.u32), 1), access: 'mutable' },
   })
   const writeQuadLabelMapLayout = tgpu.bindGroupLayout({
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
@@ -91,6 +78,7 @@ function createEdgeHistogramClusterLayouts() {
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
     labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
     labelToQuadId: { storage: d.arrayOf(d.u32), access: 'readonly' },
+    quadPeakEdge: { storage: d.arrayOf(d.u32), access: 'readonly' },
     packedEdgeLabels: { storage: d.arrayOf(d.u32), access: 'mutable' },
   })
   return {
@@ -124,8 +112,12 @@ function createHistResetPipeline(
     }
     for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
       slot.peakBins[d.u32(k)] = d.u32(COMPONENT_LABEL_INVALID)
+      slot.peakDirs[d.u32(k)] = d.vec2f(0, 0)
     }
     slot.peakCount = d.u32(0)
+    if (labelId === d.u32(0)) {
+      layout.$.quadCount[d.u32(0)] = d.u32(0)
+    }
   })
   return root.createComputePipeline({ compute: kernel })
 }
@@ -160,7 +152,7 @@ function createHistAccumPipeline(
       return
     }
 
-    const bin = gradientOrientationBin(g.x, g.y)
+    const bin = gradientOrientationBin(g)
     const histSlot = layout.$.labelClusters[labelId]!.orientationHistogram[bin]!
     atomicAdd(histSlot, d.u32(1))
   })
@@ -186,10 +178,6 @@ function createFindPeaksPipeline(
     }
 
     const slot = layout.$.labelClusters[labelId]!
-    for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-      slot.peakBins[d.u32(k)] = d.u32(COMPONENT_LABEL_INVALID)
-    }
-    slot.peakCount = d.u32(0)
 
     for (const b of tgpu.unroll(std.range(0, ORIENT_HIST_BINS))) {
       const bi = d.u32(b)
@@ -235,6 +223,21 @@ function createFindPeaksPipeline(
         }
       }
     }
+
+    const peakCount = slot.peakCount
+    for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+      if (k < peakCount) {
+        const peakBin = slot.peakBins[d.u32(k)]!
+        if (peakBin !== d.u32(COMPONENT_LABEL_INVALID)) {
+          const prevB = (peakBin + d.u32(ORIENT_HIST_BINS - 1)) % d.u32(ORIENT_HIST_BINS)
+          const nextB = (peakBin + d.u32(1)) % d.u32(ORIENT_HIST_BINS)
+          const wPrev = d.f32(atomicLoad(slot.orientationHistogram[prevB]!))
+          const wCenter = d.f32(atomicLoad(slot.orientationHistogram[peakBin]!))
+          const wNext = d.f32(atomicLoad(slot.orientationHistogram[nextB]!))
+          slot.peakDirs[d.u32(k)] = peakDirFromLocalBins(peakBin, wPrev, wCenter, wNext)
+        }
+      }
+    }
   })
   return root.createComputePipeline({ compute: kernel })
 }
@@ -244,43 +247,144 @@ function createCompactQuadsPipeline(
   layout: ReturnType<typeof createEdgeHistogramClusterLayouts>['compactQuadsLayout'],
   maxComponents: number,
 ) {
-  const requiredPeaks = d.u32(REQUIRED_ORIENTATION_PEAK_COUNT)
-
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [1, 1, 1],
+    workgroupSize: [WORKGROUP_SIZE, 1, 1],
   })((input) => {
     'use gpu'
-    if (input.gid.x !== d.u32(0)) {
+    const labelId = d.u32(input.gid.x)
+    if (labelId >= d.u32(maxComponents)) {
       return
     }
 
-    layout.$.quadCount[d.u32(0)] = d.u32(0)
-    const maxLabels = d.u32(maxComponents)
+    layout.$.labelToQuadId[labelId] = d.u32(COMPONENT_LABEL_INVALID)
 
-    for (let labelId = d.u32(0); labelId < maxLabels; labelId = labelId + d.u32(1)) {
-      layout.$.labelToQuadId[labelId] = d.u32(COMPONENT_LABEL_INVALID)
+    const cluster = layout.$.labelClusters[labelId]!
+    const peakCount = cluster.peakCount
+
+    let s0 = d.u32(0)
+    let s1 = d.u32(0)
+    let s2 = d.u32(0)
+    let s3 = d.u32(0)
+    let s4 = d.u32(0)
+    let s5 = d.u32(0)
+
+    for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+      if (k < peakCount) {
+        const peakBin = cluster.peakBins[d.u32(k)]!
+        if (peakBin !== d.u32(COMPONENT_LABEL_INVALID)) {
+          const slot = labelId * d.u32(MAX_EDGES_PER_LABEL) + d.u32(k)
+          const line = layout.$.labelLineOut[slot]!
+          const score = select(d.u32(0), line.inlierCount, line.valid !== d.u32(0))
+          if (k === d.u32(0)) {
+            s0 = score
+          } else if (k === d.u32(1)) {
+            s1 = score
+          } else if (k === d.u32(2)) {
+            s2 = score
+          } else if (k === d.u32(3)) {
+            s3 = score
+          } else if (k === d.u32(4)) {
+            s4 = score
+          } else {
+            s5 = score
+          }
+        }
+      }
     }
 
-    for (let labelId = d.u32(0); labelId < maxLabels; labelId = labelId + d.u32(1)) {
-      const cluster = layout.$.labelClusters[labelId]!
-      if (cluster.peakCount !== requiredPeaks) {
-        continue
-      }
+    let pick0 = d.u32(COMPONENT_LABEL_INVALID)
+    let pick1 = d.u32(COMPONENT_LABEL_INVALID)
+    let pick2 = d.u32(COMPONENT_LABEL_INVALID)
+    let pick3 = d.u32(COMPONENT_LABEL_INVALID)
+    let numPicked = d.u32(0)
+    let canPick = true
 
-      let total = d.u32(0)
-      for (const b of tgpu.unroll(std.range(0, ORIENT_HIST_BINS))) {
-        total = total + cluster.orientationHistogram[d.u32(b)]!
+    for (const _rank of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+      if (canPick) {
+        let bestPeak = d.u32(COMPONENT_LABEL_INVALID)
+        let bestScore = d.u32(0)
+        if (s0 > bestScore) {
+          bestScore = s0
+          bestPeak = d.u32(0)
+        }
+        if (s1 > bestScore) {
+          bestScore = s1
+          bestPeak = d.u32(1)
+        }
+        if (s2 > bestScore) {
+          bestScore = s2
+          bestPeak = d.u32(2)
+        }
+        if (s3 > bestScore) {
+          bestScore = s3
+          bestPeak = d.u32(3)
+        }
+        if (s4 > bestScore) {
+          bestScore = s4
+          bestPeak = d.u32(4)
+        }
+        if (s5 > bestScore) {
+          bestScore = s5
+          bestPeak = d.u32(5)
+        }
+        if (bestPeak === d.u32(COMPONENT_LABEL_INVALID)) {
+          canPick = false
+        } else {
+          if (numPicked === d.u32(0)) {
+            pick0 = bestPeak
+          } else if (numPicked === d.u32(1)) {
+            pick1 = bestPeak
+          } else if (numPicked === d.u32(2)) {
+            pick2 = bestPeak
+          } else {
+            pick3 = bestPeak
+          }
+          numPicked = numPicked + d.u32(1)
+          if (bestPeak === d.u32(0)) {
+            s0 = d.u32(0)
+          } else if (bestPeak === d.u32(1)) {
+            s1 = d.u32(0)
+          } else if (bestPeak === d.u32(2)) {
+            s2 = d.u32(0)
+          } else if (bestPeak === d.u32(3)) {
+            s3 = d.u32(0)
+          } else if (bestPeak === d.u32(4)) {
+            s4 = d.u32(0)
+          } else {
+            s5 = d.u32(0)
+          }
+        }
       }
-      if (total === d.u32(0)) {
-        continue
-      }
-
-      const quadId = layout.$.quadCount[d.u32(0)]!
-      layout.$.labelToQuadId[labelId] = quadId
-      layout.$.quadSourceLabelId[quadId] = labelId
-      layout.$.quadCount[d.u32(0)] = quadId + d.u32(1)
     }
+
+    if (numPicked < d.u32(MIN_QUAD_VALID_EDGES)) {
+      return
+    }
+
+    const quadId = atomicAdd(layout.$.quadCount[d.u32(0)]!, d.u32(1))
+    if (quadId >= MAX_QUADS) {
+      return
+    }
+
+    const quadBase = quadId * d.u32(REQUIRED_ORIENTATION_PEAK_COUNT)
+    for (const q of tgpu.unroll(std.range(0, REQUIRED_ORIENTATION_PEAK_COUNT))) {
+      layout.$.quadPeakEdge[quadBase + d.u32(q)] = d.u32(COMPONENT_LABEL_INVALID)
+    }
+    if (numPicked > d.u32(0)) {
+      layout.$.quadPeakEdge[quadBase + d.u32(0)] = pick0
+    }
+    if (numPicked > d.u32(1)) {
+      layout.$.quadPeakEdge[quadBase + d.u32(1)] = pick1
+    }
+    if (numPicked > d.u32(2)) {
+      layout.$.quadPeakEdge[quadBase + d.u32(2)] = pick2
+    }
+    if (numPicked > d.u32(3)) {
+      layout.$.quadPeakEdge[quadBase + d.u32(3)] = pick3
+    }
+    layout.$.labelToQuadId[labelId] = quadId
+    layout.$.quadSourceLabelId[quadId] = labelId
   })
 
   return root.createComputePipeline({ compute: kernel })
@@ -357,54 +461,30 @@ function createAssignEdgesPipeline(
     }
 
     const cluster = layout.$.labelClusters[labelId]!
-    const peakCount = cluster.peakCount
-    const pixelBin = gradientOrientationBin(g.x, g.y)
-    const gLen = length(g)
-    const nx = g.x / gLen
-    const ny = g.y / gLen
-    const cosAssign = d.f32(ORIENT_ASSIGN_COS_THRESHOLD)
+    const quadBase = quadId * d.u32(REQUIRED_ORIENTATION_PEAK_COUNT)
+    let quadEdge = d.u32(COMPONENT_LABEL_INVALID)
+    let bestDot = d.f32(-1)
 
-    let edgeId = d.u32(0)
-    if (peakCount > d.u32(0)) {
-      let bestDot = d.f32(-1)
-      let bestDist = d.u32(ORIENT_HIST_BINS)
-      for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-        if (k < peakCount) {
-          const peakBin = cluster.peakBins[d.u32(k)]!
-          if (peakBin !== d.u32(COMPONENT_LABEL_INVALID)) {
-            const peakDir = orientationBinToUnit(peakBin)
-            const align = dot(d.vec2f(nx, ny), peakDir)
-            if (align >= cosAssign) {
-              const dist = circularBinDist(pixelBin, peakBin)
-              const pick = align > bestDot || (align === bestDot && dist < bestDist)
-              if (pick) {
-                bestDot = align
-                bestDist = dist
-                edgeId = d.u32(k)
-              }
-            }
-          }
-        }
-      }
-      if (bestDot < cosAssign) {
-        for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-          if (k < peakCount) {
-            const peakBin = cluster.peakBins[d.u32(k)]!
-            if (peakBin !== d.u32(COMPONENT_LABEL_INVALID)) {
-              const peakDir = orientationBinToUnit(peakBin)
-              const align = dot(d.vec2f(nx, ny), peakDir)
-              if (align > bestDot) {
-                bestDot = align
-                edgeId = d.u32(k)
-              }
-            }
+    for (const q of tgpu.unroll(std.range(0, REQUIRED_ORIENTATION_PEAK_COUNT))) {
+      const peakK = layout.$.quadPeakEdge[quadBase + d.u32(q)]!
+      if (peakK !== d.u32(COMPONENT_LABEL_INVALID)) {
+        const peakBin = cluster.peakBins[peakK]!
+        if (peakBin !== d.u32(COMPONENT_LABEL_INVALID)) {
+          const align = gradientPeakAlign(cluster.peakDirs[peakK]!, g)
+          if (align >= ORIENT_ASSIGN_COS_THRESHOLD && align > bestDot) {
+            bestDot = align
+            quadEdge = d.u32(q)
           }
         }
       }
     }
 
-    layout.$.packedEdgeLabels[idx] =
-      quadId * d.u32(MAX_EDGES_PER_LABEL) + edgeId
+    if (quadEdge === d.u32(COMPONENT_LABEL_INVALID)) {
+      layout.$.packedEdgeLabels[idx] = d.u32(COMPONENT_LABEL_INVALID)
+      return
+    }
+
+    layout.$.packedEdgeLabels[idx] = quadId * d.u32(MAX_EDGES_PER_LABEL) + quadEdge
   })
   return root.createComputePipeline({ compute: kernel })
 }
@@ -421,6 +501,9 @@ export function createEdgeHistogramClusterStage(
   const labelClusters = root.createBuffer(d.arrayOf(LabelOrientCluster, maxComponents)).$usage('storage')
   const packedEdgeLabels = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
   const labelToQuadId = root.createBuffer(d.arrayOf(d.u32, maxComponents)).$usage('storage')
+  const quadPeakEdge = root
+    .createBuffer(d.arrayOf(d.u32, MAX_QUADS * REQUIRED_ORIENTATION_PEAK_COUNT))
+    .$usage('storage')
   const quadSourceLabelId = root.createBuffer(d.arrayOf(d.u32, MAX_QUADS)).$usage('storage')
   const quadCount = root.createBuffer(d.arrayOf(d.u32, 1)).$usage('storage')
   const quadLabelBuffer = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
@@ -437,8 +520,20 @@ export function createEdgeHistogramClusterStage(
     height,
   )
   const assignEdgesPipeline = createAssignEdgesPipeline(root, layouts.assignEdgesLayout, width, height)
+  const labelLineFit = createLabelLineFitStage(
+    root,
+    width,
+    height,
+    maxComponents,
+    filteredBuffer,
+    compactLabelBuffer,
+    labelClusters,
+  )
 
-  const histResetBindGroup = root.createBindGroup(layouts.histResetLayout, { labelClusters })
+  const histResetBindGroup = root.createBindGroup(layouts.histResetLayout, {
+    labelClusters,
+    quadCount,
+  })
   const histAccumBindGroup = root.createBindGroup(layouts.histAccumLayout, {
     edgeBuffer: filteredBuffer,
     compactLabels: compactLabelBuffer,
@@ -447,6 +542,8 @@ export function createEdgeHistogramClusterStage(
   const findPeaksBindGroup = root.createBindGroup(layouts.findPeaksLayout, { labelClusters })
   const compactQuadsBindGroup = root.createBindGroup(layouts.compactQuadsLayout, {
     labelClusters,
+    labelLineOut: labelLineFit.labelLineOut,
+    quadPeakEdge,
     labelToQuadId,
     quadSourceLabelId,
     quadCount,
@@ -461,6 +558,7 @@ export function createEdgeHistogramClusterStage(
     compactLabels: compactLabelBuffer,
     labelClusters,
     labelToQuadId,
+    quadPeakEdge,
     packedEdgeLabels,
   })
 
@@ -472,13 +570,16 @@ export function createEdgeHistogramClusterStage(
     histResetPipeline.with(pass).with(histResetBindGroup).dispatchWorkgroups(labelWg)
     histAccumPipeline.with(pass).with(histAccumBindGroup).dispatchWorkgroups(wgX, wgY)
     findPeaksPipeline.with(pass).with(findPeaksBindGroup).dispatchWorkgroups(labelWg)
-    compactQuadsPipeline.with(pass).with(compactQuadsBindGroup).dispatchWorkgroups(1)
+    labelLineFit.encodeLabelLineFit(pass)
+    compactQuadsPipeline.with(pass).with(compactQuadsBindGroup).dispatchWorkgroups(labelWg)
     writeQuadLabelMapPipeline.with(pass).with(writeQuadLabelMapBindGroup).dispatchWorkgroups(wgX, wgY)
     assignEdgesPipeline.with(pass).with(assignEdgesBindGroup).dispatchWorkgroups(wgX, wgY)
   }
 
   return {
     labelClusters,
+    labelLineOut: labelLineFit.labelLineOut,
+    quadPeakEdge,
     labelToQuadId,
     quadSourceLabelId,
     quadCount,
@@ -488,8 +589,12 @@ export function createEdgeHistogramClusterStage(
   }
 }
 
+export type { LabelLineOutBuffer } from '@/gpu/pipelines/labelLineFitPipeline'
+
 export type PackedEdgeLabelBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['packedEdgeLabels']
 export type LabelOrientClusterBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['labelClusters']
+/** Per compact quad: peak index (0..5) for each quad edge slot (0..3). */
+export type QuadPeakEdgeBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['quadPeakEdge']
 export type LabelToQuadIdBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['labelToQuadId']
 export type QuadSourceLabelIdBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['quadSourceLabelId']
 export type QuadCountBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['quadCount']

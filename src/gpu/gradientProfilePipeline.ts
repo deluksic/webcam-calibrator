@@ -1,29 +1,25 @@
 import type { TgpuRoot } from 'typegpu'
-import { d } from 'typegpu'
 
 import { createCompactLabelStage } from '@/gpu/pipelines/compactLabelPipeline'
 import { createCopyIngest } from '@/gpu/pipelines/copyPipeline'
-import { createEdgeLineFitStage } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { createEdgeFilterStage } from '@/gpu/pipelines/edgeFilterPipeline'
 import { createEdgeFittedLineOverlayStage } from '@/gpu/pipelines/edgeFittedLineOverlayPipeline'
-import { createEdgeProfilePlotStage } from '@/gpu/pipelines/edgeProfilePlotPipeline'
+import { createEdgeHistogramClusterStage, MAX_FLAT_EDGES } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import { createEdgeLineFitStage } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { createEdgeProfileStage } from '@/gpu/pipelines/edgeProfilePipeline'
+import { createEdgeProfilePlotStage } from '@/gpu/pipelines/edgeProfilePlotPipeline'
 import { createEdgesPipeline } from '@/gpu/pipelines/edgesPipeline'
 import { MAX_EXTENT_COMPONENTS } from '@/gpu/pipelines/extentTrackingPipeline'
 import { createFilteredRenderPipeline } from '@/gpu/pipelines/filteredRenderPipeline'
 import { createGrayStage } from '@/gpu/pipelines/grayPipeline'
 import { createGrayRenderPipeline, GrayRenderParams } from '@/gpu/pipelines/grayRenderPipeline'
-import {
-  createEdgeHistogramClusterStage,
-  MAX_FLAT_EDGES,
-} from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { createHistogramStage, HIST_HEIGHT, HIST_WIDTH } from '@/gpu/pipelines/histogramPipelines'
 import { createLabelVizPipeline, createQuadsLabelVizPipeline } from '@/gpu/pipelines/labelVizPipeline'
 import { createOrientHistVizStage } from '@/gpu/pipelines/orientHistVizPipeline'
 import { createPointerJumpLabeling } from '@/gpu/pipelines/pointerJumpPipeline'
+import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
-import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 
 export type GradientProfileDisplayMode =
   | 'edges'
@@ -60,13 +56,7 @@ export function createGradientProfilePipeline(
   const nms = createEdgeFilterStage(root, width, height, sobel.buffer)
   const histogram = createHistogramStage(root, width, height, sobel.buffer, presentationFormat)
   const pointerJump = createPointerJumpLabeling(root, width, height, nms.filteredBuffer)
-  const compact = createCompactLabelStage(
-    root,
-    width,
-    height,
-    MAX_EXTENT_COMPONENTS,
-    pointerJump.pointerJumpBuffer0,
-  )
+  const compact = createCompactLabelStage(root, width, height, MAX_EXTENT_COMPONENTS, pointerJump.pointerJumpBuffer0)
   const edgeHistogram = createEdgeHistogramClusterStage(
     root,
     width,
@@ -86,11 +76,11 @@ export function createGradientProfilePipeline(
     : undefined
   const lineFit = createEdgeLineFitStage(
     root,
-    width,
-    height,
     MAX_FLAT_EDGES,
-    nms.filteredBuffer,
-    edgeHistogram.packedEdgeLabels,
+    edgeHistogram.labelLineOut,
+    edgeHistogram.quadPeakEdge,
+    edgeHistogram.quadSourceLabelId,
+    edgeHistogram.quadCount,
   )
   const profile = createEdgeProfileStage(
     root,
@@ -121,13 +111,7 @@ export function createGradientProfilePipeline(
   const filtered = createFilteredRenderPipeline(root, width, height, presentationFormat, {
     filteredBuffer: nms.filteredBuffer,
   })
-  const fittedLines = createEdgeFittedLineOverlayStage(
-    root,
-    width,
-    height,
-    presentationFormat,
-    lineFit.lineOut,
-  )
+  const fittedLines = createEdgeFittedLineOverlayStage(root, width, height, presentationFormat, lineFit.lineOut)
 
   const orientHistContext = orientHistCanvas
     ? root.configureContext({ canvas: orientHistCanvas, alphaMode: 'premultiplied' })

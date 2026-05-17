@@ -1,4 +1,4 @@
-// Per-component orientation histograms as literal 32×8 pixel bars (TypeGPU render).
+// Per-component orientation histograms as scaled bar strips (TypeGPU render).
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { common } from 'typegpu'
@@ -18,14 +18,16 @@ import type {
 import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
-/** Histogram strip width in pixels (one pixel per orientation bin). */
-export const ORIENT_HIST_VIZ_WIDTH = ORIENT_HIST_BINS
+/** Screen pixels per orientation bin (2×2). */
+export const ORIENT_HIST_VIZ_PIXEL_SCALE = 2
+/** Histogram strip width in pixels. */
+export const ORIENT_HIST_VIZ_WIDTH = ORIENT_HIST_BINS * ORIENT_HIST_VIZ_PIXEL_SCALE
 /** Bar area height in pixels per histogram cell. */
-export const ORIENT_HIST_VIZ_BIN_H = 8
+export const ORIENT_HIST_VIZ_BIN_H = 8 * ORIENT_HIST_VIZ_PIXEL_SCALE
 /** Gap between histogram cells in pixels (horizontal and vertical). */
 export const ORIENT_HIST_VIZ_GAP = 2
-/** Histograms per grid row. */
-export const ORIENT_HIST_GRID_COLS = 32
+/** Histograms per grid row (was 32). */
+export const ORIENT_HIST_GRID_COLS = 6
 export const ORIENT_HIST_CELL_STRIDE_X = ORIENT_HIST_VIZ_WIDTH + ORIENT_HIST_VIZ_GAP
 export const ORIENT_HIST_CELL_STRIDE_Y = ORIENT_HIST_VIZ_BIN_H + ORIENT_HIST_VIZ_GAP
 
@@ -51,14 +53,13 @@ const BG = d.vec4f(d.f32(0.1), d.f32(0.1), d.f32(0.14), d.f32(1))
 const GAP = d.vec4f(d.f32(0.06), d.f32(0.06), d.f32(0.08), d.f32(1))
 const PEAK = d.vec4f(d.f32(1), d.f32(1), d.f32(0.92), d.f32(1))
 
-export const ORIENT_HIST_CANVAS_WIDTH =
-  ORIENT_HIST_GRID_COLS * ORIENT_HIST_CELL_STRIDE_X - ORIENT_HIST_VIZ_GAP
+export const ORIENT_HIST_CANVAS_WIDTH = ORIENT_HIST_GRID_COLS * ORIENT_HIST_CELL_STRIDE_X - ORIENT_HIST_VIZ_GAP
 
-const ORIENT_HIST_GRID_ROWS = Math.ceil(MAX_QUADS / ORIENT_HIST_GRID_COLS)
+/** Quarter of row count at the previous 32-column layout. */
+const ORIENT_HIST_GRID_ROWS = Math.ceil(Math.ceil(MAX_QUADS / 32) / 4)
 
 /** Fixed GPU canvas; scroll via `.orientHistScroll` when content exceeds viewport. */
-export const ORIENT_HIST_CANVAS_HEIGHT =
-  ORIENT_HIST_GRID_ROWS * ORIENT_HIST_CELL_STRIDE_Y - ORIENT_HIST_VIZ_GAP
+export const ORIENT_HIST_CANVAS_HEIGHT = ORIENT_HIST_GRID_ROWS * ORIENT_HIST_CELL_STRIDE_Y - ORIENT_HIST_VIZ_GAP
 
 function createOrientHistPackPipeline(root: TgpuRoot, maxQuads: number) {
   const packRows = tgpu.computeFn({
@@ -74,8 +75,7 @@ function createOrientHistPackPipeline(root: TgpuRoot, maxQuads: number) {
     orientHistPackLayout.$.rowCount[d.u32(0)] = quads
 
     for (let quadId = d.u32(0); quadId < quads; quadId = quadId + d.u32(1)) {
-      orientHistPackLayout.$.rowLabelIds[quadId] =
-        orientHistPackLayout.$.quadSourceLabelId[quadId]!
+      orientHistPackLayout.$.rowLabelIds[quadId] = orientHistPackLayout.$.quadSourceLabelId[quadId]!
     }
 
     for (let quadId = quads; quadId < d.u32(maxQuads); quadId = quadId + d.u32(1)) {
@@ -109,6 +109,7 @@ function createOrientHistRenderPipeline(root: TgpuRoot, presentationFormat: GPUT
     const cellW = d.u32(ORIENT_HIST_VIZ_WIDTH)
     const cellH = d.u32(ORIENT_HIST_VIZ_BIN_H)
     const gap = d.u32(ORIENT_HIST_VIZ_GAP)
+    const pixelScale = d.u32(ORIENT_HIST_VIZ_PIXEL_SCALE)
     const strideX = cellW + gap
     const strideY = cellH + gap
 
@@ -131,7 +132,7 @@ function createOrientHistRenderPipeline(root: TgpuRoot, presentationFormat: GPUT
 
     const labelId = orientHistVizLayout.$.rowLabelIds[flatIdx]!
     const cluster = orientHistVizLayout.$.labelClusters[labelId]!
-    const bin = localX
+    const bin = d.u32(localX / pixelScale)
 
     let maxCount = d.u32(0)
     for (const b of tgpu.unroll(std.range(0, ORIENT_HIST_BINS))) {

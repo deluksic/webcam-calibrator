@@ -5,6 +5,9 @@ const { imul, round } = Math
 
 const GRID_VIZ_RGB_SCALE = 0.55
 
+/** Label/edge viz background ≈ (0.12, 0.12, 0.14); hash RGB is remapped to [floor, 1]. */
+export const HASH_RGB_FLOOR = 0.42
+
 /** u32 hash — same ops as `stableHashU32` (CPU / CSS). */
 export function stableHashU32Cpu(x: number): number {
   x >>>= 0
@@ -39,13 +42,18 @@ export function tagIdToGridVizU32(tagId: number): number {
   return h >>> 0
 }
 
+function hashByteToLifted01(byte: number): number {
+  const t = byte / 255
+  return HASH_RGB_FLOOR + (1 - HASH_RGB_FLOOR) * t
+}
+
 /** `rgb(...)` matching `gridVizPipeline` fill (`stableHashToRgb01` × 0.55). */
 export function gridVizFillRgbCss(tagId: number): string {
   const h = stableHashU32Cpu(tagIdToGridVizU32(tagId))
   const k = GRID_VIZ_RGB_SCALE
-  const r = round(((h & 255) / 255) * k * 255)
-  const g = round((((h >>> 8) & 255) / 255) * k * 255)
-  const b = round((((h >>> 16) & 255) / 255) * k * 255)
+  const r = round(hashByteToLifted01(h & 255) * k * 255)
+  const g = round(hashByteToLifted01((h >>> 8) & 255) * k * 255)
+  const b = round(hashByteToLifted01((h >>> 16) & 255) * k * 255)
   return `rgb(${r},${g},${b})`
 }
 
@@ -59,13 +67,15 @@ export function stableHashU32(x: number) {
   return h3 ^ (h3 >> d.u32(16))
 }
 
-/** Linear RGB in [0,1]³ from a u32 id (byte lanes of `stableHashU32`). */
+/** Linear RGB in [HASH_RGB_FLOOR, 1]³ from a u32 id (byte lanes of `stableHashU32`). */
 export function stableHashToRgb01(x: number) {
   'use gpu'
   const h = stableHashU32(x)
+  const floor = d.f32(HASH_RGB_FLOOR)
+  const scale = d.f32(1) - floor
   return d.vec3f(
-    d.f32(h & d.u32(255)) / d.f32(255),
-    d.f32((h >> d.u32(8)) & d.u32(255)) / d.f32(255),
-    d.f32((h >> d.u32(16)) & d.u32(255)) / d.f32(255),
+    floor + scale * (d.f32(h & d.u32(255)) / d.f32(255)),
+    floor + scale * (d.f32((h >> d.u32(8)) & d.u32(255)) / d.f32(255)),
+    floor + scale * (d.f32((h >> d.u32(16)) & d.u32(255)) / d.f32(255)),
   )
 }

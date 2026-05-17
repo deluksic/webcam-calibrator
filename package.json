@@ -18,6 +18,7 @@
     "@solidjs/web": "2.0.0-beta.7",
     "@typegpu/color": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color",
     "@typegpu/geometry": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry",
+    "@typegpu/noise": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-noise",
     "@typegpu/sdf": "^0.11.1",
     "comlink": "^4.4.2",
     "solid-js": "2.0.0-beta.7",

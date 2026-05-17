@@ -1,0 +1,12 @@
+---
+description: WebGPU storage atomics — bind group access, not extra buffers
+alwaysApply: true
+---
+
+# Storage atomics
+
+One buffer, many bind groups — **layout + access mode** define the WGSL view. No duplicate buffers.
+
+- `d.atomic(…)` in a layout → **`access: 'mutable'`** always (even for `atomicLoad` only). Never `readonly`.
+- Plain loads only → `*Readonly` struct with **no** `d.atomic`, `access: 'readonly'`, same buffer.
+- Do not put atomics on `*Readonly` types, **do not** add a second buffer for atomic vs plain.

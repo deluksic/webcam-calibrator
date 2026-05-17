@@ -34,6 +34,9 @@ importers:
       '@typegpu/geometry':
         specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry
         version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
+      '@typegpu/noise':
+        specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-noise
+        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-noise(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
       '@typegpu/sdf':
         specifier: ^0.11.1
         version: 0.11.1(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
@@ -894,6 +897,12 @@ packages:
 
   '@typegpu/geometry@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry':
     resolution: {path: /packages/typegpu-geometry, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67}
+    version: 0.11.0
+    peerDependencies:
+      typegpu: workspace:^
+
+  '@typegpu/noise@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-noise':
+    resolution: {path: /packages/typegpu-noise, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67}
     version: 0.11.0
     peerDependencies:
       typegpu: workspace:^
@@ -2385,6 +2394,10 @@ snapshots:
       typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
 
   '@typegpu/geometry@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
+    dependencies:
+      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
+
+  '@typegpu/noise@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-noise(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
     dependencies:
       typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
 

@@ -14,17 +14,17 @@ import { tgpu, d } from 'typegpu'
 import { arrayOf, u16 } from 'typegpu/data'
 import { fwidth, max, mix, select, smoothstep } from 'typegpu/std'
 
+import { MAX_FLAT_EDGES } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import type { EdgeLineOutBuffer } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { EdgeLineEntry, PROFILE_BUCKET_COUNT, PROFILE_NEIGHBORHOOD_HALF } from '@/gpu/pipelines/edgeLineFitPipeline'
 import type { ProfileAvgBuffer, ProfileBucketsBuffer } from '@/gpu/pipelines/edgeProfilePipeline'
 import { ProfileBucketGpu } from '@/gpu/pipelines/edgeProfilePipeline'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
-import { MAX_FLAT_EDGES } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 
 const PROFILE_JOIN_MAX = 2
 const SEGMENTS_PER_LABEL = PROFILE_BUCKET_COUNT - 1
 /** Float literal for storage indexing (must match {@link PROFILE_BUCKET_COUNT}). */
-const PLOT_BUCKET_COUNT = 64.0
+const PLOT_BUCKET_COUNT = 64
 export const MAX_PROFILE_LINE_INSTANCES = MAX_FLAT_EDGES * SEGMENTS_PER_LABEL
 
 const plotTriangleIndexU16 = new Uint16Array(lineSegmentIndices(PROFILE_JOIN_MAX))
@@ -59,7 +59,7 @@ export function createEdgeProfilePlotStage(root: TgpuRoot, presentationFormat: G
       },
     })(({ instanceIndex, vertexIndex }) => {
       'use gpu'
-      const labelId = instanceIndex / d.u32(SEGMENTS_PER_LABEL)
+      const labelId = d.u32(instanceIndex / d.u32(SEGMENTS_PER_LABEL))
       const segIdx = instanceIndex % d.u32(SEGMENTS_PER_LABEL)
       const b = segIdx
 
@@ -75,17 +75,23 @@ export function createEdgeProfilePlotStage(root: TgpuRoot, presentationFormat: G
       const c1 = slot1.count
 
       let discardStroke = d.u32(0)
-      if (line.valid === d.u32(0) || c0 === d.u32(0) || c1 === d.u32(0)) {
+      if (line.valid === d.u32(0) || (c0 === d.u32(0) && c1 === d.u32(0))) {
         discardStroke = d.u32(1)
       }
 
-      const y0 = plotBindLayout.$.profileAvg[bucketIdx0F]!
-      const y1 = plotBindLayout.$.profileAvg[bucketIdx1F]!
+      let y0 = plotBindLayout.$.profileAvg[bucketIdx0F]!
+      let y1 = plotBindLayout.$.profileAvg[bucketIdx1F]!
+      if (c0 === d.u32(0)) {
+        y0 = y1
+      }
+      if (c1 === d.u32(0)) {
+        y1 = y0
+      }
 
       const span = d.f32(2) * d.f32(PROFILE_NEIGHBORHOOD_HALF)
       const bF = d.f32(b)
-      const s0 = -d.f32(PROFILE_NEIGHBORHOOD_HALF) + (bF + 0.5) / PLOT_BUCKET_COUNT * span
-      const s1 = -d.f32(PROFILE_NEIGHBORHOOD_HALF) + (bF + 1.5) / PLOT_BUCKET_COUNT * span
+      const s0 = -d.f32(PROFILE_NEIGHBORHOOD_HALF) + ((bF + 0.5) / PLOT_BUCKET_COUNT) * span
+      const s1 = -d.f32(PROFILE_NEIGHBORHOOD_HALF) + ((bF + 1.5) / PLOT_BUCKET_COUNT) * span
       const xNdc0 = -inset + ((s0 + d.f32(PROFILE_NEIGHBORHOOD_HALF)) / span) * d.f32(2) * inset
       const yNdc0 = -inset + y0 * d.f32(2) * inset
       const xNdc1 = -inset + ((s1 + d.f32(PROFILE_NEIGHBORHOOD_HALF)) / span) * d.f32(2) * inset
@@ -153,9 +159,7 @@ export function createEdgeProfilePlotStage(root: TgpuRoot, presentationFormat: G
       primitive: { topology: 'triangle-list' },
       multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
     })
-    .withIndexBuffer(
-      root.createBuffer(arrayOf(u16, plotTriangleIndexU16.length), plotTriangleIndexU16).$usage('index'),
-    )
+    .withIndexBuffer(root.createBuffer(arrayOf(u16, plotTriangleIndexU16.length), plotTriangleIndexU16).$usage('index'))
 
   const indexCount = plotTriangleIndexU16.length
 
