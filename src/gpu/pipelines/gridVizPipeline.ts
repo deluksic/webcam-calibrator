@@ -170,18 +170,32 @@ export function createGridVizPipeline(
     in: {
       uv: d.vec2f,
       failureCode: d.interpolate('flat', d.u32),
+      decodedTagId: d.interpolate('flat', d.u32),
     },
     out: d.vec4f,
-  })(({ uv, failureCode }) => {
-    'use gpu'
-    const du = abs(uv.x - d.f32(0.5))
-    const dv = abs(uv.y - d.f32(0.5))
-    const inCenter = du < d.f32(0.18) && dv < d.f32(0.18)
-    if (inCenter) {
-      const tint = gridVizFailureTintRgb(failureCode)
-      return d.vec4f(tint, 1)
+  })(({ uv, failureCode, decodedTagId }) => {
+    const ddx = dpdx(uv)
+    const ddy = dpdy(uv)
+    const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS)
+    const a = 0.2 + 0.75 * grid
+
+    if (failureCode === d.u32(0) && decodedTagId === d.u32(0xfffffffe)) {
+      const amber = d.vec3f(0.92, 0.62, 0.18)
+      return d.vec4f(mul(amber, d.vec3f(0.5, 0.5, 0.5)), 0.32 + 0.68 * grid)
     }
-    return d.vec4f(uv, 0, 0.72)
+
+    if (failureCode === d.u32(0) && decodedTagId !== d.u32(0xffffffff)) {
+      const rgb = stableHashToRgb01(decodedTagId)
+      const fill = mul(rgb, d.vec3f(0.55, 0.55, 0.55))
+      return d.vec4f(fill, 0.28 + 0.72 * grid)
+    }
+
+    if (failureCode === d.u32(0)) {
+      return d.vec4f(0, 0, 0, grid)
+    }
+
+    const tint = gridVizFailureTintRgb(failureCode)
+    return d.vec4f(mul(tint, d.vec3f(0.32 + 0.68 * grid)), a)
   })
 
   return root.createRenderPipeline({
