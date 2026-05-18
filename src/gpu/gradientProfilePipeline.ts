@@ -1,4 +1,5 @@
 import type { TgpuRoot } from 'typegpu'
+import { d } from 'typegpu'
 
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { createCompactLabelStage } from '@/gpu/pipelines/compactLabelPipeline'
@@ -23,6 +24,7 @@ import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
 import { createGridVizStage } from '@/gpu/pipelines/gridVizPipeline'
 import { createQuadCornerHomographyStage } from '@/gpu/pipelines/quadCornerHomographyPipeline'
+import { createTagDecodeStage, createTagHistogramDisplayStage, TAG_HIST_CANVAS_W, TAG_HIST_CANVAS_H } from '@/gpu/pipelines/tagDecodePipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
 
 export type GradientProfileDisplayMode =
@@ -48,6 +50,7 @@ export function createGradientProfilePipeline(
   orientHistCanvas: HTMLCanvasElement | undefined,
   profileCanvas: HTMLCanvasElement,
   histCanvas: HTMLCanvasElement | undefined,
+  tagHistCanvas: HTMLCanvasElement | undefined,
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
@@ -89,6 +92,7 @@ export function createGradientProfilePipeline(
     edgeHistogram.quadCount,
   )
   const grid = createGridVizStage(root, width, height, presentationFormat)
+  const grayTexView = ingest.grayTex.createView(d.texture2d(d.f32))
   const quadHomography = createQuadCornerHomographyStage(root, {
     lineOut: lineFit.lineOut,
     quadPeakEdge: edgeHistogram.quadPeakEdge,
@@ -96,6 +100,18 @@ export function createGradientProfilePipeline(
     quadCount: edgeHistogram.quadCount,
     quadDataBuffer: grid.quadCornersBuffer,
   })
+  const tagDecode = createTagDecodeStage(root, {
+    grayTexView,
+    quadDataBuffer: grid.quadCornersBuffer,
+    width,
+    height,
+  })
+  const tagHistContext = tagHistCanvas
+    ? root.configureContext({ canvas: tagHistCanvas, alphaMode: 'premultiplied' })
+    : undefined
+  const tagHistogramDisplay = tagHistContext
+    ? createTagHistogramDisplayStage(root, tagDecode.histBuf, presentationFormat)
+    : undefined
   const profile = createEdgeProfileStage(
     root,
     width,
@@ -194,8 +210,11 @@ export function createGradientProfilePipeline(
     compact,
     edgeHistogram,
     orientHistViz,
+    tagHistContext,
+    tagHistogramDisplay,
     lineFit,
     quadHomography,
+    tagDecode,
     grid,
     profile,
     profilePlot,

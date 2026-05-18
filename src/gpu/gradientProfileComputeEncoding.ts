@@ -1,5 +1,6 @@
 import type { TgpuRoot } from 'typegpu'
 
+import { MAX_INSTANCES } from '@/gpu/pipelines/gridVizPipeline'
 import type { GradientProfilePipeline } from './gradientProfilePipeline'
 
 /**
@@ -32,4 +33,11 @@ export function encodeGradientProfileCompute(
   pipeline.quadHomography.encodeCompute(computePass)
   pipeline.profile.encodeCompute(computePass)
   computePass.end()
+
+  // Tag decode: render pass fills quads → fragment shader accumulates votes → compute pass decodes
+  pipeline.tagDecode.encodeVotes(enc, MAX_INSTANCES)
+
+  const decodePass = enc.beginComputePass({ label: 'tag decode' })
+  pipeline.tagDecode.encodeDecode(decodePass)
+  decodePass.end()
 }

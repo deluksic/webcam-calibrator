@@ -61,6 +61,7 @@ export function updateQuadCornersBuffer(
         intersectionCount: debug ? debug.intersectionCount : 0,
       },
       decodedTagId: d.u32(gridTagU32),
+      decodedRotation: d.u32(0),
     })
   }
 
@@ -80,6 +81,7 @@ export function updateQuadCornersBuffer(
         intersectionCount: 0,
       },
       decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
+      decodedRotation: d.u32(0),
     })
   }
 

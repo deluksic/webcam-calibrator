@@ -67,6 +67,7 @@ function createQuadCornerHomographyPipeline(
       screenCorners: deadScreen,
       debug: emptyDebug,
       decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
+      decodedRotation: d.u32(0),
     })
 
     if (quadId >= nQuads) {
@@ -97,6 +98,7 @@ function createQuadCornerHomographyPipeline(
             intersectionCount: d.f32(0),
           }),
           decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
+          decodedRotation: d.u32(0),
         })
         return
       }
@@ -113,6 +115,7 @@ function createQuadCornerHomographyPipeline(
             intersectionCount: d.f32(0),
           }),
           decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
+          decodedRotation: d.u32(0),
         })
         return
       }
@@ -133,6 +136,7 @@ function createQuadCornerHomographyPipeline(
         intersectionCount: d.f32(solved.intersectionCount),
       }),
       decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
+      decodedRotation: d.u32(0),
     })
   })
 

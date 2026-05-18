@@ -32,6 +32,8 @@ export const QuadDataGpu = d.struct({
   debug: QuadDebug,
   /** `0xFFFFFFFF` = unknown — solid black (no hash). Same convention as CPU. */
   decodedTagId: d.u32,
+  /** Clockwise quarter-turns from canonical orientation (0-3). */
+  decodedRotation: d.u32,
 })
 
 export type QuadData = d.Infer<typeof QuadDataGpu>
@@ -174,28 +176,16 @@ export function createGridVizPipeline(
     },
     out: d.vec4f,
   })(({ uv, failureCode, decodedTagId }) => {
-    const ddx = dpdx(uv)
-    const ddy = dpdy(uv)
-    const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS)
-    const a = 0.2 + 0.75 * grid
-
-    if (failureCode === d.u32(0) && decodedTagId === d.u32(0xfffffffe)) {
-      const amber = d.vec3f(0.92, 0.62, 0.18)
-      return d.vec4f(mul(amber, d.vec3f(0.5, 0.5, 0.5)), 0.32 + 0.68 * grid)
-    }
-
-    if (failureCode === d.u32(0) && decodedTagId !== d.u32(0xffffffff)) {
+    'use gpu'
+    if (decodedTagId !== d.u32(DECODED_TAG_ID_UNKNOWN)) {
+      if (decodedTagId === d.u32(DECODED_TAG_ID_DICT_MISS)) {
+        return d.vec4f(0.55, 0.55, 0.6, 0.72)
+      }
       const rgb = stableHashToRgb01(decodedTagId)
-      const fill = mul(rgb, d.vec3f(0.55, 0.55, 0.55))
-      return d.vec4f(fill, 0.28 + 0.72 * grid)
+      return d.vec4f(rgb, 0.78)
     }
-
-    if (failureCode === d.u32(0)) {
-      return d.vec4f(0, 0, 0, grid)
-    }
-
-    const tint = gridVizFailureTintRgb(failureCode)
-    return d.vec4f(mul(tint, d.vec3f(0.32 + 0.68 * grid)), a)
+    // DEBUG: unknown → bright red
+    return d.vec4f(1, 0, 0, 1)
   })
 
   return root.createRenderPipeline({
