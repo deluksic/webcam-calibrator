@@ -28,3 +28,12 @@ export const TLS_REF_COS_MAX_ANGLE = 0.85
 export const MIN_QUAD_VALID_EDGES = MAX_EDGES_PER_LABEL
 /** Min TLS inliers for a side to count toward quad registration. */
 export const MIN_QUAD_EDGE_INLIERS = 12
+
+/** Line intersection: |det| below this → parallel (geometric only, not a shape prior). */
+export const LINE_INTERSECT_DET_EPS = 1e-10
+/** Homography DLT pivot floor — looser than CPU `1e-10` so f32 Gaussian elimination does not spuriously fail. */
+export const HOMOGRAPHY_PIVOT_EPS = 1e-5
+/** Min edge length (px) for corner quad degeneracy check. */
+export const QUAD_MIN_EDGE_PX = 2
+/** Signed-area floor scale: reject if |area| < this × scale² (scale = max corner |coord|). */
+export const QUAD_MIN_SIGNED_AREA_REL = 1e-4

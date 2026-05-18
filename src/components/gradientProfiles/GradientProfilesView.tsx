@@ -101,6 +101,13 @@ export function GradientProfilesView() {
                   </button>
                   <button
                     type="button"
+                    class={displayMode() === 'quadGrid' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
+                    onClick={() => setDisplayMode('quadGrid')}
+                  >
+                    Quad grid
+                  </button>
+                  <button
+                    type="button"
                     class={
                       displayMode() === 'lineFitDebug' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
                     }

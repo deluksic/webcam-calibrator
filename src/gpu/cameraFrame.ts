@@ -17,9 +17,10 @@ import type { CameraPipeline } from './cameraPipeline'
 
 const { min } = Math
 
-/** Write homography matrix (mat3x3) + debug data per quad to the GPU buffer.
- * H maps unit square → detected quad. Vertex shader applies: (x,y,z) = H * (u,v,1).
- * H is column-major mat3x3f: [c0.x, c0.y, c0.z, 0, c1..., c2...]
+/** Write homography + screen corners + debug per quad to the GPU buffer.
+ * `homography` maps the unit square → image (for future use). **Grid overlay** uses `screenCorners`
+ * only: TL, TR, BL, BR in pixels, triangle-strip order — so the drawn quad matches line intersections
+ * even when `homography` is invalid.
  */
 export function updateQuadCornersBuffer(
   pipeline: CameraPipeline,
@@ -47,6 +48,12 @@ export function updateQuadCornersBuffer(
       homography: H
         ? d.mat3x3f(H[0], H[3], H[6], H[1], H[4], H[7], H[2], H[5], H[8])
         : d.mat3x3f(0, 0, 0, 0, 0, 0, 0, 0, 1),
+      screenCorners: [
+        d.vec2f(quad.corners[0].x, quad.corners[0].y),
+        d.vec2f(quad.corners[1].x, quad.corners[1].y),
+        d.vec2f(quad.corners[2].x, quad.corners[2].y),
+        d.vec2f(quad.corners[3].x, quad.corners[3].y),
+      ],
       debug: {
         failureCode: debug ? debug.failureCode : 0,
         edgePixelCount: debug ? debug.edgePixelCount / 100 : 0,
@@ -60,6 +67,12 @@ export function updateQuadCornersBuffer(
   for (let i = count; i < MAX_INSTANCES; i++) {
     data.push({
       homography: d.mat3x3f(0, 0, 0, 0, 0, 0, 0, 0, 1),
+      screenCorners: [
+        d.vec2f(0, 0),
+        d.vec2f(0, 0),
+        d.vec2f(0, 0),
+        d.vec2f(0, 0),
+      ],
       debug: {
         failureCode: 0,
         edgePixelCount: 0,

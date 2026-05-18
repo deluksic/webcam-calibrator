@@ -21,6 +21,8 @@ import { createOrientHistVizStage } from '@/gpu/pipelines/orientHistVizPipeline'
 import { createPointerJumpLabeling } from '@/gpu/pipelines/pointerJumpPipeline'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
+import { createGridVizStage } from '@/gpu/pipelines/gridVizPipeline'
+import { createQuadCornerHomographyStage } from '@/gpu/pipelines/quadCornerHomographyPipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
 
 export type GradientProfileDisplayMode =
@@ -32,6 +34,7 @@ export type GradientProfileDisplayMode =
   | 'grayscale'
   | 'fittedLines'
   | 'lineFitDebug'
+  | 'quadGrid'
 
 export type GradientProfileNonGridDisplayMode = GradientProfileDisplayMode
 
@@ -85,6 +88,14 @@ export function createGradientProfilePipeline(
     edgeHistogram.quadSourceLabelId,
     edgeHistogram.quadCount,
   )
+  const grid = createGridVizStage(root, width, height, presentationFormat)
+  const quadHomography = createQuadCornerHomographyStage(root, {
+    lineOut: lineFit.lineOut,
+    quadPeakEdge: edgeHistogram.quadPeakEdge,
+    quadSourceLabelId: edgeHistogram.quadSourceLabelId,
+    quadCount: edgeHistogram.quadCount,
+    quadDataBuffer: grid.quadCornersBuffer,
+  })
   const profile = createEdgeProfileStage(
     root,
     width,
@@ -184,6 +195,8 @@ export function createGradientProfilePipeline(
     edgeHistogram,
     orientHistViz,
     lineFit,
+    quadHomography,
+    grid,
     profile,
     profilePlot,
     plotBindGroup,

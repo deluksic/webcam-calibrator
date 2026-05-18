@@ -11,6 +11,7 @@ export function encodeGradientProfileCameraPresent(
   pipeline: GradientProfilePipeline,
   displayMode: GradientProfileNonGridDisplayMode,
   timeSec: number,
+  quadGridInstanceCount: number = 0,
 ): void {
   pipeline.grayRenderParamsBuffer.write({
     timeSec,
@@ -18,7 +19,16 @@ export function encodeGradientProfileCameraPresent(
   })
   const mainAttachment: ColorAttachment = { view: pipeline.cameraContext }
 
-  if (displayMode === 'fittedLines') {
+  if (displayMode === 'quadGrid') {
+    pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
+    // Composite grid on top of grayscale (default loadOp would clear the canvas).
+    const gridAttachment: ColorAttachment = {
+      view: pipeline.cameraContext,
+      loadOp: 'load',
+      storeOp: 'store',
+    }
+    pipeline.grid.encodeToCanvas(enc, gridAttachment, quadGridInstanceCount)
+  } else if (displayMode === 'fittedLines') {
     pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
     pipeline.render.fittedLines.encodeOverlay(enc, mainAttachment)
   } else if (displayMode === 'lineFitDebug') {

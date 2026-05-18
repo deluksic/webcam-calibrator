@@ -39,6 +39,7 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
   const [profileCanvas, setProfileCanvas] = createSignal<HTMLCanvasElement>()
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement>()
   const [threshold, setThreshold] = createSignal(0, { ownedWrite: true })
+  let lastQuadCount = 0
 
   const videoElement = createMemo(async () => {
     const canvas = cameraCanvas()
@@ -149,7 +150,14 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         if (!props.frozen) {
           encodeGradientProfileCompute(enc, gNow, pip, video, threshold())
         }
-        encodeGradientProfileCameraPresent(enc, gNow, pip, props.displayMode, performance.now() * 0.001)
+        encodeGradientProfileCameraPresent(
+          enc,
+          gNow,
+          pip,
+          props.displayMode,
+          performance.now() * 0.001,
+          lastQuadCount,
+        )
         if (pip.orientHistViz) {
           encodeOrientHistPresent(enc, pip)
         }
@@ -166,6 +174,12 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
           if (!disposed) {
             const n = Array.isArray(v) ? (v[0] ?? 0) : Number(v)
             props.onValidEdgeCount?.(n)
+          }
+        })
+
+        void pip.edgeHistogram.quadCount.read().then((v) => {
+          if (!disposed) {
+            lastQuadCount = Array.isArray(v) ? (v[0] ?? 0) : Number(v)
           }
         })
 

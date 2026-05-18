@@ -29,6 +29,7 @@ export function encodeGradientProfileCompute(
   pipeline.lineFitDebug.encodeCompute(computePass)
   pipeline.orientHistViz?.encodePackCompute(computePass)
   pipeline.lineFit.encodeCompute(computePass)
+  pipeline.quadHomography.encodeCompute(computePass)
   pipeline.profile.encodeCompute(computePass)
   computePass.end()
 }
