@@ -31,11 +31,10 @@ export function encodeGradientProfileCameraPresent(
   } else if (displayMode === 'fittedLines') {
     pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
     pipeline.render.fittedLines.encodeOverlay(enc, mainAttachment)
-  } else if (displayMode === 'lineFitDebug') {
+  } else if (displayMode === 'lineRejects') {
     pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 0.35 })
     pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
-    pipeline.lineFitDebug.encodeToCanvas(enc, mainAttachment)
-    pipeline.render.fittedLines.encodeOverlay(enc, mainAttachment)
+    pipeline.lineRejects.encodeToCanvas(enc, mainAttachment)
   } else if (displayMode === 'edges') {
     pipeline.render.sobel.encodeToCanvas(enc, mainAttachment)
   } else if (displayMode === 'nms') {
@@ -50,6 +49,13 @@ export function encodeGradientProfileCameraPresent(
       quadLabelBuffer: pipeline.edgeHistogram.quadLabelBuffer,
     })
     pipeline.render.quadsLabelViz.encodeToCanvas(enc, mainAttachment, quadsBindGroup)
+  } else if (displayMode === 'quadReject') {
+    const quadRejectBindGroup = root.createBindGroup(pipeline.render.quadRejectViz.layout, {
+      compactLabels: pipeline.compact.compactLabelBuffer,
+      labelToQuadId: pipeline.edgeHistogram.labelToQuadId,
+      labelQuadReject: pipeline.edgeHistogram.labelQuadReject,
+    })
+    pipeline.render.quadRejectViz.encodeToCanvas(enc, mainAttachment, quadRejectBindGroup)
   } else if (displayMode === 'edgeLabels') {
     const labelVizBindGroup = root.createBindGroup(pipeline.render.labelViz.layout, {
       labelBuffer: pipeline.edgeHistogram.packedEdgeLabels,

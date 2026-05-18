@@ -437,7 +437,7 @@ function createModuleVoteStage(
       const mx = d.u32(floor(uv.x * d.f32(TAG_MODULES)))
       const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
       if (mx >= d.u32(1) && mx <= d.u32(6) && my >= d.u32(1) && my <= d.u32(6)) {
-        const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
+    const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
         const bufIdx = quadId * d.u32(MODULES_PER_QUAD) + cellIdx
         atomicAdd(layout.$.moduleWhite[bufIdx]!, d.u32(1))
       }
@@ -462,16 +462,16 @@ function createModuleVoteStage(
 
   return {
     encodeModuleVotes(enc: GPUCommandEncoder, instanceCount: number) {
-      if (instanceCount < 1) return
-      const pass = enc.beginRenderPass({
+    if (instanceCount < 1) return
+    const pass = enc.beginRenderPass({
         label: 'tag module votes',
-        colorAttachments: [
-          { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
-        ],
-      })
-      pass.setViewport(0, 0, width, height, 0, 1)
+      colorAttachments: [
+        { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
+      ],
+    })
+    pass.setViewport(0, 0, width, height, 0, 1)
       pipeline.with(pass).with(bindGroup).draw(4, instanceCount)
-      pass.end()
+    pass.end()
     },
   }
 }
@@ -905,7 +905,7 @@ function createTagHistogramRenderPipeline(root: TgpuRoot, presentationFormat: GP
         const prev = tagHistLayout.$.histogram[base + bu - d.u32(1)]!
         const next = tagHistLayout.$.histogram[base + bu + d.u32(1)]!
         if (v >= prev && v >= next && v > whiteVal) {
-          whiteVal = v
+        whiteVal = v
           whitePeak = bu
         }
       }

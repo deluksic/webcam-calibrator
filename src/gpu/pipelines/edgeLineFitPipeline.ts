@@ -14,7 +14,7 @@ import type { LabelLineOutBuffer } from '@/gpu/pipelines/labelLineFitPipeline'
 
 const WORKGROUP_SIZE = 16
 
-export const EDGE_MIN_SPAN_PX = 8
+export const EDGE_MIN_SPAN_PX = 6
 export const PROFILE_BUCKET_COUNT = 64
 export const PROFILE_NEIGHBORHOOD_HALF = 2.5
 

@@ -17,7 +17,11 @@ import { createFilteredRenderPipeline } from '@/gpu/pipelines/filteredRenderPipe
 import { createGrayStage } from '@/gpu/pipelines/grayPipeline'
 import { createGrayRenderPipeline, GrayRenderParams } from '@/gpu/pipelines/grayRenderPipeline'
 import { createHistogramStage, HIST_HEIGHT, HIST_WIDTH } from '@/gpu/pipelines/histogramPipelines'
-import { createLabelVizPipeline, createQuadsLabelVizPipeline } from '@/gpu/pipelines/labelVizPipeline'
+import {
+  createLabelVizPipeline,
+  createQuadRejectVizPipeline,
+  createQuadsLabelVizPipeline,
+} from '@/gpu/pipelines/labelVizPipeline'
 import { createOrientHistVizStage } from '@/gpu/pipelines/orientHistVizPipeline'
 import { createPointerJumpLabeling } from '@/gpu/pipelines/pointerJumpPipeline'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
@@ -33,11 +37,12 @@ export type GradientProfileDisplayMode =
   | 'nms'
   | 'labels'
   | 'quads'
+  | 'quadReject'
   | 'edgeLabels'
   | 'grayscale'
   | 'undistort'
   | 'fittedLines'
-  | 'lineFitDebug'
+  | 'lineRejects'
   | 'quadGrid'
 
 export type GradientProfileNonGridDisplayMode = GradientProfileDisplayMode
@@ -133,6 +138,7 @@ export function createGradientProfilePipeline(
   })
   const labelViz = createLabelVizPipeline(root, width, height, presentationFormat)
   const quadsLabelViz = createQuadsLabelVizPipeline(root, width, height, presentationFormat)
+  const quadRejectViz = createQuadRejectVizPipeline(root, width, height, presentationFormat)
   const grayscale = createGrayRenderPipeline(root, width, height, presentationFormat, {
     grayBuffer: gray.buffer,
     params: grayRenderParamsBuffer,
@@ -157,7 +163,7 @@ export function createGradientProfilePipeline(
     edgeHistogram.quadPeakEdge,
     fittedLineInstances,
   )
-  const lineFitDebug = createLineFitDebugStage(
+  const lineRejects = createLineFitDebugStage(
     root,
     width,
     height,
@@ -167,8 +173,6 @@ export function createGradientProfilePipeline(
     edgeHistogram.labelClusters,
     edgeHistogram.labelLineReduce,
     edgeHistogram.labelLineOut,
-    edgeHistogram.labelToQuadId,
-    edgeHistogram.packedEdgeLabels,
   )
 
   const orientHistContext = orientHistCanvas
@@ -225,7 +229,7 @@ export function createGradientProfilePipeline(
     profilePlot,
     plotBindGroup,
     validEdgeCount: lineFit.validEdgeCount,
-    lineFitDebug,
+    lineRejects,
     resizeProfileTargets,
     get msaaColorTex() {
       return msaaColorTex
@@ -235,6 +239,7 @@ export function createGradientProfilePipeline(
       edges,
       labelViz,
       quadsLabelViz,
+      quadRejectViz,
       grayscale,
       sobel: sobelRender,
       filtered,

@@ -7,7 +7,6 @@ import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import {
   MAX_EDGES_PER_LABEL,
   MIN_PEAK_BIN_SEPARATION,
-  MIN_QUAD_EDGE_INLIERS,
   MIN_QUAD_VALID_EDGES,
   ORIENT_PEAK_MIN_COUNT,
 } from '@/gpu/lineFitThresholds'
@@ -15,6 +14,7 @@ import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline
 import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { createLabelLineFitStage } from '@/gpu/pipelines/labelLineFitPipeline'
+import { LabelQuadRejectCode } from '@/gpu/labelQuadReject'
 import {
   assignPeakEdgeId,
   circularBinDist,
@@ -29,7 +29,6 @@ const WORKGROUP_SIZE = 16
 export { MAX_EDGES_PER_LABEL, ORIENT_HIST_BINS, ORIENT_ASSIGN_MAX_BIN_DIST } from '@/gpu/shaders/orientPeakAssign'
 export {
   MIN_PEAK_BIN_SEPARATION,
-  MIN_QUAD_EDGE_INLIERS,
   MIN_QUAD_VALID_EDGES,
   ORIENT_PEAK_MIN_COUNT,
 } from '@/gpu/lineFitThresholds'
@@ -54,6 +53,7 @@ export const LabelOrientClusterReadonly = d.struct({
 function createEdgeHistogramClusterLayouts() {
   const histResetLayout = tgpu.bindGroupLayout({
     labelClusters: { storage: d.arrayOf(LabelOrientCluster), access: 'mutable' },
+    labelQuadReject: { storage: d.arrayOf(d.u32), access: 'mutable' },
     quadCount: { storage: d.arrayOf(d.atomic(d.u32), 1), access: 'mutable' },
   })
   const histAccumLayout = tgpu.bindGroupLayout({
@@ -67,6 +67,7 @@ function createEdgeHistogramClusterLayouts() {
   const compactQuadsLayout = tgpu.bindGroupLayout({
     labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
     labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
+    labelQuadReject: { storage: d.arrayOf(d.u32), access: 'mutable' },
     quadPeakEdge: { storage: d.arrayOf(d.u32), access: 'mutable' },
     labelToQuadId: { storage: d.arrayOf(d.u32), access: 'mutable' },
     quadSourceLabelId: { storage: d.arrayOf(d.u32), access: 'mutable' },
@@ -118,6 +119,7 @@ function createHistResetPipeline(
       slot.peakDirs[d.u32(k)] = d.vec2f(0, 0)
     }
     slot.peakCount = d.u32(0)
+    layout.$.labelQuadReject[labelId] = d.u32(LabelQuadRejectCode.registered)
     if (labelId === d.u32(0)) {
       atomicStore(layout.$.quadCount[d.u32(0)]!, d.u32(0))
     }
@@ -262,13 +264,18 @@ function createCompactQuadsPipeline(
       if (q < peakCount) {
         const slot = labelId * d.u32(MAX_EDGES_PER_LABEL) + q
         const line = layout.$.labelLineOut[slot]!
-        if (line.valid !== d.u32(0) && line.inlierCount >= d.u32(MIN_QUAD_EDGE_INLIERS)) {
+        if (line.valid !== d.u32(0)) {
           validSides = validSides + d.u32(1)
         }
       }
     }
 
-    if (peakCount !== d.u32(MAX_EDGES_PER_LABEL) || validSides !== d.u32(MIN_QUAD_VALID_EDGES)) {
+    if (peakCount !== d.u32(MAX_EDGES_PER_LABEL)) {
+      layout.$.labelQuadReject[labelId] = d.u32(LabelQuadRejectCode.peaks)
+      return
+    }
+    if (validSides !== d.u32(MIN_QUAD_VALID_EDGES)) {
+      layout.$.labelQuadReject[labelId] = d.u32(LabelQuadRejectCode.lineFit)
       return
     }
 
@@ -286,6 +293,7 @@ function createCompactQuadsPipeline(
           }
         }
         if (farOthers < d.u32(3)) {
+          layout.$.labelQuadReject[labelId] = d.u32(LabelQuadRejectCode.parallel)
           return
         }
       }
@@ -293,6 +301,7 @@ function createCompactQuadsPipeline(
 
     const quadId = atomicAdd(layout.$.quadCount[d.u32(0)]!, d.u32(1))
     if (quadId >= MAX_QUADS) {
+      layout.$.labelQuadReject[labelId] = d.u32(LabelQuadRejectCode.cap)
       return
     }
 
@@ -304,13 +313,14 @@ function createCompactQuadsPipeline(
       if (q < peakCount) {
         const slot = labelId * d.u32(MAX_EDGES_PER_LABEL) + q
         const line = layout.$.labelLineOut[slot]!
-        if (line.valid !== d.u32(0) && line.inlierCount >= d.u32(MIN_QUAD_EDGE_INLIERS)) {
+        if (line.valid !== d.u32(0)) {
           layout.$.quadPeakEdge[quadBase + q] = q
         }
       }
     }
     layout.$.labelToQuadId[labelId] = quadId
     layout.$.quadSourceLabelId[quadId] = labelId
+    layout.$.labelQuadReject[labelId] = d.u32(LabelQuadRejectCode.registered)
   })
 
   return root.createComputePipeline({ compute: kernel })
@@ -382,20 +392,19 @@ function createAssignEdgesPipeline(
       return
     }
 
-    const quadId = layout.$.labelToQuadId[labelId]!
-    if (quadId === d.u32(COMPONENT_LABEL_INVALID)) {
+    const cluster = layout.$.labelClusters[labelId]!
+    if (cluster.peakCount === d.u32(0)) {
       layout.$.packedEdgeLabels[idx] = d.u32(COMPONENT_LABEL_INVALID)
       return
     }
 
-    const cluster = layout.$.labelClusters[labelId]!
     const edgeId = assignPeakEdgeId(cluster.peakCount, cluster.peakBins, cluster.peakDirs, g, maxBinDist)
     if (edgeId === d.u32(COMPONENT_LABEL_INVALID)) {
       layout.$.packedEdgeLabels[idx] = d.u32(COMPONENT_LABEL_INVALID)
       return
     }
 
-    layout.$.packedEdgeLabels[idx] = quadId * d.u32(MAX_EDGES_PER_LABEL) + edgeId
+    layout.$.packedEdgeLabels[idx] = labelId * d.u32(MAX_EDGES_PER_LABEL) + edgeId
   })
   return root.createComputePipeline({ compute: kernel })
 }
@@ -412,6 +421,7 @@ export function createEdgeHistogramClusterStage(
   const labelClusters = root.createBuffer(d.arrayOf(LabelOrientCluster, maxComponents)).$usage('storage')
   const packedEdgeLabels = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
   const labelToQuadId = root.createBuffer(d.arrayOf(d.u32, maxComponents)).$usage('storage')
+  const labelQuadReject = root.createBuffer(d.arrayOf(d.u32, maxComponents)).$usage('storage')
   const quadPeakEdge = root.createBuffer(d.arrayOf(d.u32, MAX_QUADS * MAX_EDGES_PER_LABEL)).$usage('storage')
   const quadSourceLabelId = root.createBuffer(d.arrayOf(d.u32, MAX_QUADS)).$usage('storage')
   const quadCount = root.createBuffer(d.arrayOf(d.atomic(d.u32), 1)).$usage('storage')
@@ -440,6 +450,7 @@ export function createEdgeHistogramClusterStage(
 
   const histResetBindGroup = root.createBindGroup(layouts.histResetLayout, {
     labelClusters,
+    labelQuadReject,
     quadCount,
   })
   const histAccumBindGroup = root.createBindGroup(layouts.histAccumLayout, {
@@ -451,6 +462,7 @@ export function createEdgeHistogramClusterStage(
   const compactQuadsBindGroup = root.createBindGroup(layouts.compactQuadsLayout, {
     labelClusters,
     labelLineOut: labelLineFit.labelLineOut,
+    labelQuadReject,
     quadPeakEdge,
     labelToQuadId,
     quadSourceLabelId,
@@ -489,6 +501,7 @@ export function createEdgeHistogramClusterStage(
     labelLineReduce: labelLineFit.labelLineReduce,
     quadPeakEdge,
     labelToQuadId,
+    labelQuadReject,
     quadSourceLabelId,
     quadCount,
     quadLabelBuffer,
@@ -503,6 +516,7 @@ export type PackedEdgeLabelBuffer = ReturnType<typeof createEdgeHistogramCluster
 export type LabelOrientClusterBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['labelClusters']
 export type QuadPeakEdgeBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['quadPeakEdge']
 export type LabelToQuadIdBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['labelToQuadId']
+export type LabelQuadRejectBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['labelQuadReject']
 export type QuadSourceLabelIdBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['quadSourceLabelId']
 export type QuadCountBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['quadCount']
 export type QuadLabelMapBuffer = ReturnType<typeof createEdgeHistogramClusterStage>['quadLabelBuffer']

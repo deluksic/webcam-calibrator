@@ -108,6 +108,8 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
 
     let disposed = false
     let frameLoop: ReturnType<typeof createFrameLoop> | undefined
+    /** While paused, only recompute when display mode changes (labeling uses non-deterministic atomics). */
+    let lastFrozenComputeMode: GradientProfileDisplayMode | undefined
 
     onCleanup(() => {
       disposed = true
@@ -155,11 +157,15 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         }
 
         const enc = gNow.device.createCommandEncoder({ label: 'gradient profiles frame' })
-        if (!props.frozen) {
+        const mode = props.displayMode
+        const shouldRunCompute = !props.frozen || lastFrozenComputeMode !== mode
+        if (shouldRunCompute) {
           encodeGradientProfileCompute(enc, gNow, pip, video, threshold(), {
             quadCount: lastQuadCount,
-            displayMode: props.displayMode,
+            displayMode: mode,
+            skipIngest: props.frozen,
           })
+          lastFrozenComputeMode = props.frozen ? mode : undefined
         }
         if (props.displayMode === 'undistort') {
           const ud = props.undistortParams?.()

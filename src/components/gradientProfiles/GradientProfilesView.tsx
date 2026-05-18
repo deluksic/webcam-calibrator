@@ -5,7 +5,8 @@ import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
 import { GradientProfilesPipeline } from '@/components/gradientProfiles/GradientProfilesPipeline'
 import type { GradientProfileDisplayMode } from '@/gpu/gradientProfilePipeline'
-import { LINE_FIT_DEBUG_LEGEND } from '@/gpu/pipelines/lineFitDebugPipeline'
+import { LABEL_QUAD_REJECT_LEGEND } from '@/gpu/labelQuadReject'
+import { LINE_REJECT_LEGEND } from '@/gpu/pipelines/lineFitDebugPipeline'
 
 import pipelineStyles from '@/components/camera/LiveCameraPipeline.module.css'
 import styles from '@/components/gradientProfiles/GradientProfilesView.module.css'
@@ -102,6 +103,16 @@ export function GradientProfilesView() {
                   </button>
                   <button
                     type="button"
+                    class={
+                      displayMode() === 'quadReject' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
+                    }
+                    onClick={() => setDisplayMode('quadReject')}
+                    title="Labels colored by quad registration outcome (reject reason or registered quad id)"
+                  >
+                    Quad reject
+                  </button>
+                  <button
+                    type="button"
                     class={displayMode() === 'edgeLabels' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
                     onClick={() => setDisplayMode('edgeLabels')}
                   >
@@ -126,20 +137,35 @@ export function GradientProfilesView() {
                   <button
                     type="button"
                     class={
-                      displayMode() === 'lineFitDebug' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
+                      displayMode() === 'lineRejects' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
                     }
-                    onClick={() => setDisplayMode('lineFitDebug')}
+                    onClick={() => setDisplayMode('lineRejects')}
                   >
-                    Line debug
+                    Line rejects
                   </button>
                 </div>
               </div>
             }
           />
           <p class={styles.status}>Valid edges (span ≥ 6px): {validEdgeCount()}</p>
-          <Show when={displayMode() === 'lineFitDebug'}>
+          <Show when={displayMode() === 'lineRejects'}>
             <ul class={styles.debugLegend}>
-              {LINE_FIT_DEBUG_LEGEND.map((item) => (
+              {LINE_REJECT_LEGEND.map((item) => (
+                <li class={styles.debugLegendItem}>
+                  <span class={styles.debugSwatch} style={{ background: item.color }} />
+                  {item.label}
+                </li>
+              ))}
+            </ul>
+          </Show>
+          <Show when={displayMode() === 'quadReject'}>
+            <p class={styles.status}>Registered quads are subdued gray. Rejected labels:</p>
+            <ul class={styles.debugLegend}>
+              <li class={styles.debugLegendItem}>
+                <span class={styles.debugSwatch} style={{ background: '#38383d' }} />
+                Registered quad
+              </li>
+              {LABEL_QUAD_REJECT_LEGEND.map((item) => (
                 <li class={styles.debugLegendItem}>
                   <span class={styles.debugSwatch} style={{ background: item.color }} />
                   {item.label}

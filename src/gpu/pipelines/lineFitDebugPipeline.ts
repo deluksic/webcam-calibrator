@@ -2,17 +2,19 @@
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
-import { abs, clamp, floor, length } from 'typegpu/std'
+import { abs, clamp, floor, length, max } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
-import { LINE_INLIER_DIST_PX, LINE_MIN_SLOT_COUNT } from '@/gpu/lineFitThresholds'
+import {
+  LINE_INLIER_DIST_PX,
+  LINE_MIN_INLIER_RATIO,
+  LINE_MIN_PEAK_HIST_COUNT,
+  LINE_MIN_SLOT_COUNT,
+} from '@/gpu/lineFitThresholds'
+import { EDGE_MIN_SPAN_PX } from '@/gpu/pipelines/edgeLineFitPipeline'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
 import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
-import type {
-  LabelOrientClusterBuffer,
-  LabelToQuadIdBuffer,
-  PackedEdgeLabelBuffer,
-} from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import type { LabelOrientClusterBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { LabelOrientClusterReadonly, MAX_EDGES_PER_LABEL } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
 import type { LabelLineOutBuffer, LabelLineReduceBuffer } from '@/gpu/pipelines/labelLineFitPipeline'
@@ -30,20 +32,29 @@ export const LineFitDebugCode = {
   lineInvalid: 6,
   quadAssign: 7,
   ok: 8,
+  /** Assigned peak bin has too few histogram votes for line accum (see `LINE_MIN_PEAK_HIST_COUNT`). */
+  histGate: 9,
+  lineInvalidRatio: 10,
+  lineInvalidSpan: 11,
+  lineInvalidTls: 12,
 } as const
 
 export type LineFitDebugCodeValue = (typeof LineFitDebugCode)[keyof typeof LineFitDebugCode]
 
-export const LINE_FIT_DEBUG_LEGEND: ReadonlyArray<{ code: LineFitDebugCodeValue; label: string; color: string }> = [
+export const LINE_REJECT_LEGEND: ReadonlyArray<{ code: LineFitDebugCodeValue; label: string; color: string }> = [
+  { code: LineFitDebugCode.ok, label: 'Valid line', color: '#38383d' },
   { code: LineFitDebugCode.assign, label: 'Peak assign', color: '#ff4444' },
-  { code: LineFitDebugCode.lowSample, label: 'Low sample', color: '#ff9933' },
-  { code: LineFitDebugCode.outlier, label: 'Inlier distance', color: '#ffdd33' },
-  { code: LineFitDebugCode.lineInvalid, label: 'TLS / span / ratio', color: '#4488ff' },
-  { code: LineFitDebugCode.quadAssign, label: 'No quad', color: '#33cccc' },
-  { code: LineFitDebugCode.noPeaks, label: 'No hist peaks', color: '#aa55ff' },
-  { code: LineFitDebugCode.noLabel, label: 'No label', color: '#666666' },
-  { code: LineFitDebugCode.ok, label: 'OK', color: '#33ee66' },
+  { code: LineFitDebugCode.histGate, label: 'Hist gate', color: '#e07020' },
+  { code: LineFitDebugCode.lowSample, label: 'Slot < min px', color: '#ff9933' },
+  { code: LineFitDebugCode.lineInvalidTls, label: 'TLS / coarse', color: '#b34dff' },
+  { code: LineFitDebugCode.lineInvalidRatio, label: 'Inlier ratio', color: '#ff5544' },
+  { code: LineFitDebugCode.lineInvalidSpan, label: 'Span short', color: '#ffcc33' },
+  { code: LineFitDebugCode.outlier, label: 'Inlier dist', color: '#ffee55' },
+  { code: LineFitDebugCode.noPeaks, label: 'No peaks', color: '#aa55ff' },
 ]
+
+/** @deprecated Use {@link LINE_REJECT_LEGEND} */
+export const LINE_FIT_DEBUG_LEGEND = LINE_REJECT_LEGEND
 
 const LabelLineReduceReadonly = d.struct({
   count: d.u32,
@@ -62,8 +73,6 @@ function createDebugLayouts() {
     labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
     labelLineReduce: { storage: d.arrayOf(LabelLineReduceReadonly), access: 'readonly' },
     labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
-    labelToQuadId: { storage: d.arrayOf(d.u32), access: 'readonly' },
-    packedEdgeLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
     lineFitDebug: { storage: d.arrayOf(d.u32), access: 'mutable' },
   })
   const renderLayout = tgpu.bindGroupLayout({
@@ -83,8 +92,6 @@ export function createLineFitDebugStage(
   labelClusters: LabelOrientClusterBuffer,
   labelLineReduce: LabelLineReduceBuffer,
   labelLineOut: LabelLineOutBuffer,
-  labelToQuadId: LabelToQuadIdBuffer,
-  packedEdgeLabels: PackedEdgeLabelBuffer,
 ) {
   const area = width * height
   const lineFitDebug = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
@@ -107,8 +114,6 @@ export function createLineFitDebugStage(
     labelClusters,
     labelLineReduce,
     labelLineOut,
-    labelToQuadId,
-    packedEdgeLabels,
     lineFitDebug,
   })
   const renderBindGroup = root.createBindGroup(layouts.renderLayout, {
@@ -185,6 +190,16 @@ function createDebugAccumPipeline(
       return
     }
 
+    const peakBin = cluster.peakBins[edgeId]!
+    if (
+      peakBin === d.u32(COMPONENT_LABEL_INVALID) ||
+      cluster.orientationHistogram[peakBin]! < d.u32(LINE_MIN_PEAK_HIST_COUNT)
+    ) {
+      code = d.u32(LineFitDebugCode.histGate)
+      layout.$.lineFitDebug[idx] = code
+      return
+    }
+
     const slot = labelId * d.u32(MAX_EDGES_PER_LABEL) + edgeId
     const reduce = layout.$.labelLineReduce[slot]!
     const slotCount = reduce.count
@@ -195,29 +210,32 @@ function createDebugAccumPipeline(
     }
 
     const line = layout.$.labelLineOut[slot]!
-    if (line.valid === d.u32(0)) {
-      const nx = line.sumGx
-      const ny = line.sumGy
-      const px = d.f32(x) + d.f32(0.5)
-      const py = d.f32(y) + d.f32(0.5)
-      const s = px * nx + py * ny - line.nDotMean
-      if (abs(s) >= inlierDist) {
-        code = d.u32(LineFitDebugCode.outlier)
+    if (line.valid !== d.u32(0)) {
+      code = d.u32(LineFitDebugCode.ok)
+      layout.$.lineFitDebug[idx] = code
+      return
+    }
+
+    const nx = line.sumGx
+    const ny = line.sumGy
+    const px = d.f32(x) + d.f32(0.5)
+    const py = d.f32(y) + d.f32(0.5)
+    const s = px * nx + py * ny - line.nDotMean
+    if (abs(s) >= inlierDist) {
+      code = d.u32(LineFitDebugCode.outlier)
+    } else if (line.inlierCount === d.u32(0)) {
+      code = d.u32(LineFitDebugCode.lineInvalidTls)
+    } else {
+      const ratio = d.f32(line.inlierCount) / d.f32(max(d.u32(1), slotCount))
+      const trimSpan = line.tSampleMax - line.tSampleMin
+      if (ratio < d.f32(LINE_MIN_INLIER_RATIO)) {
+        code = d.u32(LineFitDebugCode.lineInvalidRatio)
+      } else if (trimSpan > d.f32(0) && trimSpan < d.f32(EDGE_MIN_SPAN_PX)) {
+        code = d.u32(LineFitDebugCode.lineInvalidSpan)
       } else {
-        code = d.u32(LineFitDebugCode.lineInvalid)
+        code = d.u32(LineFitDebugCode.lineInvalidTls)
       }
-      layout.$.lineFitDebug[idx] = code
-      return
     }
-
-    const packed = layout.$.packedEdgeLabels[idx]!
-    if (packed === d.u32(COMPONENT_LABEL_INVALID)) {
-      code = d.u32(LineFitDebugCode.quadAssign)
-      layout.$.lineFitDebug[idx] = code
-      return
-    }
-
-    code = d.u32(LineFitDebugCode.ok)
     layout.$.lineFitDebug[idx] = code
   })
   return root.createComputePipeline({ compute: kernel })
@@ -243,10 +261,13 @@ function createDebugRenderPipeline(
     const code = layout.$.lineFitDebug[idx]!
 
     if (code === d.u32(LineFitDebugCode.ok)) {
-      return d.vec4f(0.2, 0.93, 0.4, 0.85)
+      return d.vec4f(0.22, 0.22, 0.24, 1)
     }
     if (code === d.u32(LineFitDebugCode.assign)) {
       return d.vec4f(1, 0.27, 0.27, 0.9)
+    }
+    if (code === d.u32(LineFitDebugCode.histGate)) {
+      return d.vec4f(0.88, 0.44, 0.13, 0.92)
     }
     if (code === d.u32(LineFitDebugCode.lowSample)) {
       return d.vec4f(1, 0.6, 0.2, 0.9)
@@ -254,11 +275,14 @@ function createDebugRenderPipeline(
     if (code === d.u32(LineFitDebugCode.outlier)) {
       return d.vec4f(1, 0.87, 0.2, 0.9)
     }
-    if (code === d.u32(LineFitDebugCode.lineInvalid)) {
-      return d.vec4f(0.27, 0.53, 1, 0.9)
+    if (code === d.u32(LineFitDebugCode.lineInvalidTls)) {
+      return d.vec4f(0.7, 0.3, 1, 0.95)
     }
-    if (code === d.u32(LineFitDebugCode.quadAssign)) {
-      return d.vec4f(0.2, 0.8, 0.8, 0.9)
+    if (code === d.u32(LineFitDebugCode.lineInvalidRatio)) {
+      return d.vec4f(1, 0.33, 0.27, 0.95)
+    }
+    if (code === d.u32(LineFitDebugCode.lineInvalidSpan)) {
+      return d.vec4f(1, 0.8, 0.2, 0.95)
     }
     if (code === d.u32(LineFitDebugCode.noPeaks)) {
       return d.vec4f(0.67, 0.33, 1, 0.85)

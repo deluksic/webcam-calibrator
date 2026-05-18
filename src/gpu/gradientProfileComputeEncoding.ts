@@ -6,13 +6,15 @@ export type GradientProfileComputeOptions = {
   /** Active quads from the previous frame's `quadCount` readback (same frame's homography). */
   quadCount?: number
   displayMode?: GradientProfileDisplayMode
+  /** When true (e.g. Pause), re-run vision on the last ingested frame without copying video again. */
+  skipIngest?: boolean
 }
 
 function shouldRunProfile(displayMode: GradientProfileDisplayMode | undefined): boolean {
   return (
     displayMode === 'quadGrid' ||
     displayMode === 'fittedLines' ||
-    displayMode === 'lineFitDebug'
+    displayMode === 'lineRejects'
   )
 }
 
@@ -31,7 +33,9 @@ export function encodeGradientProfileCompute(
   const quadCount = options.quadCount ?? 0
   const displayMode = options.displayMode
 
-  pipeline.ingest.encodeIngest(enc, root, video)
+  if (!options.skipIngest) {
+    pipeline.ingest.encodeIngest(enc, root, video)
+  }
 
   pipeline.nms.thresholdBuffer.write(threshold)
   pipeline.histogram.thresholdBinBuffer.write(Math.round(threshold * 255))
@@ -44,9 +48,7 @@ export function encodeGradientProfileCompute(
   pipeline.pointerJump.encodeCompute(computePass)
   pipeline.compact.encodeCompute(computePass)
   pipeline.edgeHistogram.encodeCompute(computePass)
-  if (displayMode === 'lineFitDebug') {
-    pipeline.lineFitDebug.encodeCompute(computePass)
-  }
+  pipeline.lineRejects.encodeCompute(computePass)
   pipeline.orientHistViz?.encodePackCompute(computePass)
   pipeline.lineFit.encodeCompute(computePass)
   pipeline.quadHomography.encodeCompute(computePass)

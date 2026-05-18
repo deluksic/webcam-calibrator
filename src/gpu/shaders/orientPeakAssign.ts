@@ -91,7 +91,8 @@ export const gradientPeakAlign = tgpu.fn(
   return dot(n, peakDir)
 })
 
-/** Best peak with ĝ·peakDir ≥ minAlign; tie-break nearest histogram bin, then align. */
+/** Best peak with ĝ·peakDir ≥ minAlign; prefer in-bin, then strongest align (corners steal if dist wins first).
+ *  Scratch/blips on the board can orthogonally align to the wrong peak — board defect, not assigned here. */
 export const assignPeakEdgeId = tgpu.fn(
   [d.u32, PeakBins4, PeakDirs4, d.vec2f, d.u32],
   d.u32,
@@ -121,7 +122,8 @@ export const assignPeakEdgeId = tgpu.fn(
           const pick =
             edgeId === COMPONENT_LABEL_INVALID ||
             (inBin && !bestInBin) ||
-            (inBin === bestInBin && (dist < bestDist || (dist === bestDist && align > bestDot)))
+            (inBin === bestInBin && align > bestDot) ||
+            (inBin === bestInBin && align === bestDot && dist < bestDist)
           if (pick) {
             bestInBin = inBin
             bestDist = dist
@@ -132,5 +134,23 @@ export const assignPeakEdgeId = tgpu.fn(
       }
     }
   }
+
+  // Corners / foreshortened sides: gradient may miss minAlign while still belonging to one peak bin.
+  if (edgeId === COMPONENT_LABEL_INVALID && peakCount > d.u32(0)) {
+    let nearestDist = d.u32(ORIENT_HIST_BINS)
+    for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+      if (k < peakCount) {
+        const peakBin = peakBins[k]!
+        if (peakBin !== COMPONENT_LABEL_INVALID) {
+          const dist = circularBinDist(pixelBin, peakBin)
+          if (dist < nearestDist) {
+            nearestDist = dist
+            edgeId = k
+          }
+        }
+      }
+    }
+  }
+
   return edgeId
 })
