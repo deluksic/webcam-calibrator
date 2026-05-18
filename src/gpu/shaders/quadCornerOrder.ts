@@ -80,11 +80,14 @@ export const cornersFromAdjacentLines = tgpu.fn(
 
 function quadSignedArea(corners: d.Infer<typeof Corners4>) {
   'use gpu'
+  // corners is in strip order (TL, TR, BL, BR). Convert to cyclic order (TL, TR, BR, BL)
+  // for the shoelace formula.
+  const cyclicIdx = [d.u32(0), d.u32(1), d.u32(3), d.u32(2)] as const
   let area = d.f32(0)
   for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
     const i1 = (i + d.u32(1)) % d.u32(MAX_EDGES_PER_LABEL)
-    const p0 = corners[i]!
-    const p1 = corners[i1]!
+    const p0 = corners[cyclicIdx[i]!]!
+    const p1 = corners[cyclicIdx[i1]!]!
     area = area + p0.x * p1.y - p1.x * p0.y
   }
   return area * d.f32(0.5)
@@ -183,10 +186,11 @@ export const quadDegeneracyOk = tgpu.fn(
     return 0
   }
 
+  const cyclicIdx = [d.u32(0), d.u32(1), d.u32(3), d.u32(2)] as const
   for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
     const i1 = (i + d.u32(1)) % d.u32(MAX_EDGES_PER_LABEL)
-    const p0 = corners[i]!
-    const p1 = corners[i1]!
+    const p0 = corners[cyclicIdx[i]!]!
+    const p1 = corners[cyclicIdx[i1]!]!
     const dx = p1.x - p0.x
     const dy = p1.y - p0.y
     if (sqrt(dx * dx + dy * dy) < d.f32(QUAD_MIN_EDGE_PX)) {
