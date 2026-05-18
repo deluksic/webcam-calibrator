@@ -55,6 +55,8 @@ export function encodeGradientProfileCameraPresent(
       labelBuffer: pipeline.edgeHistogram.packedEdgeLabels,
     })
     pipeline.render.labelViz.encodeToCanvas(enc, mainAttachment, labelVizBindGroup)
+  } else if (displayMode === 'undistort') {
+    pipeline.render.undistort.encodeToCanvas(enc, mainAttachment)
   } else {
     pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
   }

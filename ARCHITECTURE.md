@@ -8,9 +8,9 @@ WebGPU runs the vision pipeline: ingest to luma, Sobel, histogram-driven thresho
 
 ## App shell (Solid)
 
-- **Views** ([`App.tsx`](src/components/App.tsx)): **Home** ([`Home.tsx`](src/components/Home.tsx)), **Target** (printable SVG), **Calibrate** ([`CalibrationView.tsx`](src/components/CalibrationView.tsx) — collection controls, top‑K pool, stats, live solve + reprojection when `CalibrationResult` is `ok`; adaptive threshold uses the same histogram as **Debug** but the histogram is not shown on this page), **Results** ([`ResultsView.tsx`](src/components/results/ResultsView.tsx) — 3D orbit scene + export when latest result is `ok`), **Debug** ([`DebugView.tsx`](src/components/DebugView.tsx) — mode switcher, histogram, optional bbox-style overlay, logs).
+- **Views** ([`App.tsx`](src/components/App.tsx)): **Home** ([`Home.tsx`](src/components/Home.tsx)), **Target** (printable SVG), **Calibrate** ([`CalibrationView.tsx`](src/components/CalibrationView.tsx) — collection controls, top‑K pool, stats, live solve + reprojection when `CalibrationResult` is `ok`; adaptive threshold uses the same histogram as **Debug** but the histogram is not shown on this page), **Results** ([`ResultsView.tsx`](src/components/results/ResultsView.tsx) — 3D orbit scene + export when latest result is `ok`), **Debug** ([`GradientProfilesView.tsx`](src/components/gradientProfiles/GradientProfilesView.tsx) at `/debug` — GPU pipeline modes, histograms, edge profiles, quad grid + tag decode, undistort preview).
 - **Camera** — [`CameraStreamProvider`](src/components/camera/CameraStreamContext.tsx) at the app root; stream acquisition and device constraints in [`cameraStreamAcquire.ts`](src/components/camera/cameraStreamAcquire.ts).
-- **Live WebGPU path** — [`LiveCameraPipeline.tsx`](src/components/camera/LiveCameraPipeline.tsx) for both Calibrate and Debug.
+- **Live WebGPU** — **Calibrate:** [`LiveCameraPipeline.tsx`](src/components/camera/LiveCameraPipeline.tsx) + CPU `readDetection` on **grid**. **Debug:** [`GradientProfilesPipeline.tsx`](src/components/gradientProfiles/GradientProfilesPipeline.tsx) (full GPU path; see [`docs/gradient-profile-pipeline.md`](docs/gradient-profile-pipeline.md)).
 
 Product summary and roadmap: [`docs/plan.md`](docs/plan.md).
 

@@ -17,6 +17,8 @@ import { createGradientProfilePipeline } from '@/gpu/gradientProfilePipeline'
 import type { GradientProfileDisplayMode } from '@/gpu/gradientProfilePipeline'
 import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
+import { writeUndistortUniform } from '@/gpu/pipelines/undistortPipeline'
+import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import { createElementSize } from '@/utils/createElementSize'
 import { createFrameLoop } from '@/utils/createFrameLoop'
 
@@ -32,6 +34,8 @@ export type GradientProfilesPipelineProps = {
   stream: MediaStream | undefined
   onLog: (msg: string) => void
   onValidEdgeCount?: (count: number) => void
+  /** Latest calibration intrinsics/distortion for undistort preview; identity when omitted. */
+  undistortParams?: () => { k: CameraIntrinsics; distortion: RationalDistortion8 } | undefined
   toolbar?: JSX.Element
 }
 
@@ -153,6 +157,15 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         const enc = gNow.device.createCommandEncoder({ label: 'gradient profiles frame' })
         if (!props.frozen) {
           encodeGradientProfileCompute(enc, gNow, pip, video, threshold())
+        }
+        if (props.displayMode === 'undistort') {
+          const ud = props.undistortParams?.()
+          writeUndistortUniform(pip.undistortUniform, {
+            K: ud?.k ?? { fx: 1, fy: 1, cx: 0, cy: 0 },
+            distortion: ud?.distortion ?? [0, 0, 0, 0, 0, 0, 0, 0],
+            width,
+            height,
+          })
         }
         encodeGradientProfileCameraPresent(
           enc,

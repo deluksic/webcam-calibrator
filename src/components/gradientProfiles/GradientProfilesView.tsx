@@ -1,5 +1,6 @@
 import { Errored, Show, createSignal } from 'solid-js'
 
+import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
 import { GradientProfilesPipeline } from '@/components/gradientProfiles/GradientProfilesPipeline'
@@ -11,6 +12,7 @@ import styles from '@/components/gradientProfiles/GradientProfilesView.module.cs
 
 export function GradientProfilesView() {
   const cam = useCameraStream()
+  const runCtx = useCalibrationRun()
   const [displayMode, setDisplayMode] = createSignal<GradientProfileDisplayMode>('nms')
   const [validEdgeCount, setValidEdgeCount] = createSignal(0)
   const [frozen, setFrozen] = createSignal(false)
@@ -22,8 +24,9 @@ export function GradientProfilesView() {
   return (
     <div class={styles.root}>
       <p class={styles.hint}>
-        Live edge gradient profiles along each detected edge (normal = black → white). Move the board to compare blurry
-        vs sharp edges.
+        GPU detection pipeline tuning: display modes, edge threshold histogram, orientation and tag histograms, gradient
+        profiles along fitted edges, and quad grid with tag decode. Undistort uses the latest successful calibration when
+        available.
       </p>
       <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
         <div class={styles.cameraBlock}>
@@ -34,6 +37,13 @@ export function GradientProfilesView() {
             stream={cam.stream()}
             onLog={log}
             onValidEdgeCount={setValidEdgeCount}
+            undistortParams={() => {
+              const c = runCtx.calib()
+              if (!c || c.kind !== 'ok') {
+                return undefined
+              }
+              return { k: c.K, distortion: c.distortion }
+            }}
             toolbar={
               <div class={styles.toolbar}>
                 <CameraStreamSelects />
@@ -54,6 +64,13 @@ export function GradientProfilesView() {
                     onClick={() => setDisplayMode('grayscale')}
                   >
                     Gray
+                  </button>
+                  <button
+                    type="button"
+                    class={displayMode() === 'undistort' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
+                    onClick={() => setDisplayMode('undistort')}
+                  >
+                    Undistort
                   </button>
                   <button
                     type="button"

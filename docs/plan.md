@@ -16,9 +16,9 @@ In-browser AprilTag 6×6 target capture; no server. All capture, GPU stages, and
 | **Target**    | SVG AprilTag36h11 sheet for printing                                                                                                 |
 | **Calibrate** | Live **grid**; **Start** / **Snapshot** / **Reset** (no Pause/Stop); persistent **guidance** panel; collapsed **Advanced metrics**; advisory **focus guide** on the feed (hidden after the first pooled frame); **Start** only when ≥2 **decoded** tag IDs appear in frame; top‑K pool; async worker solve + **reprojection** when calibration yields a valid result |
 | **Results**   | WebGPU orbit view, **Export JSON**, **Save to library** & **Continue Calibration** when viewing **latest** (not a saved row); **Saved calibrations** list + compare + built-in **Demo calibration** row; displayed calibration = selected library entry or **`latestCalibration`** |
-| **Debug**     | Full `DisplayMode` set, edge histogram, optional bbox overlay, `Fallbk` (show quads that did not pass dictionary decode), log tail   |
+| **Debug**     | GPU gradient-profile pipeline ([`GradientProfilesView`](../src/components/gradientProfiles/GradientProfilesView.tsx) at `/debug`): gray / NMS / labels / quads / line debug / **quad grid** + tag decode, edge threshold histogram, orientation + tag histograms, edge profiles, **undistort** preview from latest calibration |
 
-**Camera** — shared [`CameraStreamContext`](../src/components/camera/CameraStreamContext.tsx) at the root: `MediaStream`, device selection, `devicechange` refresh, resolution ladder, and `applyConstraints` where supported ([`cameraStreamAcquire.ts`](../src/components/camera/cameraStreamAcquire.ts)). **Live** preview and GPU work: [`LiveCameraPipeline`](../src/components/camera/LiveCameraPipeline.tsx).
+**Camera** — shared [`CameraStreamContext`](../src/components/camera/CameraStreamContext.tsx) at the root: `MediaStream`, device selection, `devicechange` refresh, resolution ladder, and `applyConstraints` where supported ([`cameraStreamAcquire.ts`](../src/components/camera/cameraStreamAcquire.ts)). **Calibrate** live preview: [`LiveCameraPipeline`](../src/components/camera/LiveCameraPipeline.tsx). **Debug** live preview: [`GradientProfilesPipeline`](../src/components/gradientProfiles/GradientProfilesPipeline.tsx).
 
 ---
 
@@ -46,7 +46,7 @@ Order for one region: labeled edge samples → k-means (k=4) on NMS `(gx, gy)` �
 
 - WebGPU frame pipeline: ingest → gray → Sobel → histogram → threshold → NMS → labeling → extent (see [`cameraComputeEncoding.ts`](../src/gpu/cameraComputeEncoding.ts))
 - `grid` + async `readDetection` with [frame slot pool](../src/gpu/frameSlotPool.ts) (default 3 slots)
-- Per-quad homography, bounding-box fallback, grid visualization, optional `Fallbk` in Debug
+- Per-quad homography, bounding-box fallback, grid visualization on **Calibrate** (`Fallbk` off by default)
 - tag36h11 decode (587 codewords, Hamming `maxError` 3 from constants); vote-quality gating in detect path ([`contour.ts`](../src/gpu/contour.ts))
 - **Calibrate:** [`CalibrationRunContext`](../src/components/calibration/CalibrationRunContext.tsx) (session survives route changes); top‑K tag observations with merge/eviction; **OpenCV WASM** solve ([`calibration.worker.ts`](../src/workers/calibration.worker.ts)) and live **reprojection** when solve is `ok`; live grid uses `*0`, `*1`, … for **custom** (negative) tag ids after the first running frame that sees them (`*?` before **Start** / earlier), with blue-on-blue overlay styling ([`LiveCameraPipelineOverlays.tsx`](../src/components/camera/LiveCameraPipelineOverlays.tsx))
 - **Target** sheet generator (layout, spacing, optional checker, fullscreen)

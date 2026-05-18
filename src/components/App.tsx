@@ -1,4 +1,4 @@
-import { A, HashRouter, Route, type RouteSectionProps, useCurrentMatches } from '@solidjs/router'
+import { A, HashRouter, Navigate, Route, type RouteSectionProps, useCurrentMatches } from '@solidjs/router'
 import { Loading, Show, createMemo, lazy } from 'solid-js'
 
 import { CalibrationLibraryProvider } from '@/components/calibration/CalibrationLibraryContext'
@@ -12,7 +12,6 @@ import styles from '@/components/App.module.css'
 
 const CalibrationView = lazy(() => import('@/components/CalibrationView').then((m) => ({ default: m.CalibrationView })))
 const ResultsView = lazy(() => import('@/components/results/ResultsView').then((m) => ({ default: m.ResultsView })))
-const DebugView = lazy(() => import('@/components/DebugView').then((m) => ({ default: m.DebugView })))
 const GradientProfilesView = lazy(() =>
   import('@/components/gradientProfiles/GradientProfilesView').then((m) => ({ default: m.GradientProfilesView })),
 )
@@ -38,7 +37,6 @@ export function App() {
     const isCalibrate = createMemo(() => currentPath() === '/calibrate')
     const isResults = createMemo(() => currentPath() === '/results')
     const isDebug = createMemo(() => currentPath() === '/debug')
-    const isProfiles = createMemo(() => currentPath() === '/gradient-profiles')
 
     return (
       <>
@@ -65,9 +63,6 @@ export function App() {
           <A href="/debug" class={[styles.navBtn, isDebug() && styles.navBtnActive]}>
             Debug
           </A>
-          <A href="/gradient-profiles" class={[styles.navBtn, isProfiles() && styles.navBtnActive]}>
-            Profiles
-          </A>
           <span class={styles.version}>{VERSION}</span>
           <a
             href="https://github.com/deluksic/webcam-calibrator"
@@ -93,8 +88,8 @@ export function App() {
               <Route path="/target" component={TargetView} />
               <Route path="/calibrate" component={CalibrationView} />
               <Route path="/results" component={ResultsView} />
-              <Route path="/debug" component={DebugView} />
-              <Route path="/gradient-profiles" component={GradientProfilesView} />
+              <Route path="/debug" component={GradientProfilesView} />
+              <Route path="/gradient-profiles" component={() => <Navigate href="/debug" />} />
             </Loading>
           </HashRouter>
         </CalibrationLibraryProvider>

@@ -26,6 +26,7 @@ import { createGridVizStage } from '@/gpu/pipelines/gridVizPipeline'
 import { createQuadCornerHomographyStage } from '@/gpu/pipelines/quadCornerHomographyPipeline'
 import { createTagDecodeStage, createTagHistogramDisplayStage, TAG_HIST_CANVAS_W, TAG_HIST_CANVAS_H } from '@/gpu/pipelines/tagDecodePipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
+import { allocUndistortUniform, createUndistortPipeline } from '@/gpu/pipelines/undistortPipeline'
 
 export type GradientProfileDisplayMode =
   | 'edges'
@@ -34,6 +35,7 @@ export type GradientProfileDisplayMode =
   | 'quads'
   | 'edgeLabels'
   | 'grayscale'
+  | 'undistort'
   | 'fittedLines'
   | 'lineFitDebug'
   | 'quadGrid'
@@ -141,6 +143,9 @@ export function createGradientProfilePipeline(
   const filtered = createFilteredRenderPipeline(root, width, height, presentationFormat, {
     filteredBuffer: nms.filteredBuffer,
   })
+  const undistortUniform = allocUndistortUniform(root)
+  const undistortSourceView = ingest.grayTex.createView(d.texture2d(d.f32))
+  const undistort = createUndistortPipeline(root, undistortSourceView, presentationFormat, undistortUniform)
   const fittedLineInstances = MAX_EXTENT_COMPONENTS * MAX_EDGES_PER_LABEL
   const fittedLines = createEdgeFittedLineOverlayStage(
     root,
@@ -225,6 +230,7 @@ export function createGradientProfilePipeline(
     get msaaColorTex() {
       return msaaColorTex
     },
+    undistortUniform,
     render: {
       edges,
       labelViz,
@@ -232,6 +238,7 @@ export function createGradientProfilePipeline(
       grayscale,
       sobel: sobelRender,
       filtered,
+      undistort,
       fittedLines,
     },
     destroyProfileTargets() {

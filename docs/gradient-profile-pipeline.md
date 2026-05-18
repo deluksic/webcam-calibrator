@@ -1,6 +1,6 @@
 # Gradient profile pipeline
 
-GPU path used by **Gradient profiles** ([`GradientProfilesView.tsx`](../src/components/gradientProfiles/GradientProfilesView.tsx)): live Sobel edges, connected components, per-label orientation clustering, TLS line fits, **quad registration**, GPU **tag36h11 decode**, perspective **grid overlay**, gradient profiles along edge normals, and debug overlays.
+GPU path used by **Debug** at `/debug` ([`GradientProfilesView.tsx`](../src/components/gradientProfiles/GradientProfilesView.tsx); `/gradient-profiles` redirects here): live Sobel edges, connected components, per-label orientation clustering, TLS line fits, **quad registration**, GPU **tag36h11 decode**, perspective **grid overlay**, gradient profiles along edge normals, undistort preview, and line-fit debug overlays.
 
 Wiring lives in [`gradientProfilePipeline.ts`](../src/gpu/gradientProfilePipeline.ts). Per-frame compute is [`encodeGradientProfileCompute`](../src/gpu/gradientProfileComputeEncoding.ts); camera and plot present are [`gradientProfilePresentEncoding.ts`](../src/gpu/gradientProfilePresentEncoding.ts).
 
