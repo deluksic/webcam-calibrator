@@ -57,7 +57,7 @@ export function createGridVizLayouts() {
   return { gridVizLayout }
 }
 
-/** Matches `src/lib/corners.ts` bitmask order; first matching bit wins (high → low). */
+/** Matches GPU `quadCornerOrder` / `FAIL_*` bitmask order; first matching bit wins (high → low). */
 const gridVizFailureTintRgb = tgpu.fn([d.u32], d.vec3f)((failureCode) => {
   'use gpu'
   const insufficient = d.u32(1 << 0)

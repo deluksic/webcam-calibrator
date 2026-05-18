@@ -7,7 +7,7 @@ import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { atomicLoad, atomicMin, atomicStore, length } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
 
 /**

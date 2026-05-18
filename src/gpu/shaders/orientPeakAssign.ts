@@ -1,7 +1,7 @@
 import { d, std, tgpu } from 'typegpu'
 import { atan2, cos, div, dot, length, sin } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import {
   MAX_EDGES_PER_LABEL,
   ORIENT_ASSIGN_MAX_BIN_DIST,

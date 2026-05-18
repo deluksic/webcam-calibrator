@@ -1,4 +1,4 @@
-import type { DetectedQuad } from '@/gpu/contour'
+import type { DetectedQuad } from '@/gpu/detectedQuad'
 import { DECODED_TAG_ID_DICT_MISS } from '@/gpu/pipelines/gridVizPipeline'
 import { patternHasWeakOrTie } from '@/lib/tagModuleCell'
 
@@ -7,12 +7,9 @@ const DICT_MISS_U32 = DECODED_TAG_ID_DICT_MISS >>> 0
 /**
  * Single gate for GPU tag grid, ID overlay, calibration snapshots, and reprojection.
  *
- * **Debug fallbacks (`showFallbacks`):** any quad the detector emitted (including axis-aligned
- * bbox substitutes when line intersections fail) — same spirit as the old “pass all quads”
- * grid buffer.
+ * **Permissive (`showFallbacks`):** any quad returned by the GPU path.
  *
- * **Strict (calibration / Fallbk off):** real corners, successful corner pipeline, no weak/tie
- * cells, and a decoded id or dictionary-miss sentinel for tint/labels.
+ * **Strict (calibration):** successful corner pipeline and a decoded id or dictionary-miss sentinel.
  */
 export function acceptQuadForTagUse(quad: DetectedQuad, showFallbacks: boolean): boolean {
   if (!quad?.corners?.length) {

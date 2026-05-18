@@ -3,7 +3,7 @@ import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { atomicAdd, atomicLoad, atomicStore, length, select, sqrt } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
 import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
 import {

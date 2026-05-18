@@ -1,6 +1,6 @@
 import { d } from 'typegpu'
 
-import type { DetectedQuad } from '@/gpu/contour'
+import type { DetectedQuad } from '@/gpu/detectedQuad'
 import {
   DECODED_TAG_ID_UNKNOWN,
   type QuadData,

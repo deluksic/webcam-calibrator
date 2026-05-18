@@ -34,9 +34,9 @@ In-browser AprilTag 6×6 target capture; no server. All capture, GPU stages, and
 6. Compact remap to 0…N−1
 7. Extent (axis-aligned bounds per component)
 
-**CPU-on-grid** — after each submitted grid pass, if a [frame slot](../src/gpu/frameSlotPool.ts) is available, `readDetection` maps staging buffers, builds regions, runs `validateAndFilterQuads`, and completes homography + tag36h11 decode. Frame slots (default: 3) provide backpressure: if all slots are busy, the incoming frame is skipped.
+**GPU-on-grid (Calibrate)** — after each submitted grid pass, if a [frame slot](../src/gpu/frameSlotPool.ts) is available, the pipeline runs oriented edge histogram clustering, per-label line fit, quad corner homography, and GPU tag36h11 decode (same chain as Debug). [`readGpuDetection`](../src/gpu/gpuQuadReadback.ts) maps the quad buffer to `DetectedQuad` for snapshots and overlays. Session **custom** tags (after layout) still use a small CPU decode on dictionary-miss quads via the slot’s NMS copy. Frame slots (default: 3) provide backpressure.
 
-Order for one region: labeled edge samples → k-means (k=4) on NMS `(gx, gy)` → RANSAC+PCA line per cluster → line intersections (with slack) → dedupe → convex order + plausibility → **TL, TR, BL, BR** → `buildTagGrid` / `decodeTagPattern` → `decodeTag36h11AnyRotation(..., ALLOWED_ERROR_COUNT)` with `maxError = 3` → `DetectedQuad` fields. See [`ARCHITECTURE.md`](../ARCHITECTURE.md) for the corner table and decode notes.
+See [`docs/gradient-profile-pipeline.md`](../docs/gradient-profile-pipeline.md) and [`ARCHITECTURE.md`](../ARCHITECTURE.md) for stage order and corner conventions (**TL, TR, BL, BR**).
 
 **Grid draw** — [`gridVizPipeline`](../src/gpu/pipelines/gridVizPipeline.ts) warps a unit square with **`GRID_DIVISIONS`** (8) UV subdivisions using the CPU homography; `decodedTagId` drives tint via `stableHashToRgb01` when known.
 
@@ -44,10 +44,10 @@ Order for one region: labeled edge samples → k-means (k=4) on NMS `(gx, gy)` �
 
 ## What ships in this build
 
-- WebGPU frame pipeline: ingest → gray → Sobel → histogram → threshold → NMS → labeling → extent (see [`cameraComputeEncoding.ts`](../src/gpu/cameraComputeEncoding.ts))
-- `grid` + async `readDetection` with [frame slot pool](../src/gpu/frameSlotPool.ts) (default 3 slots)
+- WebGPU frame pipeline: ingest → gray → Sobel → histogram → threshold → NMS → labeling (see [`cameraComputeEncoding.ts`](../src/gpu/cameraComputeEncoding.ts))
+- `grid` + GPU tag decode + async `readGpuDetection` with [frame slot pool](../src/gpu/frameSlotPool.ts) (default 3 slots)
 - Per-quad homography, bounding-box fallback, grid visualization on **Calibrate** (`Fallbk` off by default)
-- tag36h11 decode (587 codewords, Hamming `maxError` 3 from constants); vote-quality gating in detect path ([`contour.ts`](../src/gpu/contour.ts))
+- GPU tag36h11 decode (587 codewords, Hamming `maxError` 3 in [`tagDecodePipeline.ts`](../src/gpu/pipelines/tagDecodePipeline.ts))
 - **Calibrate:** [`CalibrationRunContext`](../src/components/calibration/CalibrationRunContext.tsx) (session survives route changes); top‑K tag observations with merge/eviction; **OpenCV WASM** solve ([`calibration.worker.ts`](../src/workers/calibration.worker.ts)) and live **reprojection** when solve is `ok`; live grid uses `*0`, `*1`, … for **custom** (negative) tag ids after the first running frame that sees them (`*?` before **Start** / earlier), with blue-on-blue overlay styling ([`LiveCameraPipelineOverlays.tsx`](../src/components/camera/LiveCameraPipelineOverlays.tsx))
 - **Target** sheet generator (layout, spacing, optional checker, fullscreen)
 - **Results:** 3D WebGPU scene ([`resultsCanvasPipeline.ts`](../src/gpu/resultsCanvasPipeline.ts)) + **Export JSON** ([`exportCalibrationJson.ts`](../src/components/results/exportCalibrationJson.ts)); **`latestCalibration`** and metadata on [`CalibrationRunContext`](../src/components/calibration/CalibrationRunContext.tsx); [`CalibrationLibraryContext`](../src/components/calibration/CalibrationLibraryContext.tsx) for saved runs + default **Demo calibration** ([`demoCalibrationExample.ts`](../src/lib/demoCalibrationExample.ts))

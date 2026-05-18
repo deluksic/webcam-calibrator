@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DetectedQuad } from '@/gpu/contour'
+import type { DetectedQuad } from '@/gpu/detectedQuad'
 import { frameHasDuplicateDecodedTagIds, quadAreaPx } from '@/lib/calibrationQuality'
 import type { Corners } from '@/lib/geometry'
 

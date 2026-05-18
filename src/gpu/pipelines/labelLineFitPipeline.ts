@@ -3,7 +3,7 @@ import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { atomicAdd, atomicMin, atomicMax, atomicStore, abs, length, max } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import {
   LINE_EXTENT_TRIM_FRAC,
   LINE_INLIER_DIST_PX,

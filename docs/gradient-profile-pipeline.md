@@ -4,25 +4,17 @@ GPU path used by **Debug** at `/debug` ([`GradientProfilesView.tsx`](../src/comp
 
 Wiring lives in [`gradientProfilePipeline.ts`](../src/gpu/gradientProfilePipeline.ts). Per-frame compute is [`encodeGradientProfileCompute`](../src/gpu/gradientProfileComputeEncoding.ts); camera and plot present are [`gradientProfilePresentEncoding.ts`](../src/gpu/gradientProfilePresentEncoding.ts).
 
-The live **calibration / grid** path ([`cameraPipeline.ts`](../src/gpu/cameraPipeline.ts), [`ARCHITECTURE.md`](../ARCHITECTURE.md)) shares ingest → gray → Sobel → histogram → NMS → labeling through compact labels, but does **not** run orientation clustering, line fit, profiles, or quad registration.
+**Calibrate** [`grid` mode](../src/gpu/cameraPipeline.ts) runs the same GPU tag chain as this view (through tag decode); it omits gradient profiles and line-fit debug overlays. Host readback is [`readGpuDetection`](../src/gpu/gpuQuadReadback.ts) (~KB/frame) via [`detectForSlot`](../src/gpu/cameraDetection.ts).
 
 ## Goal
 
-**Move AprilTag detection onto the GPU** so the calibration **grid** path no longer depends on expensive full-frame CPU readbacks.
+GPU-native AprilTag detection: oriented edge clustering, line fit, quad homography, and tag36h11 decode on the GPU; small structured readback for calibration callbacks only.
 
-Today, **grid** mode calls [`readDetection`](../src/gpu/cameraDetection.ts) each frame (when a frame slot is free): it copies compact labels and the NMS `filteredBuffer` to the CPU (~11 MB at 1280×720), then runs per-region corner finding and tag36h11 decode on the host ([`ARCHITECTURE.md`](../ARCHITECTURE.md) — corner pipeline). That bandwidth and sync cost limits frame rate and adds latency.
-
-This pipeline is the staging ground for a GPU-native tag path:
-
-- **Connected components** and **per-label geometry** stay on the GPU through quad registration (`labelToQuadId`, fitted sides, `packedEdgeLabels`).
-- **Gradient profiles** validate edge quality per side without readback.
-- **Corner intersections + homography** (GPU) write per-quad `mat3x3f` maps into `grid.quadCornersBuffer`.
-- **Tag36h11 decode** (GPU) samples luma per data module, matches the dictionary, and updates `decodedTagId` / `decodedRotation` in the same buffer—no CPU contour readback in this view.
+- **Connected components** and **per-label geometry** on the GPU (`labelToQuadId`, fitted sides, `packedEdgeLabels`).
+- **Gradient profiles** (Debug only) validate edge quality per side without readback.
+- **Corner intersections + homography** write per-quad data into `grid.quadCornersBuffer`.
+- **Tag36h11 decode** samples luma per module and updates `decodedTagId` / `decodedRotation`.
 - **Grid overlay** composites an 8×8 perspective-correct warp with stable hash tints per decoded id.
-
-**Still CPU on the calibration path:** live **grid** mode in [`cameraPipeline.ts`](../src/gpu/cameraPipeline.ts) still uses [`readDetection`](../src/gpu/cameraDetection.ts) + [`updateQuadCornersBuffer`](../src/gpu/cameraFrame.ts). Porting calibration to this GPU decode chain is the remaining integration step.
-
-Success for production **grid** looks like reusing this compute chain (or a shared subset), with **no** dense label or gradient buffer readback per frame—only small structured readbacks when the UI needs tag ids on the host.
 
 ---
 
@@ -233,7 +225,7 @@ Constants: `MAX_DICT_ERROR = 3`, `DATA_MODULES = 6`, `TAG_MODULES = 8`.
 | `0xFFFFFFFE` | `DECODED_TAG_ID_DICT_MISS` | Amber-tinted grid (pattern OK, dictionary miss) |
 | `0…586` | tag36h11 id | Stable hash fill + grid lines |
 
-Non-zero `failureCode` uses failure tints from [`gridVizFailureTintRgb`](../src/gpu/pipelines/gridVizPipeline.ts) (same bitmask order as CPU [`corners.ts`](../src/lib/corners.ts)).
+Non-zero `failureCode` uses failure tints from [`gridVizFailureTintRgb`](../src/gpu/pipelines/gridVizPipeline.ts) (same bitmask order as [`quadCornerOrder.ts`](../src/gpu/shaders/quadCornerOrder.ts)).
 
 ---
 

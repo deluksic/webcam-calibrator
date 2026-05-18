@@ -2,18 +2,16 @@ import type { JSX } from 'solid-js'
 import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 
 import { CalibrateFocusOverlay } from '@/components/calibration/CalibrateFocusOverlay'
-import { type Bbox, QuadCandidateOverlay, TagIdGridOverlay } from '@/components/camera/LiveCameraPipelineOverlays'
+import { TagIdGridOverlay } from '@/components/camera/LiveCameraPipelineOverlays'
 import { encodeCameraCompute } from '@/gpu/cameraComputeEncoding'
 import { detectForSlot } from '@/gpu/cameraDetection'
-import type { ExtentRow } from '@/gpu/cameraDetection'
+import type { DetectedQuad } from '@/gpu/detectedQuad'
 import { updateQuadCornersBuffer, updateReprojectionOverlayBuffer } from '@/gpu/cameraFrame'
 import { createCameraPipeline } from '@/gpu/cameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
 import { encodeAndSubmitGridPresent, encodePresentNonGrid } from '@/gpu/cameraPresentEncoding'
-import type { DetectedQuad, QuadDecodeOptions } from '@/gpu/contour'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
-import { MAX_U32 } from '@/gpu/pipelines/extentTrackingPipeline'
 import { MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
 import { writeUndistortUniform } from '@/gpu/pipelines/undistortPipeline'
@@ -50,8 +48,6 @@ export type LiveCameraPipelineProps = {
   onFrameSize?: (size: { width: number; height: number }) => void
   /** Called when snapshot button is pressed - passes current tagged quads. */
   onQuadSnapshotRequest?: () => void
-  /** Optional session-scoped custom-tag dictionary for fuzzy re-decode after layout exists. */
-  quadDecodeOptions?: () => QuadDecodeOptions | undefined
   /** Extra controls (camera select, mode buttons, …). */
   toolbar?: JSX.Element
   /** Advisory 75%×75% framing guide over the **displayed** canvas (same box as tag overlays). */
@@ -67,7 +63,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement>()
 
   const [threshold, setThreshold] = createSignal(0, { ownedWrite: true })
-  const [bboxes, setBboxes] = createSignal<Bbox[]>([], { ownedWrite: true })
   const [gridOverlayQuads, setGridOverlayQuads] = createSignal<DetectedQuad[]>([], {
     ownedWrite: true,
   })
@@ -86,7 +81,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       onReprojectionFrame: props.onReprojectionFrame,
       onQuadDetection: props.onQuadDetection,
       onQuadSnapshotRequest: props.onQuadSnapshotRequest,
-      quadDecodeOptions: props.quadDecodeOptions,
       customTagOverlay: props.customTagOverlay,
     }
   })
@@ -197,46 +191,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     const pip = createCameraPipeline(g, canvas, histCanvas, width, height, navigator.gpu.getPreferredCanvasFormat())
     log(`Pipeline created ${width}x${height}`)
 
-    let extentReadPending = false
-
-    const scheduleExtentRead = () => {
-      if (extentReadPending || disposed) {
-        return
-      }
-      extentReadPending = true
-      pip.extent.extentBuffer
-        .read()
-        .then((extentData: ExtentRow[]) => {
-          if (disposed) {
-            return
-          }
-          extentReadPending = false
-          const boxes: Bbox[] = []
-          for (const entry of extentData) {
-            if (entry.minX === MAX_U32) {
-              continue
-            }
-            const w = entry.maxX - entry.minX
-            const h = entry.maxY - entry.minY
-            if (w <= 0 || h <= 0) {
-              continue
-            }
-            boxes.push({
-              minX: entry.minX,
-              minY: entry.minY,
-              maxX: entry.maxX,
-              maxY: entry.maxY,
-              area: w * h,
-            })
-          }
-          boxes.sort((a, b) => b.area - a.area)
-          setBboxes(boxes.slice(0, 128))
-        })
-        .finally(() => {
-          extentReadPending = false
-        })
-    }
-
     const scheduleQuadDetection = (slot: FrameSlot, sf: boolean) => {
       const gNow = gpu()
       if (!gNow) {
@@ -246,8 +200,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       const pi = pipelineInteraction()
       const liveCalib = pi.liveCalibration
 
-      const decodeOpts = pi.quadDecodeOptions?.()
-      detectForSlot(gNow, pip, slot, decodeOpts)
+      detectForSlot(gNow, pip, slot)
         .then((result) => {
           if (disposed) {
             pip.frameSlotPool.releaseSlot(slot)
@@ -270,8 +223,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
             }
           })
 
-          // Write corners + render gray+grid+histogram in the same synchronous
-          // block so the GPU overlay always matches slot.graySnapshot.
           updateQuadCornersBuffer(pip, tagged, sf)
 
           if (liveCalib?.layout) {
@@ -364,9 +315,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           encodeCameraCompute(enc, gpuNow, pip, video, threshold())
           encodePresentNonGrid(enc, gpuNow, pip, dm, timeSec, (_err) => {})
           gpuNow.device.queue.submit([enc.finish()])
-          if (dm === 'debug') {
-            scheduleExtentRead()
-          }
         }
 
         // TODO: read using Uint32Array directly
@@ -403,9 +351,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               <div class={styles.focusBottomHint} role="note">
                 <span class={styles.focusBottomHintText}>{focusBottomHintContent()}</span>
               </div>
-            </Show>
-            <Show when={props.displayMode === 'debug'}>
-              <QuadCandidateOverlay bboxes={bboxes()} scale={scale()} />
             </Show>
             <Show when={props.displayMode === 'grid'}>
               <TagIdGridOverlay quads={gridOverlayQuads()} scale={scale()} customTagOverlay={props.customTagOverlay} />

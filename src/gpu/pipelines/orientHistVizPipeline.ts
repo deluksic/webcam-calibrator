@@ -4,7 +4,7 @@ import { tgpu, d, std } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor, max } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import {
   LabelOrientClusterReadonly,
   MAX_EDGES_PER_LABEL,

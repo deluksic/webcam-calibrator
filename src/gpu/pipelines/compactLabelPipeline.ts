@@ -1,8 +1,8 @@
 // Compact labeling: remap pointer-jump roots to compact IDs (0..N-1).
 //
-// Problem: pointer-jump labels are raw pixel indices (up to area-1). The extent
-// buffer is sized for `MAX_EXTENT_COMPONENTS` (see extentTrackingPipeline). Roots with
-// index >= that limit are discarded — acceptable for our use case.
+// Problem: pointer-jump labels are raw pixel indices (up to area-1). Downstream GPU
+// stages size tables by `MAX_EXTENT_COMPONENTS`. Roots with index >= that limit are
+// discarded — acceptable for our use case.
 //
 // Pipeline (3 passes after pointer-jump):
 //   1. Reset canonicalRoot to INVALID (needed because atomicMin is used)
@@ -16,7 +16,7 @@ import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { atomicLoad, atomicStore, atomicAdd } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import type { PointerJumpConvergedLabels } from '@/gpu/pipelines/pointerJumpPipeline'
 
 /**
@@ -24,6 +24,9 @@ import type { PointerJumpConvergedLabels } from '@/gpu/pipelines/pointerJumpPipe
  * Match `FULL_FRAME_WG` / `computeDispatch2d` in cameraFrame and pointer-jump.
  */
 const WORKGROUP_SIZE = 16
+
+/** Max compact label ids (0..N-1); caps label-cluster / line-fit table sizes downstream. */
+export const MAX_EXTENT_COMPONENTS = 2 << 12
 
 /** Allocates remap buffers; reads converged `pointerJumpBuffer0` (upstream). */
 export function createCompactLabelStage(

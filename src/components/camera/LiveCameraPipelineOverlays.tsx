@@ -1,7 +1,7 @@
 import type { Component } from 'solid-js'
-import { For, Show, createMemo } from 'solid-js'
+import { For, Show } from 'solid-js'
 
-import type { DetectedQuad } from '@/gpu/contour'
+import type { DetectedQuad } from '@/gpu/detectedQuad'
 import type { CustomTagOverlaySession } from '@/lib/customTagOverlaySession'
 import { displayLabelForTagId } from '@/lib/tag36h11'
 
@@ -10,55 +10,6 @@ import styles from '@/components/camera/LiveCameraPipeline.module.css'
 const { max, abs } = Math
 
 export type { CustomTagOverlaySession }
-
-export type Bbox = {
-  minX: number
-  minY: number
-  maxX: number
-  maxY: number
-  area: number
-}
-
-export function QuadCandidateOverlay(props: { bboxes: Bbox[]; scale: { x: number; y: number } }) {
-  const candidates = createMemo(() => {
-    const MIN_AREA = 40 * 40
-    const MAX_AREA = 200000
-    const MIN_AR = 0.3
-    const MAX_AR = 3.5
-    return props.bboxes.filter((b) => {
-      const w = b.maxX - b.minX
-      const h = b.maxY - b.minY
-      if (w <= 0 || h <= 0) {
-        return false
-      }
-      const area = w * h
-      if (area < MIN_AREA || area > MAX_AREA) {
-        return false
-      }
-      const ar = w / h
-      if (ar < MIN_AR || ar > MAX_AR) {
-        return false
-      }
-      return true
-    })
-  })
-
-  return (
-    <For each={candidates()} keyed={false}>
-      {(box) => (
-        <div
-          class={styles.bbox}
-          style={{
-            '--bbox-x': `${box().minX * props.scale.x}px`,
-            '--bbox-y': `${box().minY * props.scale.y}px`,
-            '--bbox-w': `${(box().maxX - box().minX) * props.scale.x}px`,
-            '--bbox-h': `${(box().maxY - box().minY) * props.scale.y}px`,
-          }}
-        />
-      )}
-    </For>
-  )
-}
 
 export const TagIdGridOverlay: Component<{
   quads: DetectedQuad[]

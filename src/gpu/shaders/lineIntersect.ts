@@ -25,7 +25,7 @@ export const lineNormalFromEdge = tgpu.fn([EdgeLineEntry], LineNormalD)((line) =
   })
 })
 
-/** Intersection of n1·p = d1 and n2·p = d2 (same as CPU `lineIntersection` in corners.ts). */
+/** Intersection of n1·p = d1 and n2·p = d2. */
 export const lineIntersectNormal = tgpu.fn(
   [d.f32, d.f32, d.f32, d.f32, d.f32, d.f32],
   LineIntersectResult,

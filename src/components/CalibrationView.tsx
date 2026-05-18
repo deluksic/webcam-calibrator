@@ -8,7 +8,7 @@ import { useCalibrationRun } from '@/components/calibration/CalibrationRunContex
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
 import { LiveCameraPipeline } from '@/components/camera/LiveCameraPipeline'
-import type { DetectedQuad } from '@/gpu/contour'
+import type { DetectedQuad } from '@/gpu/detectedQuad'
 import { acceptQuadForTagUse } from '@/lib/acceptQuadForTagUse'
 import { calibrationQuadScore } from '@/lib/calibrationQuality'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
@@ -17,7 +17,6 @@ import type { Corners3 } from '@/lib/calibrationTypes'
 import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
 import { isProgressShapedError, percentile, type SnapshotFeedback } from '@/lib/calibrationViewUtils'
 import { formatFixed } from '@/lib/formatFixed'
-import { canonicalCodeFromCustomTagId, isCustomTagId } from '@/lib/tag36h11'
 import { learnLayoutFromFrame, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 
@@ -404,22 +403,6 @@ function CalibrationView() {
             onReprojectionFrame={(m) => setReproj(m)}
             onFrameSize={runCtx.setVideoFrameSize}
             onQuadSnapshotRequest={handleSnapshotClick}
-            quadDecodeOptions={() => {
-              const lay = runCtx.layout()
-              const sessionCustomCodewords: bigint[] = []
-              if (lay) {
-                for (const id of lay.keys()) {
-                  if (isCustomTagId(id)) {
-                    const c = canonicalCodeFromCustomTagId(id)
-                    if (c !== undefined) {
-                      sessionCustomCodewords.push(c)
-                    }
-                  }
-                }
-                return { layoutEstablished: true, sessionCustomCodewords }
-              }
-              return { layoutEstablished: false, sessionCustomCodewords }
-            }}
           />
         </div>
       </Errored>

@@ -3,7 +3,7 @@ import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { abs, mul, select } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
 import type { LabelLineOutBuffer } from '@/gpu/pipelines/labelLineFitPipeline'

@@ -4,7 +4,7 @@ import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { abs, clamp, floor, length } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import { LINE_INLIER_DIST_PX, LINE_MIN_SLOT_COUNT } from '@/gpu/lineFitThresholds'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
 import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'

@@ -4,7 +4,7 @@ import { initCalibrator } from '@deluksic/opencv-calibration-wasm'
 import CALIBRATE_WASM_PATH from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
 
 import { calibratorInitOptions } from '@/lib/calibratorWasmInit'
-import type { DetectedQuad } from '@/gpu/contour'
+import type { DetectedQuad } from '@/gpu/detectedQuad'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import type { Point } from '@/lib/geometry'
 import type { Vec3, Mat3 } from '@/lib/opencvCalibration'

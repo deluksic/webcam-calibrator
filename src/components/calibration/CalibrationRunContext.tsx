@@ -2,7 +2,7 @@ import type { ParentProps } from 'solid-js'
 import { createContext, createEffect, createMemo, createSignal, useContext } from 'solid-js'
 
 import { CameraStreamContext } from '@/components/camera/CameraStreamContext'
-import type { DetectedQuad } from '@/gpu/contour'
+import type { DetectedQuad } from '@/gpu/detectedQuad'
 import { acceptQuadForTagUse } from '@/lib/acceptQuadForTagUse'
 import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
 import type { CustomTagOverlaySession } from '@/lib/customTagOverlaySession'

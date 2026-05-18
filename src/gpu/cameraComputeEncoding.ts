@@ -1,6 +1,7 @@
 import type { TgpuRoot } from 'typegpu'
 
 import type { FrameSlot } from '@/gpu/frameSlotPool'
+import { MAX_INSTANCES } from '@/gpu/pipelines/gridVizPipeline'
 
 import type { CameraPipeline } from './cameraPipeline'
 
@@ -33,10 +34,19 @@ export function encodeCameraCompute(
   pipeline.nms.encodeCompute(computePass)
   pipeline.pointerJump.encodeCompute(computePass)
   pipeline.compact.encodeCompute(computePass)
-  pipeline.extent.encodeCompute(computePass)
+  if (slot !== undefined) {
+    pipeline.edgeHistogram.encodeCompute(computePass)
+    pipeline.lineFit.encodeCompute(computePass)
+    pipeline.quadHomography.encodeCompute(computePass)
+  }
   computePass.end()
 
   if (slot !== undefined) {
+    pipeline.tagDecode.encodeVotes(enc, MAX_INSTANCES)
+    const decodePass = enc.beginComputePass({ label: 'camera tag decode' })
+    pipeline.tagDecode.encodeDecode(decodePass)
+    decodePass.end()
+
     pipeline.frameSlotPool.enqueueCopiesForSlot(enc, pipeline, slot)
     slot.frameId = nextFrameId++
     slot.state = 'inflight'

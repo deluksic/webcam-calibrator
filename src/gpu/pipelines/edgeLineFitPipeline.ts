@@ -3,7 +3,7 @@ import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { atomicAdd, atomicStore } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import {
   MAX_EDGES_PER_LABEL,
   type QuadCountBuffer,

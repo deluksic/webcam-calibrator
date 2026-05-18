@@ -3,7 +3,7 @@ import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { clamp, floor } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
 export const labelVizLayout = tgpu.bindGroupLayout({

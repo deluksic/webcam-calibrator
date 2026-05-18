@@ -1,4 +1,4 @@
-import type { DetectedQuad } from '@/gpu/contour'
+import type { DetectedQuad } from '@/gpu/detectedQuad'
 import { acceptQuadForTagUse } from '@/lib/acceptQuadForTagUse'
 import { length, type Corners } from '@/lib/geometry'
 

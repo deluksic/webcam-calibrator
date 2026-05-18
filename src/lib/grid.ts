@@ -453,7 +453,7 @@ export function fillUnknownNeighbors6(pattern: TagPattern): void {
   }
 }
 
-/** Same magnitude floor as `extractLabeledEdgePixels` in `corners.ts`. */
+/** Minimum gradient magnitude for decode vote accumulation. */
 const DECODE_EDGE_MASK_EPS = 1e-6
 
 /**
