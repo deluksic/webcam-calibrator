@@ -2,7 +2,7 @@
 
 ## Overview
 
-In-browser AprilTag 6×6 target capture; no server. All capture, GPU stages, and CPU decode run client-side.
+In-browser AprilTag 6×6 target capture; no server. All capture, GPU vision stages, and GPU tag decode run client-side.
 
 **Stack:** SolidJS 2.0, TypeGPU (WebGPU), CSS modules.
 
@@ -16,7 +16,7 @@ In-browser AprilTag 6×6 target capture; no server. All capture, GPU stages, and
 | **Target**    | SVG AprilTag36h11 sheet for printing                                                                                                 |
 | **Calibrate** | Live **grid**; **Start** / **Snapshot** / **Reset** (no Pause/Stop); persistent **guidance** panel; collapsed **Advanced metrics**; advisory **focus guide** on the feed (hidden after the first pooled frame); **Start** only when ≥2 **decoded** tag IDs appear in frame; top‑K pool; async worker solve + **reprojection** when calibration yields a valid result |
 | **Results**   | WebGPU orbit view, **Export JSON**, **Save to library** & **Continue Calibration** when viewing **latest** (not a saved row); **Saved calibrations** list + compare + built-in **Demo calibration** row; displayed calibration = selected library entry or **`latestCalibration`** |
-| **Debug**     | GPU gradient-profile pipeline ([`GradientProfilesView`](../src/components/gradientProfiles/GradientProfilesView.tsx) at `/debug`): gray / NMS / labels / quads / line debug / **quad grid** + tag decode, edge threshold histogram, orientation + tag histograms, edge profiles, **undistort** preview from latest calibration |
+| **Debug**     | Same GPU quad + tag path as Calibrate, plus tuning viz ([`GradientProfilesView`](../src/components/gradientProfiles/GradientProfilesView.tsx) at `/debug`; `/gradient-profiles` redirects): gray / NMS / labels / quads / line debug / **quad grid**, orientation + tag histograms, edge profiles, **undistort** preview |
 
 **Camera** — shared [`CameraStreamContext`](../src/components/camera/CameraStreamContext.tsx) at the root: `MediaStream`, device selection, `devicechange` refresh, resolution ladder, and `applyConstraints` where supported ([`cameraStreamAcquire.ts`](../src/components/camera/cameraStreamAcquire.ts)). **Calibrate** live preview: [`LiveCameraPipeline`](../src/components/camera/LiveCameraPipeline.tsx). **Debug** live preview: [`GradientProfilesPipeline`](../src/components/gradientProfiles/GradientProfilesPipeline.tsx).
 
@@ -24,21 +24,24 @@ In-browser AprilTag 6×6 target capture; no server. All capture, GPU stages, and
 
 ## Detection pipeline
 
-**GPU (modes that need the full label chain: `labels`, `debug`, `grid`):**
+**GPU base chain** (labels, debug, grid, and Debug modes that need components):
 
-1. Grayscale
-2. Sobel
-3. Histogram; adaptive edge threshold (95th percentile, `THRESHOLD_PERCENTILE` in [`histogramPipelines.ts`](../src/gpu/pipelines/histogramPipelines.ts))
-4. NMS and edge filter
-5. Pointer-jump CCL
-6. Compact remap to 0…N−1
-7. Extent (axis-aligned bounds per component)
+1. Grayscale → Sobel → histogram (adaptive threshold, 95th percentile in [`histogramPipelines.ts`](../src/gpu/pipelines/histogramPipelines.ts))
+2. NMS and edge filter
+3. Pointer-jump CCL → compact remap to 0…N−1 (`MAX_EXTENT_COMPONENTS` = 4096)
 
-**GPU-on-grid (Calibrate)** — each rAF with a free [frame slot token](../src/gpu/frameSlotPool.ts) runs ingest, edge clustering, line fit, homography, tag decode, and presents live gray + GPU quad grid in one submit. [`readGpuDetection`](../src/gpu/gpuQuadReadback.ts) reads active quads only for HTML overlay and calibration (no gray snapshot, no corner write-back). Frame slot tokens (default: 3) provide backpressure.
+**GPU quad + tag chain** (Calibrate **grid** and Debug — see [`ARCHITECTURE.md`](../ARCHITECTURE.md)):
 
-See [`docs/gradient-profile-pipeline.md`](../docs/gradient-profile-pipeline.md) and [`ARCHITECTURE.md`](../ARCHITECTURE.md) for stage order and corner conventions (**TL, TR, BL, BR**).
+4. Oriented edge histogram per label → TLS line fit → quad registration (`MAX_QUADS` = 512)
+5. Quad corner homography (line intersections + DLT → `quadCornersBuffer`)
+6. Tag36h11 decode on GPU (32-bin hist, deadband votes, dictionary, canonicalize corners)
+7. Host pack / readback → [`DetectedQuad`](../src/gpu/detectedQuad.ts)
 
-**Grid draw** — [`gridVizPipeline`](../src/gpu/pipelines/gridVizPipeline.ts) warps a unit square with **`GRID_DIVISIONS`** (8) UV subdivisions using the CPU homography; `decodedTagId` drives tint via `stableHashToRgb01` when known.
+**Calibrate** — each rAF with a free [frame slot](../src/gpu/frameSlotPool.ts) (default 3) runs the full chain and presents live gray + GPU grid overlay. [`readGpuDetection`](../src/gpu/gpuQuadReadback.ts) reads active quads for HTML overlay and calibration. **Debug** runs the same tag chain every frame and adds profiles, histogram side canvases, and display-mode overlays.
+
+Corner order everywhere: **TL, TR, BL, BR** (triangle-strip / `Corners` in [`geometry.ts`](../src/lib/geometry.ts)).
+
+**Grid draw** — [`gridVizPipeline`](../src/gpu/pipelines/gridVizPipeline.ts) warps a unit square with **`GRID_DIVISIONS`** (8) using the GPU homography; `decodedTagId` drives tint via `stableHashToRgb01` when known, amber on dictionary miss, failure colors from `debug.failureCode`.
 
 ---
 

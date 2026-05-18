@@ -38,8 +38,8 @@ importers:
         specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-noise
         version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-noise(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
       '@typegpu/sdf':
-        specifier: ^0.11.1
-        version: 0.11.1(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
+        specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-sdf
+        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-sdf(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
       comlink:
         specifier: ^4.4.2
         version: 4.4.2
@@ -907,11 +907,11 @@ packages:
     peerDependencies:
       typegpu: workspace:^
 
-  '@typegpu/sdf@0.11.1':
-    resolution: {integrity: sha512-FThfBk15JDWSaTuCbQ1ZZYoaa07qSnobyG2aKf+5jaNqH5r1iRxwWsHf0fDHifG8DqAuHFRkoNu2iwDCRpW8aw==}
+  '@typegpu/sdf@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-sdf':
+    resolution: {path: /packages/typegpu-sdf, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67}
     version: 0.11.1
     peerDependencies:
-      typegpu: ^0.11.2
+      typegpu: workspace:^
 
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
@@ -2401,7 +2401,7 @@ snapshots:
     dependencies:
       typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
 
-  '@typegpu/sdf@0.11.1(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
+  '@typegpu/sdf@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-sdf(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
     dependencies:
       typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
 

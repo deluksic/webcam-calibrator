@@ -4,6 +4,7 @@ import {
   TAG_DECODE_HIST_BINS,
   TAG_DECODE_PEAK_GAP_FRAC,
   classifyModuleFromVoteCounts,
+  shortestStripEdgePx,
   tagDecodeDeadbandBounds,
   tagDecodeMinVoteTotal,
 } from '@/gpu/tagDecodeThresholds'
@@ -38,5 +39,16 @@ describe('tagDecodeThresholds', () => {
   it('minVoteTotal scales with shortest edge', () => {
     expect(tagDecodeMinVoteTotal(100)).toBe(2)
     expect(tagDecodeMinVoteTotal(200)).toBe(4)
+  })
+
+  it('shortestStripEdgePx uses perimeter edges not diagonals', () => {
+    const strip = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 0, y: 10 },
+      { x: 100, y: 10 },
+    ] as const
+    expect(shortestStripEdgePx(strip)).toBeCloseTo(10)
+    expect(shortestStripEdgePx(strip)).toBeLessThan(100)
   })
 })

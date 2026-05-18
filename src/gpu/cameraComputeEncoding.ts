@@ -41,11 +41,11 @@ export function encodeCameraCompute(
 
   if (slot !== undefined) {
     if (voteInstanceCount > 0) {
-      pipeline.tagDecode.encodeVotes(enc, voteInstanceCount)
+      pipeline.tagDecode.encodeVotePasses(enc, voteInstanceCount)
     }
     const decodePass = enc.beginComputePass({ label: 'camera tag decode' })
     pipeline.tagDecode.encodeDecode(decodePass, voteInstanceCount)
-    pipeline.hostQuadReadback.encodePack(decodePass)
+    pipeline.hostQuadReadback.encodePack(decodePass, voteInstanceCount)
     decodePass.end()
   }
 }

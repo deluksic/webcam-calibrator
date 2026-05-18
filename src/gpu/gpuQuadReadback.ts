@@ -67,7 +67,7 @@ function hostQuadToDetected(quad: HostQuadReadback, label: number, pattern?: Tag
   const failureCode = quad.debug.failureCode
   const hasCorners = failureCode === 0
   const corners = screenCornersToCorners(quad)
-  const edgePixelCount = quad.debug.edgePixelCount * 100
+  const edgePixelCount = quad.debug.edgePixelCount
   const area = quadAreaPx(corners)
   const minX = Math.min(corners[0].x, corners[1].x, corners[2].x, corners[3].x)
   const maxX = Math.max(corners[0].x, corners[1].x, corners[2].x, corners[3].x)
@@ -142,14 +142,18 @@ export async function readGpuDetection(
     return { quads: [], quadCount: 0 }
   }
 
+  const patternU32Count = n * MODULES_PER_QUAD
+
   const [allHostQuads, patternRaw, sourceLabelIds] = await Promise.all([
     pipeline.hostQuadReadback.hostQuadReadbackBuffer.read(),
-    pipeline.tagDecode.patternBuf.read(),
+    patternU32Count > 0
+      ? readU32Prefix(root.device, pipeline.tagDecode.patternBuf.buffer, patternU32Count)
+      : Promise.resolve([]),
     readU32Prefix(root.device, pipeline.edgeHistogram.quadSourceLabelId.buffer, n),
   ])
 
   const hostQuads = (Array.isArray(allHostQuads) ? allHostQuads : []).slice(0, n)
-  const patternFlat = Array.isArray(patternRaw) ? patternRaw.map((v) => Number(v)) : []
+  const patternFlat = patternRaw.map((v) => Number(v))
 
   return {
     quads: hostQuadsToDetected(hostQuads, n, sourceLabelIds, patternFlat),

@@ -33,6 +33,19 @@ export function tagDecodeDeadbandBounds(
   }
 }
 
+/** Shortest side of strip-order quad TL, TR, BL, BR (perimeter edges only). */
+export function shortestStripEdgePx(
+  corners: readonly { x: number; y: number }[],
+): number {
+  const tl = corners[0]!
+  const tr = corners[1]!
+  const bl = corners[2]!
+  const br = corners[3]!
+  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y)
+  return Math.min(dist(tl, tr), dist(tr, br), dist(br, bl), dist(bl, tl))
+}
+
 export function tagDecodeMinVoteTotal(shortestEdgePx: number): number {
   return Math.max(2, Math.round(DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE * shortestEdgePx))
 }

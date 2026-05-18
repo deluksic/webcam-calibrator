@@ -1,7 +1,20 @@
 import type { TgpuRoot } from 'typegpu'
 
-import { MAX_INSTANCES } from '@/gpu/pipelines/gridVizPipeline'
-import type { GradientProfilePipeline } from './gradientProfilePipeline'
+import type { GradientProfileDisplayMode, GradientProfilePipeline } from './gradientProfilePipeline'
+
+export type GradientProfileComputeOptions = {
+  /** Active quads from the previous frame's `quadCount` readback (same frame's homography). */
+  quadCount?: number
+  displayMode?: GradientProfileDisplayMode
+}
+
+function shouldRunProfile(displayMode: GradientProfileDisplayMode | undefined): boolean {
+  return (
+    displayMode === 'quadGrid' ||
+    displayMode === 'fittedLines' ||
+    displayMode === 'lineFitDebug'
+  )
+}
 
 /**
  * Full gradient-profile compute chain for one frame.
@@ -13,7 +26,11 @@ export function encodeGradientProfileCompute(
   pipeline: GradientProfilePipeline,
   video: HTMLVideoElement,
   threshold: number,
+  options: GradientProfileComputeOptions = {},
 ): void {
+  const quadCount = options.quadCount ?? 0
+  const displayMode = options.displayMode
+
   pipeline.ingest.encodeIngest(enc, root, video)
 
   pipeline.nms.thresholdBuffer.write(threshold)
@@ -27,17 +44,20 @@ export function encodeGradientProfileCompute(
   pipeline.pointerJump.encodeCompute(computePass)
   pipeline.compact.encodeCompute(computePass)
   pipeline.edgeHistogram.encodeCompute(computePass)
-  pipeline.lineFitDebug.encodeCompute(computePass)
+  if (displayMode === 'lineFitDebug') {
+    pipeline.lineFitDebug.encodeCompute(computePass)
+  }
   pipeline.orientHistViz?.encodePackCompute(computePass)
   pipeline.lineFit.encodeCompute(computePass)
   pipeline.quadHomography.encodeCompute(computePass)
-  pipeline.profile.encodeCompute(computePass)
+  if (shouldRunProfile(displayMode)) {
+    pipeline.profile.encodeCompute(computePass)
+  }
   computePass.end()
 
-  // Tag decode: render pass fills quads → fragment shader accumulates votes → compute pass decodes
-  pipeline.tagDecode.encodeVotes(enc, MAX_INSTANCES)
+  pipeline.tagDecode.encodeVotePasses(enc, quadCount)
 
   const decodePass = enc.beginComputePass({ label: 'tag decode' })
-  pipeline.tagDecode.encodeDecode(decodePass, MAX_INSTANCES)
+  pipeline.tagDecode.encodeDecode(decodePass, quadCount)
   decodePass.end()
 }

@@ -156,7 +156,10 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
 
         const enc = gNow.device.createCommandEncoder({ label: 'gradient profiles frame' })
         if (!props.frozen) {
-          encodeGradientProfileCompute(enc, gNow, pip, video, threshold())
+          encodeGradientProfileCompute(enc, gNow, pip, video, threshold(), {
+            quadCount: lastQuadCount,
+            displayMode: props.displayMode,
+          })
         }
         if (props.displayMode === 'undistort') {
           const ud = props.undistortParams?.()

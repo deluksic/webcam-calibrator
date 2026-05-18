@@ -22,14 +22,15 @@ import {
   DECODED_TAG_ID_UNKNOWN,
   GridDataSchema,
   type GridVizQuadBuffer,
-  MAX_INSTANCES,
 } from '@/gpu/pipelines/gridVizPipeline'
+import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 
-const MAX_QUADS = MAX_INSTANCES
 const TAG_MODULES = 8
 const DATA_MODULES = 6
 const MODULES_PER_QUAD = DATA_MODULES * DATA_MODULES
-const VOTES_PER_QUAD = MODULES_PER_QUAD * 2
+const COMPUTE_WG = 64
+const CLEAR_WG = 256
+const HOMOGRAPHY_VALID_EPS2 = 1e-12
 
 const BIT_X = [
   1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4, 1, 1, 1, 1, 1, 2, 2, 2, 3,
@@ -81,7 +82,7 @@ const TagDecodeThresholdGpu = d.struct({
   valid: d.u32,
 })
 
-const TagDecodeThresholdSchema = d.arrayOf(TagDecodeThresholdGpu, MAX_INSTANCES)
+const TagDecodeThresholdSchema = d.arrayOf(TagDecodeThresholdGpu, MAX_QUADS)
 
 const QuadDecodeMetaGpu = d.struct({
   rejectDict: d.u32,
@@ -94,23 +95,94 @@ const QuadDecodeMetaGpu = d.struct({
   weakBit5: d.u32,
 })
 
-const QuadDecodeMetaSchema = d.arrayOf(QuadDecodeMetaGpu, MAX_INSTANCES)
-const PatternSchema = d.arrayOf(d.u32, MAX_INSTANCES * MODULES_PER_QUAD)
+const QuadDecodeMetaSchema = d.arrayOf(QuadDecodeMetaGpu, MAX_QUADS)
+const PatternSchema = d.arrayOf(d.u32, MAX_QUADS * MODULES_PER_QUAD)
 const QuadPixelHistSchema = d.arrayOf(d.atomic(d.u32), PER_QUAD_HIST)
 const QuadPixelHistReadonlySchema = d.arrayOf(d.u32, PER_QUAD_HIST)
 const ModuleVoteSchema = d.arrayOf(d.atomic(d.u32), MAX_QUADS * MODULES_PER_QUAD)
 const ModuleVoteReadonlySchema = d.arrayOf(d.u32, MAX_QUADS * MODULES_PER_QUAD)
-const AtomicBestSchema = d.arrayOf(d.atomic(d.u32), MAX_INSTANCES)
-const AtomicBestReadonlySchema = d.arrayOf(d.u32, MAX_INSTANCES)
+const AtomicBestSchema = d.arrayOf(d.atomic(d.u32), MAX_QUADS)
+const AtomicBestReadonlySchema = d.arrayOf(d.u32, MAX_QUADS)
+
+const ActiveQuadCountSchema = d.arrayOf(d.u32, 1)
+
+function capQuadCount(quadCount: number): number {
+  return Math.max(0, Math.min(quadCount, MAX_QUADS))
+}
+
+function quadComputeWgs(quadCount: number): number {
+  const n = capQuadCount(quadCount)
+  return n > 0 ? Math.ceil(n / COMPUTE_WG) : 0
+}
 
 function allocCodewordBuffer(root: TgpuRoot) {
   const buf = root.createBuffer(CodewordBuffer).$usage('storage')
   const data: { low: number; high: number }[] = []
   for (const code of TAG36H11_CODES) {
-    data.push({ low: Number(code & 0xffffffffn), high: Number((code >> 32n) & 0xfn) })
+    data.push({ low: Number(code & 0xffffffffn), high: Number((code >> 32n) & 0xffffffffn) })
   }
   buf.write(data)
   return buf
+}
+
+/** GPU zero via plain `u32` mutable views (same buffers as atomic accum passes). */
+function createTagDecodeBufferClears(
+  root: TgpuRoot,
+  deps: {
+    histBuf: ReturnType<typeof root.createBuffer<typeof QuadPixelHistSchema>>
+    moduleWhiteBuf: ReturnType<typeof root.createBuffer<typeof ModuleVoteSchema>>
+    moduleBlackBuf: ReturnType<typeof root.createBuffer<typeof ModuleVoteSchema>>
+  },
+) {
+  const histClearLayout = tgpu.bindGroupLayout({
+    histogram: { storage: QuadPixelHistReadonlySchema, access: 'mutable' },
+  })
+  const histClearKernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [CLEAR_WG, 1, 1],
+  })((input) => {
+    const idx = d.u32(input.gid.x)
+    if (idx >= d.u32(PER_QUAD_HIST)) {
+      return
+    }
+    histClearLayout.$.histogram[idx] = d.u32(0)
+  })
+  const histClearPipeline = root.createComputePipeline({ compute: histClearKernel })
+  const histClearBindGroup = root.createBindGroup(histClearLayout, { histogram: deps.histBuf as never })
+
+  const voteClearLayout = tgpu.bindGroupLayout({
+    moduleWhite: { storage: ModuleVoteReadonlySchema, access: 'mutable' },
+    moduleBlack: { storage: ModuleVoteReadonlySchema, access: 'mutable' },
+  })
+  const voteClearKernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [CLEAR_WG, 1, 1],
+  })((input) => {
+    const idx = d.u32(input.gid.x)
+    const n = d.u32(MAX_QUADS * MODULES_PER_QUAD)
+    if (idx >= n) {
+      return
+    }
+    voteClearLayout.$.moduleWhite[idx] = d.u32(0)
+    voteClearLayout.$.moduleBlack[idx] = d.u32(0)
+  })
+  const voteClearPipeline = root.createComputePipeline({ compute: voteClearKernel })
+  const voteClearBindGroup = root.createBindGroup(voteClearLayout, {
+    moduleWhite: deps.moduleWhiteBuf as never,
+    moduleBlack: deps.moduleBlackBuf as never,
+  })
+
+  const histClearWgs = Math.ceil(PER_QUAD_HIST / CLEAR_WG)
+  const voteClearWgs = Math.ceil((MAX_QUADS * MODULES_PER_QUAD) / CLEAR_WG)
+
+  return {
+    encodeClearHist(pass: GPUComputePassEncoder) {
+      histClearPipeline.with(pass).with(histClearBindGroup).dispatchWorkgroups(histClearWgs)
+    },
+    encodeClearModuleVotes(pass: GPUComputePassEncoder) {
+      voteClearPipeline.with(pass).with(voteClearBindGroup).dispatchWorkgroups(voteClearWgs)
+    },
+  }
 }
 
 function createHistAccumStage(
@@ -179,14 +251,11 @@ function createHistAccumStage(
     histogram: histBuf,
   })
 
-  const zeroHist = new Uint32Array(PER_QUAD_HIST)
-
   return {
     histBuf,
     dummyTexture,
     encodeHistAccum(enc: GPUCommandEncoder, instanceCount: number) {
       if (instanceCount < 1) return
-      histBuf.write(zeroHist)
       const pass = enc.beginRenderPass({
         label: 'tag hist accum',
         colorAttachments: [
@@ -205,25 +274,28 @@ function createPeakThresholdStage(
   histBuf: ReturnType<typeof root.createBuffer<typeof QuadPixelHistSchema>>,
   thresholdBuf: ReturnType<typeof root.createBuffer<typeof TagDecodeThresholdSchema>>,
   quadDataBuffer: GridVizQuadBuffer,
+  activeQuadCountBuf: ReturnType<typeof root.createBuffer<typeof ActiveQuadCountSchema>>,
 ) {
   const layout = tgpu.bindGroupLayout({
     histogram: { storage: QuadPixelHistReadonlySchema, access: 'readonly' },
     thresholds: { storage: TagDecodeThresholdSchema, access: 'mutable' },
     quads: { storage: GridDataSchema, access: 'readonly' },
+    activeQuadCount: { storage: ActiveQuadCountSchema, access: 'readonly' },
   })
 
   const bindGroup = root.createBindGroup(layout, {
     histogram: histBuf as never,
     thresholds: thresholdBuf as never,
     quads: quadDataBuffer,
+    activeQuadCount: activeQuadCountBuf as never,
   })
 
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [64, 1, 1],
+    workgroupSize: [COMPUTE_WG, 1, 1],
   })((input) => {
     const quadId = d.u32(input.gid.x)
-    if (quadId >= d.u32(MAX_QUADS)) return
+    if (quadId >= layout.$.activeQuadCount[0]!) return
 
     const base = quadId * d.u32(TAG_DECODE_HIST_BINS)
     let blackPeak = d.u32(0)
@@ -264,13 +336,13 @@ function createPeakThresholdStage(
 
     const c = layout.$.quads[quadId]!.screenCorners
     const e01 = sqrt((c[1]!.x - c[0]!.x) * (c[1]!.x - c[0]!.x) + (c[1]!.y - c[0]!.y) * (c[1]!.y - c[0]!.y))
-    const e12 = sqrt((c[2]!.x - c[1]!.x) * (c[2]!.x - c[1]!.x) + (c[2]!.y - c[1]!.y) * (c[2]!.y - c[1]!.y))
-    const e23 = sqrt((c[3]!.x - c[2]!.x) * (c[3]!.x - c[2]!.x) + (c[3]!.y - c[2]!.y) * (c[3]!.y - c[2]!.y))
-    const e30 = sqrt((c[0]!.x - c[3]!.x) * (c[0]!.x - c[3]!.x) + (c[0]!.y - c[3]!.y) * (c[0]!.y - c[3]!.y))
+    const e13 = sqrt((c[3]!.x - c[1]!.x) * (c[3]!.x - c[1]!.x) + (c[3]!.y - c[1]!.y) * (c[3]!.y - c[1]!.y))
+    const e32 = sqrt((c[2]!.x - c[3]!.x) * (c[2]!.x - c[3]!.x) + (c[2]!.y - c[3]!.y) * (c[2]!.y - c[3]!.y))
+    const e20 = sqrt((c[0]!.x - c[2]!.x) * (c[0]!.x - c[2]!.x) + (c[0]!.y - c[2]!.y) * (c[0]!.y - c[2]!.y))
     let lMin = e01
-    lMin = min(lMin, e12)
-    lMin = min(lMin, e23)
-    lMin = min(lMin, e30)
+    lMin = min(lMin, e13)
+    lMin = min(lMin, e32)
+    lMin = min(lMin, e20)
     const minVote = max(d.u32(2), d.u32(round(d.f32(DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE) * lMin)))
 
     const peakSep = whitePeak - blackPeak
@@ -295,8 +367,11 @@ function createPeakThresholdStage(
   const pipeline = root.createComputePipeline({ compute: kernel })
 
   return {
-    encodePeakThresholds(pass: GPUComputePassEncoder) {
-      pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(MAX_QUADS / 64))
+    encodePeakThresholds(pass: GPUComputePassEncoder, quadCount: number) {
+      const wgs = quadComputeWgs(quadCount)
+      if (wgs > 0) {
+        pipeline.with(pass).with(bindGroup).dispatchWorkgroups(wgs)
+      }
     },
   }
 }
@@ -385,13 +460,9 @@ function createModuleVoteStage(
     moduleBlack: moduleBlackBuf as never,
   })
 
-  const zeroVotes = new Uint32Array(MAX_QUADS * MODULES_PER_QUAD)
-
   return {
     encodeModuleVotes(enc: GPUCommandEncoder, instanceCount: number) {
       if (instanceCount < 1) return
-      moduleWhiteBuf.write(zeroVotes)
-      moduleBlackBuf.write(zeroVotes)
       const pass = enc.beginRenderPass({
         label: 'tag module votes',
         colorAttachments: [
@@ -412,6 +483,7 @@ function createClassifyStage(
   thresholdBuf: ReturnType<typeof root.createBuffer<typeof TagDecodeThresholdSchema>>,
   patternBuf: ReturnType<typeof root.createBuffer<typeof PatternSchema>>,
   metaBuf: ReturnType<typeof root.createBuffer<typeof QuadDecodeMetaSchema>>,
+  activeQuadCountBuf: ReturnType<typeof root.createBuffer<typeof ActiveQuadCountSchema>>,
 ) {
   const layout = tgpu.bindGroupLayout({
     moduleWhite: { storage: ModuleVoteReadonlySchema, access: 'readonly' },
@@ -419,6 +491,7 @@ function createClassifyStage(
     thresholds: { storage: TagDecodeThresholdSchema, access: 'readonly' },
     pattern: { storage: PatternSchema, access: 'mutable' },
     meta: { storage: QuadDecodeMetaSchema, access: 'mutable' },
+    activeQuadCount: { storage: ActiveQuadCountSchema, access: 'readonly' },
   })
 
   const bindGroup = root.createBindGroup(layout, {
@@ -427,14 +500,15 @@ function createClassifyStage(
     thresholds: thresholdBuf as never,
     pattern: patternBuf as never,
     meta: metaBuf as never,
+    activeQuadCount: activeQuadCountBuf as never,
   })
 
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [64, 1, 1],
+    workgroupSize: [COMPUTE_WG, 1, 1],
   })((input) => {
     const quadId = d.u32(input.gid.x)
-    if (quadId >= d.u32(MAX_QUADS)) return
+    if (quadId >= layout.$.activeQuadCount[0]!) return
 
     const thr = layout.$.thresholds[quadId]!
     const pBase = quadId * d.u32(MODULES_PER_QUAD)
@@ -460,7 +534,7 @@ function createClassifyStage(
       }
       layout.$.pattern[pBase + iu] = cell
       if (cell === d.u32(PATTERN_WEAK) && weakCount < d.u32(TAG_DECODE_MAX_WEAK_WILDCARD)) {
-        weakBits[weakCount] = ModuleToBitGpu.$[iu]
+        weakBits[weakCount] = ModuleToBitGpu.$[iu]!
         weakCount = weakCount + d.u32(1)
       }
     }
@@ -484,8 +558,11 @@ function createClassifyStage(
   const pipeline = root.createComputePipeline({ compute: kernel })
 
   return {
-    encodeClassify(pass: GPUComputePassEncoder) {
-      pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(MAX_QUADS / 64))
+    encodeClassify(pass: GPUComputePassEncoder, quadCount: number) {
+      const wgs = quadComputeWgs(quadCount)
+      if (wgs > 0) {
+        pipeline.with(pass).with(bindGroup).dispatchWorkgroups(wgs)
+      }
     },
   }
 }
@@ -496,12 +573,14 @@ function createDictMatchStage(
   patternBuf: ReturnType<typeof root.createBuffer<typeof PatternSchema>>,
   metaBuf: ReturnType<typeof root.createBuffer<typeof QuadDecodeMetaSchema>>,
   atomicBestBuf: ReturnType<typeof root.createBuffer<typeof AtomicBestSchema>>,
+  activeQuadCountBuf: ReturnType<typeof root.createBuffer<typeof ActiveQuadCountSchema>>,
 ) {
   const layout = tgpu.bindGroupLayout({
     codewords: { storage: CodewordBuffer, access: 'readonly' },
     pattern: { storage: PatternSchema, access: 'readonly' },
     meta: { storage: QuadDecodeMetaSchema, access: 'readonly' },
     atomicBest: { storage: AtomicBestSchema, access: 'mutable' },
+    activeQuadCount: { storage: ActiveQuadCountSchema, access: 'readonly' },
   })
 
   const bindGroup = root.createBindGroup(layout, {
@@ -509,16 +588,17 @@ function createDictMatchStage(
     pattern: patternBuf as never,
     meta: metaBuf as never,
     atomicBest: atomicBestBuf as never,
+    activeQuadCount: activeQuadCountBuf as never,
   })
 
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [64, 1, 1],
+    workgroupSize: [COMPUTE_WG, 1, 1],
   })((input) => {
     const gid = d.u32(input.gid.x)
     const cwIdx = gid % d.u32(TAG36H11_COUNT)
     const quadId = d.u32(gid / d.u32(TAG36H11_COUNT))
-    if (quadId >= d.u32(MAX_QUADS)) return
+    if (quadId >= layout.$.activeQuadCount[0]!) return
 
     const meta = layout.$.meta[quadId]!
     if (meta.rejectDict !== d.u32(0)) return
@@ -598,16 +678,16 @@ function createDictMatchStage(
           const bitU = d.u32(bit)
           let srcBit = d.u32(0)
           if (rot === 0) {
-            srcBit = RotLut0Gpu.$[bitU]
+            srcBit = RotLut0Gpu.$[bitU]!
           } else if (rot === 1) {
-            srcBit = RotLut1Gpu.$[bitU]
+            srcBit = RotLut1Gpu.$[bitU]!
           } else if (rot === 2) {
-            srcBit = RotLut2Gpu.$[bitU]
+            srcBit = RotLut2Gpu.$[bitU]!
           } else {
-            srcBit = RotLut3Gpu.$[bitU]
+            srcBit = RotLut3Gpu.$[bitU]!
           }
-          const bx = BitXGpu.$[srcBit] - d.u32(1)
-          const by = BitYGpu.$[srcBit] - d.u32(1)
+          const bx = BitXGpu.$[srcBit]! - d.u32(1)
+          const by = BitYGpu.$[srcBit]! - d.u32(1)
           const pIdx = by * d.u32(DATA_MODULES) + bx
           const patternIdx = pBase + pIdx
           const cell = layout.$.pattern[patternIdx]!
@@ -641,9 +721,12 @@ function createDictMatchStage(
   const pipeline = root.createComputePipeline({ compute: kernel })
 
   return {
-    encodeDictMatch(pass: GPUComputePassEncoder, instanceCount: number) {
-      const threads = instanceCount * TAG36H11_COUNT
-      pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(threads / 64))
+    encodeDictMatch(pass: GPUComputePassEncoder, quadCount: number) {
+      const n = capQuadCount(quadCount)
+      const threads = n * TAG36H11_COUNT
+      if (threads > 0) {
+        pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(threads / COMPUTE_WG))
+      }
     },
   }
 }
@@ -653,25 +736,28 @@ function createCanonicalizeStage(
   quadDataBuffer: GridVizQuadBuffer,
   atomicBestBuf: ReturnType<typeof root.createBuffer<typeof AtomicBestSchema>>,
   metaBuf: ReturnType<typeof root.createBuffer<typeof QuadDecodeMetaSchema>>,
+  activeQuadCountBuf: ReturnType<typeof root.createBuffer<typeof ActiveQuadCountSchema>>,
 ) {
   const layout = tgpu.bindGroupLayout({
     quadData: { storage: GridDataSchema, access: 'mutable' },
     atomicBest: { storage: AtomicBestReadonlySchema, access: 'readonly' },
     meta: { storage: QuadDecodeMetaSchema, access: 'readonly' },
+    activeQuadCount: { storage: ActiveQuadCountSchema, access: 'readonly' },
   })
 
   const bindGroup = root.createBindGroup(layout, {
     quadData: quadDataBuffer,
     atomicBest: atomicBestBuf as never,
     meta: metaBuf as never,
+    activeQuadCount: activeQuadCountBuf as never,
   })
 
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [64, 1, 1],
+    workgroupSize: [COMPUTE_WG, 1, 1],
   })((input) => {
     const quadId = d.u32(input.gid.x)
-    if (quadId >= d.u32(MAX_QUADS)) return
+    if (quadId >= layout.$.activeQuadCount[0]!) return
 
     const quad = layout.$.quadData[quadId]!
     const H = quad.homography
@@ -717,8 +803,11 @@ function createCanonicalizeStage(
   const pipeline = root.createComputePipeline({ compute: kernel })
 
   return {
-    encodeCanonicalize(pass: GPUComputePassEncoder) {
-      pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(MAX_QUADS / 64))
+    encodeCanonicalize(pass: GPUComputePassEncoder, quadCount: number) {
+      const wgs = quadComputeWgs(quadCount)
+      if (wgs > 0) {
+        pipeline.with(pass).with(bindGroup).dispatchWorkgroups(wgs)
+      }
     },
   }
 }
@@ -891,8 +980,21 @@ export function createTagDecodeStage(
   const patternBuf = root.createBuffer(PatternSchema).$usage('storage')
   const metaBuf = root.createBuffer(QuadDecodeMetaSchema).$usage('storage')
   const atomicBestBuf = root.createBuffer(AtomicBestSchema).$usage('storage')
+  const activeQuadCountBuf = root.createBuffer(ActiveQuadCountSchema).$usage('storage')
 
-  const peakStage = createPeakThresholdStage(root, histStage.histBuf, thresholdBuf, deps.quadDataBuffer)
+  const bufferClears = createTagDecodeBufferClears(root, {
+    histBuf: histStage.histBuf,
+    moduleWhiteBuf,
+    moduleBlackBuf,
+  })
+
+  const peakStage = createPeakThresholdStage(
+    root,
+    histStage.histBuf,
+    thresholdBuf,
+    deps.quadDataBuffer,
+    activeQuadCountBuf,
+  )
   const voteStage = createModuleVoteStage(
     root,
     deps.grayTexView,
@@ -913,44 +1015,67 @@ export function createTagDecodeStage(
     thresholdBuf,
     patternBuf,
     metaBuf,
+    activeQuadCountBuf,
   )
-  const dictStage = createDictMatchStage(root, codewordBuffer, patternBuf, metaBuf, atomicBestBuf)
-  const canonicalizeStage = createCanonicalizeStage(root, deps.quadDataBuffer, atomicBestBuf, metaBuf)
+  const dictStage = createDictMatchStage(
+    root,
+    codewordBuffer,
+    patternBuf,
+    metaBuf,
+    atomicBestBuf,
+    activeQuadCountBuf,
+  )
+  const canonicalizeStage = createCanonicalizeStage(
+    root,
+    deps.quadDataBuffer,
+    atomicBestBuf,
+    metaBuf,
+    activeQuadCountBuf,
+  )
 
-  const worstScores = new Uint32Array(MAX_INSTANCES)
+  const worstScores = new Uint32Array(MAX_QUADS)
   worstScores.fill(WORST_SCORE)
 
-  function encodeHistAccum(enc: GPUCommandEncoder, instanceCount: number) {
-    histStage.encodeHistAccum(enc, instanceCount)
+  function writeActiveQuadCount(quadCount: number) {
+    activeQuadCountBuf.write([capQuadCount(quadCount)])
   }
 
-  function encodeModuleVotes(enc: GPUCommandEncoder, instanceCount: number) {
-    voteStage.encodeModuleVotes(enc, instanceCount)
+  function encodeVotePasses(enc: GPUCommandEncoder, quadCount: number) {
+    const n = capQuadCount(quadCount)
+    if (n < 1) return
+    writeActiveQuadCount(n)
+    const clearPass = enc.beginComputePass({ label: 'tag decode clear' })
+    bufferClears.encodeClearHist(clearPass)
+    clearPass.end()
+    histStage.encodeHistAccum(enc, n)
+    const peakPass = enc.beginComputePass({ label: 'tag peaks' })
+    peakStage.encodePeakThresholds(peakPass, n)
+    peakPass.end()
+    const voteClearPass = enc.beginComputePass({ label: 'tag vote clear' })
+    bufferClears.encodeClearModuleVotes(voteClearPass)
+    voteClearPass.end()
+    voteStage.encodeModuleVotes(enc, n)
   }
 
-  function encodeDecode(computePass: GPUComputePassEncoder, instanceCount: number) {
-    if (instanceCount < 1) return
-    peakStage.encodePeakThresholds(computePass)
-    classifyStage.encodeClassify(computePass)
+  function encodeDecode(computePass: GPUComputePassEncoder, quadCount: number) {
+    const n = capQuadCount(quadCount)
+    if (n < 1) return
+    writeActiveQuadCount(n)
+    classifyStage.encodeClassify(computePass, n)
     atomicBestBuf.write(worstScores)
-    dictStage.encodeDictMatch(computePass, instanceCount)
-    canonicalizeStage.encodeCanonicalize(computePass)
+    dictStage.encodeDictMatch(computePass, n)
+    canonicalizeStage.encodeCanonicalize(computePass, n)
   }
 
-  /** @deprecated Use encodeHistAccum + encodeModuleVotes + encodeDecode */
-  function encodeVotes(enc: GPUCommandEncoder, instanceCount: number) {
-    encodeHistAccum(enc, instanceCount)
-    const pass = enc.beginComputePass({ label: 'tag peaks' })
-    peakStage.encodePeakThresholds(pass)
-    pass.end()
-    encodeModuleVotes(enc, instanceCount)
+  /** Hist + peaks + module votes (call `encodeDecode` in a follow-up compute pass). */
+  function encodeVotes(enc: GPUCommandEncoder, quadCount: number) {
+    encodeVotePasses(enc, quadCount)
   }
 
   return {
     histBuf: histStage.histBuf,
     patternBuf,
-    encodeHistAccum,
-    encodeModuleVotes,
+    encodeVotePasses,
     encodeDecode,
     encodeVotes,
   }

@@ -4,15 +4,17 @@ import { tgpu, d } from 'typegpu'
 import { abs, floor, fract, length, min, max, dpdx, dpdy, mul } from 'typegpu/std'
 
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
+import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
 export const GRID_DIVISIONS = 8
 export const GRID_LINE_WIDTH = 0.06
-export const MAX_INSTANCES = 1024
+/** Same cap as edge-cluster quad registration (`MAX_QUADS`). */
+export const MAX_INSTANCES = MAX_QUADS
 
 /** App/UI cap for detected quads per frame; same as instance buffer length (`MAX_INSTANCES`). */
-export const MAX_DETECTED_TAGS = MAX_INSTANCES
+export const MAX_DETECTED_TAGS = MAX_QUADS
 
 export const QuadDebug = d.struct({
   failureCode: d.u32,
