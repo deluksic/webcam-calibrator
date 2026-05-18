@@ -314,11 +314,12 @@ function createQuadDecodeComputeStage(
       if (count > d.u32(0)) { avg = d.f32(sum) / d.f32(65536) / d.f32(count) }
       if (avg >= threshold) {
         const bitIdx = d.u32(BIT_POS[i]!)
-        if (bitIdx === d.u32(32)) { codewordHigh = codewordHigh | d.u32(1) }
-        else if (bitIdx === d.u32(33)) { codewordHigh = codewordHigh | d.u32(2) }
-        else if (bitIdx === d.u32(34)) { codewordHigh = codewordHigh | d.u32(4) }
-        else if (bitIdx === d.u32(35)) { codewordHigh = codewordHigh | d.u32(8) }
-        else { codewordLow = codewordLow | (d.u32(1) << (bitIdx & d.u32(31))) }
+        const pos = d.u32(35) - bitIdx
+        if (pos >= d.u32(32)) {
+          codewordHigh = codewordHigh | (d.u32(1) << (pos - d.u32(32)))
+        } else {
+          codewordLow = codewordLow | (d.u32(1) << pos)
+        }
       }
     }
 
@@ -341,19 +342,21 @@ function createQuadDecodeComputeStage(
         else if (rot === 1) { srcBit = d.u32(ROT_LUTS_1[bit]!) }
         else if (rot === 2) { srcBit = d.u32(ROT_LUTS_2[bit]!) }
         else { srcBit = d.u32(ROT_LUTS_3[bit]!) }
+        const srcPos = d.u32(35) - srcBit
         let srcVal = d.u32(0)
-        if (srcBit === d.u32(32)) { srcVal = codewordHigh & d.u32(1) }
-        else if (srcBit === d.u32(33)) { srcVal = (codewordHigh >> d.u32(1)) & d.u32(1) }
-        else if (srcBit === d.u32(34)) { srcVal = (codewordHigh >> d.u32(2)) & d.u32(1) }
-        else if (srcBit === d.u32(35)) { srcVal = (codewordHigh >> d.u32(3)) & d.u32(1) }
-        else { srcVal = (codewordLow >> (srcBit & d.u32(31))) & d.u32(1) }
+        if (srcPos >= d.u32(32)) {
+          srcVal = (codewordHigh >> (srcPos - d.u32(32))) & d.u32(1)
+        } else {
+          srcVal = (codewordLow >> srcPos) & d.u32(1)
+        }
         if (srcVal !== d.u32(0)) {
           const dstBit = d.u32(bit)
-          if (dstBit === d.u32(32)) { rHigh = rHigh | d.u32(1) }
-          else if (dstBit === d.u32(33)) { rHigh = rHigh | d.u32(2) }
-          else if (dstBit === d.u32(34)) { rHigh = rHigh | d.u32(4) }
-          else if (dstBit === d.u32(35)) { rHigh = rHigh | d.u32(8) }
-          else { rLow = rLow | (d.u32(1) << (dstBit & d.u32(31))) }
+          const dstPos = d.u32(35) - dstBit
+          if (dstPos >= d.u32(32)) {
+            rHigh = rHigh | (d.u32(1) << (dstPos - d.u32(32)))
+          } else {
+            rLow = rLow | (d.u32(1) << dstPos)
+          }
         }
       }
       if (rot === 0) { rLow0 = rLow; rHigh0 = rHigh }

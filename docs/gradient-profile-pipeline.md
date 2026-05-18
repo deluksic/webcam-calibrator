@@ -1,6 +1,6 @@
 # Gradient profile pipeline
 
-GPU path used by **Gradient profiles** ([`GradientProfilesView.tsx`](../src/components/gradientProfiles/GradientProfilesView.tsx)): live Sobel edges, connected components, per-label orientation clustering, TLS line fits, **quad registration**, gradient profiles along edge normals, and debug overlays.
+GPU path used by **Gradient profiles** ([`GradientProfilesView.tsx`](../src/components/gradientProfiles/GradientProfilesView.tsx)): live Sobel edges, connected components, per-label orientation clustering, TLS line fits, **quad registration**, GPU **tag36h11 decode**, perspective **grid overlay**, gradient profiles along edge normals, and debug overlays.
 
 Wiring lives in [`gradientProfilePipeline.ts`](../src/gpu/gradientProfilePipeline.ts). Per-frame compute is [`encodeGradientProfileCompute`](../src/gpu/gradientProfileComputeEncoding.ts); camera and plot present are [`gradientProfilePresentEncoding.ts`](../src/gpu/gradientProfilePresentEncoding.ts).
 
@@ -14,12 +14,15 @@ Today, **grid** mode calls [`readDetection`](../src/gpu/cameraDetection.ts) each
 
 This pipeline is the staging ground for a GPU-native tag path:
 
-- **Connected components** and **per-label geometry** already stay on the GPU through quad registration (`labelToQuadId`, fitted sides, `packedEdgeLabels`).
+- **Connected components** and **per-label geometry** stay on the GPU through quad registration (`labelToQuadId`, fitted sides, `packedEdgeLabels`).
 - **Gradient profiles** validate edge quality per side without readback.
-- **Corner intersections + homography** (GPU) produce per-quad `mat3x3f` maps for the same 8×8 grid overlay as calibration **grid** mode (no tag decode yet).
-- **Next steps**: on-GPU tag bit sampling and tag36h11 decode from compact buffers—replacing `readDetection` with small structured readbacks (decode results) only when needed.
+- **Corner intersections + homography** (GPU) write per-quad `mat3x3f` maps into `grid.quadCornersBuffer`.
+- **Tag36h11 decode** (GPU) samples luma per data module, matches the dictionary, and updates `decodedTagId` / `decodedRotation` in the same buffer—no CPU contour readback in this view.
+- **Grid overlay** composites an 8×8 perspective-correct warp with stable hash tints per decoded id.
 
-Success looks like **grid** reusing the same compute chain (or a shared subset), with **no** dense label or gradient buffer readback per frame.
+**Still CPU on the calibration path:** live **grid** mode in [`cameraPipeline.ts`](../src/gpu/cameraPipeline.ts) still uses [`readDetection`](../src/gpu/cameraDetection.ts) + [`updateQuadCornersBuffer`](../src/gpu/cameraFrame.ts). Porting calibration to this GPU decode chain is the remaining integration step.
+
+Success for production **grid** looks like reusing this compute chain (or a shared subset), with **no** dense label or gradient buffer readback per frame—only small structured readbacks when the UI needs tag ids on the host.
 
 ---
 
@@ -42,7 +45,9 @@ Video frame
   → scatter quad lines → flat lineOut[MAX_FLAT_EDGES]
   → quad corner homography (intersections + DLT → grid viz buffer)
   → edge profile (64-bin normal profiles per flat edge)
-  → present: camera mode + profile plot canvas
+  → tag decode vote pass (raster quads → per-module luma atomics)
+  → tag decode compute (histogram threshold → codeword → dictionary)
+  → present: camera mode + tag histogram canvas + profile plot canvas
 ```
 
 ---
@@ -66,8 +71,12 @@ From [`encodeGradientProfileCompute`](../src/gpu/gradientProfileComputeEncoding.
 | 11 | `lineFit` | Reset + scatter label fits → flat `lineOut` |
 | 12 | `quadHomography` | Per `quadId`: adjacent line intersections → CCW corners → DLT `H` → `grid.quadCornersBuffer` |
 | 13 | `profile` | Reset buckets → accum → normalize |
+| 14 | `tagDecode.encodeVotes` | Render pass: warp each quad with `H`, atomic-add luma into 6×6 module sums (+ debug 16-bin hist) |
+| 15 | `tagDecode.encodeDecode` | Compute pass: per-quad threshold, 36-bit codeword, Hamming match vs tag36h11 (≤3 errors) |
 
 Label line fit runs **inside** step 8 (between find peaks and compact quads), because quad registration reads `labelLineOut`.
+
+Steps 14–15 run **after** the main compute pass (separate render + compute passes on the same command encoder). They read/write `grid.quadCornersBuffer` in place.
 
 ---
 
@@ -175,11 +184,79 @@ Per `quadId < quadCount` (one thread per slot, up to `MAX_QUADS` = 512):
 2. **Sort sides CCW** by `atan2(peakDir)`; **intersect adjacent** infinite lines (`n·p = nDotMean`, same normal form as TLS).
 3. **Sort intersection points CCW** around centroid; **degeneracy only** (signed area floor, min edge 2 px — no opposite-edge ratio checks).
 4. **Try four CCW rotations** (CPU `rotateRing`); first nonsingular [`tryHomographyFromCorners`](../src/gpu/shaders/homographyDlt.ts) (8×8 DLT, same as CPU [`tryComputeHomography`](../src/lib/geometry.ts)) wins.
-5. Write [`GridDataSchema`](../src/gpu/pipelines/gridVizPipeline.ts) entry: `homography`, `debug.failureCode` / `intersectionCount`, `decodedTagId = UNKNOWN` (black grid, no ID tint).
+5. Write [`GridDataSchema`](../src/gpu/pipelines/gridVizPipeline.ts) entry: `homography`, `screenCorners`, `debug.failureCode` / `intersectionCount`, `decodedTagId = UNKNOWN`, `decodedRotation = 0`.
 
 Slots `quadId ≥ quadCount` are cleared so stale instances do not draw.
 
-Present uses [`createGridVizStage`](../src/gpu/pipelines/gridVizPipeline.ts) — same 8×8 perspective warp as [`encodeAndSubmitGridPresent`](../src/gpu/cameraPresentEncoding.ts).
+### Strip order vs cyclic order
+
+Corners are stored in **triangle-strip order** for rendering and DLT: `TL, TR, BL, BR` (indices 0–3). Shoelace area and edge-length degeneracy checks remap to cyclic perimeter `TL, TR, BR, BL` via `cyclicIdx` in [`quadCornerOrder.ts`](../src/gpu/shaders/quadCornerOrder.ts)—walking strip order directly would treat the quad as a bow-tie and falsely fail plausibility.
+
+---
+
+## GPU tag decode (tag36h11)
+
+Module: [`tagDecodePipeline.ts`](../src/gpu/pipelines/tagDecodePipeline.ts). Dictionary: [`tag36h11.ts`](../src/lib/tag36h11.ts) / `tag36h11.json` (587 codes).
+
+Shared buffer: `grid.quadCornersBuffer` (`GridDataSchema`, up to `MAX_INSTANCES` = 1024). Homography stage writes geometry; decode stage **only** updates `decodedTagId` and `decodedRotation` (and leaves `UNKNOWN` when `H` is degenerate).
+
+### Stage 1 — Vote accumulation (render pass)
+
+- **Input:** `grayTex` (camera ingest, `rgba8unorm` sampled as `texture2d(f32)`), `quads` from `quadCornersBuffer`.
+- **Vertex:** Same perspective warp as grid viz: `mul(H, vec3(uv, 1))` → clip with `w = imgPos.z` (degenerate `H` → off-screen discard).
+- **Fragment:** For each covered pixel:
+  - `floor(uv × 8)` → module index; **data cells** are the inner 6×6 (`mx, my ∈ 1…6`).
+  - `atomicAdd` fixed-point luma (`round(gray × 65536)`) into `moduleSum[quadId × 36 + cell]`, `moduleCount` likewise.
+  - **Debug:** 16-bin per-quad histogram of raw `gray` (all pixels in the quad, not only data cells)—shown on the **Tag grayscale histogram** canvas.
+
+Vote pass currently dispatches `MAX_INSTANCES` instances; slots without a valid homography contribute no samples.
+
+### Stage 2 — Decode (compute pass)
+
+One thread per `quadId < MAX_INSTANCES` (workgroup size 64):
+
+1. **Module averages** — `sum / (65536 × count)` per data cell; default 0.5 if no samples.
+2. **16-bin histogram** over the 36 averages; **3-wide circular smooth**; find black peak (max bin) and white peak (local max, ≥4 bins from black, fallback = farthest bin).
+3. **Threshold** — midpoint of peak bin indices: `(blackPeak + whitePeak) / 2 / 16`.
+4. **Codeword** — classify each cell white/black; pack 36 bits via `BIT_POS` (same spatial→bit mapping as CPU `BIT_X` / `BIT_Y`).
+5. **Bit layout** — AprilTag bit index `b` is the **MSB** of the 36-bit word. Dictionary stores `low` = bits 0–31, `high` = bits 32–35. Packing uses `pos = 35 - bitIdx` (not `1 << bitIdx` on the index alone).
+6. **Four rotations** — unrolled `ROT_LUTS_0…3`; Hamming distance `popcount(low ^ cw.low) + popcount(high ^ cw.high)` against all 587 entries.
+7. **Write result** — if `bestDist ≤ 3`: `decodedTagId = bestId` (0…586), `decodedRotation = 0…3`; else `decodedTagId = DICT_MISS`, rotation 0.
+
+Constants: `MAX_DICT_ERROR = 3`, `DATA_MODULES = 6`, `TAG_MODULES = 8`.
+
+### Sentinels (`decodedTagId`)
+
+| Value | Symbol | Grid viz (corners OK, `failureCode = 0`) |
+|-------|--------|------------------------------------------|
+| `0xFFFFFFFF` | `DECODED_TAG_ID_UNKNOWN` | Black 8×8 grid (no hash) |
+| `0xFFFFFFFE` | `DECODED_TAG_ID_DICT_MISS` | Amber-tinted grid (pattern OK, dictionary miss) |
+| `0…586` | tag36h11 id | Stable hash fill + grid lines |
+
+Non-zero `failureCode` uses failure tints from [`gridVizFailureTintRgb`](../src/gpu/pipelines/gridVizPipeline.ts) (same bitmask order as CPU [`corners.ts`](../src/lib/corners.ts)).
+
+---
+
+## Grid overlay (`gridVizPipeline.ts`)
+
+Present in **`quadGrid`** mode: grayscale camera, then instanced triangle-strip quads composited with alpha blending ([`encodeGradientProfileCameraPresent`](../src/gpu/gradientProfilePresentEncoding.ts)).
+
+### Vertex shader
+
+- **Perspective path:** `mul(H, vec3(uv, 1))` with `w` in clip space (same as tag vote pass).
+- **Degenerate fallback:** `screenCorners` in pixel space, `w = 1` (affine UV; may show a diagonal kink).
+- **UVs:** unit square `TL, TR, BL, BR` matching strip order.
+
+### Fragment shader
+
+- **Grid lines:** `gridTextureGradBox` — 8×8 anti-aliased lines via `dpdx`/`dpdy` on interpolated UV (`GRID_DIVISIONS = 8`, `GRID_LINE_WIDTH = 0.06`).
+- **Color rules** (after computing `grid`):
+  1. `failureCode = 0` and `DICT_MISS` → amber fill × grid
+  2. `failureCode = 0` and id ≠ `UNKNOWN` → `stableHashToRgb01(decodedTagId)` × 0.55 fill × grid
+  3. `failureCode = 0` → black grid only
+  4. Else → failure tint × grid
+
+Instance count for draw comes from **previous frame** `quadCount` readback (`lastQuadCount` in [`GradientProfilesPipeline.tsx`](../src/components/gradientProfiles/GradientProfilesPipeline.tsx))—one frame of latency vs registration.
 
 ---
 
@@ -196,8 +273,16 @@ From [`encodeGradientProfileCameraPresent`](../src/gpu/gradientProfilePresentEnc
 | `quads` | False-color `quadLabelBuffer` | Only registered quads |
 | `edgeLabels` | False-color `packedEdgeLabels` | Flat edge id per pixel |
 | `fittedLines` | Dim grayscale (0.38) | Green TLS segments — **registered quads only** |
-| `quadGrid` | Full grayscale | Black 8×8 grid warp per quad (`gridViz`, no tag ID coloring) |
+| `quadGrid` | Full grayscale | 8×8 grid warp per quad; hash tint when decoded, amber on dict miss, failure colors when corners fail |
 | `lineFitDebug` | Dim grayscale + failure colors | Same fitted-line overlay |
+
+Side canvases (same page):
+
+| Canvas | Source |
+|--------|--------|
+| Orientation histograms | `orientHistViz` — per-label 64-bin orientation |
+| Tag grayscale histogram | `tagHistogramDisplay` — per-quad 16-bin luma from vote-pass debug buffer |
+| Edge gradient profiles | `profilePlot` — 64-bin profiles per flat edge |
 
 ### Fitted-line overlay gating
 
@@ -229,7 +314,24 @@ This matches quad scatter: partial labels (e.g. two strong parallel edges inside
 | `packedEdgeLabels` | W×H | `quadId×4+edgeId` or `INVALID` |
 | `lineOut[flatSlot]` | 2048 | Scattered fits for profile/plot |
 | `profileAvg` | 2048×64 | Normalized profile curves |
-| `grid.quadCornersBuffer[quadId]` | 1024 × `QuadData` | Homography + debug for grid overlay (GPU-written) |
+| `grid.quadCornersBuffer[quadId]` | 1024 × `QuadData` | `homography`, `screenCorners`, `debug`, `decodedTagId`, `decodedRotation` |
+| `tagDecode.moduleSum` / `moduleCount` | 1024×36 each | Per-quad module luma votes (fixed-point / count) |
+| `tagDecode.histBuf` | 1024×16 | Per-quad debug grayscale histogram (vote pass) |
+| `tagDecode.codewords` | 587 × `{low, high}` | tag36h11 dictionary on GPU |
+
+`QuadData` layout: [`QuadDataGpu`](../src/gpu/pipelines/gridVizPipeline.ts).
+
+---
+
+## Debugging tips
+
+| Symptom | Likely cause |
+|---------|----------------|
+| Solid flat fill, no grid lines | Fragment shader left in debug fill-only mode—should call `gridTextureGradBox` |
+| All quads same gray, no hash colors | `DICT_MISS` for every quad—check codeword bit packing (`pos = 35 - bitIdx`), homography, or threshold |
+| Purple quads but geometry looks fine | `FAIL_PLAUSIBILITY` from strip-order shoelace bug—fixed via `cyclicIdx` in `quadCornerOrder` |
+| Grid “kink” on diagonal | Degenerate `H`; overlay fell back to affine `screenCorners` |
+| Tag histogram flat / single peak | Weak contrast or homography missing; check **Tag grayscale histogram** panel |
 
 ---
 
@@ -265,7 +367,9 @@ Shared constants in [`lineFitThresholds.ts`](../src/gpu/lineFitThresholds.ts):
 | TLS per label×peak | [`labelLineFitPipeline.ts`](../src/gpu/pipelines/labelLineFitPipeline.ts) |
 | Flat scatter | [`edgeLineFitPipeline.ts`](../src/gpu/pipelines/edgeLineFitPipeline.ts) |
 | Corners + homography | [`quadCornerHomographyPipeline.ts`](../src/gpu/pipelines/quadCornerHomographyPipeline.ts) |
+| Tag decode | [`tagDecodePipeline.ts`](../src/gpu/pipelines/tagDecodePipeline.ts) |
 | Grid overlay | [`gridVizPipeline.ts`](../src/gpu/pipelines/gridVizPipeline.ts) |
+| Stable hash colors | [`hashStableColor.ts`](../src/lib/hashStableColor.ts) |
 | Profiles | [`edgeProfilePipeline.ts`](../src/gpu/pipelines/edgeProfilePipeline.ts) |
 | Profile plot | [`edgeProfilePlotPipeline.ts`](../src/gpu/pipelines/edgeProfilePlotPipeline.ts) |
 | Fitted lines overlay | [`edgeFittedLineOverlayPipeline.ts`](../src/gpu/pipelines/edgeFittedLineOverlayPipeline.ts) |
