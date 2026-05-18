@@ -37,8 +37,10 @@ Video frame
   → scatter quad lines → flat lineOut[MAX_FLAT_EDGES]
   → quad corner homography (intersections + DLT → grid viz buffer)
   → edge profile (64-bin normal profiles per flat edge)
-  → tag decode vote pass (raster quads → per-module luma atomics)
-  → tag decode compute (histogram threshold → codeword → dictionary)
+  → tag decode hist render (per-quad 32-bin pixel gray histogram)
+  → tag decode peak compute (linear peaks → 25% deadband thresholds)
+  → tag decode vote render (per-pixel black/white module votes)
+  → tag decode compute (classify -1/-2 → parallel dict → canonicalize corners + H)
   → present: camera mode + tag histogram canvas + profile plot canvas
 ```
 
@@ -63,8 +65,8 @@ From [`encodeGradientProfileCompute`](../src/gpu/gradientProfileComputeEncoding.
 | 11 | `lineFit` | Reset + scatter label fits → flat `lineOut` |
 | 12 | `quadHomography` | Per `quadId`: adjacent line intersections → CCW corners → DLT `H` → `grid.quadCornersBuffer` |
 | 13 | `profile` | Reset buckets → accum → normalize |
-| 14 | `tagDecode.encodeVotes` | Render pass: warp each quad with `H`, atomic-add luma into 6×6 module sums (+ debug 16-bin hist) |
-| 15 | `tagDecode.encodeDecode` | Compute pass: per-quad threshold, 36-bit codeword, Hamming match vs tag36h11 (≤3 errors) |
+| 14 | `tagDecode.encodeVotes` | Hist render → peak compute → vote render (32-bin linear hist, deadband votes) |
+| 15 | `tagDecode.encodeDecode` | Classify pattern → 587-thread dict match (weak wildcards) → canonicalize corners + `H` |
 
 Label line fit runs **inside** step 8 (between find peaks and compact quads), because quad registration reads `labelLineOut`.
 
@@ -175,7 +177,7 @@ Per `quadId < quadCount` (one thread per slot, up to `MAX_QUADS` = 512):
 1. Load four scattered `lineOut` sides and `peakDirs` from `labelClusters[labelId]`.
 2. **Sort sides CCW** by `atan2(peakDir)`; **intersect adjacent** infinite lines (`n·p = nDotMean`, same normal form as TLS).
 3. **Sort intersection points CCW** around centroid; **degeneracy only** (signed area floor, min edge 2 px — no opposite-edge ratio checks).
-4. **Try four CCW rotations** (CPU `rotateRing`); first nonsingular [`tryHomographyFromCorners`](../src/gpu/shaders/homographyDlt.ts) (8×8 DLT, same as CPU [`tryComputeHomography`](../src/lib/geometry.ts)) wins.
+4. **Try four polar-ring starts**; first nonsingular [`tryHomographyFromCorners`](../src/gpu/shaders/homographyDlt.ts) (8×8 DLT, same as CPU [`tryComputeHomography`](../src/lib/geometry.ts)) wins.
 5. Write [`GridDataSchema`](../src/gpu/pipelines/gridVizPipeline.ts) entry: `homography`, `screenCorners`, `debug.failureCode` / `intersectionCount`, `decodedTagId = UNKNOWN`, `decodedRotation = 0`.
 
 Slots `quadId ≥ quadCount` are cleared so stale instances do not draw.
@@ -188,34 +190,41 @@ Corners are stored in **triangle-strip order** for rendering and DLT: `TL, TR, B
 
 ## GPU tag decode (tag36h11)
 
-Module: [`tagDecodePipeline.ts`](../src/gpu/pipelines/tagDecodePipeline.ts). Dictionary: [`tag36h11.ts`](../src/lib/tag36h11.ts) / `tag36h11.json` (587 codes).
+Module: [`tagDecodePipeline.ts`](../src/gpu/pipelines/tagDecodePipeline.ts). Thresholds: [`tagDecodeThresholds.ts`](../src/gpu/tagDecodeThresholds.ts). Dictionary: [`tag36h11.ts`](../src/lib/tag36h11.ts).
 
-Shared buffer: `grid.quadCornersBuffer` (`GridDataSchema`, up to `MAX_INSTANCES` = 1024). Homography stage writes geometry; decode stage **only** updates `decodedTagId` and `decodedRotation` (and leaves `UNKNOWN` when `H` is degenerate).
+Shared buffer: `grid.quadCornersBuffer` (`GridDataSchema`, up to `MAX_INSTANCES` = 1024). Homography stage writes initial geometry; **canonicalize** (after decode) rotates `screenCorners`, recomputes `H`, and zeros `decodedRotation`.
 
-### Stage 1 — Vote accumulation (render pass)
+### Stage 1 — Pixel histogram (render)
 
-- **Input:** `grayTex` (camera ingest, `rgba8unorm` sampled as `texture2d(f32)`), `quads` from `quadCornersBuffer`.
-- **Vertex:** Same perspective warp as grid viz: `mul(H, vec3(uv, 1))` → clip with `w = imgPos.z` (degenerate `H` → off-screen discard).
-- **Fragment:** For each covered pixel:
-  - `floor(uv × 8)` → module index; **data cells** are the inner 6×6 (`mx, my ∈ 1…6`).
-  - `atomicAdd` fixed-point luma (`round(gray × 65536)`) into `moduleSum[quadId × 36 + cell]`, `moduleCount` likewise.
-  - **Debug:** 16-bin per-quad histogram of raw `gray` (all pixels in the quad, not only data cells)—shown on the **Tag grayscale histogram** canvas.
+- Warp each quad with `H` (same as grid viz).
+- `bin = min(floor(gray × 32), 31)` — **linear** luma axis (no wrap, no smoothing).
+- `atomicAdd` into `quadPixelHist[quadId × 32 + bin]` (all quad pixels).
 
-Vote pass currently dispatches `MAX_INSTANCES` instances; slots without a valid homography contribute no samples.
+### Stage 2 — Peak thresholds (compute)
 
-### Stage 2 — Decode (compute pass)
+Per quad: argmax black peak on raw bins; brightest local maximum with linear separation `≥ TAG_DECODE_MIN_PEAK_BIN_SEP` from black. Invalid peaks → `valid = 0`.
 
-One thread per `quadId < MAX_INSTANCES` (workgroup size 64):
+Deadband in normalized luma (`TAG_DECODE_PEAK_GAP_FRAC = 0.25`):
 
-1. **Module averages** — `sum / (65536 × count)` per data cell; default 0.5 if no samples.
-2. **16-bin histogram** over the 36 averages; **3-wide circular smooth**; find black peak (max bin) and white peak (local max, ≥4 bins from black, fallback = farthest bin).
-3. **Threshold** — midpoint of peak bin indices: `(blackPeak + whitePeak) / 2 / 16`.
-4. **Codeword** — classify each cell white/black; pack 36 bits via `BIT_POS` (same spatial→bit mapping as CPU `BIT_X` / `BIT_Y`).
-5. **Bit layout** — AprilTag bit index `b` is the **MSB** of the 36-bit word. Dictionary stores `low` = bits 0–31, `high` = bits 32–35. Packing uses `pos = 35 - bitIdx` (not `1 << bitIdx` on the index alone).
-6. **Four rotations** — unrolled `ROT_LUTS_0…3`; Hamming distance `popcount(low ^ cw.low) + popcount(high ^ cw.high)` against all 587 entries.
-7. **Write result** — if `bestDist ≤ 3`: `decodedTagId = bestId` (0…586), `decodedRotation = 0…3`; else `decodedTagId = DICT_MISS`, rotation 0.
+- `blackBound = blackPeakLuma + diff × gap / 2`
+- `whiteBound = whitePeakLuma - diff × gap / 2`
+- Pixels with `gray` between bounds do not vote.
 
-Constants: `MAX_DICT_ERROR = 3`, `DATA_MODULES = 6`, `TAG_MODULES = 8`.
+`minVoteTotal = max(2, round(0.02 × shortest edge px))`.
+
+### Stage 3 — Module votes (render)
+
+Per pixel in deadband-excluded range: `atomicAdd` `moduleBlackCount` / `moduleWhiteCount` for inner 6×6 cells.
+
+### Stage 4 — Decode (compute, three dispatches)
+
+1. **Classify** — per module: weak `-1` if `sum < minVoteTotal` or invalid peaks; tie `-2` if `black == white` with enough votes (**reject quad** if any tie); else `0`/`1`. Weak bit list for wildcards (max 6).
+2. **Dictionary** — `587 × activeQuads` threads: Hamming vs one codeword, `4` rotations, `2^u` weak masks; `atomicMin` packed score `(dist << 20) | (rot << 18) | cwIdx`.
+3. **Canonicalize** — apply `decodedRotation` to corner strip, DLT homography, `decodedRotation = 0`; write `decodedTagId` or `DICT_MISS` / `UNKNOWN`.
+
+Host readback: [`readGpuDetection`](../src/gpu/gpuQuadReadback.ts) copies canonical corners and `pattern` from GPU buffers (`rotateStripCorners` on GPU). Calibrate grid viz uses `hideNonDecoded: true` ([`acceptQuadForTagUse`](../src/lib/acceptQuadForTagUse.ts) strict mode: decoded id only, no weak/tie).
+
+Constants: `TAG_DECODE_HIST_BINS = 32`, `MAX_DICT_ERROR = 3`.
 
 ### Sentinels (`decodedTagId`)
 
@@ -273,7 +282,7 @@ Side canvases (same page):
 | Canvas | Source |
 |--------|--------|
 | Orientation histograms | `orientHistViz` — per-label 64-bin orientation |
-| Tag grayscale histogram | `tagHistogramDisplay` — per-quad 16-bin luma from vote-pass debug buffer |
+| Tag grayscale histogram | `tagHistogramDisplay` — per-quad **32-bin linear** pixel histogram (yellow = black/white peaks) |
 | Edge gradient profiles | `profilePlot` — 64-bin profiles per flat edge |
 
 ### Fitted-line overlay gating

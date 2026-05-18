@@ -38,6 +38,6 @@ export function encodeGradientProfileCompute(
   pipeline.tagDecode.encodeVotes(enc, MAX_INSTANCES)
 
   const decodePass = enc.beginComputePass({ label: 'tag decode' })
-  pipeline.tagDecode.encodeDecode(decodePass)
+  pipeline.tagDecode.encodeDecode(decodePass, MAX_INSTANCES)
   decodePass.end()
 }

@@ -6,5 +6,4 @@ export * from '@/tests/shared/pipeline'
 export * from '@/tests/shared/rng'
 export * from '@/tests/shared/noise/index'
 export * from '@/tests/shared/distortion/index'
-
-export { decodeStressSpeckleSeed } from '@/lib/decodeStressHarness'
+export * from '@/tests/shared/sceneStrips'

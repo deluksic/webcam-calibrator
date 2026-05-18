@@ -216,22 +216,43 @@ const collapsedScreenQuad = tgpu.fn(
   return out
 })
 
-/** Copy four corners (value semantics for nested struct fields). */
-const copyCorners4 = tgpu.fn(
-  [Corners4],
+/**
+ * Rotate triangle-strip corners (TL, TR, BL, BR) by `k` quarter-turns CW — same permutations as
+ * Strip-order quarter-turn CW permutations (not a polar-ring start index).
+ */
+export const rotateStripCorners = tgpu.fn(
+  [Corners4, d.u32],
   Corners4,
-)((src) => {
+)((strip, k) => {
   'use gpu'
+  const r = k & d.u32(3)
   const out = Corners4()
-  out[d.u32(0)] = d.vec2f(src[0]!)
-  out[d.u32(1)] = d.vec2f(src[1]!)
-  out[d.u32(2)] = d.vec2f(src[2]!)
-  out[d.u32(3)] = d.vec2f(src[3]!)
+  if (r === d.u32(0)) {
+    out[d.u32(0)] = d.vec2f(strip[d.u32(0)]!)
+    out[d.u32(1)] = d.vec2f(strip[d.u32(1)]!)
+    out[d.u32(2)] = d.vec2f(strip[d.u32(2)]!)
+    out[d.u32(3)] = d.vec2f(strip[d.u32(3)]!)
+  } else if (r === d.u32(1)) {
+    out[d.u32(0)] = d.vec2f(strip[d.u32(2)]!)
+    out[d.u32(1)] = d.vec2f(strip[d.u32(0)]!)
+    out[d.u32(2)] = d.vec2f(strip[d.u32(3)]!)
+    out[d.u32(3)] = d.vec2f(strip[d.u32(1)]!)
+  } else if (r === d.u32(2)) {
+    out[d.u32(0)] = d.vec2f(strip[d.u32(3)]!)
+    out[d.u32(1)] = d.vec2f(strip[d.u32(2)]!)
+    out[d.u32(2)] = d.vec2f(strip[d.u32(1)]!)
+    out[d.u32(3)] = d.vec2f(strip[d.u32(0)]!)
+  } else {
+    out[d.u32(0)] = d.vec2f(strip[d.u32(1)]!)
+    out[d.u32(1)] = d.vec2f(strip[d.u32(3)]!)
+    out[d.u32(2)] = d.vec2f(strip[d.u32(0)]!)
+    out[d.u32(3)] = d.vec2f(strip[d.u32(2)]!)
+  }
   return out
 })
 
 /** Rotate cyclic `ring`: vertex `start` is TL; same TR,BR,BL walk as {@link orderCornersTLTRBLBR}. */
-const cornersStripFromCwRingStart = tgpu.fn(
+export const cornersStripFromCwRingStart = tgpu.fn(
   [Corners4, d.u32],
   Corners4,
 )((cw, start) => {
@@ -280,7 +301,7 @@ export const solveQuadCornersAndHomography = tgpu.fn(
       intersectionCount: count,
       homography: invalidGridHomography(),
       homographyOk: d.u32(0),
-      corners: copyCorners4(ordered),
+      corners: Corners4(ordered),
     })
   }
 
@@ -293,7 +314,7 @@ export const solveQuadCornersAndHomography = tgpu.fn(
         intersectionCount: count,
         homography: h0.homography,
         homographyOk: 1,
-        corners: copyCorners4(labeled),
+        corners: Corners4(labeled),
       })
     }
     const h1 = tryHomographyFromCorners(labeled[0]!, labeled[1]!, labeled[3]!, labeled[2]!)
@@ -303,7 +324,7 @@ export const solveQuadCornersAndHomography = tgpu.fn(
         intersectionCount: count,
         homography: h1.homography,
         homographyOk: 1,
-        corners: copyCorners4(labeled),
+        corners: Corners4(labeled),
       })
     }
   }
@@ -314,7 +335,7 @@ export const solveQuadCornersAndHomography = tgpu.fn(
     intersectionCount: count,
     homography: invalidGridHomography(),
     homographyOk: 0,
-    corners: copyCorners4(ordered),
+    corners: Corners4(ordered),
   })
 })
 

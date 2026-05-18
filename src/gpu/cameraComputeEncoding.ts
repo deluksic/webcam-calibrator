@@ -44,7 +44,7 @@ export function encodeCameraCompute(
       pipeline.tagDecode.encodeVotes(enc, voteInstanceCount)
     }
     const decodePass = enc.beginComputePass({ label: 'camera tag decode' })
-    pipeline.tagDecode.encodeDecode(decodePass)
+    pipeline.tagDecode.encodeDecode(decodePass, voteInstanceCount)
     pipeline.hostQuadReadback.encodePack(decodePass)
     decodePass.end()
   }

@@ -86,7 +86,7 @@ export function encodeGridPresent(
       storeOp: 'store',
     }
     try {
-      pipeline.grid.encodeToCanvas(enc, gridAttachment, gridInstanceCount)
+      pipeline.grid.encodeToCanvas(enc, gridAttachment, gridInstanceCount, { hideNonDecoded: true })
     } catch (e) {
       console.error('[encodeGridPresent] gridViz failed:', e)
     }

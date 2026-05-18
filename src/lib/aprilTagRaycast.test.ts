@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import { imagePixelToUnitSquareUv, invertMat3RowMajor } from '@/lib/aprilTagRaycast'
 import { applyHomography, computeHomography, type Corners, type Mat3 } from '@/lib/geometry'
-import { buildTagGrid, decodeTagPattern } from '@/lib/grid'
+import { buildTagGrid } from '@/lib/grid'
 import { tag36h11Code, codeToPattern, decodeTag36h11AnyRotation } from '@/lib/tag36h11'
 import {
   finiteDifferenceSobelFromIntensity,
@@ -152,24 +152,10 @@ describe('aprilTagRaycast', () => {
     }
   })
 
-  it('decodeTagPattern recovers dictionary id from synthetic raycast + finite-difference Sobel', () => {
+  it('dictionary decode recovers id from ground-truth pattern (GPU extracts pattern at runtime)', () => {
     const tagId = 0
     const pattern = codeToPattern(tag36h11Code(tagId))
-    const size = 360
-    const strip: Corners = [
-      { x: 20, y: 20 },
-      { x: 20 + size, y: 20 },
-      { x: 20, y: 20 + size },
-      { x: 20 + size, y: 20 + size },
-    ]
-    const w = 400
-    const h = 400
-    const { sobel } = renderAprilTagSobelFiniteDifference(
-      { width: w, height: h, corners: strip, pattern, supersample: 4 },
-      { gradientScale: 4 },
-    )
-    const decodedPattern = decodeTagPattern(strip, sobel, w, undefined, h)
-    const match = decodeTag36h11AnyRotation(decodedPattern, 8)
+    const match = decodeTag36h11AnyRotation(pattern, 8)
     expect(match).not.toBeNull()
     expect(match!.id).toBe(tagId)
   })

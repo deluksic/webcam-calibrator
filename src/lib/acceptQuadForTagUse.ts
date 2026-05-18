@@ -1,15 +1,12 @@
 import type { DetectedQuad } from '@/gpu/detectedQuad'
-import { DECODED_TAG_ID_DICT_MISS } from '@/gpu/pipelines/gridVizPipeline'
 import { patternHasWeakOrTie } from '@/lib/tagModuleCell'
-
-const DICT_MISS_U32 = DECODED_TAG_ID_DICT_MISS >>> 0
 
 /**
  * Single gate for GPU tag grid, ID overlay, calibration snapshots, and reprojection.
  *
  * **Permissive (`showFallbacks`):** any quad returned by the GPU path.
  *
- * **Strict (calibration):** successful corner pipeline and a decoded id or dictionary-miss sentinel.
+ * **Strict (calibration):** successful corners, no weak/tie pattern cells, decoded tag36h11 id.
  */
 export function acceptQuadForTagUse(quad: DetectedQuad, showFallbacks: boolean): boolean {
   if (!quad?.corners?.length) {
@@ -24,5 +21,5 @@ export function acceptQuadForTagUse(quad: DetectedQuad, showFallbacks: boolean):
   if (patternHasWeakOrTie(quad.pattern)) {
     return false
   }
-  return typeof quad.decodedTagId === 'number' || (quad.vizTagId ?? 0) === DICT_MISS_U32
+  return typeof quad.decodedTagId === 'number'
 }

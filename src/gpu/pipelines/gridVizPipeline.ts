@@ -53,6 +53,8 @@ export function createGridVizLayouts() {
   const gridVizLayout = tgpu.bindGroupLayout({
     quads: { storage: GridDataSchema, access: 'readonly' },
     failInterrogate: { uniform: d.u32 },
+    /** 1 = skip UNKNOWN / DICT_MISS overlays (Calibrate). */
+    hideNonDecoded: { uniform: d.u32 },
   })
   return { gridVizLayout }
 }
@@ -177,10 +179,20 @@ export function createGridVizPipeline(
     out: d.vec4f,
   })(({ uv, failureCode, decodedTagId }) => {
     'use gpu'
+    // Derivatives must run before any branch on flat per-instance decodedTagId (WGSL uniformity).
     const ddx = dpdx(uv)
     const ddy = dpdy(uv)
     const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS)
     const a = 0.2 + 0.75 * grid
+
+    if (gridVizLayout.$.hideNonDecoded === d.u32(1)) {
+      if (
+        decodedTagId === d.u32(DECODED_TAG_ID_UNKNOWN) ||
+        decodedTagId === d.u32(DECODED_TAG_ID_DICT_MISS)
+      ) {
+        return d.vec4f(0, 0, 0, 0)
+      }
+    }
 
     if (failureCode === d.u32(0) && decodedTagId === d.u32(DECODED_TAG_ID_DICT_MISS)) {
       const amber = d.vec3f(0.92, 0.62, 0.18)
@@ -234,29 +246,36 @@ export function createGridVizStage(
   const { gridVizLayout } = createGridVizLayouts()
   const gridVizDebugModeBuffer = root.createBuffer(d.u32).$usage('uniform')
   gridVizDebugModeBuffer.write(0)
+  const gridVizHideNonDecodedBuffer = root.createBuffer(d.u32).$usage('uniform')
+  gridVizHideNonDecodedBuffer.write(0)
   const gridVizPipeline = createGridVizPipeline(root, gridVizLayout, width, height, presentationFormat)
-  const gridVizBindGroup = root.createBindGroup(gridVizLayout, {
-    quads: quadCornersBuffer,
-    failInterrogate: gridVizDebugModeBuffer,
-  })
   const encodeToCanvas = (
     enc: GPUCommandEncoder,
     colorAttachment: ColorAttachment,
     instanceCount: number = MAX_INSTANCES,
+    options?: { hideNonDecoded?: boolean },
   ) => {
     if (instanceCount <= 0) {
       return
     }
+    gridVizHideNonDecodedBuffer.write(options?.hideNonDecoded ? 1 : 0)
     gridVizPipeline
       .with(enc)
       .withColorAttachment(colorAttachment)
-      .with(gridVizBindGroup)
+      .with(
+        root.createBindGroup(gridVizLayout, {
+          quads: quadCornersBuffer,
+          failInterrogate: gridVizDebugModeBuffer,
+          hideNonDecoded: gridVizHideNonDecodedBuffer,
+        }),
+      )
       .draw(4, instanceCount)
   }
   return {
     quadCornersBuffer,
     gridVizLayout,
     gridVizDebugModeBuffer,
+    gridVizHideNonDecodedBuffer,
     encodeToCanvas,
   }
 }

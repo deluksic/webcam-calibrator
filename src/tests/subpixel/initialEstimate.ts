@@ -1,4 +1,4 @@
-import { decodeStressStripWithHomographyMismatchOffsetsPx } from '@/lib/decodeStressHarness'
+import { stripWithHomographyMismatchOffsetsPx } from '@/tests/shared/sceneStrips'
 import type { Corners, Point } from '@/lib/geometry'
 import { xorshift32State, xorshift32U01 } from '@/tests/shared/rng'
 
@@ -10,7 +10,7 @@ export type InitialSpec =
 
 export function applyInitialRoughStrip(gtStrip: Corners, spec: InitialSpec): Corners {
   if (spec.kind === 'mismatchTemplate') {
-    return decodeStressStripWithHomographyMismatchOffsetsPx(gtStrip, spec.scale)
+    return stripWithHomographyMismatchOffsetsPx(gtStrip, spec.scale)
   }
   const st = xorshift32State(spec.seed)
   const jitter = (p: Point): Point => ({

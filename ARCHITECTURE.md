@@ -80,7 +80,7 @@ GPU, three passes: reset roots → roots claim compact IDs → pixels remap to c
 1. **Corners** — GPU writes **TL, TR, BL, BR** into `quadCornersBuffer`; host maps via `readGpuDetection`.
 2. **Decode** — GPU tag36h11 in `tagDecodePipeline` (`maxError` 3). Dictionary-miss quads get `DECODED_TAG_ID_DICT_MISS` for **?** tint.
 3. **Outputs** — [`DetectedQuad`](src/gpu/detectedQuad.ts): `decodedTagId`, `decodedRotation`, optional `vizTagId`. **Custom** (negative) tag ids from layout are a calibration/session concept; live decode is tag36h11 on GPU. Calibrate overlay: plain numbers for dictionary tags; **`*0`, `*1`, …** for session custom tags when configured in [`CalibrationRunContext`](src/components/calibration/CalibrationRunContext.tsx).
-4. **Tooling** — [`grid.ts`](src/lib/grid.ts) / [`tag36h11.ts`](src/lib/tag36h11.ts) CPU decode helpers remain for unit tests and synthetic harnesses only.
+4. **Tooling** — [`grid.ts`](src/lib/grid.ts) builds perspective tag grids for geometry tests; [`tag36h11.ts`](src/lib/tag36h11.ts) dictionary helpers remain for unit tests only (live decode is GPU-only).
 
 ## Homography
 

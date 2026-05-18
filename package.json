@@ -9,8 +9,7 @@
     "fmt": "oxfmt",
     "lint": "oxlint",
     "test": "vitest run",
-    "test:subpixel": "vitest run src/tests/subpixel",
-    "test:decode": "vitest run src/tests/decode"
+    "test:subpixel": "vitest run src/tests/subpixel"
   },
   "dependencies": {
     "@deluksic/opencv-calibration-wasm": "^0.2.5",

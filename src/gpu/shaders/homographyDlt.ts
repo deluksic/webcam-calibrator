@@ -79,8 +79,8 @@ export const tryHomographyFromCorners = tgpu.fn(
     const colU = d.u32(col)
     let maxRow = colU
     for (const row of tgpu.unroll(std.range(0, N))) {
-      if (row > col) {
-        const rowU = d.u32(row)
+      const rowU = d.u32(row)
+      if (rowU > colU) {
         if (abs(sys.A[aIdx(rowU, colU)]!) > abs(sys.A[aIdx(maxRow, colU)]!)) {
           maxRow = rowU
         }
@@ -106,9 +106,11 @@ export const tryHomographyFromCorners = tgpu.fn(
       return HomographyResult({ ok: d.u32(0), homography: invalidGridHomography() })
     }
 
-    for (const j of tgpu.unroll(std.range(col, N))) {
+    for (const j of tgpu.unroll(std.range(0, N))) {
       const jU = d.u32(j)
-      sys.A[aIdx(colU, jU)] = sys.A[aIdx(colU, jU)]! / pivot
+      if (jU >= colU) {
+        sys.A[aIdx(colU, jU)] = sys.A[aIdx(colU, jU)]! / pivot
+      }
     }
     sys.b[colU] = sys.b[colU]! / pivot
 
@@ -117,9 +119,11 @@ export const tryHomographyFromCorners = tgpu.fn(
       if (rowU !== colU) {
         const factor = sys.A[aIdx(rowU, colU)]!
         if (factor !== d.f32(0)) {
-          for (const j of tgpu.unroll(std.range(col, N))) {
+          for (const j of tgpu.unroll(std.range(0, N))) {
             const jU = d.u32(j)
-            sys.A[aIdx(rowU, jU)] = sys.A[aIdx(rowU, jU)]! - factor * sys.A[aIdx(colU, jU)]!
+            if (jU >= colU) {
+              sys.A[aIdx(rowU, jU)] = sys.A[aIdx(rowU, jU)]! - factor * sys.A[aIdx(colU, jU)]!
+            }
           }
           sys.b[rowU] = sys.b[rowU]! - factor * sys.b[colU]!
         }

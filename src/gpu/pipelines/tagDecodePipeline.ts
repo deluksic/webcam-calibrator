@@ -1,12 +1,22 @@
-// GPU tag36h11 quad decoder: render pass fills quads → fragment shader accumulates
-// grayscale votes per module via atomics → compute pass builds histogram + matches dictionary.
+// GPU tag36h11: per-quad pixel histogram → linear peaks → deadband votes → pattern -1/-2 → parallel dict → canonicalize.
 import type { ColorAttachment } from 'typegpu'
 import type { TgpuRoot } from 'typegpu'
 import { d, tgpu, std, common } from 'typegpu'
-import { floor, max, min, mul, round } from 'typegpu/std'
-import { abs, atomicAdd, clamp, countOneBits, textureLoad } from 'typegpu/std'
+import { floor, max, min, mul, round, sqrt } from 'typegpu/std'
+import { abs, atomicAdd, atomicMin, clamp, countOneBits, textureLoad } from 'typegpu/std'
 
 import { TAG36H11_CODES, TAG36H11_COUNT } from '@/lib/tag36h11'
+import {
+  DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE,
+  TAG_DECODE_HIST_BINS,
+  TAG_DECODE_MAX_DICT_ERROR,
+  TAG_DECODE_MAX_WEAK_WILDCARD,
+  TAG_DECODE_MIN_PEAK_BIN_SEP,
+  TAG_DECODE_MIN_PEAK_LUMA_BINS,
+  TAG_DECODE_PEAK_GAP_FRAC,
+} from '@/gpu/tagDecodeThresholds'
+import { Corners4, rotateStripCorners } from '@/gpu/shaders/quadCornerOrder'
+import { tryHomographyFromCorners } from '@/gpu/shaders/homographyDlt'
 import {
   DECODED_TAG_ID_DICT_MISS,
   DECODED_TAG_ID_UNKNOWN,
@@ -18,20 +28,80 @@ import {
 const MAX_QUADS = MAX_INSTANCES
 const TAG_MODULES = 8
 const DATA_MODULES = 6
-const MAX_DICT_ERROR = 3
+const MODULES_PER_QUAD = DATA_MODULES * DATA_MODULES
+const VOTES_PER_QUAD = MODULES_PER_QUAD * 2
 
-const BIT_POS = [
-  0, 1, 2, 3, 4, 9, 31, 5, 6, 7, 14, 10, 30, 34, 8, 17, 15, 11, 29, 33, 35, 26, 16, 12, 28, 32, 25, 24, 23, 13, 27, 22,
-  21, 20, 19, 18,
+const BIT_X = [
+  1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4, 1, 1, 1, 1, 1, 2, 2, 2, 3,
 ] as const
+
+const BIT_Y = [
+  1, 1, 1, 1, 1, 2, 2, 2, 3, 1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4,
+] as const
+
+/** `moduleIdx` (row-major 6×6) → codeword bit index (inverse of BIT_X/BIT_Y). */
+const MODULE_TO_BIT = (() => {
+  const lut: number[] = new Array(MODULES_PER_QUAD).fill(0)
+  for (let bit = 0; bit < 36; bit++) {
+    const col = BIT_X[bit]! - 1
+    const row = BIT_Y[bit]! - 1
+    lut[row * DATA_MODULES + col] = bit
+  }
+  return lut
+})()
 
 const ROT_LUTS_0 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35] as const
 const ROT_LUTS_1 = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 0, 1, 2, 3, 4, 5, 6, 7, 8] as const
 const ROT_LUTS_2 = [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] as const
 const ROT_LUTS_3 = [27, 28, 29, 30, 31, 32, 33, 34, 35, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26] as const
 
+const ModuleToBitGpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), MODULE_TO_BIT)
+const BitXGpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...BIT_X])
+const BitYGpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...BIT_Y])
+const RotLut0Gpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...ROT_LUTS_0])
+const RotLut1Gpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...ROT_LUTS_1])
+const RotLut2Gpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...ROT_LUTS_2])
+const RotLut3Gpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...ROT_LUTS_3])
+
+const PATTERN_BLACK = 0
+const PATTERN_WHITE = 1
+const PATTERN_WEAK = 2
+const PATTERN_TIE = 3
+
+const PER_QUAD_HIST = MAX_QUADS * TAG_DECODE_HIST_BINS
+const WORST_SCORE = ((TAG_DECODE_MAX_DICT_ERROR + 1) << 20) | TAG36H11_COUNT
+
 const CodewordPair = d.struct({ low: d.u32, high: d.u32 })
 const CodewordBuffer = d.arrayOf(CodewordPair, TAG36H11_COUNT)
+
+const TagDecodeThresholdGpu = d.struct({
+  blackBound: d.f32,
+  whiteBound: d.f32,
+  minVoteTotal: d.u32,
+  valid: d.u32,
+})
+
+const TagDecodeThresholdSchema = d.arrayOf(TagDecodeThresholdGpu, MAX_INSTANCES)
+
+const QuadDecodeMetaGpu = d.struct({
+  rejectDict: d.u32,
+  weakCount: d.u32,
+  weakBit0: d.u32,
+  weakBit1: d.u32,
+  weakBit2: d.u32,
+  weakBit3: d.u32,
+  weakBit4: d.u32,
+  weakBit5: d.u32,
+})
+
+const QuadDecodeMetaSchema = d.arrayOf(QuadDecodeMetaGpu, MAX_INSTANCES)
+const PatternSchema = d.arrayOf(d.u32, MAX_INSTANCES * MODULES_PER_QUAD)
+const QuadPixelHistSchema = d.arrayOf(d.atomic(d.u32), PER_QUAD_HIST)
+const QuadPixelHistReadonlySchema = d.arrayOf(d.u32, PER_QUAD_HIST)
+const ModuleVoteSchema = d.arrayOf(d.atomic(d.u32), MAX_QUADS * MODULES_PER_QUAD)
+const ModuleVoteReadonlySchema = d.arrayOf(d.u32, MAX_QUADS * MODULES_PER_QUAD)
+const AtomicBestSchema = d.arrayOf(d.atomic(d.u32), MAX_INSTANCES)
+const AtomicBestReadonlySchema = d.arrayOf(d.u32, MAX_INSTANCES)
 
 function allocCodewordBuffer(root: TgpuRoot) {
   const buf = root.createBuffer(CodewordBuffer).$usage('storage')
@@ -43,28 +113,19 @@ function allocCodewordBuffer(root: TgpuRoot) {
   return buf
 }
 
-// ------ Stage 1: Quad fill + vote accumulation render pass ------
-const MODULE_COUNT = MAX_QUADS * DATA_MODULES * DATA_MODULES
-const HIST_BINS = 16
-const PER_QUAD_HIST = MAX_QUADS * HIST_BINS
-
-function createVoteAccumStage(
+function createHistAccumStage(
   root: TgpuRoot,
   grayTexView: unknown,
   quadDataBuffer: GridVizQuadBuffer,
   width: number,
   height: number,
 ) {
-  const moduleSumBuf = root.createBuffer(d.arrayOf(d.atomic(d.u32), MODULE_COUNT)).$usage('storage')
-  const moduleCountBuf = root.createBuffer(d.arrayOf(d.atomic(d.u32), MODULE_COUNT)).$usage('storage')
-  const histBuf = root.createBuffer(d.arrayOf(d.atomic(d.u32), PER_QUAD_HIST)).$usage('storage')
+  const histBuf = root.createBuffer(QuadPixelHistSchema).$usage('storage')
 
-  const voteLayout = tgpu.bindGroupLayout({
+  const layout = tgpu.bindGroupLayout({
     quads: { storage: GridDataSchema, access: 'readonly' },
     grayTex: { texture: d.texture2d() },
-    moduleSum: { storage: d.arrayOf(d.atomic(d.u32), MODULE_COUNT), access: 'mutable' },
-    moduleCount: { storage: d.arrayOf(d.atomic(d.u32), MODULE_COUNT), access: 'mutable' },
-    histogram: { storage: d.arrayOf(d.atomic(d.u32), PER_QUAD_HIST), access: 'mutable' },
+    histogram: { storage: QuadPixelHistSchema, access: 'mutable' },
   })
 
   const dummyTexture = root.device.createTexture({
@@ -78,7 +139,192 @@ function createVoteAccumStage(
     in: { vertexIndex: d.builtin.vertexIndex, instanceIndex: d.builtin.instanceIndex },
     out: { outPos: d.builtin.position, uv: d.vec2f, quadId: d.interpolate('flat', d.u32) },
   })(({ vertexIndex, instanceIndex }) => {
-    const quad = voteLayout.$.quads[instanceIndex]!
+    const quad = layout.$.quads[instanceIndex]!
+    const H = quad.homography
+    const c0 = H.columns[0]!
+    const c1 = H.columns[1]!
+    const hLen = c0.x * c0.x + c0.y * c0.y + c1.x * c1.x + c1.y * c1.y
+    if (hLen < d.f32(1e-6)) {
+      return { outPos: d.vec4f(-2, -2, 0, 1), uv: d.vec2f(0), quadId: instanceIndex }
+    }
+    const uvs = [d.vec2f(0, 0), d.vec2f(1, 0), d.vec2f(0, 1), d.vec2f(1, 1)]
+    const uv = uvs[vertexIndex]!
+    const imgPos = mul(H, d.vec3f(uv, 1))
+    const w = imgPos.z
+    const clipX = (2 * imgPos.x) / d.f32(width) - w
+    const clipY = w - (2 * imgPos.y) / d.f32(height)
+    return { outPos: d.vec4f(clipX, clipY, 0, w), uv, quadId: instanceIndex }
+  })
+
+  const frag = tgpu.fragmentFn({
+    in: { pos: d.builtin.position, quadId: d.interpolate('flat', d.u32) },
+    out: d.vec4f,
+  })(({ pos, quadId }) => {
+    const gray = textureLoad(layout.$.grayTex, d.vec2u(d.u32(pos.x), d.u32(pos.y)), d.i32(0)).x
+    const hBin = min(d.u32(floor(gray * d.f32(TAG_DECODE_HIST_BINS))), d.u32(TAG_DECODE_HIST_BINS - 1))
+    atomicAdd(layout.$.histogram[quadId * d.u32(TAG_DECODE_HIST_BINS) + hBin]!, d.u32(1))
+    return d.vec4f(0, 0, 0, 0)
+  })
+
+  const pipeline = root.createRenderPipeline({
+    vertex: vert,
+    fragment: frag,
+    targets: { format: 'rgba8unorm' },
+    primitive: { topology: 'triangle-strip' },
+  })
+
+  const bindGroup = root.createBindGroup(layout, {
+    quads: quadDataBuffer,
+    grayTex: grayTexView as never,
+    histogram: histBuf,
+  })
+
+  const zeroHist = new Uint32Array(PER_QUAD_HIST)
+
+  return {
+    histBuf,
+    dummyTexture,
+    encodeHistAccum(enc: GPUCommandEncoder, instanceCount: number) {
+      if (instanceCount < 1) return
+      histBuf.write(zeroHist)
+      const pass = enc.beginRenderPass({
+        label: 'tag hist accum',
+        colorAttachments: [
+          { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
+        ],
+      })
+      pass.setViewport(0, 0, width, height, 0, 1)
+      pipeline.with(pass).with(bindGroup).draw(4, instanceCount)
+      pass.end()
+    },
+  }
+}
+
+function createPeakThresholdStage(
+  root: TgpuRoot,
+  histBuf: ReturnType<typeof root.createBuffer<typeof QuadPixelHistSchema>>,
+  thresholdBuf: ReturnType<typeof root.createBuffer<typeof TagDecodeThresholdSchema>>,
+  quadDataBuffer: GridVizQuadBuffer,
+) {
+  const layout = tgpu.bindGroupLayout({
+    histogram: { storage: QuadPixelHistReadonlySchema, access: 'readonly' },
+    thresholds: { storage: TagDecodeThresholdSchema, access: 'mutable' },
+    quads: { storage: GridDataSchema, access: 'readonly' },
+  })
+
+  const bindGroup = root.createBindGroup(layout, {
+    histogram: histBuf as never,
+    thresholds: thresholdBuf as never,
+    quads: quadDataBuffer,
+  })
+
+  const kernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [64, 1, 1],
+  })((input) => {
+    const quadId = d.u32(input.gid.x)
+    if (quadId >= d.u32(MAX_QUADS)) return
+
+    const base = quadId * d.u32(TAG_DECODE_HIST_BINS)
+    let blackPeak = d.u32(0)
+    let blackVal = d.u32(0)
+    for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
+      const bu = d.u32(b)
+      const v = layout.$.histogram[base + bu]!
+      if (v > blackVal) {
+        blackVal = v
+        blackPeak = bu
+      }
+    }
+
+    let whitePeak = d.u32(0)
+    let whiteVal = d.u32(0)
+    const minSep = d.u32(TAG_DECODE_MIN_PEAK_BIN_SEP)
+    for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
+      const bu = d.u32(b)
+      if (bu > blackPeak + minSep && bu > d.u32(0) && bu < d.u32(TAG_DECODE_HIST_BINS - 1)) {
+        const v = layout.$.histogram[base + bu]!
+        const prev = layout.$.histogram[base + bu - d.u32(1)]!
+        const next = layout.$.histogram[base + bu + d.u32(1)]!
+        if (v >= prev && v >= next && v > whiteVal) {
+          whiteVal = v
+          whitePeak = bu
+        }
+      }
+    }
+
+    const nBins = d.f32(TAG_DECODE_HIST_BINS)
+    const blackLuma = (d.f32(blackPeak) + d.f32(0.5)) / nBins
+    const whiteLuma = (d.f32(whitePeak) + d.f32(0.5)) / nBins
+    const diff = whiteLuma - blackLuma
+    const gap = d.f32(TAG_DECODE_PEAK_GAP_FRAC)
+    const halfGap = diff * gap * d.f32(0.5)
+    const blackBound = blackLuma + halfGap
+    const whiteBound = whiteLuma - halfGap
+
+    const c = layout.$.quads[quadId]!.screenCorners
+    const e01 = sqrt((c[1]!.x - c[0]!.x) * (c[1]!.x - c[0]!.x) + (c[1]!.y - c[0]!.y) * (c[1]!.y - c[0]!.y))
+    const e12 = sqrt((c[2]!.x - c[1]!.x) * (c[2]!.x - c[1]!.x) + (c[2]!.y - c[1]!.y) * (c[2]!.y - c[1]!.y))
+    const e23 = sqrt((c[3]!.x - c[2]!.x) * (c[3]!.x - c[2]!.x) + (c[3]!.y - c[2]!.y) * (c[3]!.y - c[2]!.y))
+    const e30 = sqrt((c[0]!.x - c[3]!.x) * (c[0]!.x - c[3]!.x) + (c[0]!.y - c[3]!.y) * (c[0]!.y - c[3]!.y))
+    let lMin = e01
+    lMin = min(lMin, e12)
+    lMin = min(lMin, e23)
+    lMin = min(lMin, e30)
+    const minVote = max(d.u32(2), d.u32(round(d.f32(DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE) * lMin)))
+
+    const peakSep = whitePeak - blackPeak
+    let valid = d.u32(0)
+    if (
+      blackVal > d.u32(0) &&
+      whiteVal > d.u32(0) &&
+      peakSep >= d.u32(TAG_DECODE_MIN_PEAK_LUMA_BINS) &&
+      whiteBound > blackBound
+    ) {
+      valid = d.u32(1)
+    }
+
+    layout.$.thresholds[quadId] = TagDecodeThresholdGpu({
+      blackBound,
+      whiteBound,
+      minVoteTotal: minVote,
+      valid,
+    })
+  })
+
+  const pipeline = root.createComputePipeline({ compute: kernel })
+
+  return {
+    encodePeakThresholds(pass: GPUComputePassEncoder) {
+      pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(MAX_QUADS / 64))
+    },
+  }
+}
+
+function createModuleVoteStage(
+  root: TgpuRoot,
+  grayTexView: unknown,
+  quadDataBuffer: GridVizQuadBuffer,
+  thresholdBuf: ReturnType<typeof root.createBuffer<typeof TagDecodeThresholdSchema>>,
+  moduleWhiteBuf: ReturnType<typeof root.createBuffer<typeof ModuleVoteSchema>>,
+  moduleBlackBuf: ReturnType<typeof root.createBuffer<typeof ModuleVoteSchema>>,
+  width: number,
+  height: number,
+  dummyTexture: GPUTexture,
+) {
+  const layout = tgpu.bindGroupLayout({
+    quads: { storage: GridDataSchema, access: 'readonly' },
+    grayTex: { texture: d.texture2d() },
+    thresholds: { storage: TagDecodeThresholdSchema, access: 'readonly' },
+    moduleWhite: { storage: ModuleVoteSchema, access: 'mutable' },
+    moduleBlack: { storage: ModuleVoteSchema, access: 'mutable' },
+  })
+
+  const vert = tgpu.vertexFn({
+    in: { vertexIndex: d.builtin.vertexIndex, instanceIndex: d.builtin.instanceIndex },
+    out: { outPos: d.builtin.position, uv: d.vec2f, quadId: d.interpolate('flat', d.u32) },
+  })(({ vertexIndex, instanceIndex }) => {
+    const quad = layout.$.quads[instanceIndex]!
     const H = quad.homography
     const c0 = H.columns[0]!
     const c1 = H.columns[1]!
@@ -99,25 +345,28 @@ function createVoteAccumStage(
     in: { pos: d.builtin.position, uv: d.vec2f, quadId: d.interpolate('flat', d.u32) },
     out: d.vec4f,
   })(({ pos, uv, quadId }) => {
-    // textureLoad first — uses pixel coords from the rasterizer, before any branching
-    const gray = textureLoad(voteLayout.$.grayTex, d.vec2u(d.u32(pos.x), d.u32(pos.y)), d.i32(0)).x
-
-    // DEBUG: accumulate grayscale values into per-quad 16-bin histogram
-    const hBin = min(d.u32(floor(gray * d.f32(HIST_BINS))), d.u32(HIST_BINS - 1))
-    atomicAdd(voteLayout.$.histogram[quadId * d.u32(HIST_BINS) + hBin]!, d.u32(1))
-
-    const mx = d.u32(floor(uv.x * d.f32(TAG_MODULES)))
-    const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
-    if (mx < d.u32(1) || mx > d.u32(6) || my < d.u32(1) || my > d.u32(6)) {
+    const thr = layout.$.thresholds[quadId]!
+    if (thr.valid === d.u32(0)) {
       return d.vec4f(0, 0, 0, 0)
     }
-    const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
-    const bufIdx = quadId * d.u32(DATA_MODULES * DATA_MODULES) + cellIdx
-
-    const fixedPoint = d.u32(round(gray * d.f32(65536)))
-    atomicAdd(voteLayout.$.moduleSum[bufIdx]!, fixedPoint)
-    atomicAdd(voteLayout.$.moduleCount[bufIdx]!, d.u32(1))
-
+    const gray = textureLoad(layout.$.grayTex, d.vec2u(d.u32(pos.x), d.u32(pos.y)), d.i32(0)).x
+    if (gray <= thr.blackBound) {
+      const mx = d.u32(floor(uv.x * d.f32(TAG_MODULES)))
+      const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
+      if (mx >= d.u32(1) && mx <= d.u32(6) && my >= d.u32(1) && my <= d.u32(6)) {
+        const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
+        const bufIdx = quadId * d.u32(MODULES_PER_QUAD) + cellIdx
+        atomicAdd(layout.$.moduleBlack[bufIdx]!, d.u32(1))
+      }
+    } else if (gray >= thr.whiteBound) {
+      const mx = d.u32(floor(uv.x * d.f32(TAG_MODULES)))
+      const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
+      if (mx >= d.u32(1) && mx <= d.u32(6) && my >= d.u32(1) && my <= d.u32(6)) {
+        const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
+        const bufIdx = quadId * d.u32(MODULES_PER_QUAD) + cellIdx
+        atomicAdd(layout.$.moduleWhite[bufIdx]!, d.u32(1))
+      }
+    }
     return d.vec4f(0, 0, 0, 0)
   })
 
@@ -128,294 +377,360 @@ function createVoteAccumStage(
     primitive: { topology: 'triangle-strip' },
   })
 
-  const voteBindGroup = root.createBindGroup(voteLayout, {
+  const bindGroup = root.createBindGroup(layout, {
     quads: quadDataBuffer,
     grayTex: grayTexView as never,
-    moduleSum: moduleSumBuf,
-    moduleCount: moduleCountBuf,
-    histogram: histBuf,
+    thresholds: thresholdBuf as never,
+    moduleWhite: moduleWhiteBuf as never,
+    moduleBlack: moduleBlackBuf as never,
   })
 
-  const zeroBuf = new Uint32Array(MODULE_COUNT as number)
-  const zeroHist = new Uint32Array(PER_QUAD_HIST as number)
+  const zeroVotes = new Uint32Array(MAX_QUADS * MODULES_PER_QUAD)
 
-  function encodeVotes(enc: GPUCommandEncoder, instanceCount: number) {
-    if (instanceCount < 1) return
-    moduleSumBuf.write(zeroBuf)
-    moduleCountBuf.write(zeroBuf)
-    histBuf.write(zeroHist)
-    const pass = enc.beginRenderPass({
-      label: 'tag vote accum',
-      colorAttachments: [
-        { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
-      ],
-    })
-    pass.setViewport(0, 0, width, height, 0, 1)
-    pipeline.with(pass).with(voteBindGroup).draw(4, instanceCount)
-    pass.end()
+  return {
+    encodeModuleVotes(enc: GPUCommandEncoder, instanceCount: number) {
+      if (instanceCount < 1) return
+      moduleWhiteBuf.write(zeroVotes)
+      moduleBlackBuf.write(zeroVotes)
+      const pass = enc.beginRenderPass({
+        label: 'tag module votes',
+        colorAttachments: [
+          { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
+        ],
+      })
+      pass.setViewport(0, 0, width, height, 0, 1)
+      pipeline.with(pass).with(bindGroup).draw(4, instanceCount)
+      pass.end()
+    },
   }
-
-  return { moduleSumBuf, moduleCountBuf, histBuf, encodeVotes, dummyTexture }
 }
 
-// ------ Stage 2: Per-quad histogram + decode compute pass ------
-
-const WORKGROUP_SIZE = 64
-const DECODE_SUM = d.arrayOf(d.u32, MODULE_COUNT)
-const DECODE_CNT = d.arrayOf(d.u32, MODULE_COUNT)
-
-function createQuadDecodeComputeStage(
+function createClassifyStage(
   root: TgpuRoot,
-  moduleSumBuf: ReturnType<typeof root.createBuffer>,
-  moduleCountBuf: ReturnType<typeof root.createBuffer>,
-  quadDataBuffer: GridVizQuadBuffer,
+  moduleWhiteBuf: ReturnType<typeof root.createBuffer<typeof ModuleVoteSchema>>,
+  moduleBlackBuf: ReturnType<typeof root.createBuffer<typeof ModuleVoteSchema>>,
+  thresholdBuf: ReturnType<typeof root.createBuffer<typeof TagDecodeThresholdSchema>>,
+  patternBuf: ReturnType<typeof root.createBuffer<typeof PatternSchema>>,
+  metaBuf: ReturnType<typeof root.createBuffer<typeof QuadDecodeMetaSchema>>,
 ) {
-  const codewordBuffer = allocCodewordBuffer(root)
-
-  const decodeLayout = tgpu.bindGroupLayout({
-    moduleSum: { storage: DECODE_SUM, access: 'readonly' },
-    moduleCount: { storage: DECODE_CNT, access: 'readonly' },
-    quadData: { storage: GridDataSchema, access: 'mutable' },
-    codewords: { storage: CodewordBuffer, access: 'readonly' },
+  const layout = tgpu.bindGroupLayout({
+    moduleWhite: { storage: ModuleVoteReadonlySchema, access: 'readonly' },
+    moduleBlack: { storage: ModuleVoteReadonlySchema, access: 'readonly' },
+    thresholds: { storage: TagDecodeThresholdSchema, access: 'readonly' },
+    pattern: { storage: PatternSchema, access: 'mutable' },
+    meta: { storage: QuadDecodeMetaSchema, access: 'mutable' },
   })
 
-  const decodeBindGroup = root.createBindGroup(decodeLayout, {
-    moduleSum: moduleSumBuf as never,
-    moduleCount: moduleCountBuf as never,
-    quadData: quadDataBuffer,
-    codewords: codewordBuffer,
+  const bindGroup = root.createBindGroup(layout, {
+    moduleWhite: moduleWhiteBuf as never,
+    moduleBlack: moduleBlackBuf as never,
+    thresholds: thresholdBuf as never,
+    pattern: patternBuf as never,
+    meta: metaBuf as never,
   })
 
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [WORKGROUP_SIZE, 1, 1],
+    workgroupSize: [64, 1, 1],
   })((input) => {
     const quadId = d.u32(input.gid.x)
     if (quadId >= d.u32(MAX_QUADS)) return
 
-    const quad = decodeLayout.$.quadData[quadId]!
-    const H = quad.homography
-    const c0 = H.columns[0]!
-    const c1 = H.columns[1]!
-    const hLen = c0.x * c0.x + c0.y * c0.y + c1.x * c1.x + c1.y * c1.y
-    if (hLen < d.f32(1e-6)) {
-      decodeLayout.$.quadData[quadId]!.decodedTagId = d.u32(DECODED_TAG_ID_UNKNOWN)
-      return
-    }
+    const thr = layout.$.thresholds[quadId]!
+    const pBase = quadId * d.u32(MODULES_PER_QUAD)
+    let tieCount = d.u32(0)
+    let weakCount = d.u32(0)
+  const weakBits = d.arrayOf(d.u32, TAG_DECODE_MAX_WEAK_WILDCARD)()
 
-    // 1. Read 36 module averages, build 16-bin histogram
-    let h0 = d.u32(0)
-    let h1 = d.u32(0)
-    let h2 = d.u32(0)
-    let h3 = d.u32(0)
-    let h4 = d.u32(0)
-    let h5 = d.u32(0)
-    let h6 = d.u32(0)
-    let h7 = d.u32(0)
-    let h8 = d.u32(0)
-    let h9 = d.u32(0)
-    let hA = d.u32(0)
-    let hB = d.u32(0)
-    let hC = d.u32(0)
-    let hD = d.u32(0)
-    let hE = d.u32(0)
-    let hF = d.u32(0)
-
-    const base = quadId * d.u32(DATA_MODULES * DATA_MODULES)
-    for (const i of tgpu.unroll(std.range(0, DATA_MODULES * DATA_MODULES))) {
-      const sum = decodeLayout.$.moduleSum[base + d.u32(i)]!
-      const count = decodeLayout.$.moduleCount[base + d.u32(i)]!
-      let avg = d.f32(0)
-      if (count > d.u32(0)) {
-        avg = d.f32(sum) / d.f32(65536) / d.f32(count)
-      }
-      const bin = min(d.u32(floor(avg * d.f32(16))), d.u32(15))
-      if (bin === d.u32(0)) { h0 = h0 + d.u32(1) }
-      if (bin === d.u32(1)) { h1 = h1 + d.u32(1) }
-      if (bin === d.u32(2)) { h2 = h2 + d.u32(1) }
-      if (bin === d.u32(3)) { h3 = h3 + d.u32(1) }
-      if (bin === d.u32(4)) { h4 = h4 + d.u32(1) }
-      if (bin === d.u32(5)) { h5 = h5 + d.u32(1) }
-      if (bin === d.u32(6)) { h6 = h6 + d.u32(1) }
-      if (bin === d.u32(7)) { h7 = h7 + d.u32(1) }
-      if (bin === d.u32(8)) { h8 = h8 + d.u32(1) }
-      if (bin === d.u32(9)) { h9 = h9 + d.u32(1) }
-      if (bin === d.u32(10)) { hA = hA + d.u32(1) }
-      if (bin === d.u32(11)) { hB = hB + d.u32(1) }
-      if (bin === d.u32(12)) { hC = hC + d.u32(1) }
-      if (bin === d.u32(13)) { hD = hD + d.u32(1) }
-      if (bin === d.u32(14)) { hE = hE + d.u32(1) }
-      if (bin === d.u32(15)) { hF = hF + d.u32(1) }
-    }
-
-    const hist = [h0, h1, h2, h3, h4, h5, h6, h7, h8, h9, hA, hB, hC, hD, hE, hF]
-
-    // 2. Smooth with 3-wide kernel (circular)
-    const s0 = hF + hist[0]! + hist[1]!
-    const s1 = hist[0]! + hist[1]! + hist[2]!
-    const s2 = hist[1]! + hist[2]! + hist[3]!
-    const s3 = hist[2]! + hist[3]! + hist[4]!
-    const s4 = hist[3]! + hist[4]! + hist[5]!
-    const s5 = hist[4]! + hist[5]! + hist[6]!
-    const s6 = hist[5]! + hist[6]! + hist[7]!
-    const s7 = hist[6]! + hist[7]! + hist[8]!
-    const s8 = hist[7]! + hist[8]! + hist[9]!
-    const s9 = hist[8]! + hist[9]! + hist[10]!
-    const sA = hist[9]! + hist[10]! + hist[11]!
-    const sB = hist[10]! + hist[11]! + hist[12]!
-    const sC = hist[11]! + hist[12]! + hist[13]!
-    const sD = hist[12]! + hist[13]! + hist[14]!
-    const sE = hist[13]! + hist[14]! + hist[15]!
-    const sF = hist[14]! + hist[15]! + hist[0]!
-    const smoothed = [s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF]
-
-    // 3. Find two peaks
-    let blackPeak = d.u32(0)
-    let blackPeakVal = d.u32(0)
-    for (const i of tgpu.unroll(std.range(0, 16))) {
-      if (smoothed[i]! > blackPeakVal) { blackPeakVal = smoothed[i]!; blackPeak = d.u32(i) }
-    }
-
-    let whitePeak = d.u32(0)
-    let whitePeakVal = d.u32(0)
-    for (const i of tgpu.unroll(std.range(0, 16))) {
+    for (const i of tgpu.unroll(std.range(0, MODULES_PER_QUAD))) {
       const iu = d.u32(i)
-      const binDist = min(iu, blackPeak) + d.u32(16) - max(iu, blackPeak)
-      const dist = min(binDist, d.u32(16) - binDist)
-      const prev = smoothed[(i + 15) % 16]!
-      const next = smoothed[(i + 1) % 16]!
-      const v = smoothed[i]!
-      if (v >= prev && v >= next && dist >= d.u32(4) && v > whitePeakVal) {
-        whitePeakVal = v
-        whitePeak = iu
+      const w = layout.$.moduleWhite[pBase + iu]!
+      const b = layout.$.moduleBlack[pBase + iu]!
+      const sum = w + b
+      let cell = d.u32(PATTERN_WEAK)
+      if (thr.valid === d.u32(0) || sum < thr.minVoteTotal) {
+        cell = d.u32(PATTERN_WEAK)
+      } else if (b > w) {
+        cell = d.u32(PATTERN_BLACK)
+      } else if (w > b) {
+        cell = d.u32(PATTERN_WHITE)
+      } else {
+        cell = d.u32(PATTERN_TIE)
+        tieCount = tieCount + d.u32(1)
+      }
+      layout.$.pattern[pBase + iu] = cell
+      if (cell === d.u32(PATTERN_WEAK) && weakCount < d.u32(TAG_DECODE_MAX_WEAK_WILDCARD)) {
+        weakBits[weakCount] = ModuleToBitGpu.$[iu]
+        weakCount = weakCount + d.u32(1)
       }
     }
 
-    if (whitePeakVal === d.u32(0)) {
-      let maxDist = d.u32(0)
-      for (const i of tgpu.unroll(std.range(0, 16))) {
-        const iu = d.u32(i)
-        const binDist = min(iu, blackPeak) + d.u32(16) - max(iu, blackPeak)
-        const dist = min(binDist, d.u32(16) - binDist)
-        if (dist > maxDist) { maxDist = dist; whitePeak = iu }
-      }
+    let reject = d.u32(0)
+    if (tieCount > d.u32(0)) {
+      reject = d.u32(1)
     }
+    layout.$.meta[quadId] = QuadDecodeMetaGpu({
+      rejectDict: reject,
+      weakCount,
+      weakBit0: weakBits[0]!,
+      weakBit1: weakBits[1]!,
+      weakBit2: weakBits[2]!,
+      weakBit3: weakBits[3]!,
+      weakBit4: weakBits[4]!,
+      weakBit5: weakBits[5]!,
+    })
+  })
 
-    const threshold = (d.f32(blackPeak) + d.f32(whitePeak)) * d.f32(0.5) / d.f32(16)
+  const pipeline = root.createComputePipeline({ compute: kernel })
 
-    // 4. Classify 36 modules, pack codeword
-    let codewordLow = d.u32(0)
-    let codewordHigh = d.u32(0)
-    for (const i of tgpu.unroll(std.range(0, DATA_MODULES * DATA_MODULES))) {
-      const iu = d.u32(i)
-      const sum = decodeLayout.$.moduleSum[base + iu]!
-      const count = decodeLayout.$.moduleCount[base + iu]!
-      let avg = d.f32(0.5)
-      if (count > d.u32(0)) { avg = d.f32(sum) / d.f32(65536) / d.f32(count) }
-      if (avg >= threshold) {
-        const bitIdx = d.u32(BIT_POS[i]!)
-        const pos = d.u32(35) - bitIdx
+  return {
+    encodeClassify(pass: GPUComputePassEncoder) {
+      pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(MAX_QUADS / 64))
+    },
+  }
+}
+
+function createDictMatchStage(
+  root: TgpuRoot,
+  codewordBuffer: ReturnType<typeof root.createBuffer<typeof CodewordBuffer>>,
+  patternBuf: ReturnType<typeof root.createBuffer<typeof PatternSchema>>,
+  metaBuf: ReturnType<typeof root.createBuffer<typeof QuadDecodeMetaSchema>>,
+  atomicBestBuf: ReturnType<typeof root.createBuffer<typeof AtomicBestSchema>>,
+) {
+  const layout = tgpu.bindGroupLayout({
+    codewords: { storage: CodewordBuffer, access: 'readonly' },
+    pattern: { storage: PatternSchema, access: 'readonly' },
+    meta: { storage: QuadDecodeMetaSchema, access: 'readonly' },
+    atomicBest: { storage: AtomicBestSchema, access: 'mutable' },
+  })
+
+  const bindGroup = root.createBindGroup(layout, {
+    codewords: codewordBuffer as never,
+    pattern: patternBuf as never,
+    meta: metaBuf as never,
+    atomicBest: atomicBestBuf as never,
+  })
+
+  const kernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [64, 1, 1],
+  })((input) => {
+    const gid = d.u32(input.gid.x)
+    const cwIdx = gid % d.u32(TAG36H11_COUNT)
+    const quadId = d.u32(gid / d.u32(TAG36H11_COUNT))
+    if (quadId >= d.u32(MAX_QUADS)) return
+
+    const meta = layout.$.meta[quadId]!
+    if (meta.rejectDict !== d.u32(0)) return
+
+    const weakCount = meta.weakCount
+    if (weakCount > d.u32(TAG_DECODE_MAX_WEAK_WILDCARD)) return
+
+    const cw = layout.$.codewords[cwIdx]!
+    const pBase = quadId * d.u32(MODULES_PER_QUAD)
+
+    const maskCount = d.u32(1) << weakCount
+    let localBest = d.u32(TAG_DECODE_MAX_DICT_ERROR + 1)
+    let localRot = d.u32(0)
+
+    for (let mask = d.u32(0); mask < maskCount; mask = mask + d.u32(1)) {
+      let wildLow = d.u32(0)
+      let wildHigh = d.u32(0)
+      if (weakCount > d.u32(0) && (mask & d.u32(1)) !== d.u32(0)) {
+        const bit = meta.weakBit0
+        const pos = d.u32(35) - bit
         if (pos >= d.u32(32)) {
-          codewordHigh = codewordHigh | (d.u32(1) << (pos - d.u32(32)))
+          wildHigh = wildHigh | (d.u32(1) << (pos - d.u32(32)))
         } else {
-          codewordLow = codewordLow | (d.u32(1) << pos)
+          wildLow = wildLow | (d.u32(1) << pos)
         }
       }
-    }
-
-    // 5. Build 4 rotated codewords (unrolled rotation, compile-time)
-    let rLow0 = d.u32(0)
-    let rHigh0 = d.u32(0)
-    let rLow1 = d.u32(0)
-    let rHigh1 = d.u32(0)
-    let rLow2 = d.u32(0)
-    let rHigh2 = d.u32(0)
-    let rLow3 = d.u32(0)
-    let rHigh3 = d.u32(0)
-
-    for (const rot of tgpu.unroll(std.range(0, 4))) {
-      let rLow = d.u32(0)
-      let rHigh = d.u32(0)
-      for (const bit of tgpu.unroll(std.range(0, 36))) {
-        let srcBit = d.u32(0)
-        if (rot === 0) { srcBit = d.u32(ROT_LUTS_0[bit]!) }
-        else if (rot === 1) { srcBit = d.u32(ROT_LUTS_1[bit]!) }
-        else if (rot === 2) { srcBit = d.u32(ROT_LUTS_2[bit]!) }
-        else { srcBit = d.u32(ROT_LUTS_3[bit]!) }
-        const srcPos = d.u32(35) - srcBit
-        let srcVal = d.u32(0)
-        if (srcPos >= d.u32(32)) {
-          srcVal = (codewordHigh >> (srcPos - d.u32(32))) & d.u32(1)
+      if (weakCount > d.u32(1) && (mask & d.u32(2)) !== d.u32(0)) {
+        const bit = meta.weakBit1
+        const pos = d.u32(35) - bit
+        if (pos >= d.u32(32)) {
+          wildHigh = wildHigh | (d.u32(1) << (pos - d.u32(32)))
         } else {
-          srcVal = (codewordLow >> srcPos) & d.u32(1)
+          wildLow = wildLow | (d.u32(1) << pos)
         }
-        if (srcVal !== d.u32(0)) {
-          const dstBit = d.u32(bit)
-          const dstPos = d.u32(35) - dstBit
-          if (dstPos >= d.u32(32)) {
-            rHigh = rHigh | (d.u32(1) << (dstPos - d.u32(32)))
+      }
+      if (weakCount > d.u32(2) && (mask & d.u32(4)) !== d.u32(0)) {
+        const bit = meta.weakBit2
+        const pos = d.u32(35) - bit
+        if (pos >= d.u32(32)) {
+          wildHigh = wildHigh | (d.u32(1) << (pos - d.u32(32)))
+        } else {
+          wildLow = wildLow | (d.u32(1) << pos)
+        }
+      }
+      if (weakCount > d.u32(3) && (mask & d.u32(8)) !== d.u32(0)) {
+        const bit = meta.weakBit3
+        const pos = d.u32(35) - bit
+        if (pos >= d.u32(32)) {
+          wildHigh = wildHigh | (d.u32(1) << (pos - d.u32(32)))
+        } else {
+          wildLow = wildLow | (d.u32(1) << pos)
+        }
+      }
+      if (weakCount > d.u32(4) && (mask & d.u32(16)) !== d.u32(0)) {
+        const bit = meta.weakBit4
+        const pos = d.u32(35) - bit
+        if (pos >= d.u32(32)) {
+          wildHigh = wildHigh | (d.u32(1) << (pos - d.u32(32)))
+        } else {
+          wildLow = wildLow | (d.u32(1) << pos)
+        }
+      }
+      if (weakCount > d.u32(5) && (mask & d.u32(32)) !== d.u32(0)) {
+        const bit = meta.weakBit5
+        const pos = d.u32(35) - bit
+        if (pos >= d.u32(32)) {
+          wildHigh = wildHigh | (d.u32(1) << (pos - d.u32(32)))
+        } else {
+          wildLow = wildLow | (d.u32(1) << pos)
+        }
+      }
+
+      for (const rot of tgpu.unroll(std.range(0, 4))) {
+        let knownLow = d.u32(0)
+        let knownHigh = d.u32(0)
+        for (const bit of tgpu.unroll(std.range(0, MODULES_PER_QUAD))) {
+          const bitU = d.u32(bit)
+          let srcBit = d.u32(0)
+          if (rot === 0) {
+            srcBit = RotLut0Gpu.$[bitU]
+          } else if (rot === 1) {
+            srcBit = RotLut1Gpu.$[bitU]
+          } else if (rot === 2) {
+            srcBit = RotLut2Gpu.$[bitU]
           } else {
-            rLow = rLow | (d.u32(1) << dstPos)
+            srcBit = RotLut3Gpu.$[bitU]
+          }
+          const bx = BitXGpu.$[srcBit] - d.u32(1)
+          const by = BitYGpu.$[srcBit] - d.u32(1)
+          const pIdx = by * d.u32(DATA_MODULES) + bx
+          const patternIdx = pBase + pIdx
+          const cell = layout.$.pattern[patternIdx]!
+          if (cell === d.u32(PATTERN_WHITE)) {
+            const pos = d.u32(35) - bitU
+            if (pos >= d.u32(32)) {
+              knownHigh = knownHigh | (d.u32(1) << (pos - d.u32(32)))
+            } else {
+              knownLow = knownLow | (d.u32(1) << pos)
+            }
           }
         }
+        const diffLow = knownLow ^ cw.low ^ wildLow
+        const diffHigh = knownHigh ^ cw.high ^ wildHigh
+        const d0 = countOneBits(diffLow) + countOneBits(diffHigh)
+        if (d0 < localBest) {
+          localBest = d0
+          localRot = d.u32(rot)
+        } else if (d0 === localBest) {
+          localRot = d.u32(rot)
+        }
       }
-      if (rot === 0) { rLow0 = rLow; rHigh0 = rHigh }
-      else if (rot === 1) { rLow1 = rLow; rHigh1 = rHigh }
-      else if (rot === 2) { rLow2 = rLow; rHigh2 = rHigh }
-      else { rLow3 = rLow; rHigh3 = rHigh }
     }
 
-    // 6. Dictionary match
-    let bestDist = d.u32(MAX_DICT_ERROR + 1)
-    let bestId = d.u32(DECODED_TAG_ID_UNKNOWN)
-    let bestRot = d.u32(0)
-
-    for (let cwIdx = d.u32(0); cwIdx < d.u32(TAG36H11_COUNT); cwIdx = cwIdx + d.u32(1)) {
-      const cw = decodeLayout.$.codewords[cwIdx]!
-
-      let d0 = countOneBits(rLow0 ^ cw.low) + countOneBits(rHigh0 ^ cw.high)
-      if (d0 < bestDist) { bestDist = d0; bestId = cwIdx; bestRot = d.u32(0) }
-      else if (d0 === bestDist) { if (cwIdx < bestId) { bestId = cwIdx; bestRot = d.u32(0) } }
-
-      let d1 = countOneBits(rLow1 ^ cw.low) + countOneBits(rHigh1 ^ cw.high)
-      if (d1 < bestDist) { bestDist = d1; bestId = cwIdx; bestRot = d.u32(1) }
-      else if (d1 === bestDist) { if (cwIdx < bestId) { bestId = cwIdx; bestRot = d.u32(1) } }
-
-      let d2 = countOneBits(rLow2 ^ cw.low) + countOneBits(rHigh2 ^ cw.high)
-      if (d2 < bestDist) { bestDist = d2; bestId = cwIdx; bestRot = d.u32(2) }
-      else if (d2 === bestDist) { if (cwIdx < bestId) { bestId = cwIdx; bestRot = d.u32(2) } }
-
-      let d3 = countOneBits(rLow3 ^ cw.low) + countOneBits(rHigh3 ^ cw.high)
-      if (d3 < bestDist) { bestDist = d3; bestId = cwIdx; bestRot = d.u32(3) }
-      else if (d3 === bestDist) { if (cwIdx < bestId) { bestId = cwIdx; bestRot = d.u32(3) } }
-    }
-
-    if (bestDist <= d.u32(MAX_DICT_ERROR)) {
-      decodeLayout.$.quadData[quadId]!.decodedTagId = bestId
-      decodeLayout.$.quadData[quadId]!.decodedRotation = bestRot
-    } else {
-      decodeLayout.$.quadData[quadId]!.decodedTagId = d.u32(DECODED_TAG_ID_DICT_MISS)
-      decodeLayout.$.quadData[quadId]!.decodedRotation = d.u32(0)
+    if (localBest <= d.u32(TAG_DECODE_MAX_DICT_ERROR)) {
+      const candidate = (localBest << d.u32(20)) | (localRot << d.u32(18)) | cwIdx
+      atomicMin(layout.$.atomicBest[quadId]!, candidate)
     }
   })
 
   const pipeline = root.createComputePipeline({ compute: kernel })
 
   return {
-    codewordBuffer,
-    decodeBindGroup,
-    encodeDecode(computePass: GPUComputePassEncoder) {
-      pipeline.with(computePass).with(decodeBindGroup).dispatchWorkgroups(16, 1, 1)
+    encodeDictMatch(pass: GPUComputePassEncoder, instanceCount: number) {
+      const threads = instanceCount * TAG36H11_COUNT
+      pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(threads / 64))
     },
   }
 }
 
-// ------ Stage 3: Per-quad histogram visualization render pass ------
+function createCanonicalizeStage(
+  root: TgpuRoot,
+  quadDataBuffer: GridVizQuadBuffer,
+  atomicBestBuf: ReturnType<typeof root.createBuffer<typeof AtomicBestSchema>>,
+  metaBuf: ReturnType<typeof root.createBuffer<typeof QuadDecodeMetaSchema>>,
+) {
+  const layout = tgpu.bindGroupLayout({
+    quadData: { storage: GridDataSchema, access: 'mutable' },
+    atomicBest: { storage: AtomicBestReadonlySchema, access: 'readonly' },
+    meta: { storage: QuadDecodeMetaSchema, access: 'readonly' },
+  })
+
+  const bindGroup = root.createBindGroup(layout, {
+    quadData: quadDataBuffer,
+    atomicBest: atomicBestBuf as never,
+    meta: metaBuf as never,
+  })
+
+  const kernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [64, 1, 1],
+  })((input) => {
+    const quadId = d.u32(input.gid.x)
+    if (quadId >= d.u32(MAX_QUADS)) return
+
+    const quad = layout.$.quadData[quadId]!
+    const H = quad.homography
+    const c0 = H.columns[0]!
+    const c1 = H.columns[1]!
+    const hLen = c0.x * c0.x + c0.y * c0.y + c1.x * c1.x + c1.y * c1.y
+    if (hLen < d.f32(1e-6)) {
+      layout.$.quadData[quadId]!.decodedTagId = d.u32(DECODED_TAG_ID_UNKNOWN)
+      return
+    }
+
+    if (layout.$.meta[quadId]!.rejectDict !== d.u32(0)) {
+      layout.$.quadData[quadId]!.decodedTagId = d.u32(DECODED_TAG_ID_UNKNOWN)
+      return
+    }
+
+    const score = layout.$.atomicBest[quadId]!
+    const dist = score >> d.u32(20)
+    const bestRot = (score >> d.u32(18)) & d.u32(3)
+    const bestId = score & d.u32(0x3ffff)
+
+    if (dist > d.u32(TAG_DECODE_MAX_DICT_ERROR)) {
+      layout.$.quadData[quadId]!.decodedTagId = d.u32(DECODED_TAG_ID_DICT_MISS)
+      layout.$.quadData[quadId]!.decodedRotation = d.u32(0)
+      return
+    }
+
+    layout.$.quadData[quadId]!.decodedTagId = bestId
+    layout.$.quadData[quadId]!.decodedRotation = bestRot
+
+    const strip = quad.screenCorners
+    const rotated = rotateStripCorners(strip, bestRot)
+    const hRes = tryHomographyFromCorners(rotated[0]!, rotated[1]!, rotated[2]!, rotated[3]!)
+    layout.$.quadData[quadId]!.screenCorners = Corners4(rotated)
+    layout.$.quadData[quadId]!.homography = d.mat3x3f(
+      hRes.homography.columns[0]!,
+      hRes.homography.columns[1]!,
+      hRes.homography.columns[2]!,
+    )
+    layout.$.quadData[quadId]!.decodedRotation = d.u32(0)
+  })
+
+  const pipeline = root.createComputePipeline({ compute: kernel })
+
+  return {
+    encodeCanonicalize(pass: GPUComputePassEncoder) {
+      pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(MAX_QUADS / 64))
+    },
+  }
+}
+
+// ------ Tag histogram debug (linear 32-bin) ------
 
 const TAG_HIST_GRID_COLS = 6
-const TAG_HIST_PIXEL_SCALE = 8
-const TAG_HIST_CELL_W = HIST_BINS * TAG_HIST_PIXEL_SCALE
-const TAG_HIST_CELL_H = 4 * TAG_HIST_PIXEL_SCALE
+/** Screen pixels per luma bin (matches orient hist `ORIENT_HIST_VIZ_PIXEL_SCALE`). */
+const TAG_HIST_PIXEL_SCALE = 2
+const TAG_HIST_CELL_W = TAG_DECODE_HIST_BINS * TAG_HIST_PIXEL_SCALE
+/** Bar area height — same formula as orient `ORIENT_HIST_VIZ_BIN_H`. */
+const TAG_HIST_CELL_H = 8 * TAG_HIST_PIXEL_SCALE
 const TAG_HIST_GAP = 2
 const TAG_HIST_STRIDE_X = TAG_HIST_CELL_W + TAG_HIST_GAP
 const TAG_HIST_STRIDE_Y = TAG_HIST_CELL_H + TAG_HIST_GAP
@@ -430,7 +745,7 @@ const TagHistParams = d.struct({
 
 const tagHistLayout = tgpu.bindGroupLayout({
   params: { uniform: TagHistParams },
-  histogram: { storage: d.arrayOf(d.u32, PER_QUAD_HIST), access: 'readonly' },
+  histogram: { storage: QuadPixelHistReadonlySchema, access: 'readonly' },
 })
 
 function createTagHistogramRenderPipeline(root: TgpuRoot, presentationFormat: GPUTextureFormat) {
@@ -441,7 +756,6 @@ function createTagHistogramRenderPipeline(root: TgpuRoot, presentationFormat: GP
     in: { uv: d.location(0, d.vec2f) },
     out: d.vec4f,
   })((i) => {
-    'use gpu'
     const size = tagHistLayout.$.params.canvasSize
     const wi = d.i32(size.x)
     const hi = d.i32(size.y)
@@ -461,8 +775,8 @@ function createTagHistogramRenderPipeline(root: TgpuRoot, presentationFormat: GP
     const strideX = cellW + gap
     const strideY = cellH + gap
 
-    const col = d.u32(px / strideX)
-    const row = d.u32(py / strideY)
+    const col = d.u32(d.f32(px) / d.f32(strideX))
+    const row = d.u32(d.f32(py) / d.f32(strideY))
     const localX = px % strideX
     const localY = py % strideY
 
@@ -478,46 +792,32 @@ function createTagHistogramRenderPipeline(root: TgpuRoot, presentationFormat: GP
       return BG
     }
 
-    const bin = d.u32(localX / d.u32(TAG_HIST_PIXEL_SCALE))
-    const base = quadId * d.u32(HIST_BINS)
+    const bin = d.u32(d.f32(localX) / d.f32(TAG_HIST_PIXEL_SCALE))
+    const base = quadId * d.u32(TAG_DECODE_HIST_BINS)
 
-    // Find black peak (highest bin) — histograms track per-module grayscale averages
     let blackPeak = d.u32(0)
     let blackVal = d.u32(0)
-    for (const b of tgpu.unroll(std.range(0, HIST_BINS))) {
-      const v = tagHistLayout.$.histogram[base + d.u32(b)]!
+    for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
+      const bu = d.u32(b)
+      const v = tagHistLayout.$.histogram[base + bu]!
       if (v > blackVal) {
         blackVal = v
-        blackPeak = d.u32(b)
+        blackPeak = bu
       }
     }
 
-    // Find white peak (must be local max, ≥4 bins from black)
     let whitePeak = d.u32(0)
     let whiteVal = d.u32(0)
-    for (const b of tgpu.unroll(std.range(0, HIST_BINS))) {
-      const iu = d.u32(b)
-      const dist = min(iu, blackPeak) + d.u32(HIST_BINS) - max(iu, blackPeak)
-      const sep = min(dist, d.u32(HIST_BINS) - dist)
-      const v = tagHistLayout.$.histogram[base + iu]!
-      const prev = tagHistLayout.$.histogram[base + d.u32((b + HIST_BINS - 1) % HIST_BINS)]!
-      const next = tagHistLayout.$.histogram[base + d.u32((b + 1) % HIST_BINS)]!
-      if (v >= prev && v >= next && sep >= d.u32(4) && v > whiteVal) {
-        whiteVal = v
-        whitePeak = iu
-      }
-    }
-
-    // Fallback white peak if no local max found
-    if (whiteVal === d.u32(0) && blackVal > d.u32(0)) {
-      let maxSep = d.u32(0)
-      for (const b of tgpu.unroll(std.range(0, HIST_BINS))) {
-        const iu = d.u32(b)
-        const dist = min(iu, blackPeak) + d.u32(HIST_BINS) - max(iu, blackPeak)
-        const sep = min(dist, d.u32(HIST_BINS) - dist)
-        if (sep > maxSep) {
-          maxSep = sep
-          whitePeak = iu
+    const minSep = d.u32(TAG_DECODE_MIN_PEAK_BIN_SEP)
+    for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
+      const bu = d.u32(b)
+      if (bu > blackPeak + minSep && bu > d.u32(0) && bu < d.u32(TAG_DECODE_HIST_BINS - 1)) {
+        const v = tagHistLayout.$.histogram[base + bu]!
+        const prev = tagHistLayout.$.histogram[base + bu - d.u32(1)]!
+        const next = tagHistLayout.$.histogram[base + bu + d.u32(1)]!
+        if (v >= prev && v >= next && v > whiteVal) {
+          whiteVal = v
+          whitePeak = bu
         }
       }
     }
@@ -526,7 +826,7 @@ function createTagHistogramRenderPipeline(root: TgpuRoot, presentationFormat: GP
     const count = tagHistLayout.$.histogram[base + bin]!
     let barH = d.u32(0)
     if (count > d.u32(0)) {
-      barH = max(d.u32(1), d.u32((count * cellH) / maxCount))
+      barH = max(d.u32(1), d.u32(d.f32(count * cellH) / d.f32(maxCount)))
     }
 
     const barTop = cellH - barH
@@ -534,12 +834,11 @@ function createTagHistogramRenderPipeline(root: TgpuRoot, presentationFormat: GP
       return BG
     }
 
-    // Color: peaks in white, otherwise gradient blue→white→red
     const PEAK = d.vec4f(d.f32(1), d.f32(1), d.f32(0.92), d.f32(1))
     if (bin === blackPeak || bin === whitePeak) {
       return PEAK
     }
-    const t = d.f32(bin) / d.f32(HIST_BINS - 1)
+    const t = d.f32(bin) / d.f32(TAG_DECODE_HIST_BINS - 1)
     return d.vec4f(t, d.f32(1) - d.f32(2) * abs(t - d.f32(0.5)), d.f32(1) - t, d.f32(1))
   })
 
@@ -560,7 +859,7 @@ export function createTagHistogramDisplayStage(
 
   const bindGroup = root.createBindGroup(tagHistLayout, {
     params: paramsBuffer,
-    histogram: histBuf,
+    histogram: histBuf as never,
   })
 
   function encodeDisplay(enc: GPUCommandEncoder, colorAttachment: ColorAttachment) {
@@ -573,8 +872,6 @@ export function createTagHistogramDisplayStage(
   return { encodeDisplay }
 }
 
-// ------ Public API ------
-
 export type TagDecodeStage = ReturnType<typeof createTagDecodeStage>
 
 export function createTagDecodeStage(
@@ -586,17 +883,75 @@ export function createTagDecodeStage(
     height: number
   },
 ) {
-  const voteAccum = createVoteAccumStage(root, deps.grayTexView, deps.quadDataBuffer, deps.width, deps.height)
-  const decode = createQuadDecodeComputeStage(
+  const histStage = createHistAccumStage(root, deps.grayTexView, deps.quadDataBuffer, deps.width, deps.height)
+
+  const thresholdBuf = root.createBuffer(TagDecodeThresholdSchema).$usage('storage')
+  const moduleWhiteBuf = root.createBuffer(ModuleVoteSchema).$usage('storage')
+  const moduleBlackBuf = root.createBuffer(ModuleVoteSchema).$usage('storage')
+  const patternBuf = root.createBuffer(PatternSchema).$usage('storage')
+  const metaBuf = root.createBuffer(QuadDecodeMetaSchema).$usage('storage')
+  const atomicBestBuf = root.createBuffer(AtomicBestSchema).$usage('storage')
+
+  const peakStage = createPeakThresholdStage(root, histStage.histBuf, thresholdBuf, deps.quadDataBuffer)
+  const voteStage = createModuleVoteStage(
     root,
-    voteAccum.moduleSumBuf,
-    voteAccum.moduleCountBuf,
+    deps.grayTexView,
     deps.quadDataBuffer,
+    thresholdBuf,
+    moduleWhiteBuf,
+    moduleBlackBuf,
+    deps.width,
+    deps.height,
+    histStage.dummyTexture,
   )
 
+  const codewordBuffer = allocCodewordBuffer(root)
+  const classifyStage = createClassifyStage(
+    root,
+    moduleWhiteBuf,
+    moduleBlackBuf,
+    thresholdBuf,
+    patternBuf,
+    metaBuf,
+  )
+  const dictStage = createDictMatchStage(root, codewordBuffer, patternBuf, metaBuf, atomicBestBuf)
+  const canonicalizeStage = createCanonicalizeStage(root, deps.quadDataBuffer, atomicBestBuf, metaBuf)
+
+  const worstScores = new Uint32Array(MAX_INSTANCES)
+  worstScores.fill(WORST_SCORE)
+
+  function encodeHistAccum(enc: GPUCommandEncoder, instanceCount: number) {
+    histStage.encodeHistAccum(enc, instanceCount)
+  }
+
+  function encodeModuleVotes(enc: GPUCommandEncoder, instanceCount: number) {
+    voteStage.encodeModuleVotes(enc, instanceCount)
+  }
+
+  function encodeDecode(computePass: GPUComputePassEncoder, instanceCount: number) {
+    if (instanceCount < 1) return
+    peakStage.encodePeakThresholds(computePass)
+    classifyStage.encodeClassify(computePass)
+    atomicBestBuf.write(worstScores)
+    dictStage.encodeDictMatch(computePass, instanceCount)
+    canonicalizeStage.encodeCanonicalize(computePass)
+  }
+
+  /** @deprecated Use encodeHistAccum + encodeModuleVotes + encodeDecode */
+  function encodeVotes(enc: GPUCommandEncoder, instanceCount: number) {
+    encodeHistAccum(enc, instanceCount)
+    const pass = enc.beginComputePass({ label: 'tag peaks' })
+    peakStage.encodePeakThresholds(pass)
+    pass.end()
+    encodeModuleVotes(enc, instanceCount)
+  }
+
   return {
-    histBuf: voteAccum.histBuf,
-    encodeVotes: voteAccum.encodeVotes,
-    encodeDecode: decode.encodeDecode,
+    histBuf: histStage.histBuf,
+    patternBuf,
+    encodeHistAccum,
+    encodeModuleVotes,
+    encodeDecode,
+    encodeVotes,
   }
 }

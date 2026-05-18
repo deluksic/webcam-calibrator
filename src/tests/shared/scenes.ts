@@ -1,4 +1,4 @@
-import { decodeStressAxisStrip, decodeStressFitPerspectiveStrip } from '@/lib/decodeStressHarness'
+import { axisAlignedStrip, fitPerspectiveStrip } from '@/tests/shared/sceneStrips'
 import type { Corners } from '@/lib/geometry'
 import { rotateStripAroundCentroid, scaleStripToMaxEdgePx } from '@/tests/shared/stripGeometry'
 import type { SceneSpec } from '@/tests/shared/types'
@@ -10,9 +10,9 @@ export function buildBaseStrip(spec: SceneSpec): Corners {
   const margin = spec.margin ?? 6
   if (spec.kind === 'axis') {
     const side = spec.axisSidePx ?? min(spec.width, spec.height) - 2 * margin
-    return decodeStressAxisStrip(spec.width, spec.height, margin, side)
+    return axisAlignedStrip(spec.width, spec.height, margin, side)
   }
-  return decodeStressFitPerspectiveStrip(spec.width, spec.height, {
+  return fitPerspectiveStrip(spec.width, spec.height, {
     margin,
     perspectiveBoost: spec.perspectiveBoost ?? 1,
   })

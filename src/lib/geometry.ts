@@ -19,19 +19,6 @@ export type Point3 = { x: number; y: number; z: number }
 /** Quad corners in image / triangle-strip order: TL, TR, BL, BR. */
 export type Corners = [tl: Point, tr: Point, bl: Point, br: Point]
 
-const RING_ROTATIONS = [
-  [0, 1, 2, 3],
-  [2, 0, 3, 1],
-  [3, 2, 1, 0],
-  [1, 3, 0, 2],
-] as const
-
-/** Rotate strip-order corners by k quarter-turns clockwise (k mod 4). */
-export function rotateRing(ring: Corners, k: number): Corners {
-  const [a, b, c, d] = RING_ROTATIONS[k % 4]!
-  return [ring[a], ring[b], ring[c], ring[d]]
-}
-
 /** Correspondence between plane (X,Y) and image (u,v). */
 export type Correspondence = {
   plane: { x: number; y: number }

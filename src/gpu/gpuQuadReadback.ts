@@ -6,15 +6,32 @@ import {
   DECODED_TAG_ID_DICT_MISS,
   DECODED_TAG_ID_UNKNOWN,
   MAX_DETECTED_TAGS,
-  type QuadData,
 } from '@/gpu/pipelines/gridVizPipeline'
 import type { HostQuadReadback } from '@/gpu/pipelines/hostQuadReadbackPipeline'
 import { quadAreaPx } from '@/lib/calibrationQuality'
 import type { Corners } from '@/lib/geometry'
-import { rotateRing } from '@/lib/geometry'
+import { TAG_MODULE_CELL, type TagPattern } from '@/lib/tagModuleCell'
 
 const DICT_MISS_U32 = DECODED_TAG_ID_DICT_MISS >>> 0
 const UNKNOWN_U32 = DECODED_TAG_ID_UNKNOWN >>> 0
+const MODULES_PER_QUAD = 36
+
+/** GPU classify buffer uses 0=black, 1=white, 2=weak, 3=tie. */
+function gpuPatternCellToHost(cell: number): TagPattern[number] {
+  if (cell === 1) return TAG_MODULE_CELL.white
+  if (cell === 2) return TAG_MODULE_CELL.weak
+  if (cell === 3) return TAG_MODULE_CELL.tie
+  return TAG_MODULE_CELL.black
+}
+
+function patternFromGpuBuffer(flat: number[], quadIndex: number): TagPattern {
+  const base = quadIndex * MODULES_PER_QUAD
+  const pattern = [] as unknown as TagPattern
+  for (let i = 0; i < MODULES_PER_QUAD; i++) {
+    pattern[i] = gpuPatternCellToHost(flat[base + i] ?? 0)
+  }
+  return pattern
+}
 
 async function readU32Prefix(device: GPUDevice, gpuBuffer: GPUBuffer, count: number): Promise<number[]> {
   if (count <= 0) {
@@ -46,10 +63,10 @@ function screenCornersToCorners(quad: Pick<HostQuadReadback, 'screenCorners'>): 
   ]
 }
 
-function hostQuadToDetected(quad: HostQuadReadback, label: number): DetectedQuad {
+function hostQuadToDetected(quad: HostQuadReadback, label: number, pattern?: TagPattern): DetectedQuad {
   const failureCode = quad.debug.failureCode
   const hasCorners = failureCode === 0
-  let corners = screenCornersToCorners(quad)
+  const corners = screenCornersToCorners(quad)
   const edgePixelCount = quad.debug.edgePixelCount * 100
   const area = quadAreaPx(corners)
   const minX = Math.min(corners[0].x, corners[1].x, corners[2].x, corners[3].x)
@@ -67,10 +84,7 @@ function hostQuadToDetected(quad: HostQuadReadback, label: number): DetectedQuad
 
   if (tagU32 !== UNKNOWN_U32 && tagU32 !== DICT_MISS_U32) {
     decodedTagId = tagU32
-    decodedRotation = quad.decodedRotation
-    if (decodedRotation > 0) {
-      corners = rotateRing(corners, decodedRotation)
-    }
+    decodedRotation = 0
   } else if (tagU32 === DICT_MISS_U32) {
     vizTagId = DICT_MISS_U32
   }
@@ -81,7 +95,7 @@ function hostQuadToDetected(quad: HostQuadReadback, label: number): DetectedQuad
     count: Math.round(edgePixelCount),
     aspectRatio,
     area,
-    pattern: undefined,
+    pattern,
     hasCorners,
     cornerDebug: {
       failureCode,
@@ -101,36 +115,13 @@ export function hostQuadsToDetected(
   hostQuads: HostQuadReadback[],
   quadCount: number,
   sourceLabelIds: number[],
+  patternFlat?: number[],
 ): DetectedQuad[] {
   const n = Math.min(quadCount, MAX_DETECTED_TAGS, hostQuads.length)
   const quads: DetectedQuad[] = []
   for (let i = 0; i < n; i++) {
-    quads.push(hostQuadToDetected(hostQuads[i]!, sourceLabelIds[i] ?? i))
-  }
-  return quads
-}
-
-/** @deprecated Use host readback; kept for callers that still pass full {@link QuadData}. */
-export function gpuQuadBufferToDetected(
-  quadData: QuadData[],
-  quadCount: number,
-  sourceLabelIds: number[],
-): DetectedQuad[] {
-  const n = Math.min(quadCount, MAX_DETECTED_TAGS, quadData.length)
-  const quads: DetectedQuad[] = []
-  for (let i = 0; i < n; i++) {
-    const q = quadData[i]!
-    quads.push(
-      hostQuadToDetected(
-        {
-          screenCorners: q.screenCorners,
-          debug: q.debug,
-          decodedTagId: q.decodedTagId,
-          decodedRotation: q.decodedRotation,
-        },
-        sourceLabelIds[i] ?? i,
-      ),
-    )
+    const pattern = patternFlat !== undefined ? patternFromGpuBuffer(patternFlat, i) : undefined
+    quads.push(hostQuadToDetected(hostQuads[i]!, sourceLabelIds[i] ?? i, pattern))
   }
   return quads
 }
@@ -151,15 +142,17 @@ export async function readGpuDetection(
     return { quads: [], quadCount: 0 }
   }
 
-  const [allHostQuads, sourceLabelIds] = await Promise.all([
+  const [allHostQuads, patternRaw, sourceLabelIds] = await Promise.all([
     pipeline.hostQuadReadback.hostQuadReadbackBuffer.read(),
+    pipeline.tagDecode.patternBuf.read(),
     readU32Prefix(root.device, pipeline.edgeHistogram.quadSourceLabelId.buffer, n),
   ])
 
   const hostQuads = (Array.isArray(allHostQuads) ? allHostQuads : []).slice(0, n)
+  const patternFlat = Array.isArray(patternRaw) ? patternRaw.map((v) => Number(v)) : []
 
   return {
-    quads: hostQuadsToDetected(hostQuads, n, sourceLabelIds),
+    quads: hostQuadsToDetected(hostQuads, n, sourceLabelIds, patternFlat),
     quadCount,
   }
 }
