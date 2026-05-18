@@ -121,6 +121,8 @@ export function createGradientProfilePipeline(
     height,
     presentationFormat,
     edgeHistogram.labelLineOut,
+    edgeHistogram.labelToQuadId,
+    edgeHistogram.quadPeakEdge,
     fittedLineInstances,
   )
   const lineFitDebug = createLineFitDebugStage(

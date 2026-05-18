@@ -268,8 +268,27 @@ function createCompactQuadsPipeline(
       }
     }
 
-    if (validSides < d.u32(MIN_QUAD_VALID_EDGES)) {
+    if (peakCount !== d.u32(MAX_EDGES_PER_LABEL) || validSides !== d.u32(MIN_QUAD_VALID_EDGES)) {
       return
+    }
+
+    // Reject two parallel pairs (four peaks but only two orientations).
+    const minPeakSep = d.u32(MIN_PEAK_BIN_SEPARATION)
+    for (const ki of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+      if (ki < peakCount) {
+        const bi = cluster.peakBins[ki]!
+        let farOthers = d.u32(0)
+        for (const kj of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+          if (kj < peakCount && kj !== ki) {
+            if (circularBinDist(bi, cluster.peakBins[kj]!) >= minPeakSep) {
+              farOthers = farOthers + d.u32(1)
+            }
+          }
+        }
+        if (farOthers < d.u32(3)) {
+          return
+        }
+      }
     }
 
     const quadId = atomicAdd(layout.$.quadCount[d.u32(0)]!, d.u32(1))

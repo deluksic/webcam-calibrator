@@ -24,7 +24,7 @@ export const LINE_EXTENT_TRIM_FRAC = 0.08
 
 export const TLS_REF_COS_MAX_ANGLE = 0.85
 
-/** Min valid lines to register a label as a quad for visualization. */
-export const MIN_QUAD_VALID_EDGES = 2
+/** Valid fitted lines required to register a label as a quad (AprilTag = 4). */
+export const MIN_QUAD_VALID_EDGES = MAX_EDGES_PER_LABEL
 /** Min TLS inliers for a side to count toward quad registration. */
 export const MIN_QUAD_EDGE_INLIERS = 12

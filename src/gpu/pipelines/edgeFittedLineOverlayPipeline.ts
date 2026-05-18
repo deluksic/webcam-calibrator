@@ -1,10 +1,13 @@
-// Draw per-label×edgeId fitted segments (p0 → p1) from labelLineOut.
+// Draw fitted segments only for edges of registered quads (labelToQuadId + quadPeakEdge).
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { abs, mul, select } from 'typegpu/std'
 
+import { COMPONENT_LABEL_INVALID } from '@/gpu/contour'
+import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
 import type { LabelLineOutBuffer } from '@/gpu/pipelines/labelLineFitPipeline'
+import type { LabelToQuadIdBuffer, QuadPeakEdgeBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 
 const premultipliedAlphaBlend: GPUBlendState = {
   color: {
@@ -17,6 +20,8 @@ const premultipliedAlphaBlend: GPUBlendState = {
 
 const fittedLineLayout = tgpu.bindGroupLayout({
   lineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
+  labelToQuadId: { storage: d.arrayOf(d.u32), access: 'readonly' },
+  quadPeakEdge: { storage: d.arrayOf(d.u32), access: 'readonly' },
 })
 
 function imagePxToClip(p: { x: number; y: number }, width: number, height: number) {
@@ -32,6 +37,8 @@ export function createEdgeFittedLineOverlayStage(
   height: number,
   presentationFormat: GPUTextureFormat,
   lineOut: LabelLineOutBuffer,
+  labelToQuadId: LabelToQuadIdBuffer,
+  quadPeakEdge: QuadPeakEdgeBuffer,
   lineInstanceCount: number,
 ) {
   const vert = tgpu
@@ -43,11 +50,19 @@ export function createEdgeFittedLineOverlayStage(
       out: { clipPos: d.builtin.position },
     })(({ vertexIndex, instanceIndex }) => {
       'use gpu'
+      const labelId = d.u32(instanceIndex / d.u32(MAX_EDGES_PER_LABEL))
+      const edgeId = d.u32(instanceIndex % d.u32(MAX_EDGES_PER_LABEL))
+      const quadId = fittedLineLayout.$.labelToQuadId[labelId]!
+      const quadBase = quadId * d.u32(MAX_EDGES_PER_LABEL)
+      const peakEdge = fittedLineLayout.$.quadPeakEdge[quadBase + edgeId]!
       const line = fittedLineLayout.$.lineOut[instanceIndex]!
+
       const p0 = d.vec2f(line.p0x, line.p0y)
       const p1 = d.vec2f(line.p1x, line.p1y)
       const span = abs(p1.x - p0.x) + abs(p1.y - p0.y)
-      const draw = line.count > d.u32(0) && span >= d.f32(0.5)
+      const inQuad =
+        quadId !== d.u32(COMPONENT_LABEL_INVALID) && peakEdge !== d.u32(COMPONENT_LABEL_INVALID)
+      const draw = inQuad && line.count > d.u32(0) && span >= d.f32(0.5)
       const atEnd = vertexIndex === d.u32(1)
       const pLine = select(p0, p1, atEnd)
       const clipOn = imagePxToClip(pLine, width, height)
@@ -73,7 +88,7 @@ export function createEdgeFittedLineOverlayStage(
     primitive: { topology: 'line-list' },
   })
 
-  const bindGroup = root.createBindGroup(fittedLineLayout, { lineOut })
+  const bindGroup = root.createBindGroup(fittedLineLayout, { lineOut, labelToQuadId, quadPeakEdge })
 
   return {
     pipeline,
