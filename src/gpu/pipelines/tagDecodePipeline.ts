@@ -4,7 +4,7 @@ import type { ColorAttachment } from 'typegpu'
 import type { TgpuRoot } from 'typegpu'
 import { d, tgpu, std, common } from 'typegpu'
 import { floor, max, min, mul, round } from 'typegpu/std'
-import { abs, atomicAdd, clamp, textureLoad } from 'typegpu/std'
+import { abs, atomicAdd, clamp, countOneBits, textureLoad } from 'typegpu/std'
 
 import { TAG36H11_CODES, TAG36H11_COUNT } from '@/lib/tag36h11'
 import {
@@ -42,15 +42,6 @@ function allocCodewordBuffer(root: TgpuRoot) {
   buf.write(data)
   return buf
 }
-
-const popcountU32 = tgpu.fn([d.u32], d.u32)((x) => {
-  'use gpu'
-  const a = x - ((x >> d.u32(1)) & d.u32(0x55555555))
-  const b = (a & d.u32(0x33333333)) + ((a >> d.u32(2)) & d.u32(0x33333333))
-  const c = (b + (b >> d.u32(4))) & d.u32(0x0F0F0F0F)
-  const dVal = c + (c >> d.u32(8))
-  return (dVal + (dVal >> d.u32(16))) & d.u32(0x3F)
-})
 
 // ------ Stage 1: Quad fill + vote accumulation render pass ------
 const MODULE_COUNT = MAX_QUADS * DATA_MODULES * DATA_MODULES
@@ -371,23 +362,38 @@ function createQuadDecodeComputeStage(
       else { rLow3 = rLow; rHigh3 = rHigh }
     }
 
-    // 6. Dictionary search — test entry 0 directly (no loop)
+    // 6. Dictionary match
     let bestDist = d.u32(MAX_DICT_ERROR + 1)
     let bestId = d.u32(DECODED_TAG_ID_UNKNOWN)
     let bestRot = d.u32(0)
 
-    const cw = decodeLayout.$.codewords[d.u32(0)]!
-    let d0 = popcountU32(rLow0 ^ cw.low) + popcountU32(rHigh0 ^ cw.high)
-    if (d0 < bestDist) { bestDist = d0; bestId = d.u32(0); bestRot = d.u32(0) }
-    let d1 = popcountU32(rLow1 ^ cw.low) + popcountU32(rHigh1 ^ cw.high)
-    if (d1 < bestDist) { bestDist = d1; bestId = d.u32(0); bestRot = d.u32(1) }
-    let d2 = popcountU32(rLow2 ^ cw.low) + popcountU32(rHigh2 ^ cw.high)
-    if (d2 < bestDist) { bestDist = d2; bestId = d.u32(0); bestRot = d.u32(2) }
-    let d3 = popcountU32(rLow3 ^ cw.low) + popcountU32(rHigh3 ^ cw.high)
-    if (d3 < bestDist) { bestDist = d3; bestId = d.u32(0); bestRot = d.u32(3) }
+    for (let cwIdx = d.u32(0); cwIdx < d.u32(TAG36H11_COUNT); cwIdx = cwIdx + d.u32(1)) {
+      const cw = decodeLayout.$.codewords[cwIdx]!
 
-    decodeLayout.$.quadData[quadId]!.decodedTagId = bestDist
-    decodeLayout.$.quadData[quadId]!.decodedRotation = bestRot
+      let d0 = countOneBits(rLow0 ^ cw.low) + countOneBits(rHigh0 ^ cw.high)
+      if (d0 < bestDist) { bestDist = d0; bestId = cwIdx; bestRot = d.u32(0) }
+      else if (d0 === bestDist) { if (cwIdx < bestId) { bestId = cwIdx; bestRot = d.u32(0) } }
+
+      let d1 = countOneBits(rLow1 ^ cw.low) + countOneBits(rHigh1 ^ cw.high)
+      if (d1 < bestDist) { bestDist = d1; bestId = cwIdx; bestRot = d.u32(1) }
+      else if (d1 === bestDist) { if (cwIdx < bestId) { bestId = cwIdx; bestRot = d.u32(1) } }
+
+      let d2 = countOneBits(rLow2 ^ cw.low) + countOneBits(rHigh2 ^ cw.high)
+      if (d2 < bestDist) { bestDist = d2; bestId = cwIdx; bestRot = d.u32(2) }
+      else if (d2 === bestDist) { if (cwIdx < bestId) { bestId = cwIdx; bestRot = d.u32(2) } }
+
+      let d3 = countOneBits(rLow3 ^ cw.low) + countOneBits(rHigh3 ^ cw.high)
+      if (d3 < bestDist) { bestDist = d3; bestId = cwIdx; bestRot = d.u32(3) }
+      else if (d3 === bestDist) { if (cwIdx < bestId) { bestId = cwIdx; bestRot = d.u32(3) } }
+    }
+
+    if (bestDist <= d.u32(MAX_DICT_ERROR)) {
+      decodeLayout.$.quadData[quadId]!.decodedTagId = bestId
+      decodeLayout.$.quadData[quadId]!.decodedRotation = bestRot
+    } else {
+      decodeLayout.$.quadData[quadId]!.decodedTagId = d.u32(DECODED_TAG_ID_DICT_MISS)
+      decodeLayout.$.quadData[quadId]!.decodedRotation = d.u32(0)
+    }
   })
 
   const pipeline = root.createComputePipeline({ compute: kernel })
