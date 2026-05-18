@@ -1,7 +1,5 @@
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 
-import type { FrameSlot } from '@/gpu/frameSlotPool'
-
 import type { CameraPipeline, NonGridDisplayMode } from './cameraPipeline'
 
 /** Non-grid display: main canvas + optional histogram canvas. */
@@ -67,38 +65,48 @@ export function encodePresentNonGrid(
 }
 
 /**
- * Grid mode: gray from slot, overlay, reprojection, histogram; submits the encoder.
+ * Grid mode: live gray buffer + GPU quad overlay + reprojection + histogram.
+ * Appends to `enc`; does not submit.
  */
-export function encodeAndSubmitGridPresent(
-  root: TgpuRoot,
+export function encodeGridPresent(
+  enc: GPUCommandEncoder,
   pipeline: CameraPipeline,
-  slot: FrameSlot,
   timeSec: number,
+  gridInstanceCount: number,
 ): void {
-  const enc = root.device.createCommandEncoder({ label: 'grid frame present' })
   pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 1 })
 
-  const loadMain: ColorAttachment = { view: pipeline.context, loadOp: 'load', storeOp: 'store' }
-  pipeline.render.grayscale.encodeToCanvas(enc, loadMain, slot.grayRenderBindGroup)
+  const mainAttachment: ColorAttachment = { view: pipeline.context }
+  pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
 
-  try {
-    pipeline.grid.encodeToCanvas(enc, loadMain)
-  } catch (e) {
-    console.error('[presentGridFrame] gridViz failed:', e)
+  if (gridInstanceCount > 0) {
+    const gridAttachment: ColorAttachment = {
+      view: pipeline.context,
+      loadOp: 'load',
+      storeOp: 'store',
+    }
+    try {
+      pipeline.grid.encodeToCanvas(enc, gridAttachment, gridInstanceCount)
+    } catch (e) {
+      console.error('[encodeGridPresent] gridViz failed:', e)
+    }
   }
 
   const reprojN = pipeline.reproj.reprojOverlayDrawState.instanceCount
   if (reprojN > 0) {
+    const reprojAttachment: ColorAttachment = {
+      view: pipeline.context,
+      loadOp: 'load',
+      storeOp: 'store',
+    }
     try {
-      pipeline.reproj.encodeOverlayToCanvas(enc, loadMain, reprojN)
+      pipeline.reproj.encodeOverlayToCanvas(enc, reprojAttachment, reprojN)
     } catch (e) {
-      console.error('[presentGridFrame] reprojection overlay failed:', e)
+      console.error('[encodeGridPresent] reprojection overlay failed:', e)
     }
   }
 
   if (pipeline.histContext) {
     pipeline.histogram.encodeDisplay(enc, { view: pipeline.histContext })
   }
-
-  root.device.queue.submit([enc.finish()])
 }

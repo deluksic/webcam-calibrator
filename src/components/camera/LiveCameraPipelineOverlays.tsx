@@ -17,7 +17,7 @@ export const TagIdGridOverlay: Component<{
   customTagOverlay?: () => CustomTagOverlaySession
 }> = (props) => {
   return (
-    <For each={props.quads} keyed={false}>
+    <For each={props.quads} keyed={(q) => `${q.label}-${q.decodedTagId ?? q.vizTagId ?? '?'}`}>
       {(quad) => {
         const c = () => quad().corners
         const cx = () => (c()[0].x + c()[1].x + c()[2].x + c()[3].x) / 4

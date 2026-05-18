@@ -18,7 +18,7 @@ export const HomographyResult = d.struct({
   homography: d.mat3x3f,
 })
 
-/** All UVs map to one image point — grid viz has no area (matches CPU `updateQuadCornersBuffer` failed/padded quads). */
+/** All UVs map to one image point — grid viz has no area (matches empty/padded quads in the GPU buffer). */
 export function invalidGridHomography() {
   'use gpu'
   return d.mat3x3f(0, 0, 0, 0, 0, 0, 0, 0, 1)

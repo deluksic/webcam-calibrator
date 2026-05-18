@@ -61,7 +61,7 @@ GPU, three passes: reset roots → roots claim compact IDs → pixels remap to c
 | `nms`       | Sobel + NMS                | Edges                       | Histogram                                                                                                          |
 | `labels`    | Full chain through compact | False-color labels          | —                                                                                                                  |
 | `debug`     | Same as `labels`           | False-color labels          | —                                                                                                                  |
-| `grid`      | + GPU tag chain            | Grayscale + homography grid | `readGpuDetection` when a [frame slot](src/gpu/frameSlotPool.ts) is free (default 3 slots; busy pool skips the frame) |
+| `grid`      | + GPU tag chain            | Live gray + homography grid (single submit) | Async `readGpuDetection` for HTML overlay / calibration; [frame slot pool](src/gpu/frameSlotPool.ts) tokens only (default 3; busy pool skips the frame) |
 
 ## CPU readbacks
 

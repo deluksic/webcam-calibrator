@@ -34,7 +34,7 @@ In-browser AprilTag 6×6 target capture; no server. All capture, GPU stages, and
 6. Compact remap to 0…N−1
 7. Extent (axis-aligned bounds per component)
 
-**GPU-on-grid (Calibrate)** — after each submitted grid pass, if a [frame slot](../src/gpu/frameSlotPool.ts) is available, the pipeline runs oriented edge histogram clustering, per-label line fit, quad corner homography, and GPU tag36h11 decode (same chain as Debug). [`readGpuDetection`](../src/gpu/gpuQuadReadback.ts) maps the quad buffer to `DetectedQuad` for snapshots and overlays. Session **custom** tags (after layout) still use a small CPU decode on dictionary-miss quads via the slot’s NMS copy. Frame slots (default: 3) provide backpressure.
+**GPU-on-grid (Calibrate)** — each rAF with a free [frame slot token](../src/gpu/frameSlotPool.ts) runs ingest, edge clustering, line fit, homography, tag decode, and presents live gray + GPU quad grid in one submit. [`readGpuDetection`](../src/gpu/gpuQuadReadback.ts) reads active quads only for HTML overlay and calibration (no gray snapshot, no corner write-back). Frame slot tokens (default: 3) provide backpressure.
 
 See [`docs/gradient-profile-pipeline.md`](../docs/gradient-profile-pipeline.md) and [`ARCHITECTURE.md`](../ARCHITECTURE.md) for stage order and corner conventions (**TL, TR, BL, BR**).
 

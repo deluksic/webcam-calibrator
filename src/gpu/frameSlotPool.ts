@@ -1,17 +1,7 @@
-import type { TgpuRoot } from 'typegpu'
-import { d } from 'typegpu'
+export type FrameSlotState = 'free' | 'inflight'
 
-import type { CameraPipeline } from '@/gpu/cameraPipeline'
-import { grayRenderLayout } from '@/gpu/pipelines/grayRenderPipeline'
-import type { GrayRenderBindGroup, GrayRenderBindResources } from '@/gpu/pipelines/grayRenderPipeline'
-
-export type FrameSlotState = 'free' | 'inflight' | 'display'
-
-type GraySnapshot = ReturnType<TgpuRoot['createBuffer']>
-
+/** Lightweight backpressure token — no GPU resources (gray/grid stay on live pipeline buffers). */
 export interface FrameSlot {
-  graySnapshot: GraySnapshot
-  grayRenderBindGroup: GrayRenderBindGroup
   frameId: number
   state: FrameSlotState
 }
@@ -19,77 +9,31 @@ export interface FrameSlot {
 export interface FrameSlotPool {
   acquireFreeSlot(): FrameSlot | undefined
   releaseSlot(slot: FrameSlot): void
-  swapDisplaySlot(slot: FrameSlot): void
-  /** grayBuffer → slot.graySnapshot (pinned for grid present after async detection). */
-  enqueueCopiesForSlot(enc: GPUCommandEncoder, pip: CameraPipeline, slot: FrameSlot): void
-  displaySlot: FrameSlot | undefined
 }
 
-export function createFrameSlotPool(
-  root: TgpuRoot,
-  options: {
-    width: number
-    height: number
-    grayRenderParamsBuffer: GrayRenderBindResources['params']
-    slotCount?: number
-  },
-): FrameSlotPool {
-  const { width, height, grayRenderParamsBuffer, slotCount = 3 } = options
-  const area = width * height
+let nextFrameId = 0
 
-  const slots: FrameSlot[] = Array.from({ length: slotCount }, () => {
-    const graySnapshot = root.createBuffer(d.arrayOf(d.f32, area)).$usage('storage')
-    const grayRenderBindGroup = root.createBindGroup(grayRenderLayout, {
-      grayBuffer: graySnapshot,
-      params: grayRenderParamsBuffer,
-    })
-    return {
-      graySnapshot,
-      grayRenderBindGroup,
-      frameId: -1,
-      state: 'free' as FrameSlotState,
-    }
-  })
+export function createFrameSlotPool(options?: { slotCount?: number }): FrameSlotPool {
+  const slotCount = options?.slotCount ?? 3
 
-  let displaySlot: FrameSlot | undefined = undefined
+  const slots: FrameSlot[] = Array.from({ length: slotCount }, () => ({
+    frameId: -1,
+    state: 'free' as FrameSlotState,
+  }))
 
   return {
-    get displaySlot() {
-      return displaySlot
-    },
-
     acquireFreeSlot() {
       const slot = slots.find((s) => s.state === 'free')
       if (!slot) {
         return undefined
       }
       slot.state = 'inflight'
+      slot.frameId = nextFrameId++
       return slot
     },
 
     releaseSlot(slot) {
       slot.state = 'free'
-    },
-
-    swapDisplaySlot(slot) {
-      if (import.meta.env.DEV && displaySlot !== undefined) {
-        if (slot.frameId <= displaySlot.frameId) {
-          console.warn(
-            `[frameSlotPool] swapDisplaySlot: non-monotonic frameId (new=${slot.frameId}, current=${displaySlot.frameId})`,
-          )
-        }
-      }
-      if (displaySlot !== undefined) {
-        displaySlot.state = 'free'
-      }
-      slot.state = 'display'
-      displaySlot = slot
-    },
-
-    enqueueCopiesForSlot(enc, pip, slot) {
-      const grayStorage = pip.gray.buffer.buffer
-      const grayDst = slot.graySnapshot.buffer
-      enc.copyBufferToBuffer(grayStorage, 0, grayDst, 0, grayStorage.size)
     },
   }
 }

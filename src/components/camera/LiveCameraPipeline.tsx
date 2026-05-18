@@ -6,10 +6,10 @@ import { TagIdGridOverlay } from '@/components/camera/LiveCameraPipelineOverlays
 import { encodeCameraCompute } from '@/gpu/cameraComputeEncoding'
 import { detectForSlot } from '@/gpu/cameraDetection'
 import type { DetectedQuad } from '@/gpu/detectedQuad'
-import { updateQuadCornersBuffer, updateReprojectionOverlayBuffer } from '@/gpu/cameraFrame'
+import { updateReprojectionOverlayBuffer } from '@/gpu/cameraFrame'
 import { createCameraPipeline } from '@/gpu/cameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
-import { encodeAndSubmitGridPresent, encodePresentNonGrid } from '@/gpu/cameraPresentEncoding'
+import { encodeGridPresent, encodePresentNonGrid } from '@/gpu/cameraPresentEncoding'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 import { initGPU } from '@/gpu/init'
 import { MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
@@ -191,22 +191,33 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     const pip = createCameraPipeline(g, canvas, histCanvas, width, height, navigator.gpu.getPreferredCanvasFormat())
     log(`Pipeline created ${width}x${height}`)
 
+    let lastQuadCount = 0
+    let lastAppliedDetectionFrameId = -1
+    let gridPipelineBusy = false
+
     const scheduleQuadDetection = (slot: FrameSlot, sf: boolean) => {
       const gNow = gpu()
       if (!gNow) {
         pip.frameSlotPool.releaseSlot(slot)
+        gridPipelineBusy = false
         return
       }
-      const pi = pipelineInteraction()
-      const liveCalib = pi.liveCalibration
 
-      detectForSlot(gNow, pip, slot)
+      void detectForSlot(gNow, pip, slot)
         .then((result) => {
           if (disposed) {
-            pip.frameSlotPool.releaseSlot(slot)
             return
           }
-          const { quads } = result
+          if (slot.frameId < lastAppliedDetectionFrameId) {
+            return
+          }
+          lastAppliedDetectionFrameId = slot.frameId
+
+          const pi = pipelineInteraction()
+          const liveCalib = pi.liveCalibration
+
+          const { quads, quadCount } = result
+          lastQuadCount = quadCount
           quads.sort((a, b) => b.count - a.count)
           const top = quads.slice(0, MAX_DETECTED_TAGS)
           const tagged = top.map((q) => {
@@ -223,8 +234,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
             }
           })
 
-          updateQuadCornersBuffer(pip, tagged, sf)
-
           if (liveCalib?.layout) {
             const accepted = tagged.filter((q) => acceptQuadForTagUse(q, sf))
             const built = buildReprojectionOverlayPairs(
@@ -236,32 +245,27 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               height,
             )
             if (built) {
-              updateReprojectionOverlayBuffer(pip, built.pairs, built.count)
-              if (typeof pi.onReprojectionFrame === 'function') {
-                pi.onReprojectionFrame({
+              if (updateReprojectionOverlayBuffer(pip, built.pairs, built.count)) {
+                pi.onReprojectionFrame?.({
                   rms: built.rms,
                   tagCount: built.tagCount,
                   tiltDeg: cameraTiltDegFromR(built.R),
                   dist: cameraDistanceFromT(built.t),
                 })
               }
-            } else {
-              updateReprojectionOverlayBuffer(pip, [], 0)
-              if (typeof pi.onReprojectionFrame === 'function') {
-                pi.onReprojectionFrame(undefined)
-              }
+            } else if (updateReprojectionOverlayBuffer(pip, [], 0)) {
+              pi.onReprojectionFrame?.(undefined)
             }
-          } else {
-            updateReprojectionOverlayBuffer(pip, [], 0)
-            if (typeof pi.onReprojectionFrame === 'function') {
-              pi.onReprojectionFrame(undefined)
-            }
+          } else if (updateReprojectionOverlayBuffer(pip, [], 0)) {
+            pi.onReprojectionFrame?.(undefined)
           }
 
-          pip.frameSlotPool.swapDisplaySlot(slot)
-          encodeAndSubmitGridPresent(gNow, pip, slot, performance.now() * 0.001)
+          const overlayQuads = tagged.filter((q) => acceptQuadForTagUse(q, sf))
+          setGridOverlayQuads(overlayQuads)
 
-          setGridOverlayQuads(tagged.filter((q) => acceptQuadForTagUse(q, sf)))
+          const presentEnc = gNow.device.createCommandEncoder({ label: 'grid frame present' })
+          encodeGridPresent(presentEnc, pip, performance.now() * 0.001, quadCount)
+          gNow.device.queue.submit([presentEnc.finish()])
 
           pi.onQuadDetection?.(tagged, { frameId: slot.frameId })
         })
@@ -269,7 +273,10 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           if (!disposed) {
             log(`detectForSlot error: ${e}`)
           }
+        })
+        .finally(() => {
           pip.frameSlotPool.releaseSlot(slot)
+          gridPipelineBusy = false
         })
     }
 
@@ -290,16 +297,15 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         const enc = gpuNow.device.createCommandEncoder({ label: 'camera frame' })
 
         if (dm === 'grid') {
-          // Grid mode: acquire a slot, run compute with copies pinned into it,
-          // submit, then kick off async detection. Canvas is NOT repainted here;
-          // encodeAndSubmitGridPresent does that after detection resolves.
-          const slot = pip.frameSlotPool.acquireFreeSlot()
-          if (slot !== undefined) {
-            encodeCameraCompute(enc, gpuNow, pip, video, threshold(), slot)
-            gpuNow.device.queue.submit([enc.finish()])
-            scheduleQuadDetection(slot, pi.showFallbacks)
+          if (!gridPipelineBusy) {
+            const slot = pip.frameSlotPool.acquireFreeSlot()
+            if (slot !== undefined) {
+              gridPipelineBusy = true
+              encodeCameraCompute(enc, gpuNow, pip, video, threshold(), slot, lastQuadCount)
+              gpuNow.device.queue.submit([enc.finish()])
+              scheduleQuadDetection(slot, pi.showFallbacks)
+            }
           }
-          // If no slot is free, skip this frame entirely (backpressure).
         } else {
           // Non-grid modes: compute + present synchronously as before.
           if (dm === 'undistort') {

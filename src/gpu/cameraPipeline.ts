@@ -22,6 +22,7 @@ import { createLabelVizPipeline } from '@/gpu/pipelines/labelVizPipeline'
 import { createPointerJumpLabeling } from '@/gpu/pipelines/pointerJumpPipeline'
 import { createQuadCornerHomographyStage } from '@/gpu/pipelines/quadCornerHomographyPipeline'
 import { createReprojectionOverlayStage } from '@/gpu/pipelines/reprojectionOverlayPipeline'
+import { createHostQuadReadbackStage } from '@/gpu/pipelines/hostQuadReadbackPipeline'
 import { createTagDecodeStage } from '@/gpu/pipelines/tagDecodePipeline'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
@@ -87,9 +88,11 @@ export function createCameraPipeline(
     width,
     height,
   })
+  const hostQuadReadback = createHostQuadReadbackStage(root, grid.quadCornersBuffer)
   const reproj = createReprojectionOverlayStage(root, width, height, presentationFormat)
 
-  const frameSlotPool: FrameSlotPool = createFrameSlotPool(root, { width, height, grayRenderParamsBuffer })
+  /** One in-flight grid frame so GPU quads and CPU overlay read stay on the same frame. */
+  const frameSlotPool: FrameSlotPool = createFrameSlotPool({ slotCount: 1 })
 
   const edges = createEdgesPipeline(root, width, height, presentationFormat, {
     sobelBuffer: sobel.buffer,
@@ -133,6 +136,7 @@ export function createCameraPipeline(
     lineFit,
     quadHomography,
     tagDecode,
+    hostQuadReadback,
     grid,
     reproj,
     render: {

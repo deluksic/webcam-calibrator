@@ -1,11 +1,8 @@
 import type { TgpuRoot } from 'typegpu'
 
 import type { FrameSlot } from '@/gpu/frameSlotPool'
-import { MAX_INSTANCES } from '@/gpu/pipelines/gridVizPipeline'
 
 import type { CameraPipeline } from './cameraPipeline'
-
-let nextFrameId = 0
 
 /**
  * Append external-texture ingest and the full camera compute chain to `enc`.
@@ -21,6 +18,7 @@ export function encodeCameraCompute(
   video: HTMLVideoElement,
   threshold: number,
   slot?: FrameSlot,
+  voteInstanceCount: number = 0,
 ): void {
   pipeline.ingest.encodeIngest(enc, root, video)
 
@@ -42,13 +40,12 @@ export function encodeCameraCompute(
   computePass.end()
 
   if (slot !== undefined) {
-    pipeline.tagDecode.encodeVotes(enc, MAX_INSTANCES)
+    if (voteInstanceCount > 0) {
+      pipeline.tagDecode.encodeVotes(enc, voteInstanceCount)
+    }
     const decodePass = enc.beginComputePass({ label: 'camera tag decode' })
     pipeline.tagDecode.encodeDecode(decodePass)
+    pipeline.hostQuadReadback.encodePack(decodePass)
     decodePass.end()
-
-    pipeline.frameSlotPool.enqueueCopiesForSlot(enc, pipeline, slot)
-    slot.frameId = nextFrameId++
-    slot.state = 'inflight'
   }
 }
