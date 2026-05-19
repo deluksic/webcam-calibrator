@@ -10,14 +10,6 @@ export type GradientProfileComputeOptions = {
   skipIngest?: boolean
 }
 
-function shouldRunProfile(displayMode: GradientProfileDisplayMode | undefined): boolean {
-  return (
-    displayMode === 'quadGrid' ||
-    displayMode === 'fittedLines' ||
-    displayMode === 'lineRejects'
-  )
-}
-
 /**
  * Full gradient-profile compute chain for one frame.
  * `enc` must be submitted before the external texture expires.
@@ -31,7 +23,6 @@ export function encodeGradientProfileCompute(
   options: GradientProfileComputeOptions = {},
 ): void {
   const quadCount = options.quadCount ?? 0
-  const displayMode = options.displayMode
 
   if (!options.skipIngest) {
     pipeline.ingest.encodeIngest(enc, root, video)
@@ -52,9 +43,8 @@ export function encodeGradientProfileCompute(
   pipeline.orientHistViz?.encodePackCompute(computePass)
   pipeline.lineFit.encodeCompute(computePass)
   pipeline.quadHomography.encodeCompute(computePass)
-  if (shouldRunProfile(displayMode)) {
-    pipeline.profile.encodeCompute(computePass)
-  }
+  // Profile plot canvas is always presented; compute is not tied to camera display mode.
+  pipeline.profile.encodeCompute(computePass)
   computePass.end()
 
   pipeline.tagDecode.encodeVotePasses(enc, quadCount)

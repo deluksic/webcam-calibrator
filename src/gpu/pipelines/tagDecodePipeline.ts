@@ -5,7 +5,15 @@ import { d, tgpu, std, common } from 'typegpu'
 import { floor, max, min, mul, round, sqrt } from 'typegpu/std'
 import { abs, atomicAdd, atomicMin, clamp, countOneBits, textureLoad } from 'typegpu/std'
 
-import { TAG36H11_CODES, TAG36H11_COUNT } from '@/lib/tag36h11'
+import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import {
+  DECODED_TAG_ID_DICT_MISS,
+  DECODED_TAG_ID_UNKNOWN,
+  GridDataSchema,
+  type GridVizQuadBuffer,
+} from '@/gpu/pipelines/gridVizPipeline'
+import { tryHomographyFromCorners } from '@/gpu/shaders/homographyDlt'
+import { Corners4, rotateStripCorners } from '@/gpu/shaders/quadCornerOrder'
 import {
   DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE,
   TAG_DECODE_HIST_BINS,
@@ -15,22 +23,13 @@ import {
   TAG_DECODE_MIN_PEAK_LUMA_BINS,
   TAG_DECODE_PEAK_GAP_FRAC,
 } from '@/gpu/tagDecodeThresholds'
-import { Corners4, rotateStripCorners } from '@/gpu/shaders/quadCornerOrder'
-import { tryHomographyFromCorners } from '@/gpu/shaders/homographyDlt'
-import {
-  DECODED_TAG_ID_DICT_MISS,
-  DECODED_TAG_ID_UNKNOWN,
-  GridDataSchema,
-  type GridVizQuadBuffer,
-} from '@/gpu/pipelines/gridVizPipeline'
-import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import { TAG36H11_CODES, TAG36H11_COUNT } from '@/lib/tag36h11'
 
 const TAG_MODULES = 8
 const DATA_MODULES = 6
 const MODULES_PER_QUAD = DATA_MODULES * DATA_MODULES
 const COMPUTE_WG = 64
 const CLEAR_WG = 256
-const HOMOGRAPHY_VALID_EPS2 = 1e-12
 
 const BIT_X = [
   1, 2, 3, 4, 5, 2, 3, 4, 3, 6, 6, 6, 6, 6, 5, 5, 5, 4, 6, 5, 4, 3, 2, 5, 4, 3, 4, 1, 1, 1, 1, 1, 2, 2, 2, 3,
@@ -42,7 +41,7 @@ const BIT_Y = [
 
 /** `moduleIdx` (row-major 6×6) → codeword bit index (inverse of BIT_X/BIT_Y). */
 const MODULE_TO_BIT = (() => {
-  const lut: number[] = new Array(MODULES_PER_QUAD).fill(0)
+  const lut: number[] = Array.from<number>({ length: MODULES_PER_QUAD }).fill(0)
   for (let bit = 0; bit < 36; bit++) {
     const col = BIT_X[bit]! - 1
     const row = BIT_Y[bit]! - 1
@@ -51,10 +50,22 @@ const MODULE_TO_BIT = (() => {
   return lut
 })()
 
-const ROT_LUTS_0 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35] as const
-const ROT_LUTS_1 = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 0, 1, 2, 3, 4, 5, 6, 7, 8] as const
-const ROT_LUTS_2 = [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] as const
-const ROT_LUTS_3 = [27, 28, 29, 30, 31, 32, 33, 34, 35, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26] as const
+const ROT_LUTS_0 = [
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+  32, 33, 34, 35,
+] as const
+const ROT_LUTS_1 = [
+  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 0, 1, 2, 3,
+  4, 5, 6, 7, 8,
+] as const
+const ROT_LUTS_2 = [
+  18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+  14, 15, 16, 17,
+] as const
+const ROT_LUTS_3 = [
+  27, 28, 29, 30, 31, 32, 33, 34, 35, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+  23, 24, 25, 26,
+] as const
 
 const ModuleToBitGpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), MODULE_TO_BIT)
 const BitXGpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...BIT_X])
@@ -80,6 +91,10 @@ const TagDecodeThresholdGpu = d.struct({
   whiteBound: d.f32,
   minVoteTotal: d.u32,
   valid: d.u32,
+  /** Luma histogram bins (for tag-hist debug viz; written in peak-threshold pass). */
+  blackPeakBin: d.u32,
+  whitePeakBin: d.u32,
+  histMaxCount: d.u32,
 })
 
 const TagDecodeThresholdSchema = d.arrayOf(TagDecodeThresholdGpu, MAX_QUADS)
@@ -255,7 +270,9 @@ function createHistAccumStage(
     histBuf,
     dummyTexture,
     encodeHistAccum(enc: GPUCommandEncoder, instanceCount: number) {
-      if (instanceCount < 1) return
+      if (instanceCount < 1) {
+        return
+      }
       const pass = enc.beginRenderPass({
         label: 'tag hist accum',
         colorAttachments: [
@@ -295,30 +312,82 @@ function createPeakThresholdStage(
     workgroupSize: [COMPUTE_WG, 1, 1],
   })((input) => {
     const quadId = d.u32(input.gid.x)
-    if (quadId >= layout.$.activeQuadCount[0]!) return
+    if (quadId >= layout.$.activeQuadCount[0]!) {
+      return
+    }
 
     const base = quadId * d.u32(TAG_DECODE_HIST_BINS)
+    const lastBin = d.u32(TAG_DECODE_HIST_BINS - 1)
+    const minSep = d.u32(TAG_DECODE_MIN_PEAK_BIN_SEP)
+    const blackSearchEnd = lastBin - minSep
+
     let blackPeak = d.u32(0)
     let blackVal = d.u32(0)
+    let histMaxCount = d.u32(0)
+
     for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
       const bu = d.u32(b)
       const v = layout.$.histogram[base + bu]!
-      if (v > blackVal) {
-        blackVal = v
-        blackPeak = bu
+      histMaxCount = max(histMaxCount, v)
+
+      if (bu <= blackSearchEnd) {
+        let prev = d.u32(0)
+        let next = d.u32(0)
+        if (bu > d.u32(0)) {
+          prev = layout.$.histogram[base + bu - d.u32(1)]!
+        }
+        if (bu < blackSearchEnd) {
+          next = layout.$.histogram[base + bu + d.u32(1)]!
+        }
+        if (bu === d.u32(0)) {
+          if (v >= next && v > blackVal) {
+            blackVal = v
+            blackPeak = bu
+          }
+        } else if (bu === blackSearchEnd) {
+          if (v >= prev && v > blackVal) {
+            blackVal = v
+            blackPeak = bu
+          }
+        } else if (v >= prev && v >= next && v > blackVal) {
+          blackVal = v
+          blackPeak = bu
+        }
+      }
+    }
+
+    if (blackVal === d.u32(0)) {
+      for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
+        const bu = d.u32(b)
+        if (bu <= blackSearchEnd) {
+          const v = layout.$.histogram[base + bu]!
+          if (v > blackVal) {
+            blackVal = v
+            blackPeak = bu
+          }
+        }
       }
     }
 
     let whitePeak = d.u32(0)
     let whiteVal = d.u32(0)
-    const minSep = d.u32(TAG_DECODE_MIN_PEAK_BIN_SEP)
+    const whiteSearchStart = blackPeak + minSep + d.u32(1)
+
     for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
       const bu = d.u32(b)
-      if (bu > blackPeak + minSep && bu > d.u32(0) && bu < d.u32(TAG_DECODE_HIST_BINS - 1)) {
+      if (bu >= whiteSearchStart && bu <= lastBin) {
         const v = layout.$.histogram[base + bu]!
         const prev = layout.$.histogram[base + bu - d.u32(1)]!
-        const next = layout.$.histogram[base + bu + d.u32(1)]!
-        if (v >= prev && v >= next && v > whiteVal) {
+        let next = d.u32(0)
+        if (bu < lastBin) {
+          next = layout.$.histogram[base + bu + d.u32(1)]!
+        }
+        if (bu === lastBin) {
+          if (v >= prev && v > whiteVal) {
+            whiteVal = v
+            whitePeak = bu
+          }
+        } else if (v >= prev && v >= next && v > whiteVal) {
           whiteVal = v
           whitePeak = bu
         }
@@ -361,6 +430,9 @@ function createPeakThresholdStage(
       whiteBound,
       minVoteTotal: minVote,
       valid,
+      blackPeakBin: blackPeak,
+      whitePeakBin: whitePeak,
+      histMaxCount,
     })
   })
 
@@ -437,7 +509,7 @@ function createModuleVoteStage(
       const mx = d.u32(floor(uv.x * d.f32(TAG_MODULES)))
       const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
       if (mx >= d.u32(1) && mx <= d.u32(6) && my >= d.u32(1) && my <= d.u32(6)) {
-    const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
+        const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
         const bufIdx = quadId * d.u32(MODULES_PER_QUAD) + cellIdx
         atomicAdd(layout.$.moduleWhite[bufIdx]!, d.u32(1))
       }
@@ -462,16 +534,18 @@ function createModuleVoteStage(
 
   return {
     encodeModuleVotes(enc: GPUCommandEncoder, instanceCount: number) {
-    if (instanceCount < 1) return
-    const pass = enc.beginRenderPass({
+      if (instanceCount < 1) {
+        return
+      }
+      const pass = enc.beginRenderPass({
         label: 'tag module votes',
-      colorAttachments: [
-        { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
-      ],
-    })
-    pass.setViewport(0, 0, width, height, 0, 1)
+        colorAttachments: [
+          { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
+        ],
+      })
+      pass.setViewport(0, 0, width, height, 0, 1)
       pipeline.with(pass).with(bindGroup).draw(4, instanceCount)
-    pass.end()
+      pass.end()
     },
   }
 }
@@ -508,14 +582,17 @@ function createClassifyStage(
     workgroupSize: [COMPUTE_WG, 1, 1],
   })((input) => {
     const quadId = d.u32(input.gid.x)
-    if (quadId >= layout.$.activeQuadCount[0]!) return
+    if (quadId >= layout.$.activeQuadCount[0]!) {
+      return
+    }
 
     const thr = layout.$.thresholds[quadId]!
     const pBase = quadId * d.u32(MODULES_PER_QUAD)
     let tieCount = d.u32(0)
     let weakCount = d.u32(0)
-  const weakBits = d.arrayOf(d.u32, TAG_DECODE_MAX_WEAK_WILDCARD)()
+    const weakBits = d.arrayOf(d.u32, TAG_DECODE_MAX_WEAK_WILDCARD)()
 
+    // Unroll: runtime loop here × dict `mask` loop would explode work (TDR / “hang”) when tags appear.
     for (const i of tgpu.unroll(std.range(0, MODULES_PER_QUAD))) {
       const iu = d.u32(i)
       const w = layout.$.moduleWhite[pBase + iu]!
@@ -598,13 +675,19 @@ function createDictMatchStage(
     const gid = d.u32(input.gid.x)
     const cwIdx = gid % d.u32(TAG36H11_COUNT)
     const quadId = d.u32(gid / d.u32(TAG36H11_COUNT))
-    if (quadId >= layout.$.activeQuadCount[0]!) return
+    if (quadId >= layout.$.activeQuadCount[0]!) {
+      return
+    }
 
     const meta = layout.$.meta[quadId]!
-    if (meta.rejectDict !== d.u32(0)) return
+    if (meta.rejectDict !== d.u32(0)) {
+      return
+    }
 
     const weakCount = meta.weakCount
-    if (weakCount > d.u32(TAG_DECODE_MAX_WEAK_WILDCARD)) return
+    if (weakCount > d.u32(TAG_DECODE_MAX_WEAK_WILDCARD)) {
+      return
+    }
 
     const cw = layout.$.codewords[cwIdx]!
     const pBase = quadId * d.u32(MODULES_PER_QUAD)
@@ -725,7 +808,10 @@ function createDictMatchStage(
       const n = capQuadCount(quadCount)
       const threads = n * TAG36H11_COUNT
       if (threads > 0) {
-        pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(threads / COMPUTE_WG))
+        pipeline
+          .with(pass)
+          .with(bindGroup)
+          .dispatchWorkgroups(Math.ceil(threads / COMPUTE_WG))
       }
     },
   }
@@ -757,7 +843,9 @@ function createCanonicalizeStage(
     workgroupSize: [COMPUTE_WG, 1, 1],
   })((input) => {
     const quadId = d.u32(input.gid.x)
-    if (quadId >= layout.$.activeQuadCount[0]!) return
+    if (quadId >= layout.$.activeQuadCount[0]!) {
+      return
+    }
 
     const quad = layout.$.quadData[quadId]!
     const H = quad.homography
@@ -835,6 +923,7 @@ const TagHistParams = d.struct({
 const tagHistLayout = tgpu.bindGroupLayout({
   params: { uniform: TagHistParams },
   histogram: { storage: QuadPixelHistReadonlySchema, access: 'readonly' },
+  thresholds: { storage: TagDecodeThresholdSchema, access: 'readonly' },
 })
 
 function createTagHistogramRenderPipeline(root: TgpuRoot, presentationFormat: GPUTextureFormat) {
@@ -884,34 +973,10 @@ function createTagHistogramRenderPipeline(root: TgpuRoot, presentationFormat: GP
     const bin = d.u32(d.f32(localX) / d.f32(TAG_HIST_PIXEL_SCALE))
     const base = quadId * d.u32(TAG_DECODE_HIST_BINS)
 
-    let blackPeak = d.u32(0)
-    let blackVal = d.u32(0)
-    for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
-      const bu = d.u32(b)
-      const v = tagHistLayout.$.histogram[base + bu]!
-      if (v > blackVal) {
-        blackVal = v
-        blackPeak = bu
-      }
-    }
-
-    let whitePeak = d.u32(0)
-    let whiteVal = d.u32(0)
-    const minSep = d.u32(TAG_DECODE_MIN_PEAK_BIN_SEP)
-    for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
-      const bu = d.u32(b)
-      if (bu > blackPeak + minSep && bu > d.u32(0) && bu < d.u32(TAG_DECODE_HIST_BINS - 1)) {
-        const v = tagHistLayout.$.histogram[base + bu]!
-        const prev = tagHistLayout.$.histogram[base + bu - d.u32(1)]!
-        const next = tagHistLayout.$.histogram[base + bu + d.u32(1)]!
-        if (v >= prev && v >= next && v > whiteVal) {
-        whiteVal = v
-          whitePeak = bu
-        }
-      }
-    }
-
-    const maxCount = max(blackVal, d.u32(1))
+    const thr = tagHistLayout.$.thresholds[quadId]!
+    const blackPeak = thr.blackPeakBin
+    const whitePeak = thr.whitePeakBin
+    const maxCount = max(thr.histMaxCount, d.u32(1))
     const count = tagHistLayout.$.histogram[base + bin]!
     let barH = d.u32(0)
     if (count > d.u32(0)) {
@@ -941,6 +1006,7 @@ function createTagHistogramRenderPipeline(root: TgpuRoot, presentationFormat: GP
 export function createTagHistogramDisplayStage(
   root: TgpuRoot,
   histBuf: ReturnType<typeof createTagDecodeStage>['histBuf'],
+  thresholdBuf: ReturnType<typeof createTagDecodeStage>['thresholdBuf'],
   presentationFormat: GPUTextureFormat,
 ) {
   const paramsBuffer = root.createBuffer(TagHistParams).$usage('uniform')
@@ -949,6 +1015,7 @@ export function createTagHistogramDisplayStage(
   const bindGroup = root.createBindGroup(tagHistLayout, {
     params: paramsBuffer,
     histogram: histBuf as never,
+    thresholds: thresholdBuf as never,
   })
 
   function encodeDisplay(enc: GPUCommandEncoder, colorAttachment: ColorAttachment) {
@@ -1017,14 +1084,7 @@ export function createTagDecodeStage(
     metaBuf,
     activeQuadCountBuf,
   )
-  const dictStage = createDictMatchStage(
-    root,
-    codewordBuffer,
-    patternBuf,
-    metaBuf,
-    atomicBestBuf,
-    activeQuadCountBuf,
-  )
+  const dictStage = createDictMatchStage(root, codewordBuffer, patternBuf, metaBuf, atomicBestBuf, activeQuadCountBuf)
   const canonicalizeStage = createCanonicalizeStage(
     root,
     deps.quadDataBuffer,
@@ -1040,9 +1100,11 @@ export function createTagDecodeStage(
     activeQuadCountBuf.write([capQuadCount(quadCount)])
   }
 
-  function encodeVotePasses(enc: GPUCommandEncoder, quadCount: number) {
+  function encodeHistAndPeaks(enc: GPUCommandEncoder, quadCount: number) {
     const n = capQuadCount(quadCount)
-    if (n < 1) return
+    if (n < 1) {
+      return
+    }
     writeActiveQuadCount(n)
     const clearPass = enc.beginComputePass({ label: 'tag decode clear' })
     bufferClears.encodeClearHist(clearPass)
@@ -1051,15 +1113,30 @@ export function createTagDecodeStage(
     const peakPass = enc.beginComputePass({ label: 'tag peaks' })
     peakStage.encodePeakThresholds(peakPass, n)
     peakPass.end()
+  }
+
+  function encodeModuleVotePasses(enc: GPUCommandEncoder, quadCount: number) {
+    const n = capQuadCount(quadCount)
+    if (n < 1) {
+      return
+    }
+    writeActiveQuadCount(n)
     const voteClearPass = enc.beginComputePass({ label: 'tag vote clear' })
     bufferClears.encodeClearModuleVotes(voteClearPass)
     voteClearPass.end()
     voteStage.encodeModuleVotes(enc, n)
   }
 
+  function encodeVotePasses(enc: GPUCommandEncoder, quadCount: number) {
+    encodeHistAndPeaks(enc, quadCount)
+    encodeModuleVotePasses(enc, quadCount)
+  }
+
   function encodeDecode(computePass: GPUComputePassEncoder, quadCount: number) {
     const n = capQuadCount(quadCount)
-    if (n < 1) return
+    if (n < 1) {
+      return
+    }
     writeActiveQuadCount(n)
     classifyStage.encodeClassify(computePass, n)
     atomicBestBuf.write(worstScores)
@@ -1074,7 +1151,10 @@ export function createTagDecodeStage(
 
   return {
     histBuf: histStage.histBuf,
+    thresholdBuf,
     patternBuf,
+    encodeHistAndPeaks,
+    encodeModuleVotePasses,
     encodeVotePasses,
     encodeDecode,
     encodeVotes,

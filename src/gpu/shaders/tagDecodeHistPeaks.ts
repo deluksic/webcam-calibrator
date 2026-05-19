@@ -43,15 +43,17 @@ export const findTagDecodeHistPeaks = tgpu.fn(
       if (bu < blackSearchEnd) {
         next = hist[base + bu + d.u32(1)]!
       }
-      let isPeak = false
       if (bu === d.u32(0)) {
-        isPeak = v >= next
+        if (v >= next && v > blackVal) {
+          blackVal = v
+          blackPeak = bu
+        }
       } else if (bu === blackSearchEnd) {
-        isPeak = v >= prev
-      } else {
-        isPeak = v >= prev && v >= next
-      }
-      if (isPeak && v > blackVal) {
+        if (v >= prev && v > blackVal) {
+          blackVal = v
+          blackPeak = bu
+        }
+      } else if (v >= prev && v >= next && v > blackVal) {
         blackVal = v
         blackPeak = bu
       }
@@ -84,13 +86,12 @@ export const findTagDecodeHistPeaks = tgpu.fn(
       if (bu < lastBin) {
         next = hist[base + bu + d.u32(1)]!
       }
-      let isPeak = false
       if (bu === lastBin) {
-        isPeak = v >= prev
-      } else {
-        isPeak = v >= prev && v >= next
-      }
-      if (isPeak && v > whiteVal) {
+        if (v >= prev && v > whiteVal) {
+          whiteVal = v
+          whitePeak = bu
+        }
+      } else if (v >= prev && v >= next && v > whiteVal) {
         whiteVal = v
         whitePeak = bu
       }

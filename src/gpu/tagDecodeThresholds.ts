@@ -1,7 +1,5 @@
 /** Tag decode (luma vote + dictionary) thresholds — shared constants and CPU helpers for tests. */
 
-import { MIN_PEAK_BIN_SEPARATION, ORIENT_HIST_BINS } from '@/gpu/lineFitThresholds'
-
 export const TAG_DECODE_HIST_BINS = 32
 export const TAG_DECODE_PEAK_GAP_FRAC = 0.25
 export const TAG_DECODE_MAX_DICT_ERROR = 3
@@ -9,10 +7,7 @@ export const TAG_DECODE_MAX_DICT_ERROR = 3
 export const TAG_DECODE_MAX_WEAK_WILDCARD = 6
 
 /** Linear bin separation for white peak (scale from orient histogram at 64 bins). */
-export const TAG_DECODE_MIN_PEAK_BIN_SEP = Math.max(
-  4,
-  Math.round((MIN_PEAK_BIN_SEPARATION * TAG_DECODE_HIST_BINS) / ORIENT_HIST_BINS),
-)
+export const TAG_DECODE_MIN_PEAK_BIN_SEP = 4
 
 /** Minimum peak luma span (in bins) to accept thresholds. */
 export const TAG_DECODE_MIN_PEAK_LUMA_BINS = 3
@@ -34,15 +29,12 @@ export function tagDecodeDeadbandBounds(
 }
 
 /** Shortest side of strip-order quad TL, TR, BL, BR (perimeter edges only). */
-export function shortestStripEdgePx(
-  corners: readonly { x: number; y: number }[],
-): number {
+export function shortestStripEdgePx(corners: readonly { x: number; y: number }[]): number {
   const tl = corners[0]!
   const tr = corners[1]!
   const bl = corners[2]!
   const br = corners[3]!
-  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-    Math.hypot(a.x - b.x, a.y - b.y)
+  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y)
   return Math.min(dist(tl, tr), dist(tr, br), dist(br, bl), dist(bl, tl))
 }
 
