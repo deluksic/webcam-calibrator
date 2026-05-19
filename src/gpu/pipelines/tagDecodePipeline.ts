@@ -244,9 +244,14 @@ function createHistAccumStage(
   })
 
   const frag = tgpu.fragmentFn({
-    in: { pos: d.builtin.position, quadId: d.interpolate('flat', d.u32) },
+    in: { pos: d.builtin.position, uv: d.vec2f, quadId: d.interpolate('flat', d.u32) },
     out: d.vec4f,
-  })(({ pos, quadId }) => {
+  })(({ pos, uv, quadId }) => {
+    const mx = d.u32(floor(uv.x * d.f32(TAG_MODULES)))
+    const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
+    if (mx < d.u32(1) || mx > d.u32(6) || my < d.u32(1) || my > d.u32(6)) {
+      return d.vec4f(0, 0, 0, 0)
+    }
     const gray = textureLoad(layout.$.grayTex, d.vec2u(d.u32(pos.x), d.u32(pos.y)), d.i32(0)).x
     const hBin = min(d.u32(floor(gray * d.f32(TAG_DECODE_HIST_BINS))), d.u32(TAG_DECODE_HIST_BINS - 1))
     atomicAdd(layout.$.histogram[quadId * d.u32(TAG_DECODE_HIST_BINS) + hBin]!, d.u32(1))
@@ -317,81 +322,47 @@ function createPeakThresholdStage(
     }
 
     const base = quadId * d.u32(TAG_DECODE_HIST_BINS)
-    const lastBin = d.u32(TAG_DECODE_HIST_BINS - 1)
     const minSep = d.u32(TAG_DECODE_MIN_PEAK_BIN_SEP)
-    const blackSearchEnd = lastBin - minSep
+    const minBinSep = minSep + d.u32(1)
 
-    let blackPeak = d.u32(0)
-    let blackVal = d.u32(0)
+    let peak1Bin = d.u32(0)
+    let peak1Val = d.u32(0)
+    let peak2Bin = d.u32(0)
+    let peak2Val = d.u32(0)
     let histMaxCount = d.u32(0)
 
     for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
       const bu = d.u32(b)
       const v = layout.$.histogram[base + bu]!
       histMaxCount = max(histMaxCount, v)
-
-      if (bu <= blackSearchEnd) {
-        let prev = d.u32(0)
-        let next = d.u32(0)
-        if (bu > d.u32(0)) {
-          prev = layout.$.histogram[base + bu - d.u32(1)]!
-        }
-        if (bu < blackSearchEnd) {
-          next = layout.$.histogram[base + bu + d.u32(1)]!
-        }
-        if (bu === d.u32(0)) {
-          if (v >= next && v > blackVal) {
-            blackVal = v
-            blackPeak = bu
-          }
-        } else if (bu === blackSearchEnd) {
-          if (v >= prev && v > blackVal) {
-            blackVal = v
-            blackPeak = bu
-          }
-        } else if (v >= prev && v >= next && v > blackVal) {
-          blackVal = v
-          blackPeak = bu
-        }
+      if (v > peak1Val) {
+        peak1Val = v
+        peak1Bin = bu
       }
     }
-
-    if (blackVal === d.u32(0)) {
-      for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
-        const bu = d.u32(b)
-        if (bu <= blackSearchEnd) {
-          const v = layout.$.histogram[base + bu]!
-          if (v > blackVal) {
-            blackVal = v
-            blackPeak = bu
-          }
-        }
-      }
-    }
-
-    let whitePeak = d.u32(0)
-    let whiteVal = d.u32(0)
-    const whiteSearchStart = blackPeak + minSep + d.u32(1)
 
     for (const b of tgpu.unroll(std.range(0, TAG_DECODE_HIST_BINS))) {
       const bu = d.u32(b)
-      if (bu >= whiteSearchStart && bu <= lastBin) {
-        const v = layout.$.histogram[base + bu]!
-        const prev = layout.$.histogram[base + bu - d.u32(1)]!
-        let next = d.u32(0)
-        if (bu < lastBin) {
-          next = layout.$.histogram[base + bu + d.u32(1)]!
-        }
-        if (bu === lastBin) {
-          if (v >= prev && v > whiteVal) {
-            whiteVal = v
-            whitePeak = bu
-          }
-        } else if (v >= prev && v >= next && v > whiteVal) {
-          whiteVal = v
-          whitePeak = bu
-        }
+      const v = layout.$.histogram[base + bu]!
+      let dist = bu - peak1Bin
+      if (bu < peak1Bin) {
+        dist = peak1Bin - bu
       }
+      if (dist >= minBinSep && v > peak2Val) {
+        peak2Val = v
+        peak2Bin = bu
+      }
+    }
+
+    let blackPeak = peak1Bin
+    let whitePeak = peak1Bin
+    let blackVal = peak1Val
+    let whiteVal = d.u32(0)
+    if (peak2Val > d.u32(0)) {
+      blackPeak = min(peak1Bin, peak2Bin)
+      whitePeak = max(peak1Bin, peak2Bin)
+      blackVal = layout.$.histogram[base + blackPeak]!
+      whiteVal = layout.$.histogram[base + whitePeak]!
     }
 
     const nBins = d.f32(TAG_DECODE_HIST_BINS)
