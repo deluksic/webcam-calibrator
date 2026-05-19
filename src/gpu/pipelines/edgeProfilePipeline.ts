@@ -162,7 +162,7 @@ function createProfileAccumPipeline(
     const px = d.f32(x) + d.f32(0.5)
     const py = d.f32(y) + d.f32(0.5)
 
-    let bestLabel = d.u32(COMPONENT_LABEL_INVALID)
+    let bestFlatIdx = d.u32(COMPONENT_LABEL_INVALID)
     let bestAbsS = d.f32(1e30)
     let bestNDotMean = d.f32(0)
     let bestTSampleMin = d.f32(0)
@@ -195,11 +195,11 @@ function createProfileAccumPipeline(
                   const s = px * nnx + py * nny - line.nDotMean
                   const absS = std.abs(s)
                   const pick =
-                    bestLabel === d.u32(COMPONENT_LABEL_INVALID) ||
+                    bestFlatIdx === d.u32(COMPONENT_LABEL_INVALID) ||
                     absS < bestAbsS ||
-                    (absS === bestAbsS && packedLabel < bestLabel)
+                    (absS === bestAbsS && flatIdx < bestFlatIdx)
                   if (pick) {
-                    bestLabel = packedLabel
+                    bestFlatIdx = flatIdx
                     bestAbsS = absS
                     bestSumGx = line.sumGx
                     bestSumGy = line.sumGy
@@ -215,7 +215,7 @@ function createProfileAccumPipeline(
       }
     }
 
-    if (bestLabel === d.u32(COMPONENT_LABEL_INVALID)) {
+    if (bestFlatIdx === d.u32(COMPONENT_LABEL_INVALID)) {
       return
     }
 
@@ -236,7 +236,7 @@ function createProfileAccumPipeline(
     b = std.min(std.max(b, d.u32(0)), d.u32(PROFILE_BUCKET_COUNT - 1))
 
     const gray = accumLayout.$.grayBuffer[d.u32(y * fw + x)]!
-    const bucketIdx = bestLabel * d.u32(BUCKETS_PER_LABEL) + b
+    const bucketIdx = bestFlatIdx * d.u32(BUCKETS_PER_LABEL) + b
     const slot = accumLayout.$.profileBuckets[bucketIdx]!
     atomicAdd(slot.sumGrayFixed, d.i32(gray * d.f32(GRAY_FIXED_SCALE)))
     atomicAdd(slot.count, d.u32(1))
