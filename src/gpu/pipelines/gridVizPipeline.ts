@@ -113,17 +113,46 @@ export function createGridVizPipeline(
     },
   })(({ vertexIndex, instanceIndex }) => {
     const quad = gridVizLayout.$.quads[instanceIndex]!
+    const H = quad.homography
     const debug = quad.debug
 
     const uvs = [d.vec2f(0, 0), d.vec2f(1, 0), d.vec2f(0, 1), d.vec2f(1, 1)]
     const uv = uvs[vertexIndex]!
 
-    // Always use the original intersection corners for vertex positions.
-    // Homography can stretch misdetected quads across the whole screen.
+    const e0 = mul(H, d.vec3f(1, 0, 0))
+    const e1 = mul(H, d.vec3f(0, 1, 0))
+    const hDegenerate = length(e0) + length(e1) < d.f32(1e-6)
+
+    // Check whether the homography maps all four canonical corners to positions
+    // within the image. Misdetected quads produce non-physical homographies that
+    // stretch corners across the whole screen.
+    let homographyPhysical = d.u32(0)
+    if (!hDegenerate) {
+      homographyPhysical = d.u32(1)
+      // Check all 4 canonical UV corners: (0,0), (1,0), (0,1), (1,1)
+      for (let i = 0; i < 4; i++) {
+        const ti = d.u32(i)
+        const testUv = uvs[ti]!
+        const tp = mul(H, d.vec3f(testUv, 1))
+        const tx = tp.x / tp.z
+        const ty = tp.y / tp.z
+        if (tp.z <= d.f32(1e-6) || tx < d.f32(-width) || tx > d.f32(2 * width) || ty < d.f32(-height) || ty > d.f32(2 * height)) {
+          homographyPhysical = d.u32(0)
+        }
+      }
+    }
+
+    // Initialize with the direct-corner path (screenCorners, W=1) as default.
     const corner = quad.screenCorners[vertexIndex]!
-    const clipX = (2 * corner.x) / width - 1
-    const clipY = 1 - (2 * corner.y) / height
-    const clipW = d.f32(1)
+    let clipX = (2 * corner.x) / width - 1
+    let clipY = 1 - (2 * corner.y) / height
+    let clipW = d.f32(1)
+    if (homographyPhysical !== d.u32(0)) {
+      const imgPos = mul(H, d.vec3f(uv, 1))
+      clipX = (2 * imgPos.x) / width - imgPos.z
+      clipY = imgPos.z - (2 * imgPos.y) / height
+      clipW = imgPos.z
+    }
 
     return {
       outPos: d.vec4f(clipX, clipY, 0, clipW),
