@@ -15,6 +15,10 @@ export async function initGPU(): Promise<TgpuRoot> {
     throw new Error('WebGPU is not supported.')
   }
 
-  rootPromise = tgpu.init()
+  rootPromise = tgpu.init({
+    device: {
+      optionalFeatures: ['timestamp-query'],
+    },
+  })
   return rootPromise
 }

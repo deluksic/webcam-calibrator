@@ -5,6 +5,7 @@ import { d, tgpu, std, common } from 'typegpu'
 import { floor, max, min, mul, round, sqrt } from 'typegpu/std'
 import { abs, atomicAdd, atomicMin, clamp, countOneBits, textureLoad } from 'typegpu/std'
 
+import { profileComputePass, profileRenderPass } from '@/gpu/gpuProfiling'
 import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import {
   DECODED_TAG_ID_DICT_MISS,
@@ -258,12 +259,14 @@ function createHistAccumStage(
     return d.vec4f(0, 0, 0, 0)
   })
 
-  const pipeline = root.createRenderPipeline({
-    vertex: vert,
-    fragment: frag,
-    targets: { format: 'rgba8unorm' },
-    primitive: { topology: 'triangle-strip' },
-  })
+  const pipeline = root
+    .createRenderPipeline({
+      vertex: vert,
+      fragment: frag,
+      targets: { format: 'rgba8unorm' },
+      primitive: { topology: 'triangle-strip' },
+    })
+    .$name('tag-hist-accum')
 
   const bindGroup = root.createBindGroup(layout, {
     quads: quadDataBuffer,
@@ -278,8 +281,8 @@ function createHistAccumStage(
       if (instanceCount < 1) {
         return
       }
-      const pass = enc.beginRenderPass({
-        label: 'tag hist accum',
+      const pass = profileRenderPass(enc, pipeline, {
+        label: 'tag-hist-accum',
         colorAttachments: [
           { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
         ],
@@ -407,9 +410,10 @@ function createPeakThresholdStage(
     })
   })
 
-  const pipeline = root.createComputePipeline({ compute: kernel })
+  const pipeline = root.createComputePipeline({ compute: kernel }).$name('tag-peaks')
 
   return {
+    pipeline,
     encodePeakThresholds(pass: GPUComputePassEncoder, quadCount: number) {
       const wgs = quadComputeWgs(quadCount)
       if (wgs > 0) {
@@ -488,12 +492,14 @@ function createModuleVoteStage(
     return d.vec4f(0, 0, 0, 0)
   })
 
-  const pipeline = root.createRenderPipeline({
-    vertex: vert,
-    fragment: frag,
-    targets: { format: 'rgba8unorm' },
-    primitive: { topology: 'triangle-strip' },
-  })
+  const pipeline = root
+    .createRenderPipeline({
+      vertex: vert,
+      fragment: frag,
+      targets: { format: 'rgba8unorm' },
+      primitive: { topology: 'triangle-strip' },
+    })
+    .$name('tag-module-votes')
 
   const bindGroup = root.createBindGroup(layout, {
     quads: quadDataBuffer,
@@ -508,8 +514,8 @@ function createModuleVoteStage(
       if (instanceCount < 1) {
         return
       }
-      const pass = enc.beginRenderPass({
-        label: 'tag module votes',
+      const pass = profileRenderPass(enc, pipeline, {
+        label: 'tag-module-votes',
         colorAttachments: [
           { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
         ],
@@ -603,7 +609,7 @@ function createClassifyStage(
     })
   })
 
-  const pipeline = root.createComputePipeline({ compute: kernel })
+  const pipeline = root.createComputePipeline({ compute: kernel }).$name('tag-classify')
 
   return {
     encodeClassify(pass: GPUComputePassEncoder, quadCount: number) {
@@ -772,7 +778,7 @@ function createDictMatchStage(
     }
   })
 
-  const pipeline = root.createComputePipeline({ compute: kernel })
+  const pipeline = root.createComputePipeline({ compute: kernel }).$name('tag-dict')
 
   return {
     encodeDictMatch(pass: GPUComputePassEncoder, quadCount: number) {
@@ -859,7 +865,7 @@ function createCanonicalizeStage(
     layout.$.quadData[quadId]!.decodedRotation = d.u32(0)
   })
 
-  const pipeline = root.createComputePipeline({ compute: kernel })
+  const pipeline = root.createComputePipeline({ compute: kernel }).$name('tag-canonicalize')
 
   return {
     encodeCanonicalize(pass: GPUComputePassEncoder, quadCount: number) {
@@ -1072,11 +1078,11 @@ export function createTagDecodeStage(
     if (n < 1) {
       return
     }
-    const clearPass = enc.beginComputePass({ label: 'tag decode clear' })
+    const clearPass = profileComputePass(enc, 'tag-decode-clear', { label: 'tag-decode-clear' })
     bufferClears.encodeClearHist(clearPass)
     clearPass.end()
     histStage.encodeHistAccum(enc, n)
-    const peakPass = enc.beginComputePass({ label: 'tag peaks' })
+    const peakPass = profileComputePass(enc, peakStage.pipeline, { label: 'tag-peaks' })
     peakStage.encodePeakThresholds(peakPass, n)
     peakPass.end()
   }
@@ -1086,7 +1092,7 @@ export function createTagDecodeStage(
     if (n < 1) {
       return
     }
-    const voteClearPass = enc.beginComputePass({ label: 'tag vote clear' })
+    const voteClearPass = profileComputePass(enc, 'tag-vote-clear', { label: 'tag-vote-clear' })
     bufferClears.encodeClearModuleVotes(voteClearPass)
     voteClearPass.end()
     voteStage.encodeModuleVotes(enc, n)

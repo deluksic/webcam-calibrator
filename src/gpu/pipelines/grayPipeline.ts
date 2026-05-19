@@ -53,7 +53,7 @@ export function createGrayPipeline(
     grayTexToBufferLayout.$.grayBuffer[idx] = gray
   })
 
-  const pipeline = root.createComputePipeline({ compute: grayKernel })
+  const pipeline = root.createComputePipeline({ compute: grayKernel }).$name('gray')
   const bindGroup = root.createBindGroup(grayTexToBufferLayout, resources)
   return { pipeline, bindGroup }
 }

@@ -26,7 +26,7 @@ import type { PointerJumpConvergedLabels } from '@/gpu/pipelines/pointerJumpPipe
 const WORKGROUP_SIZE = 16
 
 /** Max compact label ids (0..N-1); caps label-cluster / line-fit table sizes downstream. */
-export const MAX_EXTENT_COMPONENTS = 2 << 12
+export const MAX_EXTENT_COMPONENTS = 2 << 10
 
 /** Allocates remap buffers; reads converged `pointerJumpBuffer0` (upstream). */
 export function createCompactLabelStage(

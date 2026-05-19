@@ -4,14 +4,19 @@ import { tgpu, d } from 'typegpu'
 import { atomicAdd, atomicLoad, atomicStore, length, log2 } from 'typegpu/std'
 
 /** Bin count for magnitude histogram and bar-chart vertex instances. */
-export const HISTOGRAM_BINS = 256
+export const HISTOGRAM_BINS = 128
 
 /** Histogram chart dimensions in pixels (bar display shader). */
-export const HIST_WIDTH = 512
+export const HIST_WIDTH = 256
 export const HIST_HEIGHT = 120
 
 /** Full-frame compute tile; keep in sync with other camera passes using [16,16,1] and `computeDispatch2d` in cameraFrame. */
 const FULL_FRAME_WG = 16
+
+/** Sobel-magnitude histogram: sample every Nth pixel (N=2 → 1/4 Sobel reads). Percentile threshold is unchanged. */
+export const NMS_THRESH_HIST_PIXEL_STRIDE = 2
+/** Rebuild magnitude histogram every N frames; NMS uses the last threshold between updates. */
+export const NMS_THRESH_HIST_FRAME_INTERVAL = 2
 
 export const histogramStorageSchema = d.arrayOf(d.atomic(d.u32), HISTOGRAM_BINS)
 
@@ -52,6 +57,7 @@ export function createHistogramResetPipeline(root: TgpuRoot) {
 }
 
 export function createHistogramAccumulatePipeline(root: TgpuRoot, width: number, height: number) {
+  const pixelStride = d.u32(NMS_THRESH_HIST_PIXEL_STRIDE)
   const histogramKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
@@ -65,8 +71,8 @@ export function createHistogramAccumulatePipeline(root: TgpuRoot, width: number,
     const startX = input.gid.x * tileWidth
     const startY = input.gid.y * tileHeight
 
-    for (let dy = zero; dy < tileHeight; dy = dy + d.u32(1)) {
-      for (let dx = zero; dx < tileWidth; dx = dx + d.u32(1)) {
+    for (let dy = zero; dy < tileHeight; dy = dy + pixelStride) {
+      for (let dx = zero; dx < tileWidth; dx = dx + pixelStride) {
         const px = startX + dx
         const py = startY + dy
 
@@ -200,12 +206,34 @@ export function createHistogramStage(
     histogram: buffer,
     thresholdBin: thresholdBinBuffer,
   })
-  const displayPipeline = createHistogramRenderPipeline(root, presentationFormat, width * height)
+  const histSampleCount =
+    Math.ceil(width / NMS_THRESH_HIST_PIXEL_STRIDE) * Math.ceil(height / NMS_THRESH_HIST_PIXEL_STRIDE)
+  const displayPipeline = createHistogramRenderPipeline(root, presentationFormat, histSampleCount)
   const wgX = Math.ceil(width / FULL_FRAME_WG)
   const wgY = Math.ceil(height / FULL_FRAME_WG)
+  let frameSerial = 0
+  let thresholdReadbackDue = false
+  /** Advance frame counter; return false to skip GPU work and profiler samples this frame. */
+  const tickAccumFrame = () => {
+    frameSerial++
+    if (frameSerial % NMS_THRESH_HIST_FRAME_INTERVAL !== 0) {
+      thresholdReadbackDue = false
+      return false
+    }
+    thresholdReadbackDue = true
+    return true
+  }
   const encodeAccumulateCompute = (pass: GPUComputePassEncoder) => {
-    resetPipeline.with(pass).with(resetBindGroup).dispatchWorkgroups(Math.ceil(HISTOGRAM_BINS / HISTOGRAM_RESET_WG))
+    resetPipeline
+      .with(pass)
+      .with(resetBindGroup)
+      .dispatchWorkgroups(Math.ceil(HISTOGRAM_BINS / HISTOGRAM_RESET_WG))
     computePipeline.with(pass).with(computeBindGroup).dispatchWorkgroups(wgX, wgY)
+  }
+  const consumeThresholdReadbackDue = () => {
+    const due = thresholdReadbackDue
+    thresholdReadbackDue = false
+    return due
   }
   const encodeDisplay = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment) => {
     displayPipeline.with(enc).withColorAttachment(colorAttachment).with(displayBindGroup).draw(6, HISTOGRAM_BINS)
@@ -213,7 +241,9 @@ export function createHistogramStage(
   return {
     buffer,
     thresholdBinBuffer,
+    tickAccumFrame,
     encodeAccumulateCompute,
+    consumeThresholdReadbackDue,
     encodeDisplay,
   }
 }

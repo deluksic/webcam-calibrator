@@ -2,6 +2,8 @@ import { d, tgpu } from 'typegpu'
 import { abs, max, select, sqrt } from 'typegpu/std'
 
 export const PCA_ISOTROPY_MAX = 0.15
+/** sxx / syy below this → treat as vertical edge in image (constant x). */
+export const PCA_AXIS_VAR_FRAC = 1e-4
 
 export const LineSegmentEndpoints = d.struct({
   p0: d.vec2f,
@@ -68,6 +70,27 @@ export const tlsNormalFromMoments = tgpu.fn(
   const sxx = sumXX * invN - cx * cx
   const syy = sumYY * invN - cy * cy
   const sxy = sumXY * invN - cx * cy
+
+  // Colinear sets (e.g. every pixel has the same x): lamMin ≈ 0 and the generic
+  // eigenvector solve can return an along-edge normal, which fails the inlier gate.
+  if (syy > d.f32(1e-10) && sxx <= syy * d.f32(PCA_AXIS_VAR_FRAC)) {
+    return TlsNormalResult({
+      nx: d.f32(1),
+      ny: d.f32(0),
+      lamMin: sxx,
+      lamMax: syy,
+      ok: d.u32(1),
+    })
+  }
+  if (sxx > d.f32(1e-10) && syy <= sxx * d.f32(PCA_AXIS_VAR_FRAC)) {
+    return TlsNormalResult({
+      nx: d.f32(0),
+      ny: d.f32(1),
+      lamMin: syy,
+      lamMax: sxx,
+      ok: d.u32(1),
+    })
+  }
 
   const tr = sxx + syy
   const det = sxx * syy - sxy * sxy

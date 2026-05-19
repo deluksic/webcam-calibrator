@@ -10,6 +10,7 @@ import {
   encodeOrientHistPresent,
   encodeTagHistPresent,
 } from '@/gpu/gradientProfilePresentEncoding'
+import { noteGpuProfileFrame } from '@/gpu/gpuProfiling'
 import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
 import { ORIENT_HIST_CANVAS_HEIGHT, ORIENT_HIST_CANVAS_WIDTH } from '@/gpu/pipelines/orientHistVizPipeline'
@@ -186,6 +187,7 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
           encodeGradientProfilePlotPresent(enc, pip, profCanvas.width, profCanvas.height)
         }
         gNow.device.queue.submit([enc.finish()])
+        noteGpuProfileFrame(gNow)
 
         if (props.frozen) {
           return
@@ -198,12 +200,14 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
           }
         })
 
-        void pip.histogram.buffer.read().then((bins) => {
-          if (disposed) {
-            return
-          }
-          setThreshold(computeThreshold([...bins], THRESHOLD_PERCENTILE))
-        })
+        if (pip.histogram.consumeThresholdReadbackDue()) {
+          void pip.histogram.buffer.read().then((bins) => {
+            if (disposed) {
+              return
+            }
+            setThreshold(computeThreshold([...bins], THRESHOLD_PERCENTILE))
+          })
+        }
       },
     })
 

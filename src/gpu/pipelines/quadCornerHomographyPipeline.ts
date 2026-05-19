@@ -141,7 +141,7 @@ function createQuadCornerHomographyPipeline(
     })
   })
 
-  return root.createComputePipeline({ compute: kernel })
+  return root.createComputePipeline({ compute: kernel }).$name('quad-homography')
 }
 
 export function createQuadCornerHomographyStage(

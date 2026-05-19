@@ -1,5 +1,6 @@
 import type { TgpuRoot } from 'typegpu'
 
+import { prepareGpuProfiling, runComputeStage } from '@/gpu/gpuProfiling'
 import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 
@@ -20,32 +21,33 @@ export function encodeCameraCompute(
   threshold: number,
   slot?: FrameSlot,
 ): void {
+  prepareGpuProfiling(root)
+
   pipeline.ingest.encodeIngest(enc, root, video)
 
   pipeline.nms.thresholdBuffer.write(threshold)
   pipeline.histogram.thresholdBinBuffer.write(Math.round(threshold * 255))
 
-  const computePass = enc.beginComputePass({ label: 'gray + sobel + histogram + filter' })
-  pipeline.gray.encodeCompute(computePass)
-  pipeline.sobel.encodeCompute(computePass)
-  pipeline.histogram.encodeAccumulateCompute(computePass)
-  pipeline.nms.encodeCompute(computePass)
-  pipeline.pointerJump.encodeCompute(computePass)
-  pipeline.compact.encodeCompute(computePass)
-  pipeline.boundaryFilter.encodeCompute(computePass)
-  if (slot !== undefined) {
-    pipeline.edgeHistogram.encodeCompute(computePass)
-    pipeline.lineFit.encodeCompute(computePass)
-    pipeline.quadHomography.encodeCompute(computePass)
+  runComputeStage(enc, 'gray', (p) => pipeline.gray.encodeCompute(p))
+  runComputeStage(enc, 'sobel', (p) => pipeline.sobel.encodeCompute(p))
+  if (pipeline.histogram.tickAccumFrame()) {
+    runComputeStage(enc, 'histogram', (p) => pipeline.histogram.encodeAccumulateCompute(p))
   }
-  computePass.end()
+  runComputeStage(enc, 'nms', (p) => pipeline.nms.encodeCompute(p))
+  runComputeStage(enc, 'pointer-jump', (p) => pipeline.pointerJump.encodeCompute(p))
+  runComputeStage(enc, 'compact', (p) => pipeline.compact.encodeCompute(p))
+  runComputeStage(enc, 'boundary-filter', (p) => pipeline.boundaryFilter.encodeCompute(p))
 
   if (slot !== undefined) {
+    runComputeStage(enc, 'edge-histogram', (p) => pipeline.edgeHistogram.encodeCompute(p))
+    runComputeStage(enc, 'line-fit', (p) => pipeline.lineFit.encodeCompute(p))
+    runComputeStage(enc, 'quad-homography', (p) => pipeline.quadHomography.encodeCompute(p))
+
     pipeline.publishQuadCount.encodePublish(enc)
     pipeline.tagDecode.encodeVotePasses(enc, MAX_QUADS)
-    const decodePass = enc.beginComputePass({ label: 'camera tag decode' })
-    pipeline.tagDecode.encodeDecode(decodePass, MAX_QUADS)
-    pipeline.hostQuadReadback.encodePack(decodePass, MAX_QUADS)
-    decodePass.end()
+    runComputeStage(enc, 'tag-decode', (p) => {
+      pipeline.tagDecode.encodeDecode(p, MAX_QUADS)
+      pipeline.hostQuadReadback.encodePack(p, MAX_QUADS)
+    })
   }
 }

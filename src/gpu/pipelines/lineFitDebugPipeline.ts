@@ -52,12 +52,12 @@ export type LineFitDebugCodeValue = (typeof LineFitDebugCode)[keyof typeof LineF
 
 export const LINE_REJECT_LEGEND: ReadonlyArray<{ code: LineFitDebugCodeValue; label: string; color: string }> = [
   { code: LineFitDebugCode.ok, label: 'Valid line', color: '#38383d' },
-  { code: LineFitDebugCode.assign, label: 'Peak assign', color: '#ff3864' },
+  { code: LineFitDebugCode.assign, label: 'Peak assign', color: '#ff2bd6' },
   { code: LineFitDebugCode.histGate, label: 'Hist gate', color: '#ff6b35' },
   { code: LineFitDebugCode.lowSample, label: 'Slot < min px', color: '#f7b801' },
   { code: LineFitDebugCode.noPeaks, label: 'No peaks', color: '#4361ee' },
   { code: LineFitDebugCode.outlier, label: 'Inlier dist', color: '#ffee00' },
-  { code: LineFitDebugCode.lineInvalidRatio, label: 'Inlier ratio', color: '#e63946' },
+  { code: LineFitDebugCode.lineInvalidRatio, label: 'Inlier ratio', color: '#c1121f' },
   { code: LineFitDebugCode.lineInvalidSpan, label: 'Span short', color: '#70e000' },
   { code: LineFitDebugCode.tlsIsotropy, label: 'TLS spread', color: '#c77dff' },
   { code: LineFitDebugCode.tlsPeak, label: 'TLS vs peak', color: '#00bbf9' },
@@ -267,7 +267,7 @@ function createDebugRenderPipeline(
       return d.vec4f(0.22, 0.22, 0.24, 1)
     }
     if (code === d.u32(LineFitDebugCode.assign)) {
-      return d.vec4f(1, 0.22, 0.39, 0.92)
+      return d.vec4f(1, 0.17, 0.84, 0.95)
     }
     if (code === d.u32(LineFitDebugCode.histGate)) {
       return d.vec4f(1, 0.42, 0.21, 0.92)
@@ -282,7 +282,7 @@ function createDebugRenderPipeline(
       return d.vec4f(1, 0.93, 0, 0.92)
     }
     if (code === d.u32(LineFitDebugCode.lineInvalidRatio)) {
-      return d.vec4f(0.9, 0.22, 0.27, 0.95)
+      return d.vec4f(0.76, 0.07, 0.12, 0.95)
     }
     if (code === d.u32(LineFitDebugCode.lineInvalidSpan)) {
       return d.vec4f(0.44, 0.88, 0, 0.95)

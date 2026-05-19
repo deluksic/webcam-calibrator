@@ -30,18 +30,19 @@ In-browser AprilTag 6×6 target capture; no server. All capture, GPU vision stag
 2. NMS and edge filter
 3. Pointer-jump CCL → compact remap to 0…N−1 (`MAX_EXTENT_COMPONENTS` = 4096)
 
-**GPU quad + tag chain** (Calibrate **grid** and Debug — see [`ARCHITECTURE.md`](../ARCHITECTURE.md)):
+**GPU quad + tag chain** (Calibrate **grid** and Debug — see [`architecture.md`](architecture.md)):
 
 4. Oriented edge histogram per label → TLS line fit → quad registration (`MAX_QUADS` = 512)
 5. Quad corner homography (line intersections + DLT → `quadCornersBuffer`)
-6. Tag36h11 decode on GPU (32-bin hist, deadband votes, dictionary, canonicalize corners)
-7. Host pack / readback → [`DetectedQuad`](../src/gpu/detectedQuad.ts)
+6. Publish quad count on GPU (`activeQuadCount` + grid `drawIndirect`) — [`gridVizPipeline.ts`](../src/gpu/pipelines/gridVizPipeline.ts)
+7. Tag36h11 decode on GPU (32-bin hist, deadband votes, dictionary, canonicalize corners)
+8. Host pack / readback → [`DetectedQuad`](../src/gpu/detectedQuad.ts) (**Calibrate** only; grid overlay does not wait on this)
 
 **Calibrate** — each rAF with a free [frame slot](../src/gpu/frameSlotPool.ts) (default 3) runs the full chain and presents live gray + GPU grid overlay. [`readGpuDetection`](../src/gpu/gpuQuadReadback.ts) reads active quads for HTML overlay and calibration. **Debug** runs the same tag chain every frame and adds profiles, histogram side canvases, and display-mode overlays.
 
 Corner order everywhere: **TL, TR, BL, BR** (triangle-strip / `Corners` in [`geometry.ts`](../src/lib/geometry.ts)).
 
-**Grid draw** — [`gridVizPipeline`](../src/gpu/pipelines/gridVizPipeline.ts) warps a unit square with **`GRID_DIVISIONS`** (8) using the GPU homography; `decodedTagId` drives tint via `stableHashToRgb01` when known, amber on dictionary miss, failure colors from `debug.failureCode`.
+**Grid draw** — [`gridVizPipeline`](../src/gpu/pipelines/gridVizPipeline.ts) uses **`drawIndirect`** (instance count from the publish pass, same frame as homography/decode). Warps a unit square with **`GRID_DIVISIONS`** (8) using the GPU homography; `decodedTagId` drives tint via `stableHashToRgb01` when known, amber on dictionary miss, failure colors from `debug.failureCode`.
 
 ---
 
@@ -66,5 +67,3 @@ Corner order everywhere: **TL, TR, BL, BR** (triangle-strip / `Corners` in [`geo
 **Camera / solver model (in use):** pinhole `K` and OpenCV **rational** distortion (`k1`…`k6` as `RationalDistortion8`); types in [`cameraModel.ts`](../src/lib/cameraModel.ts). The WASM worker returns these in `CalibrationOk`.
 
 **Capture-quality heuristics (informal):** on the order of many visible tags, stable focus, and several diverse views improve robustness; the app enforces a minimum view count before reporting `ok` (see **Calibrate** solve path).
-
-Grid overlay design notes: [`PLAN.md`](../PLAN.md) (homography, buffer layout, corner order **TL, TR, BL, BR** in [`geometry.ts`](../src/lib/geometry.ts)).

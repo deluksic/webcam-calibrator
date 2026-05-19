@@ -5,24 +5,25 @@ import { CalibrateFocusOverlay } from '@/components/calibration/CalibrateFocusOv
 import { TagIdGridOverlay } from '@/components/camera/LiveCameraPipelineOverlays'
 import { encodeCameraCompute } from '@/gpu/cameraComputeEncoding'
 import { detectForSlot } from '@/gpu/cameraDetection'
-import type { DetectedQuad } from '@/gpu/detectedQuad'
 import { updateReprojectionOverlayBuffer } from '@/gpu/cameraFrame'
 import { createCameraPipeline } from '@/gpu/cameraPipeline'
 import type { DisplayMode } from '@/gpu/cameraPipeline'
 import { encodeGridPresent, encodePresentNonGrid } from '@/gpu/cameraPresentEncoding'
+import type { DetectedQuad } from '@/gpu/detectedQuad'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
+import { noteGpuProfileFrame } from '@/gpu/gpuProfiling'
 import { initGPU } from '@/gpu/init'
 import { MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
 import { writeUndistortUniform } from '@/gpu/pipelines/undistortPipeline'
+import { acceptQuadForTagUse } from '@/lib/acceptQuadForTagUse'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import type { CustomTagOverlaySession } from '@/lib/customTagOverlaySession'
 import { buildReprojectionOverlayPairs, cameraDistanceFromT, cameraTiltDegFromR } from '@/lib/reprojectionLive'
-import { acceptQuadForTagUse } from '@/lib/acceptQuadForTagUse'
 import type { TargetLayout } from '@/lib/targetLayout'
-import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 import { createElementSize } from '@/utils/createElementSize'
 import { createFrameLoop } from '@/utils/createFrameLoop'
+import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 
 import styles from '@/components/camera/LiveCameraPipeline.module.css'
 
@@ -192,13 +193,11 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     log(`Pipeline created ${width}x${height}`)
 
     let lastAppliedDetectionFrameId = -1
-    let gridPipelineBusy = false
 
     const scheduleQuadDetection = (slot: FrameSlot, sf: boolean) => {
       const gNow = gpu()
       if (!gNow) {
         pip.frameSlotPool.releaseSlot(slot)
-        gridPipelineBusy = false
         return
       }
 
@@ -215,7 +214,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           const pi = pipelineInteraction()
           const liveCalib = pi.liveCalibration
 
-          const { quads, quadCount } = result
+          const { quads } = result
           quads.sort((a, b) => b.count - a.count)
           const top = quads.slice(0, MAX_DETECTED_TAGS)
           const tagged = top.map((q) => {
@@ -274,7 +273,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         })
         .finally(() => {
           pip.frameSlotPool.releaseSlot(slot)
-          gridPipelineBusy = false
         })
     }
 
@@ -295,14 +293,12 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         const enc = gpuNow.device.createCommandEncoder({ label: 'camera frame' })
 
         if (dm === 'grid') {
-          if (!gridPipelineBusy) {
-            const slot = pip.frameSlotPool.acquireFreeSlot()
-            if (slot !== undefined) {
-              gridPipelineBusy = true
-              encodeCameraCompute(enc, gpuNow, pip, video, threshold(), slot)
-              gpuNow.device.queue.submit([enc.finish()])
-              scheduleQuadDetection(slot, pi.showFallbacks)
-            }
+          const slot = pip.frameSlotPool.acquireFreeSlot()
+          if (slot !== undefined) {
+            encodeCameraCompute(enc, gpuNow, pip, video, threshold(), slot)
+            gpuNow.device.queue.submit([enc.finish()])
+            noteGpuProfileFrame(gpuNow)
+            scheduleQuadDetection(slot, pi.showFallbacks)
           }
         } else {
           // Non-grid modes: compute + present synchronously as before.
@@ -319,16 +315,19 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           encodeCameraCompute(enc, gpuNow, pip, video, threshold())
           encodePresentNonGrid(enc, gpuNow, pip, dm, timeSec, (_err) => {})
           gpuNow.device.queue.submit([enc.finish()])
+          noteGpuProfileFrame(gpuNow)
         }
 
-        // TODO: read using Uint32Array directly
-        void pip.histogram.buffer.read().then((bins) => {
-          if (disposed) {
-            return
-          }
-          const data = new Uint32Array(bins)
-          setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE))
-        })
+        if (pip.histogram.consumeThresholdReadbackDue()) {
+          // TODO: read using Uint32Array directly
+          void pip.histogram.buffer.read().then((bins) => {
+            if (disposed) {
+              return
+            }
+            const data = new Uint32Array(bins)
+            setThreshold(computeThreshold([...data], THRESHOLD_PERCENTILE))
+          })
+        }
       },
     })
     log('rVFC loop started')

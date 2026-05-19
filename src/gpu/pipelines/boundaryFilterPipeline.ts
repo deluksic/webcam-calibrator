@@ -15,7 +15,7 @@ import { atomicStore, atomicMin, atomicMax } from 'typegpu/std'
 import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
 
-export const BOUNDARY_MARGIN_PX = 2
+export const BOUNDARY_MARGIN_PX = 1
 const WORKGROUP_SIZE = 16
 const WORKGROUP_SIZE_RESET = 256
 
@@ -75,7 +75,7 @@ function createRowBoundsResetPipeline(
       return
     }
     const b = resetRowLayout.$.rowBounds[slot]!
-    atomicStore(b.minCol, d.u32(0xFFFF_FFFF))
+    atomicStore(b.minCol, d.u32(0xffff_ffff))
     atomicStore(b.maxCol, d.u32(0))
   })
   return root.createComputePipeline({ compute: kernel })
@@ -97,7 +97,7 @@ function createColBoundsResetPipeline(
       return
     }
     const b = resetColLayout.$.colBounds[slot]!
-    atomicStore(b.minRow, d.u32(0xFFFF_FFFF))
+    atomicStore(b.minRow, d.u32(0xffff_ffff))
     atomicStore(b.maxRow, d.u32(0))
   })
   return root.createComputePipeline({ compute: kernel })

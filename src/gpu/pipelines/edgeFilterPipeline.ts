@@ -105,7 +105,7 @@ export function createEdgeFilterPipeline(
     edgeFilterLayout.$.filteredBuffer[idx] = select(g, d.vec2f(d.f32(0), d.f32(0)), suppressed)
   })
 
-  const pipeline = root.createComputePipeline({ compute: kernel })
+  const pipeline = root.createComputePipeline({ compute: kernel }).$name('nms')
   const bindGroup = root.createBindGroup(edgeFilterLayout, resources)
   return { pipeline, bindGroup }
 }

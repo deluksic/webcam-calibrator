@@ -16,4 +16,4 @@ Build hash is inferred from the entry module script URL (e.g. `index-<hash>.js`)
 
 ---
 
-Project docs: [`README.md`](../README.md), [`ARCHITECTURE.md`](../ARCHITECTURE.md), [`docs/plan.md`](../docs/plan.md).
+Project docs: [`README.md`](../README.md), [`docs/architecture.md`](../docs/architecture.md), [`docs/plan.md`](../docs/plan.md).

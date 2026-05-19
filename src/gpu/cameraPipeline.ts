@@ -137,8 +137,7 @@ export function createCameraPipeline(
     drawState: reproj.reprojOverlayDrawState,
   })
 
-  /** One in-flight grid frame so GPU quads and CPU overlay read stay on the same frame. */
-  const frameSlotPool: FrameSlotPool = createFrameSlotPool({ slotCount: 1 })
+  const frameSlotPool: FrameSlotPool = createFrameSlotPool({ slotCount: 2 })
 
   const edges = createEdgesPipeline(root, width, height, presentationFormat, {
     sobelBuffer: sobel.buffer,

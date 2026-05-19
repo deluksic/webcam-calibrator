@@ -3,6 +3,7 @@ import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { abs, atomicLoad, floor, fract, length, min, max, dpdx, dpdy, mul } from 'typegpu/std'
 
+import { profileComputePass } from '@/gpu/gpuProfiling'
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { MAX_QUADS, type QuadCountBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { PREMULTIPLIED_ALPHA_BLEND } from '@/gpu/pipelines/shared'
@@ -82,7 +83,7 @@ export function createQuadCountPublishStage(
     publishLayout.$.activeQuadCount[d.u32(0)] = n
     publishLayout.$.drawIndirect.instanceCount = n
   })
-  const publishPipeline = root.createComputePipeline({ compute: publishKernel })
+  const publishPipeline = root.createComputePipeline({ compute: publishKernel }).$name('publish-quad-count')
   const publishBindGroup = root.createBindGroup(publishLayout, {
     edgeQuadCount: edgeQuadCount as never,
     activeQuadCount: activeQuadCountBuf as never,
@@ -90,7 +91,7 @@ export function createQuadCountPublishStage(
   })
   return {
     encodePublish(enc: GPUCommandEncoder) {
-      const pass = enc.beginComputePass({ label: 'publish quad count' })
+      const pass = profileComputePass(enc, publishPipeline, { label: 'publish-quad-count' })
       publishPipeline.with(pass).with(publishBindGroup).dispatchWorkgroups(1)
       pass.end()
     },

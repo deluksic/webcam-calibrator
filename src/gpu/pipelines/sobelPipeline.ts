@@ -72,7 +72,7 @@ export function createSobelPipeline(root: TgpuRoot, width: number, height: numbe
     sobelLayout.$.sobelBuffer[d.u32(y * w + x)] = d.vec2f(gx, gy)
   })
 
-  const pipeline = root.createComputePipeline({ compute: sobelKernel })
+  const pipeline = root.createComputePipeline({ compute: sobelKernel }).$name('sobel')
   const bindGroup = root.createBindGroup(sobelLayout, resources)
   return { pipeline, bindGroup }
 }

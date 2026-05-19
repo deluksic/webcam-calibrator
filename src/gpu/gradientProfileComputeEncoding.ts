@@ -1,5 +1,6 @@
 import type { TgpuRoot } from 'typegpu'
 
+import { prepareGpuProfiling, runComputeStage } from '@/gpu/gpuProfiling'
 import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 
 import type { GradientProfileDisplayMode, GradientProfilePipeline } from './gradientProfilePipeline'
@@ -22,6 +23,8 @@ export function encodeGradientProfileCompute(
   threshold: number,
   options: GradientProfileComputeOptions = {},
 ): void {
+  prepareGpuProfiling(root)
+
   if (!options.skipIngest) {
     pipeline.ingest.encodeIngest(enc, root, video)
   }
@@ -29,27 +32,26 @@ export function encodeGradientProfileCompute(
   pipeline.nms.thresholdBuffer.write(threshold)
   pipeline.histogram.thresholdBinBuffer.write(Math.round(threshold * 255))
 
-  const computePass = enc.beginComputePass({ label: 'gradient profiles compute' })
-  pipeline.gray.encodeCompute(computePass)
-  pipeline.sobel.encodeCompute(computePass)
-  pipeline.histogram.encodeAccumulateCompute(computePass)
-  pipeline.nms.encodeCompute(computePass)
-  pipeline.pointerJump.encodeCompute(computePass)
-  pipeline.compact.encodeCompute(computePass)
-  pipeline.boundaryFilter.encodeCompute(computePass)
-  pipeline.edgeHistogram.encodeCompute(computePass)
-  pipeline.lineRejects.encodeCompute(computePass)
-  pipeline.orientHistViz?.encodePackCompute(computePass)
-  pipeline.lineFit.encodeCompute(computePass)
-  pipeline.quadHomography.encodeCompute(computePass)
-  // Profile plot canvas is always presented; compute is not tied to camera display mode.
-  pipeline.profile.encodeCompute(computePass)
-  computePass.end()
+  runComputeStage(enc, 'gray', (p) => pipeline.gray.encodeCompute(p))
+  runComputeStage(enc, 'sobel', (p) => pipeline.sobel.encodeCompute(p))
+  if (pipeline.histogram.tickAccumFrame()) {
+    runComputeStage(enc, 'histogram', (p) => pipeline.histogram.encodeAccumulateCompute(p))
+  }
+  runComputeStage(enc, 'nms', (p) => pipeline.nms.encodeCompute(p))
+  runComputeStage(enc, 'pointer-jump', (p) => pipeline.pointerJump.encodeCompute(p))
+  runComputeStage(enc, 'compact', (p) => pipeline.compact.encodeCompute(p))
+  runComputeStage(enc, 'boundary-filter', (p) => pipeline.boundaryFilter.encodeCompute(p))
+  runComputeStage(enc, 'edge-histogram', (p) => pipeline.edgeHistogram.encodeCompute(p))
+  runComputeStage(enc, 'line-rejects', (p) => pipeline.lineRejects.encodeCompute(p))
+  if (pipeline.orientHistViz) {
+    runComputeStage(enc, 'orient-hist-pack', (p) => pipeline.orientHistViz!.encodePackCompute(p))
+  }
+  runComputeStage(enc, 'line-fit', (p) => pipeline.lineFit.encodeCompute(p))
+  runComputeStage(enc, 'quad-homography', (p) => pipeline.quadHomography.encodeCompute(p))
+  runComputeStage(enc, 'profile', (p) => pipeline.profile.encodeCompute(p))
 
   pipeline.publishQuadCount.encodePublish(enc)
   pipeline.tagDecode.encodeVotePasses(enc, MAX_QUADS)
 
-  const decodePass = enc.beginComputePass({ label: 'tag decode' })
-  pipeline.tagDecode.encodeDecode(decodePass, MAX_QUADS)
-  decodePass.end()
+  runComputeStage(enc, 'tag-decode', (p) => pipeline.tagDecode.encodeDecode(p, MAX_QUADS))
 }
