@@ -94,7 +94,9 @@ export function createGridVizPipeline(
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
+  options?: { sampleCount?: number },
 ) {
+  const sampleCount = options?.sampleCount
   const gridVizVert = tgpu.vertexFn({
     in: {
       vertexIndex: d.builtin.vertexIndex,
@@ -224,6 +226,7 @@ export function createGridVizPipeline(
       blend: PREMULTIPLIED_ALPHA_BLEND,
     },
     primitive: { topology: 'triangle-strip' },
+    ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
   })
 }
 
@@ -233,14 +236,15 @@ export function createGridVizStage(
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
+  options?: { sampleCount?: number; quadCornersBuffer?: ReturnType<typeof root.createBuffer> },
 ) {
-  const quadCornersBuffer = root.createBuffer(GridDataSchema).$usage('storage')
+  const quadCornersBuffer = options?.quadCornersBuffer ?? root.createBuffer(GridDataSchema).$usage('storage')
   const { gridVizLayout } = createGridVizLayouts()
   const gridVizDebugModeBuffer = root.createBuffer(d.u32).$usage('uniform')
   gridVizDebugModeBuffer.write(0)
   const gridVizHideNonDecodedBuffer = root.createBuffer(d.u32).$usage('uniform')
   gridVizHideNonDecodedBuffer.write(0)
-  const gridVizPipeline = createGridVizPipeline(root, gridVizLayout, width, height, presentationFormat)
+  const gridVizPipeline = createGridVizPipeline(root, gridVizLayout, width, height, presentationFormat, options)
   const encodeToCanvas = (
     enc: GPUCommandEncoder,
     colorAttachment: ColorAttachment,

@@ -29,7 +29,9 @@ export function createGrayRenderPipeline(
   height: number,
   presentationFormat: GPUTextureFormat,
   resources: GrayRenderBindResources,
+  options?: { sampleCount?: number },
 ) {
+  const sampleCount = options?.sampleCount
   const grayFrag = tgpu.fragmentFn({
     in: { pos: d.builtin.position },
     out: d.vec4f,
@@ -54,6 +56,7 @@ export function createGrayRenderPipeline(
     vertex: common.fullScreenTriangle,
     fragment: grayFrag,
     targets: { format: presentationFormat },
+    ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
   })
   const bindGroup = root.createBindGroup(grayRenderLayout, resources)
   const encodeToCanvas = (

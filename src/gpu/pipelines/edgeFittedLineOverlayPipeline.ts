@@ -32,7 +32,9 @@ export function createEdgeFittedLineOverlayStage(
   labelToQuadId: LabelToQuadIdBuffer,
   quadPeakEdge: QuadPeakEdgeBuffer,
   lineInstanceCount: number,
+  options?: { sampleCount?: number },
 ) {
+  const sampleCount = options?.sampleCount
   const vert = tgpu
     .vertexFn({
       in: {
@@ -78,6 +80,7 @@ export function createEdgeFittedLineOverlayStage(
     fragment: frag,
     targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'line-list' },
+    ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
   })
 
   const bindGroup = root.createBindGroup(fittedLineLayout, { lineOut, labelToQuadId, quadPeakEdge })

@@ -17,29 +17,60 @@ export function encodeGradientProfileCameraPresent(
     timeSec,
     grayScale: displayMode === 'fittedLines' ? 0.38 : 1,
   })
-  const mainAttachment: ColorAttachment = { view: pipeline.cameraContext }
 
   if (displayMode === 'quadGrid') {
-    pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
-    // Composite grid on top of grayscale (default loadOp would clear the canvas).
-    const gridAttachment: ColorAttachment = {
-      view: pipeline.cameraContext,
-      loadOp: 'load',
+    pipeline.msaa.ensureCameraMsaa(pipeline.width, pipeline.height)
+    const msaaView = pipeline.msaa.cameraMsaaTex!.createView()
+    const canvasView = pipeline.cameraContext.getCurrentTexture().createView()
+
+    // Pass 1: Base → MSAA (clear + store, no resolve)
+    const baseAttach: ColorAttachment = {
+      view: msaaView,
+      loadOp: 'clear',
       storeOp: 'store',
     }
-    pipeline.grid.encodeToCanvas(enc, gridAttachment, quadGridInstanceCount)
+    pipeline.render.grayscaleMsaa.encodeToCanvas(enc, baseAttach)
+
+    // Pass 2: Grid overlay → MSAA (load + discard + resolve)
+    const gridAttach: ColorAttachment = {
+      view: msaaView,
+      loadOp: 'load',
+      storeOp: 'discard',
+      resolveTarget: canvasView,
+    }
+    pipeline.msaa.grid.encodeToCanvas(enc, gridAttach, quadGridInstanceCount)
   } else if (displayMode === 'fittedLines') {
-    pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
-    pipeline.render.fittedLines.encodeOverlay(enc, mainAttachment)
-  } else if (displayMode === 'lineRejects') {
-    pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 0.35 })
-    pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
-    pipeline.lineRejects.encodeToCanvas(enc, mainAttachment)
-  } else if (displayMode === 'edges') {
-    pipeline.render.sobel.encodeToCanvas(enc, mainAttachment)
-  } else if (displayMode === 'nms') {
-    pipeline.render.edges.encodeToCanvas(enc, mainAttachment)
-  } else if (displayMode === 'labels') {
+    pipeline.msaa.ensureCameraMsaa(pipeline.width, pipeline.height)
+    const msaaView = pipeline.msaa.cameraMsaaTex!.createView()
+    const canvasView = pipeline.cameraContext.getCurrentTexture().createView()
+
+    // Pass 1: Base → MSAA (clear + store, no resolve)
+    const baseAttach: ColorAttachment = {
+      view: msaaView,
+      loadOp: 'clear',
+      storeOp: 'store',
+    }
+    pipeline.render.grayscaleMsaa.encodeToCanvas(enc, baseAttach)
+
+    // Pass 2: Fitted lines → MSAA (load + discard + resolve)
+    const linesAttach: ColorAttachment = {
+      view: msaaView,
+      loadOp: 'load',
+      storeOp: 'discard',
+      resolveTarget: canvasView,
+    }
+    pipeline.msaa.fittedLines.encodeOverlay(enc, linesAttach)
+  } else {
+    const mainAttachment: ColorAttachment = { view: pipeline.cameraContext }
+    if (displayMode === 'lineRejects') {
+      pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 0.35 })
+      pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
+      pipeline.lineRejects.encodeToCanvas(enc, mainAttachment)
+    } else if (displayMode === 'edges') {
+      pipeline.render.sobel.encodeToCanvas(enc, mainAttachment)
+    } else if (displayMode === 'nms') {
+      pipeline.render.edges.encodeToCanvas(enc, mainAttachment)
+    } else if (displayMode === 'labels') {
     const labelVizBindGroup = root.createBindGroup(pipeline.render.labelViz.layout, {
       labelBuffer: pipeline.compact.compactLabelBuffer,
     })
@@ -63,8 +94,9 @@ export function encodeGradientProfileCameraPresent(
     pipeline.render.labelViz.encodeToCanvas(enc, mainAttachment, labelVizBindGroup)
   } else if (displayMode === 'undistort') {
     pipeline.render.undistort.encodeToCanvas(enc, mainAttachment)
-  } else {
-    pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
+    } else {
+      pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
+    }
   }
 
   if (pipeline.histContext) {

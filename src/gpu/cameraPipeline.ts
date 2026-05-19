@@ -3,6 +3,7 @@ import { d } from 'typegpu'
 
 import { createFrameSlotPool } from '@/gpu/frameSlotPool'
 import type { FrameSlotPool } from '@/gpu/frameSlotPool'
+import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { createBoundaryFilterStage } from '@/gpu/pipelines/boundaryFilterPipeline'
 import { createCompactLabelStage } from '@/gpu/pipelines/compactLabelPipeline'
 import { createCopyIngest } from '@/gpu/pipelines/copyPipeline'
@@ -48,7 +49,28 @@ export function createCameraPipeline(
   height: number,
   presentationFormat: GPUTextureFormat,
 ) {
+  function destroyGpuTexture(tex: GPUTexture | undefined) {
+    tex?.destroy()
+  }
+
   const context = root.configureContext({ canvas, alphaMode: 'premultiplied' })
+
+  let msaaColorTex: GPUTexture | undefined
+  function ensureMsaa(w: number, h: number) {
+    if (msaaColorTex && msaaColorTex.width === w && msaaColorTex.height === h) {
+      return
+    }
+    destroyGpuTexture(msaaColorTex)
+    msaaColorTex = root.device.createTexture({
+      label: 'camera-msaa',
+      size: [w, h, 1],
+      format: presentationFormat,
+      sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    })
+  }
+  ensureMsaa(width, height)
+
   const grayRenderParamsBuffer = root.createBuffer(GrayRenderParams).$usage('uniform')
 
   const ingest = createCopyIngest(root, width, height)
@@ -82,6 +104,10 @@ export function createCameraPipeline(
     edgeHistogram.quadCount,
   )
   const grid = createGridVizStage(root, width, height, presentationFormat)
+  const gridMsaa = createGridVizStage(root, width, height, presentationFormat, {
+    sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
+    quadCornersBuffer: grid.quadCornersBuffer,
+  })
   const grayTexView = ingest.grayTex.createView(d.texture2d(d.f32))
   const quadHomography = createQuadCornerHomographyStage(root, {
     lineOut: lineFit.lineOut,
@@ -98,6 +124,11 @@ export function createCameraPipeline(
   })
   const hostQuadReadback = createHostQuadReadbackStage(root, grid.quadCornersBuffer)
   const reproj = createReprojectionOverlayStage(root, width, height, presentationFormat)
+  const reprojMsaa = createReprojectionOverlayStage(root, width, height, presentationFormat, {
+    sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
+    reprojBuffer: reproj.reprojOverlayBuffer,
+    drawState: reproj.reprojOverlayDrawState,
+  })
 
   /** One in-flight grid frame so GPU quads and CPU overlay read stay on the same frame. */
   const frameSlotPool: FrameSlotPool = createFrameSlotPool({ slotCount: 1 })
@@ -111,6 +142,10 @@ export function createCameraPipeline(
     grayBuffer: gray.buffer,
     params: grayRenderParamsBuffer,
   })
+  const grayscaleMsaa = createGrayRenderPipeline(root, width, height, presentationFormat, {
+    grayBuffer: gray.buffer,
+    params: grayRenderParamsBuffer,
+  }, { sampleCount: RESULTS_MSAA_SAMPLE_COUNT })
   const sobelRender = createSobelRenderPipeline(root, width, height, presentationFormat, {
     sobelBuffer: sobel.buffer,
   })
@@ -148,10 +183,20 @@ export function createCameraPipeline(
     hostQuadReadback,
     grid,
     reproj,
+    msaa: {
+      grid: gridMsaa,
+      reproj: reprojMsaa,
+      /** Lazy MSAA texture. Call ensureMsaa before use if canvas may have resized. */
+      get msaaColorTex() {
+        return msaaColorTex
+      },
+      ensureMsaa,
+    },
     render: {
       edges,
       labelViz,
       grayscale,
+      grayscaleMsaa,
       sobel: sobelRender,
       filtered,
       undistort,

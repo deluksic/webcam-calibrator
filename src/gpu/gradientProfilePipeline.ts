@@ -84,6 +84,23 @@ export function createGradientProfilePipeline(
 ) {
   const cameraContext = root.configureContext({ canvas: cameraCanvas, alphaMode: 'premultiplied' })
   const profileContext = root.configureContext({ canvas: profileCanvas, alphaMode: 'premultiplied' })
+
+  let cameraMsaaTex: GPUTexture | undefined
+  function ensureCameraMsaa(w: number, h: number) {
+    if (cameraMsaaTex && cameraMsaaTex.width === w && cameraMsaaTex.height === h) {
+      return
+    }
+    destroyGpuTexture(cameraMsaaTex)
+    cameraMsaaTex = root.device.createTexture({
+      label: 'gradient-profile-camera-msaa',
+      size: [w, h, 1],
+      format: presentationFormat,
+      sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    })
+  }
+  ensureCameraMsaa(width, height)
+
   const grayRenderParamsBuffer = root.createBuffer(GrayRenderParams).$usage('uniform')
 
   const ingest = createCopyIngest(root, width, height)
@@ -126,6 +143,10 @@ export function createGradientProfilePipeline(
     edgeHistogram.quadCount,
   )
   const grid = createGridVizStage(root, width, height, presentationFormat)
+  const gridMsaa = createGridVizStage(root, width, height, presentationFormat, {
+    sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
+    quadCornersBuffer: grid.quadCornersBuffer,
+  })
   const grayTexView = ingest.grayTex.createView(d.texture2d(d.f32))
   const quadHomography = createQuadCornerHomographyStage(root, {
     lineOut: lineFit.lineOut,
@@ -171,6 +192,10 @@ export function createGradientProfilePipeline(
     grayBuffer: gray.buffer,
     params: grayRenderParamsBuffer,
   })
+  const grayscaleMsaa = createGrayRenderPipeline(root, width, height, presentationFormat, {
+    grayBuffer: gray.buffer,
+    params: grayRenderParamsBuffer,
+  }, { sampleCount: RESULTS_MSAA_SAMPLE_COUNT })
   const sobelRender = createSobelRenderPipeline(root, width, height, presentationFormat, {
     sobelBuffer: sobel.buffer,
   })
@@ -190,6 +215,17 @@ export function createGradientProfilePipeline(
     edgeHistogram.labelToQuadId,
     edgeHistogram.quadPeakEdge,
     fittedLineInstances,
+  )
+  const fittedLinesMsaa = createEdgeFittedLineOverlayStage(
+    root,
+    width,
+    height,
+    presentationFormat,
+    edgeHistogram.labelLineOut,
+    edgeHistogram.labelToQuadId,
+    edgeHistogram.quadPeakEdge,
+    fittedLineInstances,
+    { sampleCount: RESULTS_MSAA_SAMPLE_COUNT },
   )
   const lineRejects = createLineFitDebugStage(
     root,
@@ -264,6 +300,14 @@ export function createGradientProfilePipeline(
     get msaaColorTex() {
       return msaaColorTex
     },
+    msaa: {
+      grid: gridMsaa,
+      fittedLines: fittedLinesMsaa,
+      get cameraMsaaTex() {
+        return cameraMsaaTex
+      },
+      ensureCameraMsaa,
+    },
     undistortUniform,
     render: {
       edges,
@@ -271,6 +315,7 @@ export function createGradientProfilePipeline(
       quadsLabelViz,
       quadRejectViz,
       grayscale,
+      grayscaleMsaa,
       sobel: sobelRender,
       filtered,
       undistort,

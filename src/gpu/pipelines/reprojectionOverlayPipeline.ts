@@ -39,7 +39,9 @@ export function createReprojectionOverlayOriginalPipeline(
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
+  options?: { sampleCount?: number },
 ) {
+  const sampleCount = options?.sampleCount
   const vert = tgpu.vertexFn({
     in: {
       vertexIndex: d.builtin.vertexIndex,
@@ -91,6 +93,7 @@ export function createReprojectionOverlayOriginalPipeline(
     fragment: frag,
     targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'triangle-strip' },
+    ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
   })
 }
 
@@ -100,7 +103,9 @@ export function createReprojectionOverlayTargetPipeline(
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
+  options?: { sampleCount?: number },
 ) {
+  const sampleCount = options?.sampleCount
   const vert = tgpu.vertexFn({
     in: {
       vertexIndex: d.builtin.vertexIndex,
@@ -156,6 +161,7 @@ export function createReprojectionOverlayTargetPipeline(
     fragment: frag,
     targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'triangle-strip' },
+    ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
   })
 }
 
@@ -165,7 +171,9 @@ export function createReprojectionOverlayLinesPipeline(
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
+  options?: { sampleCount?: number },
 ) {
+  const sampleCount = options?.sampleCount
   const vert = tgpu.vertexFn({
     in: {
       vertexIndex: d.builtin.vertexIndex,
@@ -205,6 +213,7 @@ export function createReprojectionOverlayLinesPipeline(
     fragment: frag,
     targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'line-list' },
+    ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
   })
 }
 
@@ -214,8 +223,10 @@ export function createReprojectionOverlayStage(
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
+  options?: { sampleCount?: number; reprojBuffer?: ReturnType<typeof root.createBuffer>; drawState?: { instanceCount: number } },
 ) {
-  const reprojOverlayBuffer = root.createBuffer(ReprojOverlaySchema).$usage('storage')
+  const reprojOverlayBuffer = options?.reprojBuffer ?? root.createBuffer(ReprojOverlaySchema).$usage('storage')
+  const reprojOverlayDrawState = options?.drawState ?? { instanceCount: 0 }
   const { reprojOverlayLayout } = createReprojectionOverlayLayouts()
   const reprojOverlayBindGroup = root.createBindGroup(reprojOverlayLayout, {
     pairs: reprojOverlayBuffer,
@@ -226,6 +237,7 @@ export function createReprojectionOverlayStage(
     width,
     height,
     presentationFormat,
+    options,
   )
   const reprojTargetPipeline = createReprojectionOverlayTargetPipeline(
     root,
@@ -233,6 +245,7 @@ export function createReprojectionOverlayStage(
     width,
     height,
     presentationFormat,
+    options,
   )
   const reprojLinesPipeline = createReprojectionOverlayLinesPipeline(
     root,
@@ -240,8 +253,8 @@ export function createReprojectionOverlayStage(
     width,
     height,
     presentationFormat,
+    options,
   )
-  const reprojOverlayDrawState = { instanceCount: 0 }
   const encodeOverlayToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment, instanceCount: number) => {
     if (instanceCount <= 0) {
       return
