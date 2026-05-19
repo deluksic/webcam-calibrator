@@ -113,33 +113,17 @@ export function createGridVizPipeline(
     },
   })(({ vertexIndex, instanceIndex }) => {
     const quad = gridVizLayout.$.quads[instanceIndex]!
-    const H = quad.homography
     const debug = quad.debug
 
     const uvs = [d.vec2f(0, 0), d.vec2f(1, 0), d.vec2f(0, 1), d.vec2f(1, 1)]
     const uv = uvs[vertexIndex]!
 
-    const e0 = mul(H, d.vec3f(1, 0, 0))
-    const e1 = mul(H, d.vec3f(0, 1, 0))
-    const hDegenerate = length(e0) + length(e1) < d.f32(1e-6)
-
-    let clipX = d.f32(0)
-    let clipY = d.f32(0)
-    let clipW = d.f32(1)
-    if (hDegenerate) {
-      const p = quad.screenCorners[vertexIndex]!
-      clipX = (2 * p.x) / width - 1
-      clipY = 1 - (2 * p.y) / height
-      clipW = 1
-    } else {
-      const imgPos = mul(H, d.vec3f(uv, 1))
-      const imgX = imgPos.x
-      const imgY = imgPos.y
-      const w = imgPos.z
-      clipX = (2 * imgX) / width - w
-      clipY = w - (2 * imgY) / height
-      clipW = w
-    }
+    // Always use the original intersection corners for vertex positions.
+    // Homography can stretch misdetected quads across the whole screen.
+    const corner = quad.screenCorners[vertexIndex]!
+    const clipX = (2 * corner.x) / width - 1
+    const clipY = 1 - (2 * corner.y) / height
+    const clipW = d.f32(1)
 
     return {
       outPos: d.vec4f(clipX, clipY, 0, clipW),
