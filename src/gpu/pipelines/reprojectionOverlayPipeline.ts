@@ -4,6 +4,8 @@ import { tgpu, d } from 'typegpu'
 import { clamp, fwidth, length, max, mul, select, sub } from 'typegpu/std'
 
 import { MAX_INSTANCES } from '@/gpu/pipelines/gridVizPipeline'
+import { PREMULTIPLIED_ALPHA_BLEND } from '@/gpu/pipelines/shared'
+
 const ReprojPairStruct = d.struct({
   original: d.vec2f,
   /** Reprojected point in image space (`target` is reserved in WGSL). */
@@ -23,19 +25,6 @@ const TARGET_QUAD_HALF_PX = 5
 const TARGET_FILL_RADIUS_PX = 3
 
 const ERR_GOOD_PX = 0.75
-
-const premultipliedAlphaBlend = {
-  color: {
-    operation: 'add' as const,
-    srcFactor: 'src-alpha' as const,
-    dstFactor: 'one-minus-src-alpha' as const,
-  },
-  alpha: {
-    operation: 'add' as const,
-    srcFactor: 'one' as const,
-    dstFactor: 'one-minus-src-alpha' as const,
-  },
-}
 
 export function createReprojectionOverlayLayouts() {
   const reprojOverlayLayout = tgpu.bindGroupLayout({
@@ -100,7 +89,7 @@ export function createReprojectionOverlayOriginalPipeline(
   return root.createRenderPipeline({
     vertex: vert,
     fragment: frag,
-    targets: { format: presentationFormat, blend: premultipliedAlphaBlend },
+    targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'triangle-strip' },
   })
 }
@@ -165,7 +154,7 @@ export function createReprojectionOverlayTargetPipeline(
   return root.createRenderPipeline({
     vertex: vert,
     fragment: frag,
-    targets: { format: presentationFormat, blend: premultipliedAlphaBlend },
+    targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'triangle-strip' },
   })
 }
@@ -214,7 +203,7 @@ export function createReprojectionOverlayLinesPipeline(
   return root.createRenderPipeline({
     vertex: vert,
     fragment: frag,
-    targets: { format: presentationFormat, blend: premultipliedAlphaBlend },
+    targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'line-list' },
   })
 }

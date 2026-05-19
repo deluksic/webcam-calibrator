@@ -176,11 +176,11 @@ export function createDistortionFieldStage(
     const oy = (canvasH - scaledH) * d.f32(0.5)
 
     /** Map canvas pixel to video pixel coords (no letterbox clamping — extends beyond frame). */
-    const xnPx = ((px - ox) / scaledW) * videoW
-    const ynPx = ((py - oy) / scaledH) * videoH
+    const xPx = ((px - ox) / scaledW) * videoW
+    const yPx = ((py - oy) / scaledH) * videoH
 
-    const xn = (xnPx - intr.cx) / intr.fx
-    const yn = (ynPx - intr.cy) / intr.fy
+    const xn = (xPx - intr.cx) / intr.fx
+    const yn = (yPx - intr.cy) / intr.fy
 
     const xyD = forwardDistortNormalized(d.vec2f(xn, yn), dist)
     const xd = xyD.x
@@ -198,8 +198,8 @@ export function createDistortionFieldStage(
     const fw = max(fwidth(magPhys), d.f32(1e-4))
 
     /** Raw normalized dot product: displacement direction vs toward-center direction, in [-1, 1]. */
-    const toCenterX = intr.cx - xnPx
-    const toCenterY = intr.cy - ynPx
+    const toCenterX = intr.cx - xPx
+    const toCenterY = intr.cy - yPx
     const toCenterLen = max(length(d.vec2f(toCenterX, toCenterY)), d.f32(1e-8))
     const dispLen = max(length(d.vec2f(dispPhysX, dispPhysY)), d.f32(1e-8))
     const dotToCenterRaw =

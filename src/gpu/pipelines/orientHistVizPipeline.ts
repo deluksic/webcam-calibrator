@@ -5,11 +5,8 @@ import { common } from 'typegpu'
 import { clamp, floor, max, min } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
-import {
-  LabelOrientClusterReadonly,
-  MAX_EDGES_PER_LABEL,
-  ORIENT_HIST_BINS,
-} from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import { LabelOrientClusterReadonly } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import { MAX_EDGES_PER_LABEL, ORIENT_HIST_BINS } from '@/gpu/lineFitThresholds'
 import type {
   LabelOrientClusterBuffer,
   QuadCountBuffer,
@@ -61,25 +58,25 @@ const ORIENT_HIST_GRID_ROWS = Math.ceil(Math.ceil(MAX_QUADS / 32) / 4)
 /** Fixed GPU canvas; scroll via `.orientHistScroll` when content exceeds viewport. */
 export const ORIENT_HIST_CANVAS_HEIGHT = ORIENT_HIST_GRID_ROWS * ORIENT_HIST_CELL_STRIDE_Y - ORIENT_HIST_VIZ_GAP
 
+const ORIENT_HIST_PACK_WG = 256
+
 function createOrientHistPackPipeline(root: TgpuRoot, maxQuads: number) {
   const packRows = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [1, 1, 1],
+    workgroupSize: [ORIENT_HIST_PACK_WG, 1, 1],
   })((input) => {
     'use gpu'
-    if (input.gid.x !== d.u32(0)) {
-      return
-    }
-
+    const quadId = d.u32(input.gid.x)
     const quadsRaw = orientHistPackLayout.$.quadCount[d.u32(0)]!
     const quads = min(quadsRaw, d.u32(maxQuads))
-    orientHistPackLayout.$.rowCount[d.u32(0)] = quads
 
-    for (let quadId = d.u32(0); quadId < quads; quadId = quadId + d.u32(1)) {
-      orientHistPackLayout.$.rowLabelIds[quadId] = orientHistPackLayout.$.quadSourceLabelId[quadId]!
+    if (quadId === d.u32(0)) {
+      orientHistPackLayout.$.rowCount[d.u32(0)] = quads
     }
 
-    for (let quadId = quads; quadId < d.u32(maxQuads); quadId = quadId + d.u32(1)) {
+    if (quadId < quads) {
+      orientHistPackLayout.$.rowLabelIds[quadId] = orientHistPackLayout.$.quadSourceLabelId[quadId]!
+    } else if (quadId < d.u32(maxQuads)) {
       orientHistPackLayout.$.rowLabelIds[quadId] = d.u32(COMPONENT_LABEL_INVALID)
     }
   })
@@ -216,7 +213,7 @@ export function createOrientHistVizStage(
   })
 
   const encodePackCompute = (pass: GPUComputePassEncoder) => {
-    packPipeline.with(pass).with(packBindGroup).dispatchWorkgroups(1)
+    packPipeline.with(pass).with(packBindGroup).dispatchWorkgroups(Math.ceil(MAX_QUADS / ORIENT_HIST_PACK_WG))
   }
 
   const encodeDisplay = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment) => {

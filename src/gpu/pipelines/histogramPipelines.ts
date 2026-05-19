@@ -33,14 +33,16 @@ export type HistogramResetBindResources = ExtractBindGroupInputFromLayout<typeof
 export type HistogramComputeBindResources = ExtractBindGroupInputFromLayout<typeof histogramComputeLayout.entries>
 export type HistogramDisplayBindResources = ExtractBindGroupInputFromLayout<typeof histogramDisplayLayout.entries>
 
+const HISTOGRAM_RESET_WG = 256
+
 export function createHistogramResetPipeline(root: TgpuRoot) {
   const histogramResetKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [1, 1, 1],
+    workgroupSize: [HISTOGRAM_RESET_WG, 1, 1],
   })((input) => {
     'use gpu'
     const binIdx = input.gid.x
-    if (d.i32(binIdx) >= d.i32(HISTOGRAM_BINS)) {
+    if (binIdx >= HISTOGRAM_BINS) {
       return
     }
     atomicStore(histogramResetLayout.$.histogram[binIdx]!, d.u32(0))
@@ -56,8 +58,8 @@ export function createHistogramAccumulatePipeline(root: TgpuRoot, width: number,
   })((input) => {
     'use gpu'
     const zero = d.u32(0)
-    const tileWidth = d.u32(16)
-    const tileHeight = d.u32(16)
+    const tileWidth = d.u32(FULL_FRAME_WG)
+    const tileHeight = d.u32(FULL_FRAME_WG)
     const numBinsI = d.i32(HISTOGRAM_BINS)
 
     const startX = input.gid.x * tileWidth
@@ -202,7 +204,7 @@ export function createHistogramStage(
   const wgX = Math.ceil(width / FULL_FRAME_WG)
   const wgY = Math.ceil(height / FULL_FRAME_WG)
   const encodeAccumulateCompute = (pass: GPUComputePassEncoder) => {
-    resetPipeline.with(pass).with(resetBindGroup).dispatchWorkgroups(HISTOGRAM_BINS)
+    resetPipeline.with(pass).with(resetBindGroup).dispatchWorkgroups(Math.ceil(HISTOGRAM_BINS / HISTOGRAM_RESET_WG))
     computePipeline.with(pass).with(computeBindGroup).dispatchWorkgroups(wgX, wgY)
   }
   const encodeDisplay = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment) => {

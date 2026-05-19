@@ -10,52 +10,53 @@ import {
   tagDecodeMinVoteTotal,
 } from '@/gpu/tagDecodeThresholds'
 
-/** Mirrors GPU `findTagDecodeHistPeaks` in `tagDecodeHistPeaks.ts` — test-only, not used at runtime. */
+/** Mirrors GPU peak-finding in `tagDecodePipeline.ts` (global max + separation). */
 function findTagDecodeHistPeaks(
   hist: readonly number[],
   bins: number = TAG_DECODE_HIST_BINS,
   minSep: number = TAG_DECODE_MIN_PEAK_BIN_SEP,
 ) {
-  const lastBin = bins - 1
-  const blackSearchEnd = lastBin - minSep
-
-  let blackPeak = 0
-  let blackVal = 0
-  for (let bu = 0; bu <= blackSearchEnd; bu++) {
+  // Find global maximum → peak1
+  let peak1Bin = 0
+  let peak1Val = 0
+  for (let bu = 0; bu < bins; bu++) {
     const v = hist[bu] ?? 0
-    const prev = bu > 0 ? (hist[bu - 1] ?? 0) : 0
-    const next = bu < blackSearchEnd ? (hist[bu + 1] ?? 0) : 0
-    const isPeak = bu === 0 ? v >= next : bu === blackSearchEnd ? v >= prev : v >= prev && v >= next
-    if (isPeak && v > blackVal) {
-      blackVal = v
-      blackPeak = bu
-    }
-  }
-  if (blackVal === 0) {
-    for (let bu = 0; bu <= blackSearchEnd; bu++) {
-      const v = hist[bu] ?? 0
-      if (v > blackVal) {
-        blackVal = v
-        blackPeak = bu
-      }
+    if (v > peak1Val) {
+      peak1Val = v
+      peak1Bin = bu
     }
   }
 
-  let whitePeak = 0
-  let whiteVal = 0
-  const whiteSearchStart = blackPeak + minSep + 1
-  for (let bu = whiteSearchStart; bu <= lastBin; bu++) {
+  // Find global maximum ≥ minSep+1 away from peak1 → peak2
+  const minDist = minSep + 1
+  let peak2Bin = 0
+  let peak2Val = 0
+  for (let bu = 0; bu < bins; bu++) {
     const v = hist[bu] ?? 0
-    const prev = hist[bu - 1] ?? 0
-    const next = bu < lastBin ? (hist[bu + 1] ?? 0) : 0
-    const isPeak = bu === lastBin ? v >= prev : v >= prev && v >= next
-    if (isPeak && v > whiteVal) {
-      whiteVal = v
-      whitePeak = bu
+    const dist = Math.abs(bu - peak1Bin)
+    if (dist >= minDist && v > peak2Val) {
+      peak2Val = v
+      peak2Bin = bu
     }
   }
 
-  return { blackPeak, whitePeak, blackVal, whiteVal }
+  if (peak2Val > 0) {
+    const blackPeak = Math.min(peak1Bin, peak2Bin)
+    const whitePeak = Math.max(peak1Bin, peak2Bin)
+    return {
+      blackPeak,
+      whitePeak,
+      blackVal: hist[blackPeak] ?? 0,
+      whiteVal: hist[whitePeak] ?? 0,
+    }
+  }
+
+  return {
+    blackPeak: peak1Bin,
+    whitePeak: peak1Bin,
+    blackVal: peak1Val,
+    whiteVal: 0,
+  }
 }
 
 describe('tagDecodeThresholds', () => {

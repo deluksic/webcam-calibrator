@@ -1091,7 +1091,6 @@ export function createTagDecodeStage(
     if (n < 1) {
       return
     }
-    writeActiveQuadCount(n)
     const voteClearPass = enc.beginComputePass({ label: 'tag vote clear' })
     bufferClears.encodeClearModuleVotes(voteClearPass)
     voteClearPass.end()
@@ -1115,11 +1114,6 @@ export function createTagDecodeStage(
     canonicalizeStage.encodeCanonicalize(computePass, n)
   }
 
-  /** Hist + peaks + module votes (call `encodeDecode` in a follow-up compute pass). */
-  function encodeVotes(enc: GPUCommandEncoder, quadCount: number) {
-    encodeVotePasses(enc, quadCount)
-  }
-
   return {
     histBuf: histStage.histBuf,
     thresholdBuf,
@@ -1128,6 +1122,5 @@ export function createTagDecodeStage(
     encodeModuleVotePasses,
     encodeVotePasses,
     encodeDecode,
-    encodeVotes,
   }
 }

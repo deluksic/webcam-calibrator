@@ -8,6 +8,8 @@ import {
   MAX_EDGES_PER_LABEL,
   MIN_PEAK_BIN_SEPARATION,
   MIN_QUAD_VALID_EDGES,
+  ORIENT_ASSIGN_MAX_BIN_DIST,
+  ORIENT_HIST_BINS,
   ORIENT_PEAK_MIN_COUNT,
 } from '@/gpu/lineFitThresholds'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
@@ -19,14 +21,11 @@ import {
   assignPeakEdgeId,
   circularBinDist,
   gradientOrientationBin,
-  ORIENT_ASSIGN_MAX_BIN_DIST,
-  ORIENT_HIST_BINS,
   peakDirFromLocalBins,
 } from '@/gpu/shaders/orientPeakAssign'
 
 const WORKGROUP_SIZE = 16
 
-export { MAX_EDGES_PER_LABEL, ORIENT_HIST_BINS, ORIENT_ASSIGN_MAX_BIN_DIST } from '@/gpu/shaders/orientPeakAssign'
 export {
   MIN_PEAK_BIN_SEPARATION,
   MIN_QUAD_VALID_EDGES,

@@ -5,6 +5,7 @@ import { abs, floor, fract, length, min, max, dpdx, dpdy, mul } from 'typegpu/st
 
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import { PREMULTIPLIED_ALPHA_BLEND } from '@/gpu/pipelines/shared'
 
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
@@ -220,18 +221,7 @@ export function createGridVizPipeline(
     fragment: gridVizFrag,
     targets: {
       format: presentationFormat,
-      blend: {
-        color: {
-          operation: 'add',
-          srcFactor: 'src-alpha',
-          dstFactor: 'one-minus-src-alpha',
-        },
-        alpha: {
-          operation: 'add',
-          srcFactor: 'one',
-          dstFactor: 'one-minus-src-alpha',
-        },
-      },
+      blend: PREMULTIPLIED_ALPHA_BLEND,
     },
     primitive: { topology: 'triangle-strip' },
   })

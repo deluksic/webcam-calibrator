@@ -4,8 +4,8 @@ import { tgpu, d } from 'typegpu'
 import { atomicAdd, atomicStore } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
+import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import {
-  MAX_EDGES_PER_LABEL,
   type QuadCountBuffer,
   type QuadPeakEdgeBuffer,
   type QuadSourceLabelIdBuffer,

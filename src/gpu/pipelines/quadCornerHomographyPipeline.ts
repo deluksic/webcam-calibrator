@@ -66,6 +66,7 @@ function createQuadCornerHomographyPipeline(
       homography: invalidGridHomography(),
       screenCorners: deadScreen,
       debug: emptyDebug,
+      // Tag decode runs after homography in a later compute pass — initialized as unknown here.
       decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
       decodedRotation: d.u32(0),
     })

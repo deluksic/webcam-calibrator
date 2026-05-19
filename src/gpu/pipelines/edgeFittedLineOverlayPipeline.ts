@@ -8,15 +8,7 @@ import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
 import type { LabelLineOutBuffer } from '@/gpu/pipelines/labelLineFitPipeline'
 import type { LabelToQuadIdBuffer, QuadPeakEdgeBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
-
-const premultipliedAlphaBlend: GPUBlendState = {
-  color: {
-    operation: 'add',
-    srcFactor: 'src-alpha',
-    dstFactor: 'one-minus-src-alpha',
-  },
-  alpha: { operation: 'add', srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-}
+import { PREMULTIPLIED_ALPHA_BLEND } from '@/gpu/pipelines/shared'
 
 const fittedLineLayout = tgpu.bindGroupLayout({
   lineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
@@ -84,7 +76,7 @@ export function createEdgeFittedLineOverlayStage(
   const pipeline = root.createRenderPipeline({
     vertex: vert,
     fragment: frag,
-    targets: { format: presentationFormat, blend: premultipliedAlphaBlend },
+    targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'line-list' },
   })
 

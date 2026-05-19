@@ -13,7 +13,7 @@
 //
 // Root index IS the compact ID — this is deterministic, no counter race.
 import type { TgpuRoot } from 'typegpu'
-import { tgpu, d, std } from 'typegpu'
+import { tgpu, d } from 'typegpu'
 import { atomicLoad, atomicStore, atomicAdd } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'

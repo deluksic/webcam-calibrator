@@ -18,7 +18,8 @@ import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline
 import { LabelOrientClusterReadonly, type LabelOrientClusterBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { EdgeLineEntry, EDGE_MIN_SPAN_PX } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { lineSegmentEndpoints, lineDirDot, tlsNormalFromMoments } from '@/gpu/shaders/linePca'
-import { assignPeakEdgeId, ORIENT_ASSIGN_MAX_BIN_DIST } from '@/gpu/shaders/orientPeakAssign'
+import { ORIENT_ASSIGN_MAX_BIN_DIST } from '@/gpu/lineFitThresholds'
+import { assignPeakEdgeId } from '@/gpu/shaders/orientPeakAssign'
 
 const WORKGROUP_SIZE = 16
 const T_FIXED_SCALE = 16
@@ -28,7 +29,6 @@ const T_MIN_INIT_FIXED = 2_147_483_647
 const T_MAX_INIT_FIXED = -2_147_483_647
 
 export { LINE_INLIER_DIST_PX, LINE_MIN_SLOT_COUNT as LINE_MIN_COARSE_COUNT } from '@/gpu/lineFitThresholds'
-export const P0_UNSET_X_FIXED = T_MIN_INIT_FIXED
 
 const LabelLineReduceAtomic = d.struct({
   count: d.atomic(d.u32),

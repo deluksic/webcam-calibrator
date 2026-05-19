@@ -9,13 +9,6 @@ import {
   ORIENT_HIST_BINS,
 } from '@/gpu/lineFitThresholds'
 
-export {
-  MAX_EDGES_PER_LABEL,
-  ORIENT_ASSIGN_MAX_BIN_DIST,
-  ORIENT_ASSIGN_MIN_ALIGN,
-  ORIENT_HIST_BINS,
-} from '@/gpu/lineFitThresholds'
-
 const PI = Math.PI
 
 export const gradientOrientationBin = tgpu.fn(
@@ -43,8 +36,7 @@ export const circularBinDist = tgpu.fn(
   return std.min(forward, backward)
 })
 
-/** Unit normal from histogram bin center. */
-export const orientationBinToUnit = tgpu.fn(
+const orientationBinToUnit = tgpu.fn(
   [d.u32],
   d.vec2f,
 )((bin) => {
@@ -53,8 +45,8 @@ export const orientationBinToUnit = tgpu.fn(
   return d.vec2f(cos(theta), sin(theta))
 })
 
-export const PeakBins4 = d.arrayOf(d.u32, MAX_EDGES_PER_LABEL)
-export const PeakDirs4 = d.arrayOf(d.vec2f, MAX_EDGES_PER_LABEL)
+const PeakBins4 = d.arrayOf(d.u32, MAX_EDGES_PER_LABEL)
+const PeakDirs4 = d.arrayOf(d.vec2f, MAX_EDGES_PER_LABEL)
 
 /** 3-bin circular centroid; falls back to bin center when total weight is zero. */
 export const peakDirFromLocalBins = tgpu.fn(
@@ -75,20 +67,6 @@ export const peakDirFromLocalBins = tgpu.fn(
     return d.vec2f(sx / len, sy / len)
   }
   return d1
-})
-
-/** Dot of unit gradient with peak direction (−1 if |g| = 0). */
-export const gradientPeakAlign = tgpu.fn(
-  [d.vec2f, d.vec2f],
-  d.f32,
-)((peakDir, g) => {
-  'use gpu'
-  const gLen = length(g)
-  if (gLen <= d.f32(0)) {
-    return d.f32(-1)
-  }
-  const n = div(g, gLen)
-  return dot(n, peakDir)
 })
 
 /** Best peak with ĝ·peakDir ≥ minAlign; prefer in-bin, then strongest align (corners steal if dist wins first).

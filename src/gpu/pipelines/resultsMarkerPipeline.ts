@@ -1,7 +1,7 @@
 import { circle, circleVertexCount } from '@typegpu/geometry'
 import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
-import { length, mix, mul, select, smoothstep } from 'typegpu/std'
+import { length, mix, mul, smoothstep } from 'typegpu/std'
 
 import { resultsCameraBindLayout, type ResultsCameraBindGroup } from '@/gpu/pipelines/resultsCameraTransform'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
@@ -42,12 +42,6 @@ export const markersBindLayout = tgpu
   .$idx(1)
 
 export type MarkersGpuBindValues = ExtractBindGroupInputFromLayout<typeof markersBindLayout.entries>
-
-/**
- * When true: marker pass draws one bright clip-space triangle and ignores projection/circle math.
- * Confirms MSAA color + resolve + bind group wiring. Set to `false` after you see the triangle.
- */
-export const RESULTS_MARKERS_CLIP_SPACE_DIAGNOSTIC_TRIANGLE = false as const
 
 /** NDC depth offset (× w) so marker disks win over coplanar tag quads; WebGPU nearer = smaller z. */
 const RESULTS_MARKER_DEPTH_BIAS_NDC = 0.0005 as const
@@ -91,66 +85,11 @@ export function markerCenterWritesForGpu(ok: CalibrationOk): MarkerCenterRow[] {
   return rows
 }
 
-function markerInstancesForEncode(requestedMarkers: number) {
-  if (RESULTS_MARKERS_CLIP_SPACE_DIAGNOSTIC_TRIANGLE) {
-    return 1 as const
-  }
-  return Math.max(requestedMarkers, 0)
-}
-
 /** Pipeline + pass bind group + encode in one closure (see {@link createGridVizStage}). */
 export function createMarkerResultsStage(root: TgpuRoot, presentationFormat: GPUTextureFormat) {
   const markerUniform = allocMarkerPassUniform(root)
   const centersBuf = allocMarkersCenters(root)
   const markersBg = root.createBindGroup(markersBindLayout, { markers: markerUniform, centers: centersBuf })
-
-  if (RESULTS_MARKERS_CLIP_SPACE_DIAGNOSTIC_TRIANGLE) {
-    const vertDiag = tgpu.vertexFn({
-      in: {
-        vertexIndex: d.builtin.vertexIndex,
-        instanceIndex: d.builtin.instanceIndex,
-      },
-      out: { clipPos: d.builtin.position },
-    })(({ vertexIndex, instanceIndex }) => {
-      'use gpu'
-      if (instanceIndex > d.u32(0)) {
-        return { clipPos: d.vec4f(0, 0, 2, 1) }
-      }
-      const vx = select(d.f32(-0.92), d.f32(0.92), vertexIndex === d.u32(2))
-      const vy = select(d.f32(-0.92), d.f32(0.92), vertexIndex === d.u32(1))
-      return { clipPos: d.vec4f(vx, vy, d.f32(0.5), d.f32(1)) }
-    })
-
-    const fragDiag = tgpu.fragmentFn({
-      out: d.vec4f,
-    })(() => {
-      'use gpu'
-      return d.vec4f(1, 0, 0, 1)
-    })
-
-    const pipeline = root.createRenderPipeline({
-      vertex: vertDiag,
-      fragment: fragDiag,
-      targets: {
-        format: presentationFormat,
-      },
-      primitive: {
-        topology: 'triangle-list',
-        cullMode: 'none',
-      },
-      depthStencil: {
-        format: 'depth24plus',
-        depthWriteEnabled: true,
-        depthCompare: 'less',
-      },
-      multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
-    })
-
-    const encodeToPass = (pass: GPURenderPassEncoder, _cameraBg: ResultsCameraBindGroup, _markerInstances: number) => {
-      pipeline.with(pass).draw(3, 1)
-    }
-    return { markerUniform, centersBuf, encodeToPass }
-  }
 
   const diskVerts = circleVertexCount(MARKER_DISK_SUBDIV)
   const vert = tgpu
@@ -221,8 +160,7 @@ export function createMarkerResultsStage(root: TgpuRoot, presentationFormat: GPU
   })
 
   const encodeToPass = (pass: GPURenderPassEncoder, cameraBg: ResultsCameraBindGroup, markerInstances: number) => {
-    const count = markerInstancesForEncode(markerInstances)
-    pipeline.with(pass).with(cameraBg).with(markersBg).draw(diskVerts, count)
+    pipeline.with(pass).with(cameraBg).with(markersBg).draw(diskVerts, Math.max(markerInstances, 0))
   }
   return { markerUniform, centersBuf, encodeToPass }
 }

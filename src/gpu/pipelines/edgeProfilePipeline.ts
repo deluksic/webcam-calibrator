@@ -15,8 +15,6 @@ import {
 import type { GrayTexToBufferBindResources } from '@/gpu/pipelines/grayPipeline'
 import { lineDirDot } from '@/gpu/shaders/linePca'
 
-export { PROFILE_BUCKET_COUNT, PROFILE_NEIGHBORHOOD_HALF } from '@/gpu/pipelines/edgeLineFitPipeline'
-
 const WORKGROUP_SIZE = 16
 /** 1D bucket reset/normalize: WG sized so MAX_FLAT_EDGES×64 buckets stay under 65535 workgroups/dim. */
 const BUCKET_WORKGROUP_SIZE = 256
@@ -77,7 +75,7 @@ export function createEdgeProfileStage(
 
   const layouts = createProfileLayouts()
   const resetPipeline = createProfileResetPipeline(root, layouts.resetLayout, bucketCount)
-  const accumPipeline = createProfileAccumPipeline(root, layouts.accumLayout, width, height)
+  const accumPipeline = createProfileAccumPipeline(root, layouts.accumLayout)
   const normalizePipeline = createProfileNormalizePipeline(root, layouts.normalizeLayout, bucketCount)
 
   const resetBindGroup = root.createBindGroup(layouts.resetLayout, {
@@ -139,8 +137,6 @@ function createProfileResetPipeline(
 function createProfileAccumPipeline(
   root: TgpuRoot,
   accumLayout: ReturnType<typeof createProfileLayouts>['accumLayout'],
-  _width: number,
-  _height: number,
 ) {
   const halfW = PROFILE_NEIGHBORHOOD_HALF
   const bucketCountF = d.f32(PROFILE_BUCKET_COUNT)

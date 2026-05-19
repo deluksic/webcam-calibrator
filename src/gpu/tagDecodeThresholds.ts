@@ -1,4 +1,10 @@
-/** Tag decode (luma vote + dictionary) thresholds — shared constants and CPU helpers for tests. */
+/**
+ * Tag decode (luma vote + dictionary) thresholds — shared constants.
+ *
+ * The exported helper functions are CPU-only mirrors of inline GPU logic in
+ * `tagDecodePipeline.ts`; they exist exclusively for test verification and
+ * are not used at runtime.
+ */
 
 export const TAG_DECODE_HIST_BINS = 32
 export const TAG_DECODE_PEAK_GAP_FRAC = 0.25

@@ -135,9 +135,6 @@ export const sortCornersByPolarAngle = tgpu.fn(
   return out
 })
 
-/** @deprecated Use {@link sortCornersByPolarAngle}. */
-export const sortCornersClockwise = sortCornersByPolarAngle
-
 /**
  * `ring` is cyclic from {@link sortCornersByPolarAngle}: increasing atan2 around centroid (y-down screen).
  * Pick geometric TL, then walk TL → ring[+1] → ring[+2] → ring[+3] as TR, BR, BL on that cycle.

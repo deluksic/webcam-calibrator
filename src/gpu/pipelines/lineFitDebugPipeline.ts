@@ -5,11 +5,17 @@ import { common } from 'typegpu'
 import { abs, clamp, floor, length } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
-import { LINE_INLIER_DIST_PX, LINE_MIN_PEAK_HIST_COUNT, LINE_MIN_SLOT_COUNT } from '@/gpu/lineFitThresholds'
+import {
+  LINE_INLIER_DIST_PX,
+  LINE_MIN_PEAK_HIST_COUNT,
+  LINE_MIN_SLOT_COUNT,
+  MAX_EDGES_PER_LABEL,
+  ORIENT_ASSIGN_MAX_BIN_DIST,
+} from '@/gpu/lineFitThresholds'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
 import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
 import type { LabelOrientClusterBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
-import { LabelOrientClusterReadonly, MAX_EDGES_PER_LABEL } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import { LabelOrientClusterReadonly } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
 import type {
   LabelInlierStatsBuffer,
@@ -21,7 +27,7 @@ import {
   LabelInlierStatsReadonly,
   lineFitProbeFromSlot,
 } from '@/gpu/shaders/lineFitRejectClassify'
-import { assignPeakEdgeId, ORIENT_ASSIGN_MAX_BIN_DIST } from '@/gpu/shaders/orientPeakAssign'
+import { assignPeakEdgeId } from '@/gpu/shaders/orientPeakAssign'
 
 const WORKGROUP_SIZE = 16
 
@@ -32,7 +38,6 @@ export const LineFitDebugCode = {
   assign: 3,
   lowSample: 4,
   outlier: 5,
-  quadAssign: 7,
   ok: 8,
   histGate: 9,
   lineInvalidRatio: 10,
@@ -59,9 +64,6 @@ export const LINE_REJECT_LEGEND: ReadonlyArray<{ code: LineFitDebugCodeValue; la
   { code: LineFitDebugCode.tlsDegenerate, label: 'TLS degenerate', color: '#9b5de5' },
   { code: LineFitDebugCode.tlsRefineFail, label: 'TLS refine', color: '#00f5d4' },
 ]
-
-/** @deprecated Use {@link LINE_REJECT_LEGEND} */
-export const LINE_FIT_DEBUG_LEGEND = LINE_REJECT_LEGEND
 
 const LabelLineReduceReadonly = d.struct({
   count: d.u32,

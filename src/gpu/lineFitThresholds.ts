@@ -28,8 +28,6 @@ export const TLS_REF_COS_MAX_ANGLE = 0.85
 
 /** Valid fitted lines required to register a label as a quad (AprilTag = 4). */
 export const MIN_QUAD_VALID_EDGES = MAX_EDGES_PER_LABEL
-/** Min TLS inliers for a side to count toward quad registration. */
-export const MIN_QUAD_EDGE_INLIERS = 12
 
 /** Line intersection: |det| below this → parallel (geometric only, not a shape prior). */
 export const LINE_INTERSECT_DET_EPS = 1e-10

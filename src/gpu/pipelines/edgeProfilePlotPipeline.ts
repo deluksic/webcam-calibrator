@@ -20,11 +20,10 @@ import { EdgeLineEntry, PROFILE_BUCKET_COUNT, PROFILE_NEIGHBORHOOD_HALF } from '
 import type { ProfileAvgBuffer, ProfileBucketsBuffer } from '@/gpu/pipelines/edgeProfilePipeline'
 import { ProfileBucketGpu } from '@/gpu/pipelines/edgeProfilePipeline'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
+import { PREMULTIPLIED_ALPHA_BLEND } from '@/gpu/pipelines/shared'
 
 const PROFILE_JOIN_MAX = 2
 const SEGMENTS_PER_LABEL = PROFILE_BUCKET_COUNT - 1
-/** Float literal for storage indexing (must match {@link PROFILE_BUCKET_COUNT}). */
-const PLOT_BUCKET_COUNT = 64
 export const MAX_PROFILE_LINE_INSTANCES = MAX_FLAT_EDGES * SEGMENTS_PER_LABEL
 
 const plotTriangleIndexU16 = new Uint16Array(lineSegmentIndices(PROFILE_JOIN_MAX))
@@ -67,7 +66,7 @@ export function createEdgeProfilePlotStage(root: TgpuRoot, presentationFormat: G
       const inset = plotBindLayout.$.plot.plotInset
 
       const line = plotBindLayout.$.lineOut[labelId]!
-      const bucketIdx0F = d.f32(labelId) * PLOT_BUCKET_COUNT + d.f32(b)
+      const bucketIdx0F = d.f32(labelId) * PROFILE_BUCKET_COUNT + d.f32(b)
       const bucketIdx1F = bucketIdx0F + 1.0
       const slot0 = plotBindLayout.$.profileBuckets[bucketIdx0F]!
       const slot1 = plotBindLayout.$.profileBuckets[bucketIdx1F]!
@@ -90,8 +89,8 @@ export function createEdgeProfilePlotStage(root: TgpuRoot, presentationFormat: G
 
       const span = d.f32(2) * d.f32(PROFILE_NEIGHBORHOOD_HALF)
       const bF = d.f32(b)
-      const s0 = -d.f32(PROFILE_NEIGHBORHOOD_HALF) + ((bF + 0.5) / PLOT_BUCKET_COUNT) * span
-      const s1 = -d.f32(PROFILE_NEIGHBORHOOD_HALF) + ((bF + 1.5) / PLOT_BUCKET_COUNT) * span
+      const s0 = -d.f32(PROFILE_NEIGHBORHOOD_HALF) + ((bF + 0.5) / PROFILE_BUCKET_COUNT) * span
+      const s1 = -d.f32(PROFILE_NEIGHBORHOOD_HALF) + ((bF + 1.5) / PROFILE_BUCKET_COUNT) * span
       const xNdc0 = -inset + ((s0 + d.f32(PROFILE_NEIGHBORHOOD_HALF)) / span) * d.f32(2) * inset
       const yNdc0 = -inset + y0 * d.f32(2) * inset
       const xNdc1 = -inset + ((s1 + d.f32(PROFILE_NEIGHBORHOOD_HALF)) / span) * d.f32(2) * inset
@@ -136,15 +135,6 @@ export function createEdgeProfilePlotStage(root: TgpuRoot, presentationFormat: G
     return d.vec4f(outRgb, outA)
   })
 
-  const alphaBlend: GPUBlendState = {
-    color: {
-      operation: 'add',
-      srcFactor: 'src-alpha',
-      dstFactor: 'one-minus-src-alpha',
-    },
-    alpha: { operation: 'add', srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-  }
-
   const pipeline = root
     .with(joinSlot, joins.round)
     .with(startCapSlot, caps.round)
@@ -154,7 +144,7 @@ export function createEdgeProfilePlotStage(root: TgpuRoot, presentationFormat: G
       fragment: frag,
       targets: {
         format: presentationFormat,
-        blend: alphaBlend,
+        blend: PREMULTIPLIED_ALPHA_BLEND,
       },
       primitive: { topology: 'triangle-list' },
       multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },

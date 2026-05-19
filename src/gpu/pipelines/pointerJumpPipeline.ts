@@ -28,7 +28,6 @@ export function createPointerJumpLayouts() {
     labelBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
   })
   const stepLayout = tgpu.bindGroupLayout({
-    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     readBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
     writeBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
   })
@@ -291,12 +290,10 @@ export function createPointerJumpLabeling(
   })
   const pointerJumpPingPongBindGroups = [
     root.createBindGroup(pointerJumpStepLayout, {
-      edgeBuffer: filteredBuffer,
       readBuffer: pointerJumpBuffer0,
       writeBuffer: pointerJumpBuffer1,
     }),
     root.createBindGroup(pointerJumpStepLayout, {
-      edgeBuffer: filteredBuffer,
       readBuffer: pointerJumpBuffer1,
       writeBuffer: pointerJumpBuffer0,
     }),
