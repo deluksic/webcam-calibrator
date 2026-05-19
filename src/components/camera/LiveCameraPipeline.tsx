@@ -191,7 +191,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     const pip = createCameraPipeline(g, canvas, histCanvas, width, height, navigator.gpu.getPreferredCanvasFormat())
     log(`Pipeline created ${width}x${height}`)
 
-    let lastQuadCount = 0
     let lastAppliedDetectionFrameId = -1
     let gridPipelineBusy = false
 
@@ -217,7 +216,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           const liveCalib = pi.liveCalibration
 
           const { quads, quadCount } = result
-          lastQuadCount = quadCount
           quads.sort((a, b) => b.count - a.count)
           const top = quads.slice(0, MAX_DETECTED_TAGS)
           const tagged = top.map((q) => {
@@ -264,7 +262,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           setGridOverlayQuads(overlayQuads)
 
           const presentEnc = gNow.device.createCommandEncoder({ label: 'grid frame present' })
-          encodeGridPresent(presentEnc, pip, performance.now() * 0.001, quadCount)
+          encodeGridPresent(presentEnc, pip, performance.now() * 0.001)
           gNow.device.queue.submit([presentEnc.finish()])
 
           pi.onQuadDetection?.(tagged, { frameId: slot.frameId })
@@ -301,7 +299,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
             const slot = pip.frameSlotPool.acquireFreeSlot()
             if (slot !== undefined) {
               gridPipelineBusy = true
-              encodeCameraCompute(enc, gpuNow, pip, video, threshold(), slot, lastQuadCount)
+              encodeCameraCompute(enc, gpuNow, pip, video, threshold(), slot)
               gpuNow.device.queue.submit([enc.finish()])
               scheduleQuadDetection(slot, pi.showFallbacks)
             }

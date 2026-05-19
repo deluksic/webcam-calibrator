@@ -1,10 +1,10 @@
 import type { TgpuRoot } from 'typegpu'
 
+import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+
 import type { GradientProfileDisplayMode, GradientProfilePipeline } from './gradientProfilePipeline'
 
 export type GradientProfileComputeOptions = {
-  /** Active quads from the previous frame's `quadCount` readback (same frame's homography). */
-  quadCount?: number
   displayMode?: GradientProfileDisplayMode
   /** When true (e.g. Pause), re-run vision on the last ingested frame without copying video again. */
   skipIngest?: boolean
@@ -22,8 +22,6 @@ export function encodeGradientProfileCompute(
   threshold: number,
   options: GradientProfileComputeOptions = {},
 ): void {
-  const quadCount = options.quadCount ?? 0
-
   if (!options.skipIngest) {
     pipeline.ingest.encodeIngest(enc, root, video)
   }
@@ -48,9 +46,10 @@ export function encodeGradientProfileCompute(
   pipeline.profile.encodeCompute(computePass)
   computePass.end()
 
-  pipeline.tagDecode.encodeVotePasses(enc, quadCount)
+  pipeline.publishQuadCount.encodePublish(enc)
+  pipeline.tagDecode.encodeVotePasses(enc, MAX_QUADS)
 
   const decodePass = enc.beginComputePass({ label: 'tag decode' })
-  pipeline.tagDecode.encodeDecode(decodePass, quadCount)
+  pipeline.tagDecode.encodeDecode(decodePass, MAX_QUADS)
   decodePass.end()
 }

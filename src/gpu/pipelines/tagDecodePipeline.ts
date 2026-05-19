@@ -1067,16 +1067,11 @@ export function createTagDecodeStage(
   const worstScores = new Uint32Array(MAX_QUADS)
   worstScores.fill(WORST_SCORE)
 
-  function writeActiveQuadCount(quadCount: number) {
-    activeQuadCountBuf.write([capQuadCount(quadCount)])
-  }
-
   function encodeHistAndPeaks(enc: GPUCommandEncoder, quadCount: number) {
     const n = capQuadCount(quadCount)
     if (n < 1) {
       return
     }
-    writeActiveQuadCount(n)
     const clearPass = enc.beginComputePass({ label: 'tag decode clear' })
     bufferClears.encodeClearHist(clearPass)
     clearPass.end()
@@ -1107,7 +1102,6 @@ export function createTagDecodeStage(
     if (n < 1) {
       return
     }
-    writeActiveQuadCount(n)
     classifyStage.encodeClassify(computePass, n)
     atomicBestBuf.write(worstScores)
     dictStage.encodeDictMatch(computePass, n)
@@ -1118,6 +1112,7 @@ export function createTagDecodeStage(
     histBuf: histStage.histBuf,
     thresholdBuf,
     patternBuf,
+    activeQuadCountBuf,
     encodeHistAndPeaks,
     encodeModuleVotePasses,
     encodeVotePasses,

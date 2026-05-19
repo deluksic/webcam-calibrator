@@ -11,7 +11,6 @@ export function encodeGradientProfileCameraPresent(
   pipeline: GradientProfilePipeline,
   displayMode: GradientProfileNonGridDisplayMode,
   timeSec: number,
-  quadGridInstanceCount: number = 0,
 ): void {
   pipeline.grayRenderParamsBuffer.write({
     timeSec,
@@ -22,27 +21,22 @@ export function encodeGradientProfileCameraPresent(
     pipeline.msaa.ensureCameraMsaa(pipeline.cameraCanvas.width, pipeline.cameraCanvas.height)
     const msaaView = pipeline.msaa.cameraMsaaTex!.createView()
     const canvasView = pipeline.cameraContext.getCurrentTexture().createView()
-    const hasGrid = quadGridInstanceCount > 0
-
-    // Pass 1: Base → MSAA (clear + store, resolve to canvas if no grid follows)
+    // Pass 1: Base → MSAA (clear + store; grid pass resolves)
     const baseAttach: ColorAttachment = {
       view: msaaView,
       loadOp: 'clear',
-      storeOp: hasGrid ? 'store' : 'discard',
-      resolveTarget: hasGrid ? undefined : canvasView,
+      storeOp: 'store',
     }
     pipeline.render.grayscaleMsaa.encodeToCanvas(enc, baseAttach)
 
-    if (hasGrid) {
-      // Pass 2: Grid overlay → MSAA (load + discard + resolve)
-      const gridAttach: ColorAttachment = {
-        view: msaaView,
-        loadOp: 'load',
-        storeOp: 'discard',
-        resolveTarget: canvasView,
-      }
-      pipeline.msaa.grid.encodeToCanvas(enc, gridAttach, quadGridInstanceCount)
+    // Pass 2: Grid overlay → MSAA (instance count from drawIndirect, published post-compute)
+    const gridAttach: ColorAttachment = {
+      view: msaaView,
+      loadOp: 'load',
+      storeOp: 'discard',
+      resolveTarget: canvasView,
     }
+    pipeline.msaa.grid.encodeToCanvas(enc, gridAttach)
   } else if (displayMode === 'fittedLines') {
     pipeline.msaa.ensureCameraMsaa(pipeline.cameraCanvas.width, pipeline.cameraCanvas.height)
     const msaaView = pipeline.msaa.cameraMsaaTex!.createView()

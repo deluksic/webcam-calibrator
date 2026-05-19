@@ -1,5 +1,6 @@
 import type { TgpuRoot } from 'typegpu'
 
+import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import type { FrameSlot } from '@/gpu/frameSlotPool'
 
 import type { CameraPipeline } from './cameraPipeline'
@@ -18,7 +19,6 @@ export function encodeCameraCompute(
   video: HTMLVideoElement,
   threshold: number,
   slot?: FrameSlot,
-  voteInstanceCount: number = 0,
 ): void {
   pipeline.ingest.encodeIngest(enc, root, video)
 
@@ -41,12 +41,11 @@ export function encodeCameraCompute(
   computePass.end()
 
   if (slot !== undefined) {
-    if (voteInstanceCount > 0) {
-      pipeline.tagDecode.encodeVotePasses(enc, voteInstanceCount)
-    }
+    pipeline.publishQuadCount.encodePublish(enc)
+    pipeline.tagDecode.encodeVotePasses(enc, MAX_QUADS)
     const decodePass = enc.beginComputePass({ label: 'camera tag decode' })
-    pipeline.tagDecode.encodeDecode(decodePass, voteInstanceCount)
-    pipeline.hostQuadReadback.encodePack(decodePass, voteInstanceCount)
+    pipeline.tagDecode.encodeDecode(decodePass, MAX_QUADS)
+    pipeline.hostQuadReadback.encodePack(decodePass, MAX_QUADS)
     decodePass.end()
   }
 }

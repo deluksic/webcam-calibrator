@@ -1,10 +1,10 @@
 // Grid viz: homography clip + w for perspective-correct UV; degenerate H uses screenCorners (affine fallback).
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
-import { abs, floor, fract, length, min, max, dpdx, dpdy, mul } from 'typegpu/std'
+import { abs, atomicLoad, floor, fract, length, min, max, dpdx, dpdy, mul } from 'typegpu/std'
 
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
-import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import { MAX_QUADS, type QuadCountBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { PREMULTIPLIED_ALPHA_BLEND } from '@/gpu/pipelines/shared'
 
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
@@ -48,6 +48,54 @@ export const DECODED_TAG_ID_UNKNOWN = 0xffff_ffff
 export const DECODED_TAG_ID_DICT_MISS = 0xffff_fffe
 
 export const GridDataSchema = d.arrayOf(QuadDataGpu, MAX_INSTANCES)
+
+const ActiveQuadCountSchema = d.arrayOf(d.u32, 1)
+
+export const GridDrawIndirectParams = d.struct({
+  vertexCount: d.u32,
+  instanceCount: d.u32,
+  firstVertex: d.u32,
+  firstInstance: d.u32,
+})
+
+/** Publish edge-cluster quad count to tag-decode + grid drawIndirect (same encoder, post-compute). */
+export function createQuadCountPublishStage(
+  root: TgpuRoot,
+  edgeQuadCount: QuadCountBuffer,
+  activeQuadCountBuf: ReturnType<TgpuRoot['createBuffer']>,
+  drawIndirectBuf: ReturnType<TgpuRoot['createBuffer']>,
+) {
+  const publishLayout = tgpu.bindGroupLayout({
+    edgeQuadCount: { storage: d.arrayOf(d.atomic(d.u32), 1), access: 'mutable' },
+    activeQuadCount: { storage: ActiveQuadCountSchema, access: 'mutable' },
+    drawIndirect: { storage: GridDrawIndirectParams, access: 'mutable' },
+  })
+  const publishKernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [1, 1, 1],
+  })((input) => {
+    'use gpu'
+    if (input.gid.x !== d.u32(0)) {
+      return
+    }
+    const n = min(atomicLoad(publishLayout.$.edgeQuadCount[d.u32(0)]!), d.u32(MAX_QUADS))
+    publishLayout.$.activeQuadCount[d.u32(0)] = n
+    publishLayout.$.drawIndirect.instanceCount = n
+  })
+  const publishPipeline = root.createComputePipeline({ compute: publishKernel })
+  const publishBindGroup = root.createBindGroup(publishLayout, {
+    edgeQuadCount: edgeQuadCount as never,
+    activeQuadCount: activeQuadCountBuf as never,
+    drawIndirect: drawIndirectBuf as never,
+  })
+  return {
+    encodePublish(enc: GPUCommandEncoder) {
+      const pass = enc.beginComputePass({ label: 'publish quad count' })
+      publishPipeline.with(pass).with(publishBindGroup).dispatchWorkgroups(1)
+      pass.end()
+    },
+  }
+}
 
 /** 0 = legacy RGB fail tint; 1 = interrogate FAIL_INSUFFICIENT_EDGES (red hit / black miss); 2 = interrogate FAIL_LINE_FIT_FAILED (blue). */
 export type GridVizFailInterrogateMode = 0 | 1 | 2
@@ -249,24 +297,26 @@ export function createGridVizStage(
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
-  options?: { sampleCount?: number; quadCornersBuffer?: ReturnType<typeof root.createBuffer> },
+  options?: {
+    sampleCount?: number
+    quadCornersBuffer?: ReturnType<typeof root.createBuffer>
+    drawIndirectBuf?: ReturnType<typeof root.createBuffer>
+  },
 ) {
   const quadCornersBuffer = options?.quadCornersBuffer ?? root.createBuffer(GridDataSchema).$usage('storage')
+  const drawIndirectBuf =
+    options?.drawIndirectBuf ??
+    root.createBuffer(GridDrawIndirectParams).$usage('storage', 'indirect')
+  if (!options?.drawIndirectBuf) {
+    drawIndirectBuf.write({ vertexCount: 4, instanceCount: 0, firstVertex: 0, firstInstance: 0 })
+  }
   const { gridVizLayout } = createGridVizLayouts()
   const gridVizDebugModeBuffer = root.createBuffer(d.u32).$usage('uniform')
   gridVizDebugModeBuffer.write(0)
   const gridVizHideNonDecodedBuffer = root.createBuffer(d.u32).$usage('uniform')
   gridVizHideNonDecodedBuffer.write(0)
   const gridVizPipeline = createGridVizPipeline(root, gridVizLayout, width, height, presentationFormat, options)
-  const encodeToCanvas = (
-    enc: GPUCommandEncoder,
-    colorAttachment: ColorAttachment,
-    instanceCount: number = MAX_INSTANCES,
-    options?: { hideNonDecoded?: boolean },
-  ) => {
-    if (instanceCount <= 0) {
-      return
-    }
+  const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment, options?: { hideNonDecoded?: boolean }) => {
     gridVizHideNonDecodedBuffer.write(options?.hideNonDecoded ? 1 : 0)
     gridVizPipeline
       .with(enc)
@@ -278,10 +328,11 @@ export function createGridVizStage(
           hideNonDecoded: gridVizHideNonDecodedBuffer,
         }),
       )
-      .draw(4, instanceCount)
+      .drawIndirect(drawIndirectBuf as never)
   }
   return {
     quadCornersBuffer,
+    drawIndirectBuf,
     gridVizLayout,
     gridVizDebugModeBuffer,
     gridVizHideNonDecodedBuffer,

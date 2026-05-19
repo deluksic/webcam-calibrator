@@ -18,7 +18,7 @@ import {
   MAX_FLAT_EDGES,
 } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { createEdgeLineFitStage } from '@/gpu/pipelines/edgeLineFitPipeline'
-import { createGridVizStage } from '@/gpu/pipelines/gridVizPipeline'
+import { createGridVizStage, createQuadCountPublishStage } from '@/gpu/pipelines/gridVizPipeline'
 import { createHistogramStage, HIST_HEIGHT, HIST_WIDTH } from '@/gpu/pipelines/histogramPipelines'
 import { createLabelVizPipeline } from '@/gpu/pipelines/labelVizPipeline'
 import { createPointerJumpLabeling } from '@/gpu/pipelines/pointerJumpPipeline'
@@ -107,6 +107,7 @@ export function createCameraPipeline(
   const gridMsaa = createGridVizStage(root, width, height, presentationFormat, {
     sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
     quadCornersBuffer: grid.quadCornersBuffer,
+    drawIndirectBuf: grid.drawIndirectBuf,
   })
   const grayTexView = ingest.grayTex.createView(d.texture2d(d.f32))
   const quadHomography = createQuadCornerHomographyStage(root, {
@@ -122,6 +123,12 @@ export function createCameraPipeline(
     width,
     height,
   })
+  const publishQuadCount = createQuadCountPublishStage(
+    root,
+    edgeHistogram.quadCount,
+    tagDecode.activeQuadCountBuf,
+    grid.drawIndirectBuf,
+  )
   const hostQuadReadback = createHostQuadReadbackStage(root, grid.quadCornersBuffer)
   const reproj = createReprojectionOverlayStage(root, width, height, presentationFormat)
   const reprojMsaa = createReprojectionOverlayStage(root, width, height, presentationFormat, {
@@ -181,6 +188,7 @@ export function createCameraPipeline(
     lineFit,
     quadHomography,
     tagDecode,
+    publishQuadCount,
     hostQuadReadback,
     grid,
     reproj,

@@ -16,7 +16,7 @@ import { createEdgesPipeline } from '@/gpu/pipelines/edgesPipeline'
 import { createFilteredRenderPipeline } from '@/gpu/pipelines/filteredRenderPipeline'
 import { createGrayStage } from '@/gpu/pipelines/grayPipeline'
 import { createGrayRenderPipeline, GrayRenderParams } from '@/gpu/pipelines/grayRenderPipeline'
-import { createGridVizStage } from '@/gpu/pipelines/gridVizPipeline'
+import { createGridVizStage, createQuadCountPublishStage } from '@/gpu/pipelines/gridVizPipeline'
 import { createHistogramStage, HIST_HEIGHT, HIST_WIDTH } from '@/gpu/pipelines/histogramPipelines'
 import {
   createLabelVizPipeline,
@@ -146,6 +146,7 @@ export function createGradientProfilePipeline(
   const gridMsaa = createGridVizStage(root, width, height, presentationFormat, {
     sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
     quadCornersBuffer: grid.quadCornersBuffer,
+    drawIndirectBuf: grid.drawIndirectBuf,
   })
   const grayTexView = ingest.grayTex.createView(d.texture2d(d.f32))
   const quadHomography = createQuadCornerHomographyStage(root, {
@@ -161,6 +162,12 @@ export function createGradientProfilePipeline(
     width,
     height,
   })
+  const publishQuadCount = createQuadCountPublishStage(
+    root,
+    edgeHistogram.quadCount,
+    tagDecode.activeQuadCountBuf,
+    grid.drawIndirectBuf,
+  )
   const tagHistContext = tagHistCanvas
     ? root.configureContext({ canvas: tagHistCanvas, alphaMode: 'premultiplied' })
     : undefined
@@ -291,6 +298,7 @@ export function createGradientProfilePipeline(
     lineFit,
     quadHomography,
     tagDecode,
+    publishQuadCount,
     grid,
     profile,
     profilePlot,

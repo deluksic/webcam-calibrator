@@ -71,12 +71,7 @@ export function encodePresentNonGrid(
  * All layers render to a shared 4x MSAA texture. Only the final pass resolves
  * to the canvas so the multisampled content is preserved across passes.
  */
-export function encodeGridPresent(
-  enc: GPUCommandEncoder,
-  pipeline: CameraPipeline,
-  timeSec: number,
-  gridInstanceCount: number,
-): void {
+export function encodeGridPresent(enc: GPUCommandEncoder, pipeline: CameraPipeline, timeSec: number): void {
   pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 1 })
 
   pipeline.msaa.ensureMsaa(pipeline.canvas.width, pipeline.canvas.height)
@@ -84,22 +79,19 @@ export function encodeGridPresent(
   const canvasView = pipeline.context.getCurrentTexture().createView()
 
   const reprojN = pipeline.reproj.reprojOverlayDrawState.instanceCount
-  const hasOverlays = gridInstanceCount > 0 || reprojN > 0
-  const hasGrid = gridInstanceCount > 0
 
-  // Pass 1: Base layer → MSAA (clear + store, no resolve)
+  // Pass 1: Base layer → MSAA (clear + store; grid or reproj pass resolves)
   {
     const attach: ColorAttachment = {
       view: msaaView,
       loadOp: 'clear',
-      storeOp: hasOverlays ? 'store' : 'discard',
-      resolveTarget: hasOverlays ? undefined : canvasView,
+      storeOp: 'store',
     }
     pipeline.render.grayscaleMsaa.encodeToCanvas(enc, attach)
   }
 
-  // Pass 2: Grid overlay → MSAA (load + store, no resolve)
-  if (hasGrid) {
+  // Pass 2: Grid overlay → MSAA (drawIndirect instance count from publish pass)
+  {
     const gridFinal = reprojN === 0
     const attach: ColorAttachment = {
       view: msaaView,
@@ -108,7 +100,7 @@ export function encodeGridPresent(
       resolveTarget: gridFinal ? canvasView : undefined,
     }
     try {
-      pipeline.msaa.grid.encodeToCanvas(enc, attach, gridInstanceCount, { hideNonDecoded: true })
+      pipeline.msaa.grid.encodeToCanvas(enc, attach, { hideNonDecoded: true })
     } catch (e) {
       console.error('[encodeGridPresent] gridViz failed:', e)
     }

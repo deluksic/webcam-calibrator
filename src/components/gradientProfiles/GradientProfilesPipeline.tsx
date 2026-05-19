@@ -43,7 +43,6 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
   const [tagHistCanvas, setTagHistCanvas] = createSignal<HTMLCanvasElement>()
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement>()
   const [threshold, setThreshold] = createSignal(0, { ownedWrite: true })
-  let lastQuadCount = 0
 
   const videoElement = createMemo(async () => {
     const canvas = cameraCanvas()
@@ -162,13 +161,12 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         const shouldRunCompute = !props.frozen || lastFrozenComputeMode !== mode
         if (shouldRunCompute) {
           encodeGradientProfileCompute(enc, gNow, pip, video, threshold(), {
-            quadCount: lastQuadCount,
             displayMode: mode,
             skipIngest: props.frozen,
           })
           lastFrozenComputeMode = props.frozen ? mode : undefined
         }
-        if (props.displayMode === 'undistort') {
+        if (mode === 'undistort') {
           const ud = props.undistortParams?.()
           writeUndistortUniform(pip.undistortUniform, {
             K: ud?.k ?? { fx: 1, fy: 1, cx: 0, cy: 0 },
@@ -177,7 +175,7 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
             height,
           })
         }
-        encodeGradientProfileCameraPresent(enc, gNow, pip, props.displayMode, performance.now() * 0.001, lastQuadCount)
+        encodeGradientProfileCameraPresent(enc, gNow, pip, mode, performance.now() * 0.001)
         if (pip.orientHistViz) {
           encodeOrientHistPresent(enc, pip)
         }
@@ -197,12 +195,6 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
           if (!disposed) {
             const n = Array.isArray(v) ? (v[0] ?? 0) : Number(v)
             props.onValidEdgeCount?.(n)
-          }
-        })
-
-        void pip.edgeHistogram.quadCount.read().then((v) => {
-          if (!disposed) {
-            lastQuadCount = Array.isArray(v) ? (v[0] ?? 0) : Number(v)
           }
         })
 
