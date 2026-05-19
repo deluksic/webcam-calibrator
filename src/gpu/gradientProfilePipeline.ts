@@ -146,6 +146,7 @@ export function createGradientProfilePipeline(
     gray.buffer,
     nms.filteredBuffer,
     edgeHistogram.packedEdgeLabels,
+    edgeHistogram.labelToQuadId,
     lineFit.lineOut,
   )
   const profilePlot = createEdgeProfilePlotStage(root, presentationFormat)

@@ -6,6 +6,7 @@ import { atomicAdd, atomicLoad, atomicStore, length, select, sqrt } from 'typegp
 import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
 import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
+import type { LabelToQuadIdBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import {
   EdgeLineEntry,
   PROFILE_BUCKET_COUNT,
@@ -48,6 +49,7 @@ function createProfileLayouts() {
     grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
     edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
+    labelToQuadId: { storage: d.arrayOf(d.u32), access: 'readonly' },
     lineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
     profileBuckets: { storage: d.arrayOf(ProfileBucketAtomic), access: 'mutable' },
   })
@@ -66,6 +68,7 @@ export function createEdgeProfileStage(
   grayBuffer: GrayTexToBufferBindResources['grayBuffer'],
   filteredBuffer: EdgeFilterBindResources['filteredBuffer'],
   compactLabels: CompactLabelMapBuffer,
+  labelToQuadId: LabelToQuadIdBuffer,
   lineOut: EdgeLineOutBuffer,
 ) {
   const bucketCount = maxComponents * BUCKETS_PER_LABEL
@@ -87,6 +90,7 @@ export function createEdgeProfileStage(
     grayBuffer,
     edgeBuffer: filteredBuffer,
     compactLabels,
+    labelToQuadId,
     lineOut,
     profileBuckets,
   })
@@ -173,9 +177,16 @@ function createProfileAccumPipeline(
         if (nx >= d.i32(0) && nx < fw && ny >= d.i32(0) && ny < fh) {
           const nIdx = d.u32(ny * fw + nx)
           if (length(accumLayout.$.edgeBuffer[nIdx]!) > d.f32(0)) {
-            const label = accumLayout.$.compactLabels[nIdx]!
-            if (label !== d.u32(COMPONENT_LABEL_INVALID)) {
-              const line = accumLayout.$.lineOut[label]!
+            const packedLabel = accumLayout.$.compactLabels[nIdx]!
+            if (packedLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
+              const edgeId = packedLabel % d.u32(4)
+              const lblId = packedLabel / d.u32(4)
+              const quadId = accumLayout.$.labelToQuadId[lblId]!
+              if (quadId === d.u32(COMPONENT_LABEL_INVALID)) {
+                continue
+              }
+              const flatIdx = quadId * d.u32(4) + edgeId
+              const line = accumLayout.$.lineOut[flatIdx]!
               if (line.valid !== d.u32(0)) {
                 const gLen = sqrt(line.sumGx * line.sumGx + line.sumGy * line.sumGy)
                 if (gLen >= d.f32(1e-8)) {
@@ -186,9 +197,9 @@ function createProfileAccumPipeline(
                   const pick =
                     bestLabel === d.u32(COMPONENT_LABEL_INVALID) ||
                     absS < bestAbsS ||
-                    (absS === bestAbsS && label < bestLabel)
+                    (absS === bestAbsS && packedLabel < bestLabel)
                   if (pick) {
-                    bestLabel = label
+                    bestLabel = packedLabel
                     bestAbsS = absS
                     bestSumGx = line.sumGx
                     bestSumGy = line.sumGy
