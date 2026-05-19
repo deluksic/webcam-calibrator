@@ -392,6 +392,12 @@ function createAssignEdgesPipeline(
       return
     }
 
+    const quadId = layout.$.labelToQuadId[labelId]!
+    if (quadId === d.u32(COMPONENT_LABEL_INVALID)) {
+      layout.$.packedEdgeLabels[idx] = d.u32(COMPONENT_LABEL_INVALID)
+      return
+    }
+
     const cluster = layout.$.labelClusters[labelId]!
     if (cluster.peakCount === d.u32(0)) {
       layout.$.packedEdgeLabels[idx] = d.u32(COMPONENT_LABEL_INVALID)
@@ -404,7 +410,7 @@ function createAssignEdgesPipeline(
       return
     }
 
-    layout.$.packedEdgeLabels[idx] = labelId * d.u32(MAX_EDGES_PER_LABEL) + edgeId
+    layout.$.packedEdgeLabels[idx] = quadId * d.u32(MAX_EDGES_PER_LABEL) + edgeId
   })
   return root.createComputePipeline({ compute: kernel })
 }
