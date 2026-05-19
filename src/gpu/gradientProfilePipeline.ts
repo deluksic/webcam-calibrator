@@ -267,6 +267,7 @@ export function createGradientProfilePipeline(
 
   return {
     cameraContext,
+    cameraCanvas,
     orientHistContext,
     profileContext,
     histContext,

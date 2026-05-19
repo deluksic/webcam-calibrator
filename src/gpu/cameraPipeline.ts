@@ -161,6 +161,7 @@ export function createCameraPipeline(
 
   return {
     context,
+    canvas,
     histContext,
     width,
     height,

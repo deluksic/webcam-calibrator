@@ -79,9 +79,10 @@ export function encodeGridPresent(
 ): void {
   pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 1 })
 
-  pipeline.msaa.ensureMsaa(pipeline.width, pipeline.height)
+  pipeline.msaa.ensureMsaa(pipeline.canvas.width, pipeline.canvas.height)
   const msaaView = pipeline.msaa.msaaColorTex!.createView()
-  const canvasView = pipeline.context.getCurrentTexture().createView()
+  const gpuCtx = pipeline.canvas.getContext('webgpu')!
+  const canvasView = gpuCtx.getCurrentTexture().createView()
 
   const reprojN = pipeline.reproj.reprojOverlayDrawState.instanceCount
   const hasOverlays = gridInstanceCount > 0 || reprojN > 0

@@ -19,30 +19,36 @@ export function encodeGradientProfileCameraPresent(
   })
 
   if (displayMode === 'quadGrid') {
-    pipeline.msaa.ensureCameraMsaa(pipeline.width, pipeline.height)
+    pipeline.msaa.ensureCameraMsaa(pipeline.cameraCanvas.width, pipeline.cameraCanvas.height)
     const msaaView = pipeline.msaa.cameraMsaaTex!.createView()
-    const canvasView = pipeline.cameraContext.getCurrentTexture().createView()
+    const gpuCtx = pipeline.cameraCanvas.getContext('webgpu')!
+    const canvasView = gpuCtx.getCurrentTexture().createView()
+    const hasGrid = quadGridInstanceCount > 0
 
-    // Pass 1: Base → MSAA (clear + store, no resolve)
+    // Pass 1: Base → MSAA (clear + store, resolve to canvas if no grid follows)
     const baseAttach: ColorAttachment = {
       view: msaaView,
       loadOp: 'clear',
-      storeOp: 'store',
+      storeOp: hasGrid ? 'store' : 'discard',
+      resolveTarget: hasGrid ? undefined : canvasView,
     }
     pipeline.render.grayscaleMsaa.encodeToCanvas(enc, baseAttach)
 
-    // Pass 2: Grid overlay → MSAA (load + discard + resolve)
-    const gridAttach: ColorAttachment = {
-      view: msaaView,
-      loadOp: 'load',
-      storeOp: 'discard',
-      resolveTarget: canvasView,
+    if (hasGrid) {
+      // Pass 2: Grid overlay → MSAA (load + discard + resolve)
+      const gridAttach: ColorAttachment = {
+        view: msaaView,
+        loadOp: 'load',
+        storeOp: 'discard',
+        resolveTarget: canvasView,
+      }
+      pipeline.msaa.grid.encodeToCanvas(enc, gridAttach, quadGridInstanceCount)
     }
-    pipeline.msaa.grid.encodeToCanvas(enc, gridAttach, quadGridInstanceCount)
   } else if (displayMode === 'fittedLines') {
-    pipeline.msaa.ensureCameraMsaa(pipeline.width, pipeline.height)
+    pipeline.msaa.ensureCameraMsaa(pipeline.cameraCanvas.width, pipeline.cameraCanvas.height)
     const msaaView = pipeline.msaa.cameraMsaaTex!.createView()
-    const canvasView = pipeline.cameraContext.getCurrentTexture().createView()
+    const gpuCtx = pipeline.cameraCanvas.getContext('webgpu')!
+    const canvasView = gpuCtx.getCurrentTexture().createView()
 
     // Pass 1: Base → MSAA (clear + store, no resolve)
     const baseAttach: ColorAttachment = {

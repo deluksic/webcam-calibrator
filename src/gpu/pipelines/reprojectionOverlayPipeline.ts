@@ -259,10 +259,12 @@ export function createReprojectionOverlayStage(
     if (instanceCount <= 0) {
       return
     }
-    const att = colorAttachment
-    reprojOriginalPipeline.with(enc).withColorAttachment(att).with(reprojOverlayBindGroup).draw(4, instanceCount)
-    reprojTargetPipeline.with(enc).withColorAttachment(att).with(reprojOverlayBindGroup).draw(4, instanceCount)
-    reprojLinesPipeline.with(enc).withColorAttachment(att).with(reprojOverlayBindGroup).draw(2, instanceCount)
+    // Only the last sub-pass resolves; earlier passes keep MSAA content stored.
+    const keep: ColorAttachment = { ...colorAttachment, storeOp: 'store', resolveTarget: undefined }
+    const last: ColorAttachment = { ...colorAttachment, loadOp: 'load', storeOp: 'discard' }
+    reprojOriginalPipeline.with(enc).withColorAttachment(keep).with(reprojOverlayBindGroup).draw(4, instanceCount)
+    reprojTargetPipeline.with(enc).withColorAttachment(keep).with(reprojOverlayBindGroup).draw(4, instanceCount)
+    reprojLinesPipeline.with(enc).withColorAttachment(last).with(reprojOverlayBindGroup).draw(2, instanceCount)
   }
   return {
     reprojOverlayBuffer,
