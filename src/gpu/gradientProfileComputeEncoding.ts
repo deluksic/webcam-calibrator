@@ -38,6 +38,7 @@ export function encodeGradientProfileCompute(
   pipeline.nms.encodeCompute(computePass)
   pipeline.pointerJump.encodeCompute(computePass)
   pipeline.compact.encodeCompute(computePass)
+  pipeline.boundaryFilter.encodeCompute(computePass)
   pipeline.edgeHistogram.encodeCompute(computePass)
   pipeline.lineRejects.encodeCompute(computePass)
   pipeline.orientHistViz?.encodePackCompute(computePass)

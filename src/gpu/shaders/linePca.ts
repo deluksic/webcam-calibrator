@@ -1,7 +1,7 @@
 import { d, tgpu } from 'typegpu'
 import { abs, max, select, sqrt } from 'typegpu/std'
 
-export const PCA_ISOTROPY_MAX = 0.1
+export const PCA_ISOTROPY_MAX = 0.15
 
 export const LineSegmentEndpoints = d.struct({
   p0: d.vec2f,

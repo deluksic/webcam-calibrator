@@ -32,6 +32,7 @@ export function encodeCameraCompute(
   pipeline.nms.encodeCompute(computePass)
   pipeline.pointerJump.encodeCompute(computePass)
   pipeline.compact.encodeCompute(computePass)
+  pipeline.boundaryFilter.encodeCompute(computePass)
   if (slot !== undefined) {
     pipeline.edgeHistogram.encodeCompute(computePass)
     pipeline.lineFit.encodeCompute(computePass)

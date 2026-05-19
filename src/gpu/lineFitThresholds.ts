@@ -14,13 +14,13 @@ export const ORIENT_ASSIGN_MIN_ALIGN = 0.4
 /** Must match `ORIENT_PEAK_MIN_COUNT` — peaks are accepted at 6 but accum used to require 12. */
 export const LINE_MIN_PEAK_HIST_COUNT = ORIENT_PEAK_MIN_COUNT
 /** Min edge pixels assigned to a peak slot before coarse/TLS fit. */
-export const LINE_MIN_SLOT_COUNT = 6
+export const LINE_MIN_SLOT_COUNT = 4
 /** Perpendicular distance (px) for inlier gate and refine pass. */
 export const LINE_INLIER_DIST_PX = 2.5
 /** Min fraction of assigned slot pixels that pass the inlier gate after refit. */
 export const LINE_MIN_INLIER_RATIO = 0.7
 /** Min inlier pixels required before TLS refit (after coarse fit + gate). */
-export const LINE_MIN_REFINE_INLIERS = 12
+export const LINE_MIN_REFINE_INLIERS = 8
 /** Fraction trimmed from each end of along-edge extent (corner pull). */
 export const LINE_EXTENT_TRIM_FRAC = 0.05
 

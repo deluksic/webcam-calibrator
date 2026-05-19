@@ -9,6 +9,7 @@ import { createEdgeFilterStage } from '@/gpu/pipelines/edgeFilterPipeline'
 import { createEdgeFittedLineOverlayStage } from '@/gpu/pipelines/edgeFittedLineOverlayPipeline'
 import { createEdgeHistogramClusterStage, MAX_FLAT_EDGES } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { createEdgeLineFitStage } from '@/gpu/pipelines/edgeLineFitPipeline'
+import { createBoundaryFilterStage } from '@/gpu/pipelines/boundaryFilterPipeline'
 import { createEdgeProfileStage } from '@/gpu/pipelines/edgeProfilePipeline'
 import { createEdgeProfilePlotStage } from '@/gpu/pipelines/edgeProfilePlotPipeline'
 import { createEdgesPipeline } from '@/gpu/pipelines/edgesPipeline'
@@ -92,6 +93,13 @@ export function createGradientProfilePipeline(
   const histogram = createHistogramStage(root, width, height, sobel.buffer, presentationFormat)
   const pointerJump = createPointerJumpLabeling(root, width, height, nms.filteredBuffer)
   const compact = createCompactLabelStage(root, width, height, MAX_EXTENT_COMPONENTS, pointerJump.pointerJumpBuffer0)
+  const boundaryFilter = createBoundaryFilterStage(
+    root,
+    width,
+    height,
+    MAX_EXTENT_COMPONENTS,
+    compact.compactLabelBuffer,
+  )
   const edgeHistogram = createEdgeHistogramClusterStage(
     root,
     width,
@@ -238,6 +246,7 @@ export function createGradientProfilePipeline(
     histogram,
     pointerJump,
     compact,
+    boundaryFilter,
     edgeHistogram,
     orientHistViz,
     tagHistContext,

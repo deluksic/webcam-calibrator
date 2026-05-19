@@ -3,6 +3,7 @@ import { d } from 'typegpu'
 
 import { createFrameSlotPool } from '@/gpu/frameSlotPool'
 import type { FrameSlotPool } from '@/gpu/frameSlotPool'
+import { createBoundaryFilterStage } from '@/gpu/pipelines/boundaryFilterPipeline'
 import { createCompactLabelStage } from '@/gpu/pipelines/compactLabelPipeline'
 import { createCopyIngest } from '@/gpu/pipelines/copyPipeline'
 import { createEdgeFilterStage } from '@/gpu/pipelines/edgeFilterPipeline'
@@ -57,6 +58,13 @@ export function createCameraPipeline(
   const histogram = createHistogramStage(root, width, height, sobel.buffer, presentationFormat)
   const pointerJump = createPointerJumpLabeling(root, width, height, nms.filteredBuffer)
   const compact = createCompactLabelStage(root, width, height, MAX_EXTENT_COMPONENTS, pointerJump.pointerJumpBuffer0)
+  const boundaryFilter = createBoundaryFilterStage(
+    root,
+    width,
+    height,
+    MAX_EXTENT_COMPONENTS,
+    compact.compactLabelBuffer,
+  )
   const edgeHistogram = createEdgeHistogramClusterStage(
     root,
     width,
@@ -132,6 +140,7 @@ export function createCameraPipeline(
     histogram,
     pointerJump,
     compact,
+    boundaryFilter,
     edgeHistogram,
     lineFit,
     quadHomography,
