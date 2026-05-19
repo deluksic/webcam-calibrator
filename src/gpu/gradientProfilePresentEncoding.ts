@@ -21,8 +21,7 @@ export function encodeGradientProfileCameraPresent(
   if (displayMode === 'quadGrid') {
     pipeline.msaa.ensureCameraMsaa(pipeline.cameraCanvas.width, pipeline.cameraCanvas.height)
     const msaaView = pipeline.msaa.cameraMsaaTex!.createView()
-    const gpuCtx = pipeline.cameraCanvas.getContext('webgpu')!
-    const canvasView = gpuCtx.getCurrentTexture().createView()
+    const canvasView = pipeline.cameraContext.getCurrentTexture().createView()
     const hasGrid = quadGridInstanceCount > 0
 
     // Pass 1: Base → MSAA (clear + store, resolve to canvas if no grid follows)
@@ -47,8 +46,7 @@ export function encodeGradientProfileCameraPresent(
   } else if (displayMode === 'fittedLines') {
     pipeline.msaa.ensureCameraMsaa(pipeline.cameraCanvas.width, pipeline.cameraCanvas.height)
     const msaaView = pipeline.msaa.cameraMsaaTex!.createView()
-    const gpuCtx = pipeline.cameraCanvas.getContext('webgpu')!
-    const canvasView = gpuCtx.getCurrentTexture().createView()
+    const canvasView = pipeline.cameraContext.getCurrentTexture().createView()
 
     // Pass 1: Base → MSAA (clear + store, no resolve)
     const baseAttach: ColorAttachment = {
