@@ -111,7 +111,7 @@ function createHistResetPipeline(
     }
 
     const slot = layout.$.labelClusters[labelId]!
-    for (const b of tgpu.unroll(std.range(0, ORIENT_HIST_BINS))) {
+    for (const b of std.range(0, ORIENT_HIST_BINS)) {
       atomicStore(slot.orientationHistogram[d.u32(b)]!, d.u32(0))
     }
     for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
@@ -189,7 +189,7 @@ function createFindPeaksPipeline(
       let bestCount = d.u32(0)
       const peakCount = slot.peakCount
 
-      for (const b of tgpu.unroll(std.range(0, ORIENT_HIST_BINS))) {
+      for (const b of std.range(0, ORIENT_HIST_BINS)) {
         const bi = d.u32(b)
         const binCount = atomicLoad(slot.orientationHistogram[bi]!)
         if (binCount >= minPeakCount) {
@@ -499,6 +499,7 @@ export function createEdgeHistogramClusterStage(
     labelClusters,
     labelLineOut: labelLineFit.labelLineOut,
     labelLineReduce: labelLineFit.labelLineReduce,
+    labelInlierStats: labelLineFit.labelInlierStats,
     quadPeakEdge,
     labelToQuadId,
     labelQuadReject,

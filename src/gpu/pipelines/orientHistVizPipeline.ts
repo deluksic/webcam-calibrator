@@ -2,7 +2,7 @@
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { common } from 'typegpu'
-import { clamp, floor, max } from 'typegpu/std'
+import { clamp, floor, max, min } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import {
@@ -71,7 +71,8 @@ function createOrientHistPackPipeline(root: TgpuRoot, maxQuads: number) {
       return
     }
 
-    const quads = orientHistPackLayout.$.quadCount[d.u32(0)]!
+    const quadsRaw = orientHistPackLayout.$.quadCount[d.u32(0)]!
+    const quads = min(quadsRaw, d.u32(maxQuads))
     orientHistPackLayout.$.rowCount[d.u32(0)] = quads
 
     for (let quadId = d.u32(0); quadId < quads; quadId = quadId + d.u32(1)) {
@@ -135,8 +136,8 @@ function createOrientHistRenderPipeline(root: TgpuRoot, presentationFormat: GPUT
     const bin = d.u32(localX / pixelScale)
 
     let maxCount = d.u32(0)
-    for (const b of tgpu.unroll(std.range(0, ORIENT_HIST_BINS))) {
-      const c = cluster.orientationHistogram[d.u32(b)]!
+    for (const b of std.range(0, ORIENT_HIST_BINS)) {
+      const c = cluster.orientationHistogram[b]!
       maxCount = max(maxCount, c)
     }
     if (maxCount === d.u32(0)) {

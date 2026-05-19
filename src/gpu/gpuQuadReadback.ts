@@ -2,11 +2,7 @@ import type { TgpuRoot } from 'typegpu'
 
 import type { CameraPipeline } from '@/gpu/cameraPipeline'
 import type { DetectedQuad } from '@/gpu/detectedQuad'
-import {
-  DECODED_TAG_ID_DICT_MISS,
-  DECODED_TAG_ID_UNKNOWN,
-  MAX_DETECTED_TAGS,
-} from '@/gpu/pipelines/gridVizPipeline'
+import { DECODED_TAG_ID_DICT_MISS, DECODED_TAG_ID_UNKNOWN, MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
 import type { HostQuadReadback } from '@/gpu/pipelines/hostQuadReadbackPipeline'
 import { quadAreaPx } from '@/lib/calibrationQuality'
 import type { Corners } from '@/lib/geometry'
@@ -18,9 +14,15 @@ const MODULES_PER_QUAD = 36
 
 /** GPU classify buffer uses 0=black, 1=white, 2=weak, 3=tie. */
 function gpuPatternCellToHost(cell: number): TagPattern[number] {
-  if (cell === 1) return TAG_MODULE_CELL.white
-  if (cell === 2) return TAG_MODULE_CELL.weak
-  if (cell === 3) return TAG_MODULE_CELL.tie
+  if (cell === 1) {
+    return TAG_MODULE_CELL.white
+  }
+  if (cell === 2) {
+    return TAG_MODULE_CELL.weak
+  }
+  if (cell === 3) {
+    return TAG_MODULE_CELL.tie
+  }
   return TAG_MODULE_CELL.black
 }
 

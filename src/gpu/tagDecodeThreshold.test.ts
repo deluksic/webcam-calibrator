@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   TAG_DECODE_HIST_BINS,
+  TAG_DECODE_MIN_PEAK_BIN_SEP,
   TAG_DECODE_PEAK_GAP_FRAC,
   classifyModuleFromVoteCounts,
   shortestStripEdgePx,
@@ -9,7 +10,80 @@ import {
   tagDecodeMinVoteTotal,
 } from '@/gpu/tagDecodeThresholds'
 
+/** Mirrors GPU `findTagDecodeHistPeaks` in `tagDecodeHistPeaks.ts` — test-only, not used at runtime. */
+function findTagDecodeHistPeaks(
+  hist: readonly number[],
+  bins: number = TAG_DECODE_HIST_BINS,
+  minSep: number = TAG_DECODE_MIN_PEAK_BIN_SEP,
+) {
+  const lastBin = bins - 1
+  const blackSearchEnd = lastBin - minSep
+
+  let blackPeak = 0
+  let blackVal = 0
+  for (let bu = 0; bu <= blackSearchEnd; bu++) {
+    const v = hist[bu] ?? 0
+    const prev = bu > 0 ? (hist[bu - 1] ?? 0) : 0
+    const next = bu < blackSearchEnd ? (hist[bu + 1] ?? 0) : 0
+    const isPeak = bu === 0 ? v >= next : bu === blackSearchEnd ? v >= prev : v >= prev && v >= next
+    if (isPeak && v > blackVal) {
+      blackVal = v
+      blackPeak = bu
+    }
+  }
+  if (blackVal === 0) {
+    for (let bu = 0; bu <= blackSearchEnd; bu++) {
+      const v = hist[bu] ?? 0
+      if (v > blackVal) {
+        blackVal = v
+        blackPeak = bu
+      }
+    }
+  }
+
+  let whitePeak = 0
+  let whiteVal = 0
+  const whiteSearchStart = blackPeak + minSep + 1
+  for (let bu = whiteSearchStart; bu <= lastBin; bu++) {
+    const v = hist[bu] ?? 0
+    const prev = hist[bu - 1] ?? 0
+    const next = bu < lastBin ? (hist[bu + 1] ?? 0) : 0
+    const isPeak = bu === lastBin ? v >= prev : v >= prev && v >= next
+    if (isPeak && v > whiteVal) {
+      whiteVal = v
+      whitePeak = bu
+    }
+  }
+
+  return { blackPeak, whitePeak, blackVal, whiteVal }
+}
+
 describe('tagDecodeThresholds', () => {
+  it('findTagDecodeHistPeaks treats saturated last bin as white, not black', () => {
+    const hist = Array.from<number>({ length: TAG_DECODE_HIST_BINS }).fill(0)
+    hist[5] = 80
+    hist[31] = 1000
+    const peaks = findTagDecodeHistPeaks(hist)
+    expect(peaks.blackPeak).toBe(5)
+    expect(peaks.whitePeak).toBe(31)
+    expect(peaks.blackVal).toBe(80)
+    expect(peaks.whiteVal).toBe(1000)
+  })
+
+  it('findTagDecodeHistPeaks finds separated interior peaks', () => {
+    const hist = Array.from<number>({ length: TAG_DECODE_HIST_BINS }).fill(0)
+    hist[3] = 40
+    hist[4] = 120
+    hist[5] = 50
+    hist[27] = 90
+    hist[28] = 220
+    hist[29] = 100
+    const peaks = findTagDecodeHistPeaks(hist)
+    expect(peaks.blackPeak).toBe(4)
+    expect(peaks.whitePeak).toBe(28)
+    expect(peaks.whitePeak - peaks.blackPeak).toBeGreaterThanOrEqual(TAG_DECODE_MIN_PEAK_BIN_SEP)
+  })
+
   it('deadband leaves middle 25% of peak luma span undecided', () => {
     const blackBin = 4
     const whiteBin = 28

@@ -12,8 +12,8 @@ import {
   PROFILE_NEIGHBORHOOD_HALF,
   type EdgeLineOutBuffer,
 } from '@/gpu/pipelines/edgeLineFitPipeline'
-import { lineDirDot } from '@/gpu/shaders/linePca'
 import type { GrayTexToBufferBindResources } from '@/gpu/pipelines/grayPipeline'
+import { lineDirDot } from '@/gpu/shaders/linePca'
 
 export { PROFILE_BUCKET_COUNT, PROFILE_NEIGHBORHOOD_HALF } from '@/gpu/pipelines/edgeLineFitPipeline'
 
@@ -139,8 +139,8 @@ function createProfileResetPipeline(
 function createProfileAccumPipeline(
   root: TgpuRoot,
   accumLayout: ReturnType<typeof createProfileLayouts>['accumLayout'],
-  width: number,
-  height: number,
+  _width: number,
+  _height: number,
 ) {
   const halfW = PROFILE_NEIGHBORHOOD_HALF
   const bucketCountF = d.f32(PROFILE_BUCKET_COUNT)
@@ -170,8 +170,8 @@ function createProfileAccumPipeline(
     let bestSumGx = d.f32(0)
     let bestSumGy = d.f32(0)
 
-    for (const dy of tgpu.unroll(std.range(-2, 3))) {
-      for (const dx of tgpu.unroll(std.range(-2, 3))) {
+    for (const dy of std.range(-2, 3)) {
+      for (const dx of std.range(-2, 3)) {
         const nx = x + dx
         const ny = y + dy
         if (nx >= d.i32(0) && nx < fw && ny >= d.i32(0) && ny < fh) {

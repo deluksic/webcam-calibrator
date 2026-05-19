@@ -1,4 +1,4 @@
-/** Tag decode (luma vote + dictionary) thresholds — shared CPU/GPU. */
+/** Tag decode (luma vote + dictionary) thresholds — shared constants and CPU helpers for tests. */
 
 import { MIN_PEAK_BIN_SEPARATION, ORIENT_HIST_BINS } from '@/gpu/lineFitThresholds'
 

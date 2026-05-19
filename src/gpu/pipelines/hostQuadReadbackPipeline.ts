@@ -3,11 +3,7 @@ import type { TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 
 import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
-import {
-  GridDataSchema,
-  QuadDebug,
-  type GridVizQuadBuffer,
-} from '@/gpu/pipelines/gridVizPipeline'
+import { GridDataSchema, QuadDebug, type GridVizQuadBuffer } from '@/gpu/pipelines/gridVizPipeline'
 
 const WORKGROUP_SIZE = 64
 
@@ -33,10 +29,7 @@ function createHostQuadPackLayouts() {
   return { layout }
 }
 
-function createHostQuadPackPipeline(
-  root: TgpuRoot,
-  layout: ReturnType<typeof createHostQuadPackLayouts>['layout'],
-) {
+function createHostQuadPackPipeline(root: TgpuRoot, layout: ReturnType<typeof createHostQuadPackLayouts>['layout']) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [WORKGROUP_SIZE, 1, 1],
@@ -71,7 +64,9 @@ export function createHostQuadReadbackStage(root: TgpuRoot, quadDataBuffer: Grid
 
   const encodePack = (pass: GPUComputePassEncoder, quadCount: number) => {
     const n = Math.max(0, Math.min(quadCount, MAX_QUADS))
-    if (n < 1) return
+    if (n < 1) {
+      return
+    }
     const wg = Math.ceil(n / WORKGROUP_SIZE)
     pipeline.with(pass).with(bindGroup).dispatchWorkgroups(wg)
   }

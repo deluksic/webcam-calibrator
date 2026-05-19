@@ -3,6 +3,7 @@ import { d } from 'typegpu'
 
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { createCompactLabelStage } from '@/gpu/pipelines/compactLabelPipeline'
+import { MAX_EXTENT_COMPONENTS } from '@/gpu/pipelines/compactLabelPipeline'
 import { createCopyIngest } from '@/gpu/pipelines/copyPipeline'
 import { createEdgeFilterStage } from '@/gpu/pipelines/edgeFilterPipeline'
 import { createEdgeFittedLineOverlayStage } from '@/gpu/pipelines/edgeFittedLineOverlayPipeline'
@@ -10,26 +11,25 @@ import { createEdgeHistogramClusterStage, MAX_FLAT_EDGES } from '@/gpu/pipelines
 import { createEdgeLineFitStage } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { createEdgeProfileStage } from '@/gpu/pipelines/edgeProfilePipeline'
 import { createEdgeProfilePlotStage } from '@/gpu/pipelines/edgeProfilePlotPipeline'
-import { createLineFitDebugStage } from '@/gpu/pipelines/lineFitDebugPipeline'
 import { createEdgesPipeline } from '@/gpu/pipelines/edgesPipeline'
-import { MAX_EXTENT_COMPONENTS } from '@/gpu/pipelines/compactLabelPipeline'
 import { createFilteredRenderPipeline } from '@/gpu/pipelines/filteredRenderPipeline'
 import { createGrayStage } from '@/gpu/pipelines/grayPipeline'
 import { createGrayRenderPipeline, GrayRenderParams } from '@/gpu/pipelines/grayRenderPipeline'
+import { createGridVizStage } from '@/gpu/pipelines/gridVizPipeline'
 import { createHistogramStage, HIST_HEIGHT, HIST_WIDTH } from '@/gpu/pipelines/histogramPipelines'
 import {
   createLabelVizPipeline,
   createQuadRejectVizPipeline,
   createQuadsLabelVizPipeline,
 } from '@/gpu/pipelines/labelVizPipeline'
+import { createLineFitDebugStage } from '@/gpu/pipelines/lineFitDebugPipeline'
 import { createOrientHistVizStage } from '@/gpu/pipelines/orientHistVizPipeline'
 import { createPointerJumpLabeling } from '@/gpu/pipelines/pointerJumpPipeline'
+import { createQuadCornerHomographyStage } from '@/gpu/pipelines/quadCornerHomographyPipeline'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
-import { createGridVizStage } from '@/gpu/pipelines/gridVizPipeline'
-import { createQuadCornerHomographyStage } from '@/gpu/pipelines/quadCornerHomographyPipeline'
-import { createTagDecodeStage, createTagHistogramDisplayStage, TAG_HIST_CANVAS_W, TAG_HIST_CANVAS_H } from '@/gpu/pipelines/tagDecodePipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
+import { createTagDecodeStage, createTagHistogramDisplayStage } from '@/gpu/pipelines/tagDecodePipeline'
 import { allocUndistortUniform, createUndistortPipeline } from '@/gpu/pipelines/undistortPipeline'
 
 export type GradientProfileDisplayMode =
@@ -46,6 +46,25 @@ export type GradientProfileDisplayMode =
   | 'quadGrid'
 
 export type GradientProfileNonGridDisplayMode = GradientProfileDisplayMode
+
+/** Toolbar order: matches `encodeGradientProfileCompute` (ingest → … → tag decode). */
+export const GRADIENT_PROFILE_DISPLAY_MODES: ReadonlyArray<{
+  mode: GradientProfileDisplayMode
+  label: string
+  title?: string
+}> = [
+  { mode: 'grayscale', label: 'Gray' },
+  { mode: 'undistort', label: 'Undistort' },
+  { mode: 'edges', label: 'Edges' },
+  { mode: 'nms', label: 'NMS' },
+  { mode: 'labels', label: 'Labels' },
+  { mode: 'edgeLabels', label: 'Edge labels' },
+  { mode: 'lineRejects', label: 'Line rejects' },
+  { mode: 'fittedLines', label: 'Lines' },
+  { mode: 'quadReject', label: 'Quad reject', title: 'Labels colored by quad registration outcome' },
+  { mode: 'quads', label: 'Quads' },
+  { mode: 'quadGrid', label: 'Quad grid' },
+]
 
 function destroyGpuTexture(tex: GPUTexture | undefined) {
   tex?.destroy()
@@ -117,7 +136,7 @@ export function createGradientProfilePipeline(
     ? root.configureContext({ canvas: tagHistCanvas, alphaMode: 'premultiplied' })
     : undefined
   const tagHistogramDisplay = tagHistContext
-    ? createTagHistogramDisplayStage(root, tagDecode.histBuf, presentationFormat)
+    ? createTagHistogramDisplayStage(root, tagDecode.histBuf, tagDecode.thresholdBuf, presentationFormat)
     : undefined
   const profile = createEdgeProfileStage(
     root,
@@ -172,6 +191,7 @@ export function createGradientProfilePipeline(
     compact.compactLabelBuffer,
     edgeHistogram.labelClusters,
     edgeHistogram.labelLineReduce,
+    edgeHistogram.labelInlierStats,
     edgeHistogram.labelLineOut,
   )
 

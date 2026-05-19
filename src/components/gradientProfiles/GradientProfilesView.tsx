@@ -1,10 +1,10 @@
-import { Errored, Show, createSignal } from 'solid-js'
+import { Errored, For, Show, createSignal } from 'solid-js'
 
 import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
 import { GradientProfilesPipeline } from '@/components/gradientProfiles/GradientProfilesPipeline'
-import type { GradientProfileDisplayMode } from '@/gpu/gradientProfilePipeline'
+import { GRADIENT_PROFILE_DISPLAY_MODES, type GradientProfileDisplayMode } from '@/gpu/gradientProfilePipeline'
 import { LABEL_QUAD_REJECT_LEGEND } from '@/gpu/labelQuadReject'
 import { LINE_REJECT_LEGEND } from '@/gpu/pipelines/lineFitDebugPipeline'
 
@@ -26,8 +26,8 @@ export function GradientProfilesView() {
     <div class={styles.root}>
       <p class={styles.hint}>
         GPU detection pipeline tuning: display modes, edge threshold histogram, orientation and tag histograms, gradient
-        profiles along fitted edges, and quad grid with tag decode. Undistort uses the latest successful calibration when
-        available.
+        profiles along fitted edges, and quad grid with tag decode. Undistort uses the latest successful calibration
+        when available.
       </p>
       <Errored fallback={(err) => <p class={styles.error}>Camera: {String(err)}</p>}>
         <div class={styles.cameraBlock}>
@@ -59,90 +59,20 @@ export function GradientProfilesView() {
                   </button>
                 </div>
                 <div class={styles.modeRow}>
-                  <button
-                    type="button"
-                    class={displayMode() === 'grayscale' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-                    onClick={() => setDisplayMode('grayscale')}
-                  >
-                    Gray
-                  </button>
-                  <button
-                    type="button"
-                    class={displayMode() === 'undistort' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-                    onClick={() => setDisplayMode('undistort')}
-                  >
-                    Undistort
-                  </button>
-                  <button
-                    type="button"
-                    class={displayMode() === 'edges' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-                    onClick={() => setDisplayMode('edges')}
-                  >
-                    Edges
-                  </button>
-                  <button
-                    type="button"
-                    class={displayMode() === 'nms' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-                    onClick={() => setDisplayMode('nms')}
-                  >
-                    NMS
-                  </button>
-                  <button
-                    type="button"
-                    class={displayMode() === 'labels' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-                    onClick={() => setDisplayMode('labels')}
-                  >
-                    Labels
-                  </button>
-                  <button
-                    type="button"
-                    class={displayMode() === 'quads' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-                    onClick={() => setDisplayMode('quads')}
-                  >
-                    Quads
-                  </button>
-                  <button
-                    type="button"
-                    class={
-                      displayMode() === 'quadReject' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
-                    }
-                    onClick={() => setDisplayMode('quadReject')}
-                    title="Labels colored by quad registration outcome (reject reason or registered quad id)"
-                  >
-                    Quad reject
-                  </button>
-                  <button
-                    type="button"
-                    class={displayMode() === 'edgeLabels' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-                    onClick={() => setDisplayMode('edgeLabels')}
-                  >
-                    Edge labels
-                  </button>
-                  <button
-                    type="button"
-                    class={
-                      displayMode() === 'fittedLines' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
-                    }
-                    onClick={() => setDisplayMode('fittedLines')}
-                  >
-                    Lines
-                  </button>
-                  <button
-                    type="button"
-                    class={displayMode() === 'quadGrid' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton}
-                    onClick={() => setDisplayMode('quadGrid')}
-                  >
-                    Quad grid
-                  </button>
-                  <button
-                    type="button"
-                    class={
-                      displayMode() === 'lineRejects' ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
-                    }
-                    onClick={() => setDisplayMode('lineRejects')}
-                  >
-                    Line rejects
-                  </button>
+                  <For each={GRADIENT_PROFILE_DISPLAY_MODES}>
+                    {(item) => (
+                      <button
+                        type="button"
+                        class={
+                          displayMode() === item().mode ? pipelineStyles.modeButtonActive : pipelineStyles.modeButton
+                        }
+                        onClick={() => setDisplayMode(item().mode)}
+                        title={item().title}
+                      >
+                        {item().label}
+                      </button>
+                    )}
+                  </For>
                 </div>
               </div>
             }

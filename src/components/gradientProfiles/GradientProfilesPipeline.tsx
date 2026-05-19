@@ -2,21 +2,18 @@ import type { JSX } from 'solid-js'
 import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 
 import { encodeGradientProfileCompute } from '@/gpu/gradientProfileComputeEncoding'
+import { createGradientProfilePipeline } from '@/gpu/gradientProfilePipeline'
+import type { GradientProfileDisplayMode } from '@/gpu/gradientProfilePipeline'
 import {
   encodeGradientProfileCameraPresent,
   encodeGradientProfilePlotPresent,
   encodeOrientHistPresent,
   encodeTagHistPresent,
 } from '@/gpu/gradientProfilePresentEncoding'
-import {
-  ORIENT_HIST_CANVAS_HEIGHT,
-  ORIENT_HIST_CANVAS_WIDTH,
-} from '@/gpu/pipelines/orientHistVizPipeline'
-import { TAG_HIST_CANVAS_W, TAG_HIST_CANVAS_H } from '@/gpu/pipelines/tagDecodePipeline'
-import { createGradientProfilePipeline } from '@/gpu/gradientProfilePipeline'
-import type { GradientProfileDisplayMode } from '@/gpu/gradientProfilePipeline'
 import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
+import { ORIENT_HIST_CANVAS_HEIGHT, ORIENT_HIST_CANVAS_WIDTH } from '@/gpu/pipelines/orientHistVizPipeline'
+import { TAG_HIST_CANVAS_W, TAG_HIST_CANVAS_H } from '@/gpu/pipelines/tagDecodePipeline'
 import { writeUndistortUniform } from '@/gpu/pipelines/undistortPipeline'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import { createElementSize } from '@/utils/createElementSize'
@@ -71,9 +68,13 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
       return
     }
     const onResize = () => {
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        setFrameSize({ width: video.videoWidth, height: video.videoHeight })
+      const w = video.videoWidth
+      const h = video.videoHeight
+      if (w < 1 || h < 1) {
+        return
       }
+      // Keep prior object when dimensions unchanged — new `{w,h}` every resize re-runs pipeline createMemo.
+      setFrameSize((prev) => (prev?.width === w && prev.height === h ? prev : { width: w, height: h }))
     }
     video.addEventListener('resize', onResize)
     onResize()
@@ -176,14 +177,7 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
             height,
           })
         }
-        encodeGradientProfileCameraPresent(
-          enc,
-          gNow,
-          pip,
-          props.displayMode,
-          performance.now() * 0.001,
-          lastQuadCount,
-        )
+        encodeGradientProfileCameraPresent(enc, gNow, pip, props.displayMode, performance.now() * 0.001, lastQuadCount)
         if (pip.orientHistViz) {
           encodeOrientHistPresent(enc, pip)
         }
@@ -218,7 +212,6 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
           }
           setThreshold(computeThreshold([...bins], THRESHOLD_PERCENTILE))
         })
-
       },
     })
 
@@ -302,14 +295,11 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
           <span class={pipelineStyles.feedLabel}>Edge threshold</span>
           <canvas ref={setHistCanvasEl} class={pipelineStyles.histogramCanvas} width={512} height={120} />
           <div class={pipelineStyles.histogramInfo}>
-            <span class={pipelineStyles.thresholdLabel}>
-              {(THRESHOLD_PERCENTILE * 100).toFixed(0)}th percentile
-            </span>
+            <span class={pipelineStyles.thresholdLabel}>{(THRESHOLD_PERCENTILE * 100).toFixed(0)}th percentile</span>
             <span class={pipelineStyles.thresholdValue}>{(threshold() * 255).toFixed(1)} / 255</span>
           </div>
         </div>
       </Show>
-
     </div>
   )
 }

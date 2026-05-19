@@ -12,13 +12,12 @@ import {
   LINE_MIN_REFINE_INLIERS,
   LINE_MIN_SLOT_COUNT,
   MAX_EDGES_PER_LABEL,
-  TLS_REF_COS_MAX_ANGLE,
 } from '@/gpu/lineFitThresholds'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
 import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
 import { LabelOrientClusterReadonly, type LabelOrientClusterBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { EdgeLineEntry, EDGE_MIN_SPAN_PX } from '@/gpu/pipelines/edgeLineFitPipeline'
-import { lineSegmentEndpoints, lineDirDot, tlsAgreesWithNormal, tlsNormalFromMoments } from '@/gpu/shaders/linePca'
+import { lineSegmentEndpoints, lineDirDot, tlsNormalFromMoments } from '@/gpu/shaders/linePca'
 import { assignPeakEdgeId, ORIENT_ASSIGN_MAX_BIN_DIST } from '@/gpu/shaders/orientPeakAssign'
 
 const WORKGROUP_SIZE = 16
@@ -189,12 +188,14 @@ export function createLabelLineFitStage(
   return {
     labelLineOut,
     labelLineReduce,
+    labelInlierStats,
     encodeLabelLineFit,
   }
 }
 
 export type LabelLineOutBuffer = ReturnType<typeof createLabelLineFitStage>['labelLineOut']
 export type LabelLineReduceBuffer = ReturnType<typeof createLabelLineFitStage>['labelLineReduce']
+export type LabelInlierStatsBuffer = ReturnType<typeof createLabelLineFitStage>['labelInlierStats']
 
 function createLabelLineResetPipeline(
   root: TgpuRoot,
@@ -317,7 +318,6 @@ function createLabelFitPipeline(
   maxSlots: number,
 ) {
   const invPos = d.f32(1) / d.f32(POS_FIXED_SCALE)
-  const cosRef = d.f32(TLS_REF_COS_MAX_ANGLE)
 
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
@@ -366,7 +366,10 @@ function createLabelFitPipeline(
       const sumYY = d.f32(inlier.sumYYFixed) * invPos * invPos
 
       const tls = tlsNormalFromMoments(fitCount, sumX, sumY, sumXX, sumXY, sumYY)
-      if (tls.ok !== d.u32(0) && tlsAgreesWithNormal(tls.nx, tls.ny, refNx, refNy, cosRef) !== d.u32(0)) {
+      // `peakDir` is gradient-aligned (see assignPeakEdgeId). Use it only to pick the TLS sign;
+      // do not reject when |dot(tls, peak)| is small — that spuriously fails near-vertical sides
+      // (axis-aligned covariance often yields the along-edge eigenvector vs histogram peak).
+      if (tls.ok !== d.u32(0)) {
         let nx = tls.nx
         let ny = tls.ny
         if (nx * refNx + ny * refNy < d.f32(0)) {

@@ -16,13 +16,13 @@ export const LINE_MIN_PEAK_HIST_COUNT = ORIENT_PEAK_MIN_COUNT
 /** Min edge pixels assigned to a peak slot before coarse/TLS fit. */
 export const LINE_MIN_SLOT_COUNT = 6
 /** Perpendicular distance (px) for inlier gate and refine pass. */
-export const LINE_INLIER_DIST_PX = 4.0
+export const LINE_INLIER_DIST_PX = 2.5
 /** Min fraction of assigned slot pixels that pass the inlier gate after refit. */
-export const LINE_MIN_INLIER_RATIO = 0.72
+export const LINE_MIN_INLIER_RATIO = 0.7
 /** Min inlier pixels required before TLS refit (after coarse fit + gate). */
 export const LINE_MIN_REFINE_INLIERS = 12
 /** Fraction trimmed from each end of along-edge extent (corner pull). */
-export const LINE_EXTENT_TRIM_FRAC = 0.08
+export const LINE_EXTENT_TRIM_FRAC = 0.05
 
 export const TLS_REF_COS_MAX_ANGLE = 0.85
 
