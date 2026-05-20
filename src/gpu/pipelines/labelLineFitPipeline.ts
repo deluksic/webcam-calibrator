@@ -356,6 +356,8 @@ function createLabelFitPipeline(
       slotCount >= d.u32(LINE_MIN_SLOT_COUNT) &&
       fitCount >= minFitCount
     ) {
+      // AprilTag border: peakDir points outward (dark→light away from tag interior).
+      // Normal should follow peakDir. TLS refines direction when covariance is well-conditioned.
       const refNx = peakDir.x / peakLen
       const refNy = peakDir.y / peakLen
 
@@ -365,23 +367,28 @@ function createLabelFitPipeline(
       const sumXY = d.f32(inlier.sumXYFixed) * invPos * invPos
       const sumYY = d.f32(inlier.sumYYFixed) * invPos * invPos
 
+      const cosMin = d.f32(0.5)
       const tls = tlsNormalFromMoments(fitCount, sumX, sumY, sumXX, sumXY, sumYY)
-      // `peakDir` is gradient-aligned (see assignPeakEdgeId). Use it only to pick the TLS sign;
-      // do not reject when |dot(tls, peak)| is small — that spuriously fails near-vertical sides
-      // (axis-aligned covariance often yields the along-edge eigenvector vs histogram peak).
+      let nx = refNx
+      let ny = refNy
       if (tls.ok !== d.u32(0)) {
-        let nx = tls.nx
-        let ny = tls.ny
-        if (nx * refNx + ny * refNy < d.f32(0)) {
-          nx = -nx
-          ny = -ny
+        const dotTls = tls.nx * refNx + tls.ny * refNy
+        if (abs(dotTls) >= cosMin) {
+          nx = tls.nx
+          ny = tls.ny
+          if (dotTls < d.f32(0)) {
+            nx = -nx
+            ny = -ny
+          }
         }
-        const invN = d.f32(1) / d.f32(fitCount)
-        nDotMean = sumX * invN * nx + sumY * invN * ny
-        sumGx = nx
-        sumGy = ny
+        valid = d.u32(1)
+      } else {
         valid = d.u32(1)
       }
+      const invN = d.f32(1) / d.f32(fitCount)
+      nDotMean = sumX * invN * nx + sumY * invN * ny
+      sumGx = nx
+      sumGy = ny
     }
 
     layout.$.labelLineOut[sid] = EdgeLineEntry({

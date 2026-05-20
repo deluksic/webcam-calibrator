@@ -1,5 +1,8 @@
 /** Shared thresholds for oriented histogram peaks, assignment, and line fit (gradient-profile path). */
 
+/** Number of bins for **signed** gradient direction θ = atan2(gy, gx) over (−π, π].
+ *  Full 360° — opposite tag sides land ~ORIENT_HIST_BINS/2 bins apart, not the same bin.
+ *  Do not treat this as an undirected (0..π) line-orientation histogram. */
 export const ORIENT_HIST_BINS = 64
 export const MAX_EDGES_PER_LABEL = 4
 

@@ -1,3 +1,7 @@
+/**
+ * Signed gradient orientation → 64-bin histogram (full 360°).
+ * Peaks are canonically sorted CCW at discovery time; edges 0..3 are adjacent sides.
+ */
 import { d, std, tgpu } from 'typegpu'
 import { atan2, cos, div, dot, length, sin } from 'typegpu/std'
 
@@ -11,6 +15,8 @@ import {
 
 const PI = Math.PI
 
+/** Map signed gradient vector to a 0..63 bin.  θ=atan2(gy,gx) → [−π,π] → bin.
+ *  Bin 0 and bin 32 are opposite directions (≈π apart), not the same bucket. */
 export const gradientOrientationBin = tgpu.fn(
   [d.vec2f],
   d.u32,
@@ -25,6 +31,9 @@ export const gradientOrientationBin = tgpu.fn(
   return bin
 })
 
+/** Shortest distance along the 64-bin circle (wrap-aware). Used for peak separation and
+ *  assignPeakEdgeId tie-breaks. This is NOT folding direction modulo π;
+ *  bin 0 and bin 32 are far apart. */
 export const circularBinDist = tgpu.fn(
   [d.u32, d.u32],
   d.u32,

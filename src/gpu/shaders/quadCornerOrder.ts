@@ -136,8 +136,8 @@ export const sortCornersByPolarAngle = tgpu.fn(
 })
 
 /**
- * `ring` is cyclic from {@link sortCornersByPolarAngle}: increasing atan2 around centroid (y-down screen).
- * Pick geometric TL, then walk TL → ring[+1] → ring[+2] → ring[+3] as TR, BR, BL on that cycle.
+ * `ring` is a CCW cyclic array (from fixed-slot adjacency intersections).
+ * Pick geometric TL by lexicographic (y, x) min, then walk the ring for TR, BR, BL.
  */
 export const orderCornersTLTRBLBR = tgpu.fn(
   [Corners4],
@@ -266,60 +266,45 @@ export const cornersStripFromCwRingStart = tgpu.fn(
   return out
 })
 
-/** Fix any normal that points away from the median line midpoint — flipped by the edge peak sign. */
-export const fixFlippedNormals = tgpu.fn(
-  [d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL)],
-  d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL),
-)((linesIn) => {
-  'use gpu'
-  const out = d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL)()
-  let cx = d.f32(0)
-  let cy = d.f32(0)
-  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    cx = cx + linesIn[i]!.mx
-    cy = cy + linesIn[i]!.my
-  }
-  cx = cx / d.f32(MAX_EDGES_PER_LABEL)
-  cy = cy / d.f32(MAX_EDGES_PER_LABEL)
-  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    const l = linesIn[i]!
-    const dot = (cx - l.mx) * l.nx + (cy - l.my) * l.ny
-    if (dot < d.f32(0)) {
-      out[i] = LineNormalD({ nx: -l.nx, ny: -l.ny, d: -l.d, mx: l.mx, my: l.my })
-    } else {
-      out[i] = LineNormalD(l)
-    }
-  }
-  return out
-})
-
-/** Intersect lines → order corners → single DLT homography (TL, TR, BL, BR). */
+/**
+ * Corners from fixed CCW slot adjacency (peaks were canonically sorted in findPeaks).
+ * Lines are in CCW circular order — slot i and (i+1)%4 are adjacent sides.
+ * Corner order from intersections: [i∩(i+1)] is a CCW ring.
+ *
+ * Produces TL,TR,BL,BR strip and one DLT homography. No normal sorting, no polar sort,
+ * no ring-start / BL-BR guesses — edge order is already authoritative.
+ */
 export const solveQuadCornersAndHomography = tgpu.fn(
   [d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL)],
   QuadCornerSolveResult,
-)((linesIn) => {
+)((lines) => {
   'use gpu'
-  const lines = fixFlippedNormals(linesIn)
-  const slotsIn = U32x4()
+  // Fixed adjacency intersections — lines are already in CCW circular order.
+  const corners = Corners4()
+  let count = d.u32(0)
   for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    slotsIn[i] = i
+    const i1 = (i + d.u32(1)) % d.u32(MAX_EDGES_PER_LABEL)
+    const la = lines[i]!
+    const lb = lines[i1]!
+    const hit = lineIntersectNormal(la.nx, la.ny, la.d, lb.nx, lb.ny, lb.d)
+    corners[i] = d.vec2f(hit.point)
+    if (hit.ok !== d.u32(0)) {
+      count = count + d.u32(1)
+    }
   }
-  const sortedSlots = sortEdgeSlotsByLineNormal(lines, slotsIn)
-  const adjacent = cornersFromAdjacentLines(lines, sortedSlots)
-  const rawCorners = adjacent.corners
-  const count = adjacent.count
+
   if (count !== d.u32(MAX_EDGES_PER_LABEL)) {
     return QuadCornerSolveResult({
       failureCode: FAIL_NO_INTERSECTIONS,
       intersectionCount: count,
       homography: invalidGridHomography(),
       homographyOk: d.u32(0),
-      corners: collapsedScreenQuad(rawCorners, count),
+      corners: collapsedScreenQuad(corners, count),
     })
   }
 
-  const ring = sortCornersByPolarAngle(rawCorners)
-  const ordered = orderCornersTLTRBLBR(ring)
+  // corners are already in CCW ring order (fixed adjacency).  Convert to strip.
+  const ordered = orderCornersTLTRBLBR(corners)
   if (quadDegeneracyOk(ordered) === d.u32(0)) {
     return QuadCornerSolveResult({
       failureCode: FAIL_PLAUSIBILITY,
@@ -330,31 +315,19 @@ export const solveQuadCornersAndHomography = tgpu.fn(
     })
   }
 
-  for (const start of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    const labeled = cornersStripFromCwRingStart(ring, start)
-    const h0 = tryHomographyFromCorners(labeled[0]!, labeled[1]!, labeled[2]!, labeled[3]!)
-    if (h0.ok !== d.u32(0)) {
-      return QuadCornerSolveResult({
-        failureCode: 0,
-        intersectionCount: count,
-        homography: h0.homography,
-        homographyOk: 1,
-        corners: Corners4(labeled),
-      })
-    }
-    const h1 = tryHomographyFromCorners(labeled[0]!, labeled[1]!, labeled[3]!, labeled[2]!)
-    if (h1.ok !== d.u32(0)) {
-      return QuadCornerSolveResult({
-        failureCode: 0,
-        intersectionCount: count,
-        homography: h1.homography,
-        homographyOk: 1,
-        corners: Corners4(labeled),
-      })
-    }
+  // Single DLT — strip order is authoritative, no guesswork.
+  const h = tryHomographyFromCorners(ordered[0]!, ordered[1]!, ordered[2]!, ordered[3]!)
+  if (h.ok !== d.u32(0)) {
+    return QuadCornerSolveResult({
+      failureCode: 0,
+      intersectionCount: count,
+      homography: h.homography,
+      homographyOk: 1,
+      corners: Corners4(ordered),
+    })
   }
 
-  // Geometry passed degeneracy but no DLT root survived f32 elimination — still draw a sane grid from corners.
+  // DLT pivot failed — return stable corners for screen-space fallback.
   return QuadCornerSolveResult({
     failureCode: 0,
     intersectionCount: count,

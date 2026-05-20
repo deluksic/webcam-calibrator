@@ -1,7 +1,7 @@
 // Per compact labelId: 64-bin oriented histogram → 4 peaks → per-pixel edgeId.
 import type { TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
-import { atomicAdd, atomicLoad, atomicStore, length } from 'typegpu/std'
+import { atomicAdd, atomicLoad, atomicStore, length, select } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
 import {
@@ -35,6 +35,9 @@ export {
 export const MAX_QUADS = 2 << 9
 export const MAX_FLAT_EDGES = MAX_QUADS * MAX_EDGES_PER_LABEL
 
+/** Per-label oriented edge histogram (full 360° / 64 bins).
+ *  After findPeaks: peakBins/peakDirs slots are permuted to CCW circular order
+ *  so slot 0→1→2→3 are adjacent sides in orientation space. */
 export const LabelOrientCluster = d.struct({
   orientationHistogram: d.arrayOf(d.atomic(d.u32), ORIENT_HIST_BINS),
   peakBins: d.arrayOf(d.u32, MAX_EDGES_PER_LABEL),
@@ -232,6 +235,59 @@ function createFindPeaksPipeline(
           const wNext = d.f32(atomicLoad(slot.orientationHistogram[nextB]!))
           slot.peakDirs[d.u32(k)] = peakDirFromLocalBins(peakBin, wPrev, wCenter, wNext)
         }
+      }
+    }
+
+    // Canonicalize 4 peak slots to CCW circular order on the 64-bin histogram
+    // so slot 0→1→2→3 are adjacent sides in orientation space.
+    if (peakCount === d.u32(MAX_EDGES_PER_LABEL)) {
+      const bins = d.u32(ORIENT_HIST_BINS)
+      // Pick the peak with minimum bin as the CCW start.
+      let startIdx = d.u32(0)
+      let startBin = slot.peakBins[d.u32(0)]!
+      for (const k of tgpu.unroll(std.range(1, MAX_EDGES_PER_LABEL))) {
+        const ki = d.u32(k)
+        const kb = slot.peakBins[ki]!
+        const pick = kb < startBin
+        startIdx = select(startIdx, ki, pick)
+        startBin = select(startBin, kb, pick)
+      }
+
+      // Compute CCW distance from start for each peak.
+      const key = d.arrayOf(d.u32, MAX_EDGES_PER_LABEL)()
+      for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+        const ki = d.u32(k)
+        key[ki] = (slot.peakBins[ki]! + bins - startBin) % bins
+      }
+
+      // Bubble sort slot indices by key → CCW circular order.
+      const order = d.arrayOf(d.u32, MAX_EDGES_PER_LABEL)()
+      for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+        order[k] = k
+      }
+      for (const _ of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+        for (const j of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL - 1))) {
+          const ja = order[j]!
+          const jb = order[j + d.u32(1)]!
+          const ka = key[ja]!
+          const kb = key[jb]!
+          const swap = ka > kb
+          order[j] = select(ja, jb, swap)
+          order[j + d.u32(1)] = select(jb, ja, swap)
+        }
+      }
+
+      // Permute peakBins and peakDirs in-place (value-copy to avoid reference assignments).
+      const newBins = d.arrayOf(d.u32, MAX_EDGES_PER_LABEL)()
+      const newDirs = d.arrayOf(d.vec2f, MAX_EDGES_PER_LABEL)()
+      for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+        const src = slot.peakDirs[order[k]!]!
+        newBins[k] = slot.peakBins[order[k]!]!
+        newDirs[k] = d.vec2f(src.x, src.y)
+      }
+      for (const k of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+        slot.peakBins[k] = newBins[k]!
+        slot.peakDirs[k] = d.vec2f(newDirs[k]!)
       }
     }
   })

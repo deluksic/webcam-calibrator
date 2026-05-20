@@ -85,7 +85,13 @@ Wiring: [`cameraPipeline.ts`](../src/gpu/cameraPipeline.ts) (Calibrate), [`gradi
 
 ### Quad corners and homography
 
-[`quadCornerHomographyPipeline.ts`](../src/gpu/pipelines/quadCornerHomographyPipeline.ts): intersect adjacent TLS lines, sort CCW, try four polar-ring homography starts ([`homographyDlt.ts`](../src/gpu/shaders/homographyDlt.ts)). Corners are stored in **triangle-strip order** **TL, TR, BL, BR** for rendering and DLT; shoelace / edge checks use cyclic perimeter **TL, TR, BR, BL** via `cyclicIdx` in [`quadCornerOrder.ts`](../src/gpu/shaders/quadCornerOrder.ts). After decode, **canonicalize** applies `rotateStripCorners` (strip quarter-turns, not polar ring) and recomputes `H`; `decodedRotation` is cleared on GPU.
+[`quadCornerHomographyPipeline.ts`](../src/gpu/pipelines/quadCornerHomographyPipeline.ts): intersect TLS lines from **CCW-ordered peak slots** (canonicalized at `findPeaks` time), walk TL→TR→BR→BL, and compute one DLT homography ([`homographyDlt.ts`](../src/gpu/shaders/homographyDlt.ts)). No per-frame normal sorting, polar-angle sorting, or ring-start guesswork — edge adjacency is fixed once per frame at cluster time.
+
+**Edge normal sign** is settled at line-fit: TLS follows `peakDir` (outward for AprilTag black→white border) with a `|cos| ≥ 0.5` gate; degenerate PCA falls back to `peakDir` directly. No centroid-based flips or all-flip recovery downstream.
+
+Corners are stored in **triangle-strip order** **TL, TR, BL, BR** for rendering and DLT; shoelace / edge checks use cyclic perimeter **TL, TR, BR, BL** via `cyclicIdx` in [`quadCornerOrder.ts`](../src/gpu/shaders/quadCornerOrder.ts). After decode, **canonicalize** applies `rotateStripCorners` (strip quarter-turns, not polar ring) and recomputes `H`; `decodedRotation` is cleared on GPU.
+
+**Extent pass** ([`labelLineFitPipeline.ts`](../src/gpu/pipelines/labelLineFitPipeline.ts)) follows refine-fit and measures inlier projection span (`tMinFixed`/`tMaxFixed`) along the fitted line; 8% trimmed → `p0x/p0y/p1x/p1y` segment endpoints. Used only for segment endpoints — not for corner ordering or homography.
 
 **Failure bitmask** (grid viz): insufficient edges (0), line fit (2), plausibility (3), no intersections (4) — [`gridVizPipeline.ts`](../src/gpu/pipelines/gridVizPipeline.ts).
 
@@ -143,7 +149,7 @@ Eight-parameter DLT, Gaussian elimination with partial pivot ([`homographyDlt.ts
 | `filteredBuffer` | After NMS |
 | `pointerJumpBuffer0/1`, `pointerJumpAtomicBuffer` | Labeling |
 | `compactLabelBuffer` | Final compact labels (W×H) |
-| `labelClusters[labelId]` | 64-bin orient hist + 4 peaks (`MAX_EXTENT_COMPONENTS`) |
+| `labelClusters[labelId]` | 64-bin full-360° signed orient hist + 4 CCW-ordered peaks (`MAX_EXTENT_COMPONENTS`) |
 | `labelLineOut`, `labelToQuadId`, `quadPeakEdge`, `quadCount` | Per-label fits and quad registration |
 | `packedEdgeLabels` | `quadId×4+edgeId` per edge pixel |
 | `lineOut[flatSlot]` | `MAX_FLAT_EDGES` = `MAX_QUADS×4` scattered fits |
