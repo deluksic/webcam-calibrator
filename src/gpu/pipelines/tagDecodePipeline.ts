@@ -107,8 +107,6 @@ const QuadDecodeMetaGpu = d.struct({
   weakBit1: d.u32,
   weakBit2: d.u32,
   weakBit3: d.u32,
-  weakBit4: d.u32,
-  weakBit5: d.u32,
 })
 
 const QuadDecodeMetaSchema = d.arrayOf(QuadDecodeMetaGpu, MAX_QUADS)
@@ -604,8 +602,6 @@ function createClassifyStage(
       weakBit1: weakBits[1]!,
       weakBit2: weakBits[2]!,
       weakBit3: weakBits[3]!,
-      weakBit4: weakBits[4]!,
-      weakBit5: weakBits[5]!,
     })
   })
 
@@ -705,24 +701,6 @@ function createDictMatchStage(
       }
       if (weakCount > d.u32(3) && (mask & d.u32(8)) !== d.u32(0)) {
         const bit = meta.weakBit3
-        const pos = d.u32(35) - bit
-        if (pos >= d.u32(32)) {
-          wildHigh = wildHigh | (d.u32(1) << (pos - d.u32(32)))
-        } else {
-          wildLow = wildLow | (d.u32(1) << pos)
-        }
-      }
-      if (weakCount > d.u32(4) && (mask & d.u32(16)) !== d.u32(0)) {
-        const bit = meta.weakBit4
-        const pos = d.u32(35) - bit
-        if (pos >= d.u32(32)) {
-          wildHigh = wildHigh | (d.u32(1) << (pos - d.u32(32)))
-        } else {
-          wildLow = wildLow | (d.u32(1) << pos)
-        }
-      }
-      if (weakCount > d.u32(5) && (mask & d.u32(32)) !== d.u32(0)) {
-        const bit = meta.weakBit5
         const pos = d.u32(35) - bit
         if (pos >= d.u32(32)) {
           wildHigh = wildHigh | (d.u32(1) << (pos - d.u32(32)))
