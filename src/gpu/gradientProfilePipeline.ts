@@ -195,6 +195,20 @@ export function createGradientProfilePipeline(
   const labelViz = createLabelVizPipeline(root, width, height, presentationFormat)
   const quadsLabelViz = createQuadsLabelVizPipeline(root, width, height, presentationFormat)
   const quadRejectViz = createQuadRejectVizPipeline(root, width, height, presentationFormat)
+  const labelVizBindGroup = root.createBindGroup(labelViz.layout, {
+    labelBuffer: compact.compactLabelBuffer,
+  })
+  const quadsBindGroup = root.createBindGroup(quadsLabelViz.layout, {
+    quadLabelBuffer: edgeHistogram.quadLabelBuffer,
+  })
+  const quadRejectBindGroup = root.createBindGroup(quadRejectViz.layout, {
+    compactLabels: compact.compactLabelBuffer,
+    labelToQuadId: edgeHistogram.labelToQuadId,
+    labelQuadReject: edgeHistogram.labelQuadReject,
+  })
+  const edgeLabelsBindGroup = root.createBindGroup(labelViz.layout, {
+    labelBuffer: edgeHistogram.packedEdgeLabels,
+  })
   const grayscale = createGrayRenderPipeline(root, width, height, presentationFormat, {
     grayBuffer: gray.buffer,
     params: grayRenderParamsBuffer,
@@ -323,6 +337,10 @@ export function createGradientProfilePipeline(
       labelViz,
       quadsLabelViz,
       quadRejectViz,
+      labelVizBindGroup,
+      quadsBindGroup,
+      quadRejectBindGroup,
+      edgeLabelsBindGroup,
       grayscale,
       grayscaleMsaa,
       sobel: sobelRender,

@@ -9,17 +9,17 @@ import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
 export const labelVizLayout = tgpu.bindGroupLayout({
   labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
-})
+}).$name('label-viz-bgl')
 
 export const quadsLabelVizLayout = tgpu.bindGroupLayout({
   quadLabelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
-})
+}).$name('quads-label-viz-bgl')
 
 export const quadRejectVizLayout = tgpu.bindGroupLayout({
   compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
   labelToQuadId: { storage: d.arrayOf(d.u32), access: 'readonly' },
   labelQuadReject: { storage: d.arrayOf(d.u32), access: 'readonly' },
-})
+}).$name('quad-reject-viz-bgl')
 
 export type LabelVizBindGroup = TgpuBindGroup<typeof labelVizLayout.entries>
 export type QuadsLabelVizBindGroup = TgpuBindGroup<typeof quadsLabelVizLayout.entries>
@@ -85,7 +85,7 @@ export function createLabelVizPipeline(
     vertex: common.fullScreenTriangle,
     fragment: labelVizFrag,
     targets: { format: presentationFormat },
-  })
+  }).$name('label-viz-render')
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment, bindGroup: LabelVizBindGroup) => {
     pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)
   }
@@ -151,7 +151,7 @@ export function createQuadRejectVizPipeline(
     vertex: common.fullScreenTriangle,
     fragment: frag,
     targets: { format: presentationFormat },
-  })
+  }).$name('quad-reject-viz-render')
   const encodeToCanvas = (
     enc: GPUCommandEncoder,
     colorAttachment: ColorAttachment,
@@ -174,7 +174,7 @@ export function createQuadsLabelVizPipeline(
     vertex: common.fullScreenTriangle,
     fragment: frag,
     targets: { format: presentationFormat },
-  })
+  }).$name('quads-label-viz-render')
   const encodeToCanvas = (
     enc: GPUCommandEncoder,
     colorAttachment: ColorAttachment,

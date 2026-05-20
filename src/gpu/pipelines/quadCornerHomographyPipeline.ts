@@ -33,7 +33,7 @@ function createQuadCornerHomographyLayouts() {
     quadSourceLabelId: { storage: d.arrayOf(d.u32), access: 'readonly' },
     quadCount: { storage: d.arrayOf(d.u32, 1), access: 'readonly' },
     quadData: { storage: GridDataSchema, access: 'mutable' },
-  })
+  }).$name('quad-corner-homography-bgl')
   return { layout }
 }
 

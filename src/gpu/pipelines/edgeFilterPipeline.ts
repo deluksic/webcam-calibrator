@@ -14,7 +14,7 @@ export const edgeFilterLayout = tgpu.bindGroupLayout({
   sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
   threshold: { uniform: d.f32 },
   filteredBuffer: { storage: d.arrayOf(d.vec2f), access: 'mutable' },
-})
+}).$name('nms-bgl')
 
 export type EdgeFilterBindResources = ExtractBindGroupInputFromLayout<typeof edgeFilterLayout.entries>
 
@@ -30,8 +30,8 @@ export function createEdgeFilterStage(
   height: number,
   sobelBuffer: EdgeFilterBindResources['sobelBuffer'],
 ) {
-  const thresholdBuffer = root.createBuffer(d.f32).$usage('uniform')
-  const filteredBuffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage('storage')
+  const thresholdBuffer = root.createBuffer(d.f32).$name('nms-threshold').$usage('uniform')
+  const filteredBuffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$name('nms-filtered').$usage('storage')
   const { pipeline, bindGroup } = createEdgeFilterPipeline(root, width, height, {
     sobelBuffer,
     threshold: thresholdBuffer,

@@ -15,15 +15,15 @@ const UndistortUniformStruct = d.struct({
 
 const undistortUniformLayout = tgpu.bindGroupLayout({
   params: { uniform: UndistortUniformStruct },
-})
+}).$name('undistort-uniform-bgl')
 
 const sourceLayout = tgpu.bindGroupLayout({
   source: { texture: d.texture2d() },
   srcSampler: { sampler: 'filtering' },
-})
+}).$name('undistort-source-bgl')
 
 export function allocUndistortUniform(root: TgpuRoot) {
-  return root.createBuffer(UndistortUniformStruct).$usage('uniform')
+  return root.createBuffer(UndistortUniformStruct).$name('undistort-uniform').$usage('uniform')
 }
 
 export type UndistortUniformGpuBuffer = ReturnType<typeof allocUndistortUniform>
@@ -75,7 +75,7 @@ export function createUndistortPipeline(
     vertex: common.fullScreenTriangle,
     fragment: frag,
     targets: { format: presentationFormat },
-  })
+  }).$name('undistort-render')
 
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment) => {
     pipeline.with(enc).withColorAttachment(colorAttachment).with(paramsBg).with(sourceBg).draw(3)

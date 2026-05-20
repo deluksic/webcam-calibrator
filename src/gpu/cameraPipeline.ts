@@ -144,6 +144,9 @@ export function createCameraPipeline(
     filteredBuffer: nms.filteredBuffer,
   })
   const labelViz = createLabelVizPipeline(root, width, height, presentationFormat)
+  const labelVizBindGroup = root.createBindGroup(labelViz.layout, {
+    labelBuffer: compact.compactLabelBuffer,
+  })
   const grayscale = createGrayRenderPipeline(root, width, height, presentationFormat, {
     grayBuffer: gray.buffer,
     params: grayRenderParamsBuffer,
@@ -203,6 +206,7 @@ export function createCameraPipeline(
     render: {
       edges,
       labelViz,
+      labelVizBindGroup,
       grayscale,
       grayscaleMsaa,
       sobel: sobelRender,

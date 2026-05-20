@@ -4,7 +4,7 @@ import { tgpu, d, std, common } from 'typegpu'
 
 export const copyBindGroupLayout = tgpu.bindGroupLayout({
   cameraTex: { externalTexture: d.textureExternal() },
-})
+}).$name('copy-bgl')
 
 export function createCopyBindGroup(root: TgpuRoot, video: HTMLVideoElement) {
   return root.createBindGroup(copyBindGroupLayout, {
@@ -20,6 +20,7 @@ export function createCopyIngest(root: TgpuRoot, width: number, height: number) 
       format: 'rgba8unorm',
       dimension: '2d',
     })
+    .$name('camera-gray-tex')
     .$usage('storage', 'sampled', 'render')
   const copyPipeline = createCopyPipeline(root)
   const encodeIngest = (enc: GPUCommandEncoder, ingestRoot: TgpuRoot, video: HTMLVideoElement) => {
@@ -42,5 +43,5 @@ export function createCopyPipeline(root: TgpuRoot) {
     vertex: common.fullScreenTriangle,
     fragment: copyFrag,
     targets: { format: 'rgba8unorm' },
-  })
+  }).$name('copy-render')
 }

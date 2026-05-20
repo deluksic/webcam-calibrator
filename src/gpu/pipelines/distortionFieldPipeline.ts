@@ -25,7 +25,7 @@ const DistortionUniformStruct = d.struct({
 
 const distortionLayout = tgpu.bindGroupLayout({
   dist: { uniform: DistortionUniformStruct },
-})
+}).$name('distortion-field-bgl')
 
 function allocDistortionUniform(root: TgpuRoot) {
   return root.createBuffer(DistortionUniformStruct).$usage('uniform')

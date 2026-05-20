@@ -42,20 +42,20 @@ const LabelColBoundsReadonly = d.struct({
 function createBoundaryFilterLayouts() {
   const resetRowLayout = tgpu.bindGroupLayout({
     rowBounds: { storage: d.arrayOf(LabelRowBoundsAtomic), access: 'mutable' },
-  })
+  }).$name('boundary-reset-row-bgl')
   const resetColLayout = tgpu.bindGroupLayout({
     colBounds: { storage: d.arrayOf(LabelColBoundsAtomic), access: 'mutable' },
-  })
+  }).$name('boundary-reset-col-bgl')
   const reduceLayout = tgpu.bindGroupLayout({
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
     rowBounds: { storage: d.arrayOf(LabelRowBoundsAtomic), access: 'mutable' },
     colBounds: { storage: d.arrayOf(LabelColBoundsAtomic), access: 'mutable' },
-  })
+  }).$name('boundary-reduce-bgl')
   const filterLayout = tgpu.bindGroupLayout({
     compactLabels: { storage: d.arrayOf(d.u32), access: 'mutable' },
     rowBounds: { storage: d.arrayOf(LabelRowBoundsReadonly), access: 'readonly' },
     colBounds: { storage: d.arrayOf(LabelColBoundsReadonly), access: 'readonly' },
-  })
+  }).$name('boundary-filter-bgl')
   return { resetRowLayout, resetColLayout, reduceLayout, filterLayout }
 }
 

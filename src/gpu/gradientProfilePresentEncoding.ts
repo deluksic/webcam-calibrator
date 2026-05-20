@@ -69,27 +69,13 @@ export function encodeGradientProfileCameraPresent(
     } else if (displayMode === 'nms') {
       pipeline.render.edges.encodeToCanvas(enc, mainAttachment)
     } else if (displayMode === 'labels') {
-    const labelVizBindGroup = root.createBindGroup(pipeline.render.labelViz.layout, {
-      labelBuffer: pipeline.compact.compactLabelBuffer,
-    })
-    pipeline.render.labelViz.encodeToCanvas(enc, mainAttachment, labelVizBindGroup)
+    pipeline.render.labelViz.encodeToCanvas(enc, mainAttachment, pipeline.render.labelVizBindGroup)
   } else if (displayMode === 'quads') {
-    const quadsBindGroup = root.createBindGroup(pipeline.render.quadsLabelViz.layout, {
-      quadLabelBuffer: pipeline.edgeHistogram.quadLabelBuffer,
-    })
-    pipeline.render.quadsLabelViz.encodeToCanvas(enc, mainAttachment, quadsBindGroup)
+    pipeline.render.quadsLabelViz.encodeToCanvas(enc, mainAttachment, pipeline.render.quadsBindGroup)
   } else if (displayMode === 'quadReject') {
-    const quadRejectBindGroup = root.createBindGroup(pipeline.render.quadRejectViz.layout, {
-      compactLabels: pipeline.compact.compactLabelBuffer,
-      labelToQuadId: pipeline.edgeHistogram.labelToQuadId,
-      labelQuadReject: pipeline.edgeHistogram.labelQuadReject,
-    })
-    pipeline.render.quadRejectViz.encodeToCanvas(enc, mainAttachment, quadRejectBindGroup)
+    pipeline.render.quadRejectViz.encodeToCanvas(enc, mainAttachment, pipeline.render.quadRejectBindGroup)
   } else if (displayMode === 'edgeLabels') {
-    const labelVizBindGroup = root.createBindGroup(pipeline.render.labelViz.layout, {
-      labelBuffer: pipeline.edgeHistogram.packedEdgeLabels,
-    })
-    pipeline.render.labelViz.encodeToCanvas(enc, mainAttachment, labelVizBindGroup)
+    pipeline.render.labelViz.encodeToCanvas(enc, mainAttachment, pipeline.render.edgeLabelsBindGroup)
   } else if (displayMode === 'undistort') {
     pipeline.render.undistort.encodeToCanvas(enc, mainAttachment)
     } else {

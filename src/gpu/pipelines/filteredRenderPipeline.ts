@@ -6,7 +6,7 @@ import { clamp, floor, length } from 'typegpu/std'
 
 export const filteredRenderLayout = tgpu.bindGroupLayout({
   filteredBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
-})
+}).$name('nms-render-bgl')
 
 export type FilteredRenderBindResources = ExtractBindGroupInputFromLayout<typeof filteredRenderLayout.entries>
 
@@ -38,7 +38,7 @@ export function createFilteredRenderPipeline(
     vertex: common.fullScreenTriangle,
     fragment: filteredFrag,
     targets: { format: presentationFormat },
-  })
+  }).$name('nms-render')
   const bindGroup = root.createBindGroup(filteredRenderLayout, resources)
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment) => {
     pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)

@@ -8,7 +8,7 @@ import { atan2, clamp, floor, length, max } from 'typegpu/std'
 export const edgesLayout = tgpu.bindGroupLayout({
   sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
   filteredBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
-})
+}).$name('edges-render-bgl')
 
 export type EdgesBindResources = ExtractBindGroupInputFromLayout<typeof edgesLayout.entries>
 
@@ -104,7 +104,7 @@ export function createEdgesPipeline(
     vertex: common.fullScreenTriangle,
     fragment: frag,
     targets: { format: presentationFormat },
-  })
+  }).$name('edges-render')
   const bindGroup = root.createBindGroup(edgesLayout, resources)
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment) => {
     pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)

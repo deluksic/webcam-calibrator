@@ -41,7 +41,7 @@ function createScatterLayouts() {
   const resetLayout = tgpu.bindGroupLayout({
     lineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'mutable' },
     validEdgeCount: { storage: d.atomic(d.u32), access: 'mutable' },
-  })
+  }).$name('edge-line-fit-reset-bgl')
   const scatterLayout = tgpu.bindGroupLayout({
     labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
     quadPeakEdge: { storage: d.arrayOf(d.u32), access: 'readonly' },
@@ -49,7 +49,7 @@ function createScatterLayouts() {
     quadCount: { storage: d.arrayOf(d.u32, 1), access: 'readonly' },
     lineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'mutable' },
     validEdgeCount: { storage: d.atomic(d.u32), access: 'mutable' },
-  })
+  }).$name('edge-line-fit-scatter-bgl')
   return { resetLayout, scatterLayout }
 }
 
@@ -62,8 +62,8 @@ export function createEdgeLineFitStage(
   quadCount: QuadCountBuffer,
 ) {
   const layouts = createScatterLayouts()
-  const lineOut = root.createBuffer(d.arrayOf(EdgeLineEntry, maxFlatEdges)).$usage('storage')
-  const validEdgeCount = root.createBuffer(d.atomic(d.u32)).$usage('storage')
+  const lineOut = root.createBuffer(d.arrayOf(EdgeLineEntry, maxFlatEdges)).$name('edge-line-out').$usage('storage')
+  const validEdgeCount = root.createBuffer(d.atomic(d.u32)).$name('edge-valid-count').$usage('storage')
 
   const resetPipeline = createScatterResetPipeline(root, layouts.resetLayout, maxFlatEdges)
   const scatterPipeline = createScatterQuadLinesPipeline(root, layouts.scatterLayout, maxFlatEdges)
@@ -129,7 +129,7 @@ function createScatterResetPipeline(
       atomicStore(layout.$.validEdgeCount, d.u32(0))
     }
   })
-  return root.createComputePipeline({ compute: kernel })
+  return root.createComputePipeline({ compute: kernel }).$name('edge-line-fit-reset-compute')
 }
 
 function createScatterQuadLinesPipeline(
@@ -189,7 +189,7 @@ function createScatterQuadLinesPipeline(
       atomicAdd(layout.$.validEdgeCount, d.u32(1))
     }
   })
-  return root.createComputePipeline({ compute: kernel })
+  return root.createComputePipeline({ compute: kernel }).$name('edge-line-fit-scatter-compute')
 }
 
 export type EdgeLineOutBuffer = ReturnType<typeof createEdgeLineFitStage>['lineOut']

@@ -5,7 +5,7 @@ import { tgpu, d, std } from 'typegpu'
 export const grayTexToBufferLayout = tgpu.bindGroupLayout({
   grayTex: { texture: d.texture2d(d.f32), access: 'readonly' },
   grayBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
-})
+}).$name('gray-bgl')
 
 export type GrayTexToBufferBindResources = ExtractBindGroupInputFromLayout<typeof grayTexToBufferLayout.entries>
 
@@ -21,7 +21,7 @@ export function createGrayStage(
   height: number,
   grayTex: GrayTexToBufferBindResources['grayTex'],
 ) {
-  const buffer = root.createBuffer(d.arrayOf(d.f32, width * height)).$usage('storage')
+  const buffer = root.createBuffer(d.arrayOf(d.f32, width * height)).$name('gray-buffer').$usage('storage')
   const { pipeline, bindGroup } = createGrayPipeline(root, width, height, { grayTex, grayBuffer: buffer })
   const wgX = ceil(width / FULL_FRAME_WG)
   const wgY = ceil(height / FULL_FRAME_WG)

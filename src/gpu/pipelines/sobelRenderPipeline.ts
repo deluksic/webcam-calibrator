@@ -6,7 +6,7 @@ import { clamp, floor, length } from 'typegpu/std'
 
 export const sobelRenderLayout = tgpu.bindGroupLayout({
   sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
-})
+}).$name('sobel-render-bgl')
 
 export type SobelRenderBindResources = ExtractBindGroupInputFromLayout<typeof sobelRenderLayout.entries>
 
@@ -37,7 +37,7 @@ export function createSobelRenderPipeline(
     vertex: common.fullScreenTriangle,
     fragment: sobelFrag,
     targets: { format: presentationFormat },
-  })
+  }).$name('sobel-render')
   const bindGroup = root.createBindGroup(sobelRenderLayout, resources)
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment) => {
     pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)

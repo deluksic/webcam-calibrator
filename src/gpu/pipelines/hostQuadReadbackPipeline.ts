@@ -25,7 +25,7 @@ function createHostQuadPackLayouts() {
   const layout = tgpu.bindGroupLayout({
     quadData: { storage: GridDataSchema, access: 'readonly' },
     hostOut: { storage: HostQuadReadbackSchema, access: 'mutable' },
-  })
+  }).$name('host-quad-readback-bgl')
   return { layout }
 }
 
@@ -49,11 +49,11 @@ function createHostQuadPackPipeline(root: TgpuRoot, layout: ReturnType<typeof cr
     })
   })
 
-  return root.createComputePipeline({ compute: kernel })
+  return root.createComputePipeline({ compute: kernel }).$name('host-quad-readback-compute')
 }
 
 export function createHostQuadReadbackStage(root: TgpuRoot, quadDataBuffer: GridVizQuadBuffer) {
-  const hostQuadReadbackBuffer = root.createBuffer(HostQuadReadbackSchema).$usage('storage')
+  const hostQuadReadbackBuffer = root.createBuffer(HostQuadReadbackSchema).$name('host-quad-readback').$usage('storage')
   const layouts = createHostQuadPackLayouts()
   const pipeline = createHostQuadPackPipeline(root, layouts.layout)
 

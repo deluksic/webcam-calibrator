@@ -65,42 +65,42 @@ function createLabelLineFitLayouts() {
     labelLineReduce: { storage: d.arrayOf(LabelLineReduceAtomic), access: 'mutable' },
     labelInlierStats: { storage: d.arrayOf(LabelInlierStatsAtomic), access: 'mutable' },
     labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'mutable' },
-  })
+  }).$name('label-line-fit-reset-bgl')
   const accumLayout = tgpu.bindGroupLayout({
     edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
     labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
     labelLineReduce: { storage: d.arrayOf(LabelLineReduceAtomic), access: 'mutable' },
     labelInlierStats: { storage: d.arrayOf(LabelInlierStatsAtomic), access: 'mutable' },
-  })
+  }).$name('label-line-fit-accum-bgl')
   const fitLayout = tgpu.bindGroupLayout({
     labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
     labelLineReduce: { storage: d.arrayOf(LabelLineReduce), access: 'readonly' },
     labelInlierStats: { storage: d.arrayOf(LabelInlierStats), access: 'readonly' },
     labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'mutable' },
-  })
+  }).$name('label-line-fit-fit-bgl')
   const extentLayout = tgpu.bindGroupLayout({
     edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
     labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
     labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
     labelInlierStats: { storage: d.arrayOf(LabelInlierStatsAtomic), access: 'mutable' },
-  })
+  }).$name('label-line-fit-extent-bgl')
   const refineResetLayout = tgpu.bindGroupLayout({
     labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
     labelInlierStats: { storage: d.arrayOf(LabelInlierStatsAtomic), access: 'mutable' },
-  })
+  }).$name('label-line-fit-refine-reset-bgl')
   const refineAccumLayout = tgpu.bindGroupLayout({
     edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
     labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
     labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
     labelInlierStats: { storage: d.arrayOf(LabelInlierStatsAtomic), access: 'mutable' },
-  })
+  }).$name('label-line-fit-refine-accum-bgl')
   const scatterLayout = tgpu.bindGroupLayout({
     labelInlierStats: { storage: d.arrayOf(LabelInlierStats), access: 'readonly' },
     labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'mutable' },
-  })
+  }).$name('label-line-fit-scatter-bgl')
   return { resetLayout, accumLayout, fitLayout, extentLayout, refineResetLayout, refineAccumLayout, scatterLayout }
 }
 

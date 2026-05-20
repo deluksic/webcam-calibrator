@@ -6,7 +6,7 @@ import { clamp } from 'typegpu/std'
 export const sobelLayout = tgpu.bindGroupLayout({
   grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
   sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'mutable' },
-})
+}).$name('sobel-bgl')
 
 export type SobelBindResources = ExtractBindGroupInputFromLayout<typeof sobelLayout.entries>
 
@@ -22,7 +22,7 @@ export function createSobelStage(
   height: number,
   grayBuffer: SobelBindResources['grayBuffer'],
 ) {
-  const buffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$usage('storage')
+  const buffer = root.createBuffer(d.arrayOf(d.vec2f, width * height)).$name('sobel-gradient').$usage('storage')
   const { pipeline, bindGroup } = createSobelPipeline(root, width, height, { grayBuffer, sobelBuffer: buffer })
   const wgX = ceil(width / FULL_FRAME_WG)
   const wgY = ceil(height / FULL_FRAME_WG)

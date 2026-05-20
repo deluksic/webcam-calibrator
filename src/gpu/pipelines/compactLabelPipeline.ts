@@ -78,12 +78,12 @@ export function createCompactLabelLayouts() {
   const resetLayout = tgpu.bindGroupLayout({
     compactCounter: { storage: d.atomic(d.u32), access: 'mutable' },
     canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
-  })
+  }).$name('compact-label-reset-bgl')
   const claimLayout = tgpu.bindGroupLayout({
     labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
     compactCounter: { storage: d.atomic(d.u32), access: 'mutable' },
     canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
-  })
+  }).$name('compact-label-claim-bgl')
   const remapLayout = tgpu.bindGroupLayout({
     labelBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
     compactLabelBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
@@ -91,7 +91,7 @@ export function createCompactLabelLayouts() {
     // The remap kernel uses atomicLoad which needs mutable, but this is safe since
     // we only read (atomicLoad doesn't modify the value, just reads it atomically).
     canonicalRoot: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
-  })
+  }).$name('compact-label-remap-bgl')
   return { resetLayout, claimLayout, remapLayout }
 }
 

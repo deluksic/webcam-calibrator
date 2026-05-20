@@ -37,14 +37,14 @@ const orientHistVizLayout = tgpu.bindGroupLayout({
   rowCount: { storage: d.arrayOf(d.u32, 1), access: 'readonly' },
   rowLabelIds: { storage: d.arrayOf(d.u32), access: 'readonly' },
   labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
-})
+}).$name('orient-hist-viz-bgl')
 
 const orientHistPackLayout = tgpu.bindGroupLayout({
   quadCount: { storage: d.arrayOf(d.u32, 1), access: 'readonly' },
   quadSourceLabelId: { storage: d.arrayOf(d.u32), access: 'readonly' },
   rowCount: { storage: d.arrayOf(d.u32, 1), access: 'mutable' },
   rowLabelIds: { storage: d.arrayOf(d.u32), access: 'mutable' },
-})
+}).$name('orient-hist-pack-bgl')
 
 const BG = d.vec4f(d.f32(0.1), d.f32(0.1), d.f32(0.14), d.f32(1))
 const GAP = d.vec4f(d.f32(0.06), d.f32(0.06), d.f32(0.08), d.f32(1))

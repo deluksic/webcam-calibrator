@@ -17,7 +17,7 @@ export const GrayRenderParams = d.struct({
 export const grayRenderLayout = tgpu.bindGroupLayout({
   grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
   params: { uniform: GrayRenderParams },
-})
+}).$name('grayscale-render-bgl')
 
 export type GrayRenderBindResources = ExtractBindGroupInputFromLayout<typeof grayRenderLayout.entries>
 
@@ -57,7 +57,7 @@ export function createGrayRenderPipeline(
     fragment: grayFrag,
     targets: { format: presentationFormat },
     ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
-  })
+  }).$name('grayscale-render')
   const bindGroup = root.createBindGroup(grayRenderLayout, resources)
   const encodeToCanvas = (
     enc: GPUCommandEncoder,

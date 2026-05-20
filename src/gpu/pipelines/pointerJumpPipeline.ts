@@ -26,24 +26,24 @@ export function createPointerJumpLayouts() {
   const initLayout = tgpu.bindGroupLayout({
     edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     labelBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
-  })
+  }).$name('pointer-jump-init-bgl')
   const stepLayout = tgpu.bindGroupLayout({
     readBuffer: { storage: d.arrayOf(d.u32), access: 'readonly' },
     writeBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
-  })
+  }).$name('pointer-jump-step-bgl')
   const labelsToAtomicLayout = tgpu.bindGroupLayout({
     source: { storage: d.arrayOf(d.u32), access: 'readonly' },
     atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
-  })
+  }).$name('pointer-jump-labels-to-atomic-bgl')
   const parentTightenLayout = tgpu.bindGroupLayout({
     edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     labelRead: { storage: d.arrayOf(d.u32), access: 'readonly' },
     atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
-  })
+  }).$name('pointer-jump-parent-tighten-bgl')
   const atomicToLabelsLayout = tgpu.bindGroupLayout({
     atomicLabels: { storage: d.arrayOf(d.atomic(d.u32)), access: 'mutable' },
     dest: { storage: d.arrayOf(d.u32), access: 'mutable' },
-  })
+  }).$name('pointer-jump-atomic-to-labels-bgl')
   return {
     initLayout,
     stepLayout,

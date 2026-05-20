@@ -23,16 +23,16 @@ export const histogramStorageSchema = d.arrayOf(d.atomic(d.u32), HISTOGRAM_BINS)
 export const histogramComputeLayout = tgpu.bindGroupLayout({
   sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
   histogram: { storage: histogramStorageSchema, access: 'mutable' },
-})
+}).$name('histogram-compute-bgl')
 
 export const histogramResetLayout = tgpu.bindGroupLayout({
   histogram: { storage: histogramStorageSchema, access: 'mutable' },
-})
+}).$name('histogram-reset-bgl')
 
 export const histogramDisplayLayout = tgpu.bindGroupLayout({
   histogram: { storage: histogramStorageSchema, access: 'mutable' },
   thresholdBin: { uniform: d.u32 },
-})
+}).$name('histogram-display-bgl')
 
 export type HistogramResetBindResources = ExtractBindGroupInputFromLayout<typeof histogramResetLayout.entries>
 export type HistogramComputeBindResources = ExtractBindGroupInputFromLayout<typeof histogramComputeLayout.entries>
@@ -53,7 +53,7 @@ export function createHistogramResetPipeline(root: TgpuRoot) {
     atomicStore(histogramResetLayout.$.histogram[binIdx]!, d.u32(0))
   })
 
-  return root.createComputePipeline({ compute: histogramResetKernel })
+  return root.createComputePipeline({ compute: histogramResetKernel }).$name('histogram-reset-compute')
 }
 
 export function createHistogramAccumulatePipeline(root: TgpuRoot, width: number, height: number) {
@@ -97,7 +97,7 @@ export function createHistogramAccumulatePipeline(root: TgpuRoot, width: number,
     }
   })
 
-  return root.createComputePipeline({ compute: histogramKernel })
+  return root.createComputePipeline({ compute: histogramKernel }).$name('histogram-accum-compute')
 }
 
 const { floor } = Math
@@ -182,7 +182,7 @@ export function createHistogramRenderPipeline(
     vertex: histogramVert,
     fragment: histogramFrag,
     targets: { format: presentationFormat },
-  })
+  }).$name('histogram-render')
 }
 
 /** Allocates histogram storage, compute + bar-chart render pipelines, and bind groups; reads `sobelBuffer` (upstream). */
@@ -193,8 +193,8 @@ export function createHistogramStage(
   sobelBuffer: HistogramComputeBindResources['sobelBuffer'],
   presentationFormat: GPUTextureFormat,
 ) {
-  const buffer = root.createBuffer(histogramStorageSchema).$usage('storage')
-  const thresholdBinBuffer = root.createBuffer(d.u32).$usage('uniform')
+  const buffer = root.createBuffer(histogramStorageSchema).$name('histogram-bins').$usage('storage')
+  const thresholdBinBuffer = root.createBuffer(d.u32).$name('histogram-threshold-bin').$usage('uniform')
   const resetPipeline = createHistogramResetPipeline(root)
   const resetBindGroup = root.createBindGroup(histogramResetLayout, { histogram: buffer })
   const computePipeline = createHistogramAccumulatePipeline(root, width, height)

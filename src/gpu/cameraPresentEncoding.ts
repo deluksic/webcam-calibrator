@@ -31,11 +31,8 @@ export function encodePresentNonGrid(
       onError?.(msg)
     }
   } else if (displayMode === 'labels' || displayMode === 'debug') {
-    const labelVizBindGroup = root.createBindGroup(pipeline.render.labelViz.layout, {
-      labelBuffer: pipeline.compact.compactLabelBuffer,
-    })
     try {
-      pipeline.render.labelViz.encodeToCanvas(enc, mainAttachment, labelVizBindGroup)
+      pipeline.render.labelViz.encodeToCanvas(enc, mainAttachment, pipeline.render.labelVizBindGroup)
     } catch (e) {
       const msg = `[camera] labelVizPipeline (${displayMode}) failed: ${e}`
       console.error(msg)

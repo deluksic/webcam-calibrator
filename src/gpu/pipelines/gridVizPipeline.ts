@@ -70,7 +70,7 @@ export function createQuadCountPublishStage(
     edgeQuadCount: { storage: d.arrayOf(d.atomic(d.u32), 1), access: 'mutable' },
     activeQuadCount: { storage: ActiveQuadCountSchema, access: 'mutable' },
     drawIndirect: { storage: GridDrawIndirectParams, access: 'mutable' },
-  })
+  }).$name('quad-count-publish-bgl')
   const publishKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [1, 1, 1],
@@ -107,7 +107,7 @@ export function createGridVizLayouts() {
     failInterrogate: { uniform: d.u32 },
     /** 1 = skip UNKNOWN / DICT_MISS overlays (Calibrate). */
     hideNonDecoded: { uniform: d.u32 },
-  })
+  }).$name('grid-viz-bgl')
   return { gridVizLayout }
 }
 
@@ -289,7 +289,7 @@ export function createGridVizPipeline(
     },
     primitive: { topology: 'triangle-strip' },
     ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
-  })
+  }).$name('grid-viz-render')
 }
 
 /** Allocates quad + uniform storage; render pipeline for AprilTag overlay. */
@@ -304,31 +304,30 @@ export function createGridVizStage(
     drawIndirectBuf?: ReturnType<typeof root.createBuffer>
   },
 ) {
-  const quadCornersBuffer = options?.quadCornersBuffer ?? root.createBuffer(GridDataSchema).$usage('storage')
+  const quadCornersBuffer = options?.quadCornersBuffer ?? root.createBuffer(GridDataSchema).$name('grid-quad-data').$usage('storage')
   const drawIndirectBuf =
     options?.drawIndirectBuf ??
-    root.createBuffer(GridDrawIndirectParams).$usage('storage', 'indirect')
+    root.createBuffer(GridDrawIndirectParams).$name('grid-draw-indirect').$usage('storage', 'indirect')
   if (!options?.drawIndirectBuf) {
     drawIndirectBuf.write({ vertexCount: 4, instanceCount: 0, firstVertex: 0, firstInstance: 0 })
   }
   const { gridVizLayout } = createGridVizLayouts()
-  const gridVizDebugModeBuffer = root.createBuffer(d.u32).$usage('uniform')
+  const gridVizDebugModeBuffer = root.createBuffer(d.u32).$name('grid-viz-debug-mode').$usage('uniform')
   gridVizDebugModeBuffer.write(0)
-  const gridVizHideNonDecodedBuffer = root.createBuffer(d.u32).$usage('uniform')
+  const gridVizHideNonDecodedBuffer = root.createBuffer(d.u32).$name('grid-viz-hide-non-decoded').$usage('uniform')
   gridVizHideNonDecodedBuffer.write(0)
   const gridVizPipeline = createGridVizPipeline(root, gridVizLayout, width, height, presentationFormat, options)
+  const gridVizBindGroup = root.createBindGroup(gridVizLayout, {
+    quads: quadCornersBuffer,
+    failInterrogate: gridVizDebugModeBuffer,
+    hideNonDecoded: gridVizHideNonDecodedBuffer,
+  })
   const encodeToCanvas = (enc: GPUCommandEncoder, colorAttachment: ColorAttachment, options?: { hideNonDecoded?: boolean }) => {
     gridVizHideNonDecodedBuffer.write(options?.hideNonDecoded ? 1 : 0)
     gridVizPipeline
       .with(enc)
       .withColorAttachment(colorAttachment)
-      .with(
-        root.createBindGroup(gridVizLayout, {
-          quads: quadCornersBuffer,
-          failInterrogate: gridVizDebugModeBuffer,
-          hideNonDecoded: gridVizHideNonDecodedBuffer,
-        }),
-      )
+      .with(gridVizBindGroup)
       .drawIndirect(drawIndirectBuf as never)
   }
   return {

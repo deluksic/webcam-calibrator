@@ -29,7 +29,7 @@ const ERR_GOOD_PX = 0.75
 export function createReprojectionOverlayLayouts() {
   const reprojOverlayLayout = tgpu.bindGroupLayout({
     pairs: { storage: ReprojOverlaySchema, access: 'readonly' },
-  })
+  }).$name('reproj-overlay-bgl')
   return { reprojOverlayLayout }
 }
 
@@ -94,7 +94,7 @@ export function createReprojectionOverlayOriginalPipeline(
     targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'triangle-strip' },
     ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
-  })
+  }).$name('reproj-original-render')
 }
 
 export function createReprojectionOverlayTargetPipeline(
@@ -162,7 +162,7 @@ export function createReprojectionOverlayTargetPipeline(
     targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'triangle-strip' },
     ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
-  })
+  }).$name('reproj-target-render')
 }
 
 export function createReprojectionOverlayLinesPipeline(
@@ -214,7 +214,7 @@ export function createReprojectionOverlayLinesPipeline(
     targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'line-list' },
     ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
-  })
+  }).$name('reproj-lines-render')
 }
 
 /** Allocates pair buffer + three draw pipelines for reprojection overlay. */
@@ -225,7 +225,7 @@ export function createReprojectionOverlayStage(
   presentationFormat: GPUTextureFormat,
   options?: { sampleCount?: number; reprojBuffer?: ReturnType<typeof root.createBuffer>; drawState?: { instanceCount: number } },
 ) {
-  const reprojOverlayBuffer = options?.reprojBuffer ?? root.createBuffer(ReprojOverlaySchema).$usage('storage')
+  const reprojOverlayBuffer = options?.reprojBuffer ?? root.createBuffer(ReprojOverlaySchema).$name('reproj-overlay-pairs').$usage('storage')
   const reprojOverlayDrawState = options?.drawState ?? { instanceCount: 0 }
   const { reprojOverlayLayout } = createReprojectionOverlayLayouts()
   const reprojOverlayBindGroup = root.createBindGroup(reprojOverlayLayout, {

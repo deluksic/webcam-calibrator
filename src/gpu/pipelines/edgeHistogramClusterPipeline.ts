@@ -54,15 +54,15 @@ function createEdgeHistogramClusterLayouts() {
     labelClusters: { storage: d.arrayOf(LabelOrientCluster), access: 'mutable' },
     labelQuadReject: { storage: d.arrayOf(d.u32), access: 'mutable' },
     quadCount: { storage: d.arrayOf(d.atomic(d.u32), 1), access: 'mutable' },
-  })
+  }).$name('edge-hist-reset-bgl')
   const histAccumLayout = tgpu.bindGroupLayout({
     edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
     labelClusters: { storage: d.arrayOf(LabelOrientCluster), access: 'mutable' },
-  })
+  }).$name('edge-hist-accum-bgl')
   const findPeaksLayout = tgpu.bindGroupLayout({
     labelClusters: { storage: d.arrayOf(LabelOrientCluster), access: 'mutable' },
-  })
+  }).$name('edge-hist-peaks-bgl')
   const compactQuadsLayout = tgpu.bindGroupLayout({
     labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
     labelLineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
@@ -71,19 +71,19 @@ function createEdgeHistogramClusterLayouts() {
     labelToQuadId: { storage: d.arrayOf(d.u32), access: 'mutable' },
     quadSourceLabelId: { storage: d.arrayOf(d.u32), access: 'mutable' },
     quadCount: { storage: d.arrayOf(d.atomic(d.u32), 1), access: 'mutable' },
-  })
+  }).$name('edge-hist-compact-quads-bgl')
   const writeQuadLabelMapLayout = tgpu.bindGroupLayout({
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
     labelToQuadId: { storage: d.arrayOf(d.u32), access: 'readonly' },
     quadLabelBuffer: { storage: d.arrayOf(d.u32), access: 'mutable' },
-  })
+  }).$name('edge-hist-quad-label-map-bgl')
   const assignEdgesLayout = tgpu.bindGroupLayout({
     edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
     compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
     labelClusters: { storage: d.arrayOf(LabelOrientClusterReadonly), access: 'readonly' },
     labelToQuadId: { storage: d.arrayOf(d.u32), access: 'readonly' },
     packedEdgeLabels: { storage: d.arrayOf(d.u32), access: 'mutable' },
-  })
+  }).$name('edge-hist-assign-edges-bgl')
   return {
     histResetLayout,
     histAccumLayout,

@@ -14,7 +14,7 @@ const fittedLineLayout = tgpu.bindGroupLayout({
   lineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
   labelToQuadId: { storage: d.arrayOf(d.u32), access: 'readonly' },
   quadPeakEdge: { storage: d.arrayOf(d.u32), access: 'readonly' },
-})
+}).$name('fitted-lines-bgl')
 
 function imagePxToClip(p: { x: number; y: number }, width: number, height: number) {
   'use gpu'
@@ -81,7 +81,7 @@ export function createEdgeFittedLineOverlayStage(
     targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
     primitive: { topology: 'line-list' },
     ...(sampleCount !== undefined && sampleCount > 1 ? { multisample: { count: sampleCount } } : {}),
-  })
+  }).$name('fitted-lines-render')
 
   const bindGroup = root.createBindGroup(fittedLineLayout, { lineOut, labelToQuadId, quadPeakEdge })
 
