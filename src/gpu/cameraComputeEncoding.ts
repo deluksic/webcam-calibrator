@@ -47,6 +47,8 @@ export function encodeCameraCompute(
     pipeline.tagDecode.encodeVotePasses(enc, MAX_QUADS)
     runComputeStage(enc, 'tag-decode', (p) => {
       pipeline.tagDecode.encodeDecode(p, MAX_QUADS)
+    })
+    runComputeStage(enc, 'host-quad-pack', (p) => {
       pipeline.hostQuadReadback.encodePack(p, MAX_QUADS)
     })
   }

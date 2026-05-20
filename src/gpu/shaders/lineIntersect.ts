@@ -9,11 +9,13 @@ export const LineIntersectResult = d.struct({
   ok: d.u32,
 })
 
-/** Infinite line n·p = d with unit n. */
+/** Infinite line n·p = d with unit n, plus segment midpoint for center estimation. */
 export const LineNormalD = d.struct({
   nx: d.f32,
   ny: d.f32,
   d: d.f32,
+  mx: d.f32,
+  my: d.f32,
 })
 
 export const lineNormalFromEdge = tgpu.fn([EdgeLineEntry], LineNormalD)((line) => {
@@ -22,6 +24,8 @@ export const lineNormalFromEdge = tgpu.fn([EdgeLineEntry], LineNormalD)((line) =
     nx: line.sumGx,
     ny: line.sumGy,
     d: line.nDotMean,
+    mx: (line.p0x + line.p1x) * d.f32(0.5),
+    my: (line.p0y + line.p1y) * d.f32(0.5),
   })
 })
 

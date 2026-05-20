@@ -83,6 +83,7 @@ const PATTERN_TIE = 3
 
 const PER_QUAD_HIST = MAX_QUADS * TAG_DECODE_HIST_BINS
 const WORST_SCORE = ((TAG_DECODE_MAX_DICT_ERROR + 1) << 20) | TAG36H11_COUNT
+const WorstScoreGpu = tgpu.const(d.u32, WORST_SCORE)
 
 const CodewordPair = d.struct({ low: d.u32, high: d.u32 })
 const CodewordBuffer = d.arrayOf(CodewordPair, TAG36H11_COUNT)
@@ -195,6 +196,32 @@ function createTagDecodeBufferClears(
     },
     encodeClearModuleVotes(pass: GPUComputePassEncoder) {
       voteClearPipeline.with(pass).with(voteClearBindGroup).dispatchWorkgroups(voteClearWgs)
+    },
+  }
+}
+
+function createAtomicBestClearStage(
+  root: TgpuRoot,
+  atomicBestBuf: ReturnType<typeof root.createBuffer<typeof AtomicBestSchema>>,
+) {
+  const layout = tgpu.bindGroupLayout({
+    atomicBest: { storage: AtomicBestReadonlySchema, access: 'mutable' },
+  })
+  const kernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [CLEAR_WG, 1, 1],
+  })((input) => {
+    const idx = d.u32(input.gid.x)
+    if (idx >= d.u32(MAX_QUADS)) {
+      return
+    }
+    layout.$.atomicBest[idx] = WorstScoreGpu.$
+  })
+  const pipeline = root.createComputePipeline({ compute: kernel })
+  const bindGroup = root.createBindGroup(layout, { atomicBest: atomicBestBuf as never })
+  return {
+    encodeClear(pass: GPUComputePassEncoder) {
+      pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(MAX_QUADS / CLEAR_WG))
     },
   }
 }
@@ -1048,8 +1075,7 @@ export function createTagDecodeStage(
     activeQuadCountBuf,
   )
 
-  const worstScores = new Uint32Array(MAX_QUADS)
-  worstScores.fill(WORST_SCORE)
+  const atomicBestClear = createAtomicBestClearStage(root, atomicBestBuf)
 
   function encodeHistAndPeaks(enc: GPUCommandEncoder, quadCount: number) {
     const n = capQuadCount(quadCount)
@@ -1087,7 +1113,7 @@ export function createTagDecodeStage(
       return
     }
     classifyStage.encodeClassify(computePass, n)
-    atomicBestBuf.write(worstScores)
+    atomicBestClear.encodeClear(computePass)
     dictStage.encodeDictMatch(computePass, n)
     canonicalizeStage.encodeCanonicalize(computePass, n)
   }

@@ -266,12 +266,40 @@ export const cornersStripFromCwRingStart = tgpu.fn(
   return out
 })
 
+/** Fix any normal that points away from the median line midpoint — flipped by the edge peak sign. */
+export const fixFlippedNormals = tgpu.fn(
+  [d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL)],
+  d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL),
+)((linesIn) => {
+  'use gpu'
+  const out = d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL)()
+  let cx = d.f32(0)
+  let cy = d.f32(0)
+  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+    cx = cx + linesIn[i]!.mx
+    cy = cy + linesIn[i]!.my
+  }
+  cx = cx / d.f32(MAX_EDGES_PER_LABEL)
+  cy = cy / d.f32(MAX_EDGES_PER_LABEL)
+  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+    const l = linesIn[i]!
+    const dot = (cx - l.mx) * l.nx + (cy - l.my) * l.ny
+    if (dot < d.f32(0)) {
+      out[i] = LineNormalD({ nx: -l.nx, ny: -l.ny, d: -l.d, mx: l.mx, my: l.my })
+    } else {
+      out[i] = LineNormalD(l)
+    }
+  }
+  return out
+})
+
 /** Intersect lines → order corners → single DLT homography (TL, TR, BL, BR). */
 export const solveQuadCornersAndHomography = tgpu.fn(
   [d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL)],
   QuadCornerSolveResult,
-)((lines) => {
+)((linesIn) => {
   'use gpu'
+  const lines = fixFlippedNormals(linesIn)
   const slotsIn = U32x4()
   for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
     slotsIn[i] = i
