@@ -242,15 +242,12 @@ function createFindPeaksPipeline(
     // so slot 0→1→2→3 are adjacent sides in orientation space.
     if (peakCount === d.u32(MAX_EDGES_PER_LABEL)) {
       const bins = d.u32(ORIENT_HIST_BINS)
-      // Pick the peak with minimum bin as the CCW start.
-      let startIdx = d.u32(0)
+      // Pick minimum bin as CCW ring origin (distance keys only need startBin).
       let startBin = slot.peakBins[d.u32(0)]!
       for (const k of tgpu.unroll(std.range(1, MAX_EDGES_PER_LABEL))) {
         const ki = d.u32(k)
         const kb = slot.peakBins[ki]!
-        const pick = kb < startBin
-        startIdx = select(startIdx, ki, pick)
-        startBin = select(startBin, kb, pick)
+        startBin = select(startBin, kb, kb < startBin)
       }
 
       // Compute CCW distance from start for each peak.

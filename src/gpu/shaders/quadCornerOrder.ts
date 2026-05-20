@@ -1,5 +1,5 @@
 import { d, std, tgpu } from 'typegpu'
-import { abs, atan2, max, sqrt } from 'typegpu/std'
+import { abs, max, sqrt } from 'typegpu/std'
 
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { QUAD_MIN_EDGE_PX, QUAD_MIN_SIGNED_AREA_REL } from '@/gpu/lineFitThresholds'
@@ -13,7 +13,6 @@ export const FAIL_PLAUSIBILITY = d.u32(1 << 3)
 export const FAIL_NO_INTERSECTIONS = d.u32(1 << 4)
 
 export const Corners4 = d.arrayOf(d.vec2f, MAX_EDGES_PER_LABEL)
-export const U32x4 = d.arrayOf(d.u32, MAX_EDGES_PER_LABEL)
 
 export const QuadCornerSolveResult = d.struct({
   failureCode: d.u32,
@@ -22,60 +21,6 @@ export const QuadCornerSolveResult = d.struct({
   homographyOk: d.u32,
   /** TL, TR, BL, BR in image pixels — used for grid overlay rasterization. */
   corners: Corners4,
-})
-
-/** Sort edge slot indices 0..3 by increasing TLS normal angle. */
-export const sortEdgeSlotsByLineNormal = tgpu.fn(
-  [d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL), U32x4],
-  U32x4,
-)((lines, slotsIn) => {
-  'use gpu'
-  const slots = U32x4()
-  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    slots[i] = slotsIn[i]!
-  }
-
-  for (const _ of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    for (const j of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL - 1))) {
-      const sj = slots[j]!
-      const sjp1 = slots[j + d.u32(1)]!
-      const la = lines[sj]!
-      const lb = lines[sjp1]!
-      const aj = atan2(la.ny, la.nx)
-      const ajp1 = atan2(lb.ny, lb.nx)
-      if (aj > ajp1) {
-        slots[j] = sjp1
-        slots[j + d.u32(1)] = sj
-      }
-    }
-  }
-  return U32x4(slots)
-})
-
-export const AdjacentCornersResult = d.struct({
-  corners: Corners4,
-  count: d.u32,
-})
-
-/** Intersect adjacent lines in sorted normal order → up to four corners. */
-export const cornersFromAdjacentLines = tgpu.fn(
-  [d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL), U32x4],
-  AdjacentCornersResult,
-)((lines, sortedSlots) => {
-  'use gpu'
-  const corners = Corners4()
-  let count = d.u32(0)
-  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    const i1 = (i + d.u32(1)) % d.u32(MAX_EDGES_PER_LABEL)
-    const la = lines[sortedSlots[i]!]!
-    const lb = lines[sortedSlots[i1]!]!
-    const hit = lineIntersectNormal(la.nx, la.ny, la.d, lb.nx, lb.ny, lb.d)
-    corners[i] = d.vec2f(hit.point)
-    if (hit.ok !== d.u32(0)) {
-      count = count + d.u32(1)
-    }
-  }
-  return AdjacentCornersResult({ corners: corners, count: count })
 })
 
 function quadSignedArea(corners: d.Infer<typeof Corners4>) {
@@ -93,51 +38,9 @@ function quadSignedArea(corners: d.Infer<typeof Corners4>) {
   return area * d.f32(0.5)
 }
 
-/** Sort corners by polar angle around centroid (cyclic order only). */
-export const sortCornersByPolarAngle = tgpu.fn(
-  [Corners4],
-  Corners4,
-)((cornersIn) => {
-  'use gpu'
-  let cx = d.f32(0)
-  let cy = d.f32(0)
-  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    cx = cx + cornersIn[i]!.x
-    cy = cy + cornersIn[i]!.y
-  }
-  cx = cx / d.f32(MAX_EDGES_PER_LABEL)
-  cy = cy / d.f32(MAX_EDGES_PER_LABEL)
-
-  const slots = U32x4()
-  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    slots[i] = i
-  }
-
-  for (const _ of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    for (const j of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL - 1))) {
-      const sj = slots[j]!
-      const sjp1 = slots[j + d.u32(1)]!
-      const pj = cornersIn[sj]!
-      const pjp1 = cornersIn[sjp1]!
-      const aj = atan2(pj.y - cy, pj.x - cx)
-      const ajp1 = atan2(pjp1.y - cy, pjp1.x - cx)
-      if (aj > ajp1) {
-        slots[j] = sjp1
-        slots[j + d.u32(1)] = sj
-      }
-    }
-  }
-
-  const out = Corners4()
-  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    out[i] = d.vec2f(cornersIn[slots[i]!]!)
-  }
-  return out
-})
-
 /**
  * `ring` is a CCW cyclic array (from fixed-slot adjacency intersections).
- * Pick geometric TL by lexicographic (y, x) min, then walk the ring for TR, BR, BL.
+ * Pick geometric TL by lexicographic (y, x) min with ε ties, then walk the ring for TR, BR, BL.
  */
 export const orderCornersTLTRBLBR = tgpu.fn(
   [Corners4],
@@ -145,12 +48,17 @@ export const orderCornersTLTRBLBR = tgpu.fn(
 )((ring) => {
   'use gpu'
   let tlIdx = d.u32(0)
+  let bestY = ring[0]!.y
+  let bestX = ring[0]!.x
+  const tlEps = d.f32(1e-4)
   for (const i of tgpu.unroll(std.range(1, MAX_EDGES_PER_LABEL))) {
     const p = ring[i]!
-    const t = ring[tlIdx]!
-    const pick = p.y < t.y || (p.y === t.y && p.x < t.x)
+    const pick =
+      p.y < bestY - tlEps || (abs(p.y - bestY) <= tlEps && p.x < bestX - tlEps)
     if (pick) {
       tlIdx = i
+      bestY = p.y
+      bestX = p.x
     }
   }
 
@@ -215,7 +123,7 @@ const collapsedScreenQuad = tgpu.fn(
 
 /**
  * Rotate triangle-strip corners (TL, TR, BL, BR) by `k` quarter-turns CW — same permutations as
- * Strip-order quarter-turn CW permutations (not a polar-ring start index).
+ * strip-order quarter-turn CW permutations (not a polar-ring start index).
  */
 export const rotateStripCorners = tgpu.fn(
   [Corners4, d.u32],
@@ -248,38 +156,15 @@ export const rotateStripCorners = tgpu.fn(
   return out
 })
 
-/** Rotate cyclic `ring`: vertex `start` is TL; same TR,BR,BL walk as {@link orderCornersTLTRBLBR}. */
-export const cornersStripFromCwRingStart = tgpu.fn(
-  [Corners4, d.u32],
-  Corners4,
-)((cw, start) => {
-  'use gpu'
-  const tl = cw[start]!
-  const tr = cw[(start + d.u32(1)) % d.u32(MAX_EDGES_PER_LABEL)]!
-  const br = cw[(start + d.u32(2)) % d.u32(MAX_EDGES_PER_LABEL)]!
-  const bl = cw[(start + d.u32(3)) % d.u32(MAX_EDGES_PER_LABEL)]!
-  const out = Corners4()
-  out[d.u32(0)] = d.vec2f(tl)
-  out[d.u32(1)] = d.vec2f(tr)
-  out[d.u32(2)] = d.vec2f(bl)
-  out[d.u32(3)] = d.vec2f(br)
-  return out
-})
-
 /**
- * Corners from fixed CCW slot adjacency (peaks were canonically sorted in findPeaks).
- * Lines are in CCW circular order — slot i and (i+1)%4 are adjacent sides.
- * Corner order from intersections: [i∩(i+1)] is a CCW ring.
- *
- * Produces TL,TR,BL,BR strip and one DLT homography. No normal sorting, no polar sort,
- * no ring-start / BL-BR guesses — edge order is already authoritative.
+ * Corners from fixed CCW slot adjacency (peaks canonically sorted in findPeaks).
+ * Intersect line i with line (i+1)%4, then TL,TR,BL,BR + single DLT.
  */
 export const solveQuadCornersAndHomography = tgpu.fn(
   [d.arrayOf(LineNormalD, MAX_EDGES_PER_LABEL)],
   QuadCornerSolveResult,
 )((lines) => {
   'use gpu'
-  // Fixed adjacency intersections — lines are already in CCW circular order.
   const corners = Corners4()
   let count = d.u32(0)
   for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
@@ -303,7 +188,6 @@ export const solveQuadCornersAndHomography = tgpu.fn(
     })
   }
 
-  // corners are already in CCW ring order (fixed adjacency).  Convert to strip.
   const ordered = orderCornersTLTRBLBR(corners)
   if (quadDegeneracyOk(ordered) === d.u32(0)) {
     return QuadCornerSolveResult({
@@ -315,7 +199,6 @@ export const solveQuadCornersAndHomography = tgpu.fn(
     })
   }
 
-  // Single DLT — strip order is authoritative, no guesswork.
   const h = tryHomographyFromCorners(ordered[0]!, ordered[1]!, ordered[2]!, ordered[3]!)
   if (h.ok !== d.u32(0)) {
     return QuadCornerSolveResult({
@@ -327,7 +210,6 @@ export const solveQuadCornersAndHomography = tgpu.fn(
     })
   }
 
-  // DLT pivot failed — return stable corners for screen-space fallback.
   return QuadCornerSolveResult({
     failureCode: 0,
     intersectionCount: count,

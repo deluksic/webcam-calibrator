@@ -1,9 +1,9 @@
 import { d, tgpu } from 'typegpu'
-import { length, max, select } from 'typegpu/std'
+import { abs, length, max, select } from 'typegpu/std'
 
-import { LINE_MIN_INLIER_RATIO, TLS_REF_COS_MAX_ANGLE } from '@/gpu/lineFitThresholds'
+import { LINE_FIT_PEAKDIR_COS_MIN, LINE_MIN_INLIER_RATIO } from '@/gpu/lineFitThresholds'
 import { EDGE_MIN_SPAN_PX, EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
-import { PCA_ISOTROPY_MAX, tlsAgreesWithNormal, tlsNormalFromMoments } from '@/gpu/shaders/linePca'
+import { PCA_ISOTROPY_MAX, tlsNormalFromMoments } from '@/gpu/shaders/linePca'
 
 /** i32 moment scale — must match label line-fit accum. */
 const POS_FIXED_SCALE = 4
@@ -50,7 +50,7 @@ export const classifyInvalidLineFit = tgpu.fn(
   const sumXY = d.f32(inlier.sumXYFixed) * invPos * invPos
   const sumYY = d.f32(inlier.sumYYFixed) * invPos * invPos
   const peakLen = length(peakDir)
-  const cosRef = d.f32(TLS_REF_COS_MAX_ANGLE)
+  const cosMin = d.f32(LINE_FIT_PEAKDIR_COS_MIN)
 
   if (line.inlierCount > d.u32(0)) {
     const ratio = d.f32(line.inlierCount) / d.f32(max(d.u32(1), line.count))
@@ -80,13 +80,14 @@ export const classifyInvalidLineFit = tgpu.fn(
     }
     return d.u32(Reject.tlsDegenerate)
   }
-  if (tlsAgreesWithNormal(tls.nx, tls.ny, refNx, refNy, cosRef) === d.u32(0)) {
+  const dotTls = abs(tls.nx * refNx + tls.ny * refNy)
+  if (dotTls < cosMin) {
     return d.u32(Reject.tlsPeak)
   }
   return d.u32(Reject.tlsDegenerate)
 })
 
-/** Normal + offset for inlier-distance tint when the fitted line is invalid. */
+/** Normal + offset for inlier-distance tint — matches production peakDir-first fit. */
 export const lineFitProbeFromSlot = tgpu.fn(
   [LabelInlierStatsReadonly, d.vec2f, d.u32],
   LineFitProbe,
@@ -105,28 +106,28 @@ export const lineFitProbeFromSlot = tgpu.fn(
   const cy = sumY * invN
   const peakLen = length(peakDir)
 
-  if (fitCount >= d.u32(2) && peakLen > d.f32(1e-6)) {
+  if (peakLen > d.f32(1e-6)) {
     const refNx = peakDir.x / peakLen
     const refNy = peakDir.y / peakLen
-    const tls = tlsNormalFromMoments(fitCount, sumX, sumY, sumXX, sumXY, sumYY)
-    if (tls.ok !== d.u32(0)) {
-      let nx = tls.nx
-      let ny = tls.ny
-      if (nx * refNx + ny * refNy < d.f32(0)) {
-        nx = -nx
-        ny = -ny
-      }
-      return LineFitProbe({
-        nx,
-        ny,
-        nDotMean: cx * nx + cy * ny,
-      })
-    }
-  }
+    let nx = refNx
+    let ny = refNy
+    const cosMin = d.f32(LINE_FIT_PEAKDIR_COS_MIN)
 
-  if (peakLen > d.f32(1e-6)) {
-    const nx = -peakDir.y / peakLen
-    const ny = peakDir.x / peakLen
+    if (fitCount >= d.u32(2)) {
+      const tls = tlsNormalFromMoments(fitCount, sumX, sumY, sumXX, sumXY, sumYY)
+      if (tls.ok !== d.u32(0)) {
+        const dotTls = tls.nx * refNx + tls.ny * refNy
+        if (abs(dotTls) >= cosMin) {
+          nx = tls.nx
+          ny = tls.ny
+          if (dotTls < d.f32(0)) {
+            nx = -nx
+            ny = -ny
+          }
+        }
+      }
+    }
+
     return LineFitProbe({
       nx,
       ny,

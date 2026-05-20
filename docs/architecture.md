@@ -81,7 +81,7 @@ Wiring: [`cameraPipeline.ts`](../src/gpu/cameraPipeline.ts) (Calibrate), [`gradi
 
 ### Oriented edge clustering
 
-[`edgeHistogramClusterPipeline.ts`](../src/gpu/pipelines/edgeHistogramClusterPipeline.ts): 64-bin orientation histogram per compact label; up to **4** peaks ≥ `MIN_PEAK_BIN_SEPARATION` (8 bins). [`labelLineFitPipeline.ts`](../src/gpu/pipelines/labelLineFitPipeline.ts): TLS + inlier refine per `labelId × peak`. A label registers as a quad only with four valid peaks, four sides with enough inliers, and orientation spread (rejects two parallel pairs). `quadCount` is atomic per frame; `labelToQuadId` / `quadPeakEdge` index flat edges for profiles and homography.
+[`edgeHistogramClusterPipeline.ts`](../src/gpu/pipelines/edgeHistogramClusterPipeline.ts): **64-bin signed 360°** orientation histogram per compact label (`atan2(gy,gx)` — opposite tag sides are ~32 bins apart, not folded at π); up to **4** peaks ≥ `MIN_PEAK_BIN_SEPARATION` (8 bins), permuted to **CCW circular order** when four peaks are found. [`labelLineFitPipeline.ts`](../src/gpu/pipelines/labelLineFitPipeline.ts): TLS + inlier refine per `labelId × peak`. A label registers as a quad only with four valid peaks, four sides with enough inliers, and orientation spread (rejects two parallel pairs). `quadCount` is atomic per frame; `labelToQuadId` / `quadPeakEdge` index flat edges for profiles and homography.
 
 ### Quad corners and homography
 

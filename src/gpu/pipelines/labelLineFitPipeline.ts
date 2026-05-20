@@ -9,6 +9,7 @@ import {
   LINE_INLIER_DIST_PX,
   LINE_MIN_INLIER_RATIO,
   LINE_MIN_PEAK_HIST_COUNT,
+  LINE_FIT_PEAKDIR_COS_MIN,
   LINE_MIN_REFINE_INLIERS,
   LINE_MIN_SLOT_COUNT,
   MAX_EDGES_PER_LABEL,
@@ -367,7 +368,7 @@ function createLabelFitPipeline(
       const sumXY = d.f32(inlier.sumXYFixed) * invPos * invPos
       const sumYY = d.f32(inlier.sumYYFixed) * invPos * invPos
 
-      const cosMin = d.f32(0.5)
+      const cosMin = d.f32(LINE_FIT_PEAKDIR_COS_MIN)
       const tls = tlsNormalFromMoments(fitCount, sumX, sumY, sumXX, sumXY, sumYY)
       let nx = refNx
       let ny = refNy

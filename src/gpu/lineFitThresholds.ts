@@ -29,6 +29,9 @@ export const LINE_EXTENT_TRIM_FRAC = 0.08
 
 export const TLS_REF_COS_MAX_ANGLE = 0.85
 
+/** Min |dot(tls, peakDir)| to use TLS direction; else outward peakDir (AprilTag fit). */
+export const LINE_FIT_PEAKDIR_COS_MIN = 0.5
+
 /** Valid fitted lines required to register a label as a quad. */
 export const MIN_QUAD_VALID_EDGES = 4
 
