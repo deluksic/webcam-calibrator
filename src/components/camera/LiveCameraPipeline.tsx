@@ -260,10 +260,6 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           const overlayQuads = tagged.filter((q) => acceptQuadForTagUse(q, sf))
           setGridOverlayQuads(overlayQuads)
 
-          const presentEnc = gNow.device.createCommandEncoder({ label: 'grid frame present' })
-          encodeGridPresent(presentEnc, pip, performance.now() * 0.001)
-          gNow.device.queue.submit([presentEnc.finish()])
-
           pi.onQuadDetection?.(tagged, { frameId: slot.frameId })
         })
         .catch((e) => {
@@ -297,6 +293,10 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           if (slot !== undefined) {
             encodeCameraCompute(enc, gpuNow, pip, video, threshold(), slot)
             gpuNow.device.queue.submit([enc.finish()])
+
+            const presentEnc = gpuNow.device.createCommandEncoder({ label: 'grid frame present' })
+            encodeGridPresent(presentEnc, pip, timeSec)
+            gpuNow.device.queue.submit([presentEnc.finish()])
             noteGpuProfileFrame(gpuNow)
             scheduleQuadDetection(slot, pi.showFallbacks)
           }
