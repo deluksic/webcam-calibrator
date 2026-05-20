@@ -1,5 +1,5 @@
 import { d, std, tgpu } from 'typegpu'
-import { abs, max, sqrt } from 'typegpu/std'
+import { abs, max, mul, sqrt } from 'typegpu/std'
 
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { QUAD_MIN_EDGE_PX, QUAD_MIN_SIGNED_AREA_REL } from '@/gpu/lineFitThresholds'
@@ -86,8 +86,11 @@ export const quadDegeneracyOk = tgpu.fn(
     scale = max(scale, abs(p.x))
     scale = max(scale, abs(p.y))
   }
-  const area = abs(quadSignedArea(corners))
-  if (area < d.f32(QUAD_MIN_SIGNED_AREA_REL) * scale * scale) {
+  const signedArea = quadSignedArea(corners)
+  if (signedArea <= d.f32(0)) {
+    return 0
+  }
+  if (signedArea < d.f32(QUAD_MIN_SIGNED_AREA_REL) * scale * scale) {
     return 0
   }
 
@@ -190,26 +193,34 @@ export const solveQuadCornersAndHomography = tgpu.fn(
 
   const ordered = orderCornersTLTRBLBR(corners)
   if (quadDegeneracyOk(ordered) === d.u32(0)) {
+    // Collapse to zero-area — grid viz won't render a degenerate triangle strip.
     return QuadCornerSolveResult({
       failureCode: FAIL_PLAUSIBILITY,
       intersectionCount: count,
       homography: invalidGridHomography(),
       homographyOk: d.u32(0),
-      corners: Corners4(ordered),
+      corners: collapsedScreenQuad(ordered, count),
     })
   }
 
   const h = tryHomographyFromCorners(ordered[0]!, ordered[1]!, ordered[2]!, ordered[3]!)
   if (h.ok !== d.u32(0)) {
-    return QuadCornerSolveResult({
-      failureCode: 0,
-      intersectionCount: count,
-      homography: h.homography,
-      homographyOk: 1,
-      corners: Corners4(ordered),
-    })
+    // Verify the homography maps the unit-square midpoint to a point in front
+    // of the camera (z > 0).  Non-positive z means a self-intersecting or
+    // flipped quad that slipped past the winding check.
+    const mid = mul(h.homography, d.vec3f(d.f32(0.5), d.f32(0.5), d.f32(1)))
+    if (mid.z > d.f32(0)) {
+      return QuadCornerSolveResult({
+        failureCode: 0,
+        intersectionCount: count,
+        homography: h.homography,
+        homographyOk: 1,
+        corners: Corners4(ordered),
+      })
+    }
   }
 
+  // DLT failed or homography is degenerate — return stable corners for screen-space fallback.
   return QuadCornerSolveResult({
     failureCode: 0,
     intersectionCount: count,
