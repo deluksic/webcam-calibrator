@@ -136,11 +136,16 @@ export async function readGpuDetection(
   root: TgpuRoot,
   pipeline: CameraPipeline,
 ): Promise<{ quads: DetectedQuad[]; quadCount: number }> {
-  // Read quadCount + hostQuadReadback atomically in one batch so they're from the
-  // same GPU queue point. Then flush and read pattern + source labels at actual count.
-  const [quadCountRaw, allHostQuads] = await Promise.all([
+  // All reads fire in one Promise.all — every copy command is submitted to the GPU
+  // queue before any of them resolve. This avoids a two-phase race where quadCount
+  // and quad data came from different frames.
+  const maxPattern = MAX_DETECTED_TAGS * MODULES_PER_QUAD
+
+  const [quadCountRaw, allHostQuads, patternRaw, sourceLabelIds] = await Promise.all([
     pipeline.edgeHistogram.quadCount.read(),
     pipeline.hostQuadReadback.hostQuadReadbackBuffer.read(),
+    readU32Prefix(root.device, pipeline.tagDecode.patternBuf.buffer, maxPattern),
+    readU32Prefix(root.device, pipeline.edgeHistogram.quadSourceLabelId.buffer, MAX_DETECTED_TAGS),
   ])
 
   const quadCount = Array.isArray(quadCountRaw) ? (quadCountRaw[0] ?? 0) : Number(quadCountRaw)
@@ -151,22 +156,10 @@ export async function readGpuDetection(
   }
 
   const hostQuads = (Array.isArray(allHostQuads) ? allHostQuads : []).slice(0, n)
-
-  // Flush GPU queue so pattern + sourceLabel reads see the same frame.
-  await root.device.queue.onSubmittedWorkDone()
-
-  const patternU32Count = n * MODULES_PER_QUAD
-  const [patternRaw, sourceLabelIds] = await Promise.all([
-    patternU32Count > 0
-      ? readU32Prefix(root.device, pipeline.tagDecode.patternBuf.buffer, patternU32Count)
-      : Promise.resolve([] as number[]),
-    readU32Prefix(root.device, pipeline.edgeHistogram.quadSourceLabelId.buffer, n),
-  ])
-
-  const patternFlat = patternRaw.map((v) => Number(v))
+  const patternFlat = patternRaw.slice(0, n * MODULES_PER_QUAD).map((v) => Number(v))
 
   return {
-    quads: hostQuadsToDetected(hostQuads, n, sourceLabelIds, patternFlat),
+    quads: hostQuadsToDetected(hostQuads, n, sourceLabelIds.slice(0, n), patternFlat),
     quadCount,
   }
 }
