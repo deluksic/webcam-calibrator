@@ -8,6 +8,7 @@ import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { MAX_QUADS, type QuadCountBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { PREMULTIPLIED_ALPHA_BLEND } from '@/gpu/pipelines/shared'
 
+import { PatternGrid } from '@/gpu/pipelines/tagDecodePipeline'
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
 export const GRID_DIVISIONS = 8
@@ -341,3 +342,88 @@ export function createGridVizStage(
 }
 
 export type GridVizQuadBuffer = ReturnType<typeof createGridVizStage>['quadCornersBuffer']
+
+const SelectedQuadPatternLayout = tgpu.bindGroupLayout({
+  quads: { storage: GridDataSchema, access: 'readonly' },
+  pattern: { storage: d.arrayOf(PatternGrid, MAX_QUADS), access: 'readonly' },
+  selectedId: { uniform: d.u32 },
+}).$name('selected-quad-pattern-bgl')
+
+export function createSelectedQuadPatternStage(
+  root: TgpuRoot,
+  quadCornersBuffer: GridVizQuadBuffer,
+  patternBuf: ReturnType<typeof root.createBuffer>,
+  canvasSize: number,
+  presentationFormat: GPUTextureFormat,
+) {
+  const selectedIdBuf = root.createBuffer(d.u32).$name('selected-quad-id').$usage('uniform')
+  selectedIdBuf.write(d.u32(0xFFFFFFFF)) // no selection initially
+
+  const vert = tgpu.vertexFn({
+    in: { vertexIndex: d.builtin.vertexIndex },
+    out: { outPos: d.builtin.position, uv: d.vec2f },
+  })(({ vertexIndex }) => {
+    // Face-on unit square filling 90% of the canvas, centered.
+    const u = d.f32(vertexIndex & d.u32(1))
+    const v = d.f32(vertexIndex >> d.u32(1))
+    return {
+      outPos: d.vec4f(
+        (u - d.f32(0.5)) * d.f32(2) * d.f32(0.9),
+        (d.f32(0.5) - v) * d.f32(2) * d.f32(0.9),
+        d.f32(0),
+        d.f32(1),
+      ),
+      uv: d.vec2f(u, v),
+    }
+  })
+
+  const frag = tgpu.fragmentFn({
+    in: { uv: d.vec2f },
+    out: d.vec4f,
+  })(({ uv }) => {
+    const cell = d.vec2i(floor(uv * d.f32(8)))
+    const onBorder = cell.x <= d.i32(0) || cell.x >= d.i32(7) || cell.y <= d.i32(0) || cell.y >= d.i32(7)
+    if (onBorder) {
+      return d.vec4f(0, 0, 0, 1)
+    }
+    const row = d.u32(cell.y - d.i32(1))
+    const col = d.u32(cell.x - d.i32(1))
+    const cellIdx = row * d.u32(6) + col
+    const quadId = SelectedQuadPatternLayout.$.selectedId
+    const v = SelectedQuadPatternLayout.$.pattern[quadId]!.modules[cellIdx]!
+    if (v === d.u32(0)) {
+      return d.vec4f(0, 0, 0, 1)
+    }
+    if (v === d.u32(1)) {
+      return d.vec4f(1, 1, 1, 1)
+    }
+    if (v === d.u32(2)) {
+      return d.vec4f(0.2, 0.3, 1, 1) // blue: weak
+    }
+    return d.vec4f(1, 0.15, 0.15, 1) // red: tie (v === 3)
+  })
+
+  const indexBuf = root.createBuffer(d.arrayOf(d.u16, 6))
+    .$name('selected-quad-idx').$usage('index')
+  indexBuf.write(new Uint16Array([0, 1, 2, 2, 1, 3]))
+
+  const pipeline = root.createRenderPipeline({
+    vertex: vert,
+    fragment: frag,
+    targets: { format: presentationFormat },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+  }).$name('selected-quad-pattern').withIndexBuffer(indexBuf)
+
+  const bindGroup = root.createBindGroup(SelectedQuadPatternLayout, {
+    quads: quadCornersBuffer,
+    pattern: patternBuf as never,
+    selectedId: selectedIdBuf,
+  })
+
+  return {
+    selectedIdBuf,
+    encodeToCanvas(enc: GPUCommandEncoder, colorAttachment: ColorAttachment) {
+      pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).drawIndexed(6, 1)
+    },
+  }
+}

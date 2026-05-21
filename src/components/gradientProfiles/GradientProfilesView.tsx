@@ -17,6 +17,7 @@ export function GradientProfilesView() {
   const [displayMode, setDisplayMode] = createSignal<GradientProfileDisplayMode>('nms')
   const [validEdgeCount, setValidEdgeCount] = createSignal(0)
   const [frozen, setFrozen] = createSignal(false)
+  const [selectedQuadId, setSelectedQuadId] = createSignal<number | undefined>(undefined)
 
   const log = (msg: string) => {
     console.log(msg)
@@ -38,6 +39,8 @@ export function GradientProfilesView() {
             stream={cam.stream()}
             onLog={log}
             onValidEdgeCount={setValidEdgeCount}
+            selectedQuadId={selectedQuadId()}
+            onQuadSelect={setSelectedQuadId}
             undistortParams={() => {
               const c = runCtx.calib()
               if (!c || c.kind !== 'ok') {

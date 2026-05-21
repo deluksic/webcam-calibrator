@@ -78,8 +78,8 @@ const RotLut3Gpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...ROT_LUTS_3
 
 const PATTERN_BLACK = 0
 const PATTERN_WHITE = 1
-const PATTERN_WEAK = 2
-const PATTERN_TIE = 3
+const PATTERN_WEAK = -1
+const PATTERN_TIE = -2
 
 const PER_QUAD_HIST = MAX_QUADS * TAG_DECODE_HIST_BINS
 const WORST_SCORE = ((TAG_DECODE_MAX_DICT_ERROR + 1) << 20) | TAG36H11_COUNT
@@ -111,11 +111,15 @@ const QuadDecodeMetaGpu = d.struct({
 })
 
 const QuadDecodeMetaSchema = d.arrayOf(QuadDecodeMetaGpu, MAX_QUADS)
-const PatternSchema = d.arrayOf(d.u32, MAX_QUADS * MODULES_PER_QUAD)
+export const PatternGrid = d.struct({ modules: d.arrayOf(d.i32, MODULES_PER_QUAD) })
+const PatternSchema = d.arrayOf(PatternGrid, MAX_QUADS)
+const ModuleVoteGrid = d.struct({ votes: d.arrayOf(d.atomic(d.u32), MODULES_PER_QUAD) })
+const ModuleVoteSchema = d.arrayOf(ModuleVoteGrid, MAX_QUADS)
+const ModuleVoteReadonlyGrid = d.struct({ votes: d.arrayOf(d.u32, MODULES_PER_QUAD) })
+const ModuleVoteReadonlySchema = d.arrayOf(ModuleVoteReadonlyGrid, MAX_QUADS)
 const QuadPixelHistSchema = d.arrayOf(d.atomic(d.u32), PER_QUAD_HIST)
 const QuadPixelHistReadonlySchema = d.arrayOf(d.u32, PER_QUAD_HIST)
-const ModuleVoteSchema = d.arrayOf(d.atomic(d.u32), MAX_QUADS * MODULES_PER_QUAD)
-const ModuleVoteReadonlySchema = d.arrayOf(d.u32, MAX_QUADS * MODULES_PER_QUAD)
+
 const AtomicBestSchema = d.arrayOf(d.atomic(d.u32), MAX_QUADS)
 const AtomicBestReadonlySchema = d.arrayOf(d.u32, MAX_QUADS)
 
@@ -174,12 +178,14 @@ function createTagDecodeBufferClears(
     workgroupSize: [CLEAR_WG, 1, 1],
   })((input) => {
     const idx = d.u32(input.gid.x)
-    const n = d.u32(MAX_QUADS * MODULES_PER_QUAD)
-    if (idx >= n) {
+    const total = d.u32(MAX_QUADS * MODULES_PER_QUAD)
+    if (idx >= total) {
       return
     }
-    voteClearLayout.$.moduleWhite[idx] = d.u32(0)
-    voteClearLayout.$.moduleBlack[idx] = d.u32(0)
+    const quadId = idx / d.u32(MODULES_PER_QUAD)
+    const vIdx = idx % d.u32(MODULES_PER_QUAD)
+    voteClearLayout.$.moduleWhite[quadId]!.votes[vIdx] = d.u32(0)
+    voteClearLayout.$.moduleBlack[quadId]!.votes[vIdx] = d.u32(0)
   })
   const voteClearPipeline = root.createComputePipeline({ compute: voteClearKernel })
   const voteClearBindGroup = root.createBindGroup(voteClearLayout, {
@@ -502,16 +508,14 @@ function createModuleVoteStage(
       const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
       if (mx >= d.u32(1) && mx <= d.u32(6) && my >= d.u32(1) && my <= d.u32(6)) {
         const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
-        const bufIdx = quadId * d.u32(MODULES_PER_QUAD) + cellIdx
-        atomicAdd(layout.$.moduleBlack[bufIdx]!, d.u32(1))
+        atomicAdd(layout.$.moduleBlack[quadId]!.votes[cellIdx]!, d.u32(1))
       }
     } else if (gray >= thr.whiteBound) {
       const mx = d.u32(floor(uv.x * d.f32(TAG_MODULES)))
       const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
       if (mx >= d.u32(1) && mx <= d.u32(6) && my >= d.u32(1) && my <= d.u32(6)) {
         const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
-        const bufIdx = quadId * d.u32(MODULES_PER_QUAD) + cellIdx
-        atomicAdd(layout.$.moduleWhite[bufIdx]!, d.u32(1))
+        atomicAdd(layout.$.moduleWhite[quadId]!.votes[cellIdx]!, d.u32(1))
       }
     }
     return d.vec4f(0, 0, 0, 0)
@@ -589,7 +593,7 @@ function createClassifyStage(
     }
 
     const thr = layout.$.thresholds[quadId]!
-    const pBase = quadId * d.u32(MODULES_PER_QUAD)
+    
     let tieCount = d.u32(0)
     let weakCount = d.u32(0)
     const weakBits = d.arrayOf(d.u32, TAG_DECODE_MAX_WEAK_WILDCARD)()
@@ -597,22 +601,30 @@ function createClassifyStage(
     // Unroll: runtime loop here × dict `mask` loop would explode work (TDR / “hang”) when tags appear.
     for (const i of tgpu.unroll(std.range(0, MODULES_PER_QUAD))) {
       const iu = d.u32(i)
-      const w = layout.$.moduleWhite[pBase + iu]!
-      const b = layout.$.moduleBlack[pBase + iu]!
+      const w = layout.$.moduleWhite[quadId]!.votes[iu]!
+      const b = layout.$.moduleBlack[quadId]!.votes[iu]!
       const sum = w + b
-      let cell = d.u32(PATTERN_WEAK)
+      let cell = d.i32(PATTERN_WEAK)
       if (thr.valid === d.u32(0) || sum < thr.minVoteTotal) {
-        cell = d.u32(PATTERN_WEAK)
-      } else if (b > w) {
-        cell = d.u32(PATTERN_BLACK)
-      } else if (w > b) {
-        cell = d.u32(PATTERN_WHITE)
+        cell = d.i32(PATTERN_WEAK)
       } else {
-        cell = d.u32(PATTERN_TIE)
-        tieCount = tieCount + d.u32(1)
+        let diff = b
+        if (b > w) {
+          diff = b - w
+        } else {
+          diff = w - b
+        }
+        const minDiff = max(d.u32(2), sum / d.u32(6))
+        if (diff >= minDiff) {
+          if (b > w) { cell = d.i32(PATTERN_BLACK) }
+          else { cell = d.i32(PATTERN_WHITE) }
+        } else {
+          cell = d.i32(PATTERN_TIE)
+          tieCount = tieCount + d.u32(1)
+        }
       }
-      layout.$.pattern[pBase + iu] = cell
-      if (cell === d.u32(PATTERN_WEAK) && weakCount < d.u32(TAG_DECODE_MAX_WEAK_WILDCARD)) {
+      layout.$.pattern[quadId]!.modules[iu] = cell
+      if (cell === d.i32(PATTERN_WEAK) && weakCount < d.u32(TAG_DECODE_MAX_WEAK_WILDCARD)) {
         weakBits[weakCount] = ModuleToBitGpu.$[iu]!
         weakCount = weakCount + d.u32(1)
       }
@@ -690,7 +702,7 @@ function createDictMatchStage(
     }
 
     const cw = layout.$.codewords[cwIdx]!
-    const pBase = quadId * d.u32(MODULES_PER_QUAD)
+    
 
     const maskCount = d.u32(1) << weakCount
     let localBest = d.u32(TAG_DECODE_MAX_DICT_ERROR + 1)
@@ -754,9 +766,8 @@ function createDictMatchStage(
           const bx = BitXGpu.$[srcBit]! - d.u32(1)
           const by = BitYGpu.$[srcBit]! - d.u32(1)
           const pIdx = by * d.u32(DATA_MODULES) + bx
-          const patternIdx = pBase + pIdx
-          const cell = layout.$.pattern[patternIdx]!
-          if (cell === d.u32(PATTERN_WHITE)) {
+          const cell = layout.$.pattern[quadId]!.modules[pIdx]!
+          if (cell === d.i32(PATTERN_WHITE)) {
             const pos = d.u32(35) - bitU
             if (pos >= d.u32(32)) {
               knownHigh = knownHigh | (d.u32(1) << (pos - d.u32(32)))

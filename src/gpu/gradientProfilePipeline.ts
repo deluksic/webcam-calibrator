@@ -31,6 +31,7 @@ import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
 import { createTagDecodeStage, createTagHistogramDisplayStage } from '@/gpu/pipelines/tagDecodePipeline'
+import { createHostQuadReadbackStage } from '@/gpu/pipelines/hostQuadReadbackPipeline'
 import { allocUndistortUniform, createUndistortPipeline } from '@/gpu/pipelines/undistortPipeline'
 
 export type GradientProfileDisplayMode =
@@ -162,6 +163,7 @@ export function createGradientProfilePipeline(
     width,
     height,
   })
+  const hostQuadReadback = createHostQuadReadbackStage(root, grid.quadCornersBuffer)
   const publishQuadCount = createQuadCountPublishStage(
     root,
     edgeHistogram.quadCount,
@@ -312,6 +314,7 @@ export function createGradientProfilePipeline(
     lineFit,
     quadHomography,
     tagDecode,
+    hostQuadReadback,
     publishQuadCount,
     grid,
     profile,

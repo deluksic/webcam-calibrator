@@ -10,10 +10,12 @@ import {
   encodeOrientHistPresent,
   encodeTagHistPresent,
 } from '@/gpu/gradientProfilePresentEncoding'
+import { readGpuDetection } from '@/gpu/gpuQuadReadback'
 import { noteGpuProfileFrame } from '@/gpu/gpuProfiling'
 import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
 import { ORIENT_HIST_CANVAS_HEIGHT, ORIENT_HIST_CANVAS_WIDTH } from '@/gpu/pipelines/orientHistVizPipeline'
+import { createSelectedQuadPatternStage } from '@/gpu/pipelines/gridVizPipeline'
 import { TAG_HIST_CANVAS_W, TAG_HIST_CANVAS_H } from '@/gpu/pipelines/tagDecodePipeline'
 import { writeUndistortUniform } from '@/gpu/pipelines/undistortPipeline'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
@@ -35,10 +37,13 @@ export type GradientProfilesPipelineProps = {
   /** Latest calibration intrinsics/distortion for undistort preview; identity when omitted. */
   undistortParams?: () => { k: CameraIntrinsics; distortion: RationalDistortion8 } | undefined
   toolbar?: JSX.Element
+  selectedQuadId: number | undefined
+  onQuadSelect: (quadId: number | undefined) => void
 }
 
 export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
   const [cameraCanvas, setCameraCanvas] = createSignal<HTMLCanvasElement>()
+  const [patternCanvas, setPatternCanvas] = createSignal<HTMLCanvasElement>()
   const [orientHistCanvas, setOrientHistCanvas] = createSignal<HTMLCanvasElement>()
   const [profileCanvas, setProfileCanvas] = createSignal<HTMLCanvasElement>()
   const [tagHistCanvas, setTagHistCanvas] = createSignal<HTMLCanvasElement>()
@@ -60,6 +65,9 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
     })
     return el
   })
+
+  const [patternStage, setPatternStage] = createSignal<ReturnType<typeof createSelectedQuadPatternStage>>()
+  let patternStageCtx: GPUCanvasContext | undefined
 
   const [frameSize, setFrameSize] = createSignal<{ width: number; height: number } | undefined>()
 
@@ -92,7 +100,7 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
     }
   })
 
-  createMemo(async () => {
+  const gpuPipeline = createMemo(async () => {
     const video = videoElement()
     const size = frameSize()
     const camCanvas = cameraCanvas()
@@ -137,6 +145,20 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
       format,
     )
     props.onLog(`Gradient profile pipeline ${width}×${height}`)
+
+    const patCanvas = patternCanvas()
+    if (patCanvas && !patternStage()) {
+      patCanvas.width = 240
+      patCanvas.height = 240
+      patternStageCtx = g.configureContext({ canvas: patCanvas, alphaMode: 'premultiplied' })
+      setPatternStage(createSelectedQuadPatternStage(
+        g,
+        pip.grid.quadCornersBuffer,
+        pip.tagDecode.patternBuf,
+        240,
+        format,
+      ))
+    }
 
     frameLoop = createFrameLoop({
       video,
@@ -189,6 +211,19 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         gNow.device.queue.submit([enc.finish()])
         noteGpuProfileFrame(gNow)
 
+        const stage = patternStage()
+        if (stage && patternStageCtx) {
+          stage.selectedIdBuf.write(props.selectedQuadId ?? 0)
+          const patEnc = gNow.device.createCommandEncoder({ label: 'pattern' })
+          stage.encodeToCanvas(patEnc, {
+            view: patternStageCtx,
+            loadOp: 'clear',
+            clearValue: [0, 0, 0, 1],
+            storeOp: 'store',
+          })
+          gNow.device.queue.submit([patEnc.finish()])
+        }
+
         if (props.frozen) {
           return
         }
@@ -230,8 +265,53 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         </div>
         <div class={pipelineStyles.feedContainer}>
           <div class={pipelineStyles.feedCanvasWrap}>
-            <canvas ref={setCameraCanvas} class={pipelineStyles.feedCanvas} />
+            <canvas
+              ref={setCameraCanvas}
+              class={pipelineStyles.feedCanvas}
+              onClick={(e) => {
+                const canvas = cameraCanvas()
+                const g = gpu()
+                if (!canvas || !g) return
+                const pip = gpuPipeline()
+                if (!pip) return
+                const rect = canvas.getBoundingClientRect()
+                const sx = (e.clientX - rect.left) / rect.width
+                const sy = (e.clientY - rect.top) / rect.height
+                const px = sx * canvas.width
+                const py = sy * canvas.height
+                void readGpuDetection(g, pip as never).then((result) => {
+                  for (let qi = 0; qi < result.quads.length; qi++) {
+                    const quad = result.quads[qi]!
+                    const c = quad.corners
+                    // Corners in strip order: [0]=TL, [1]=TR, [2]=BL, [3]=BR.
+                    // Cyclic perimeter: TL→TR→BR→BL→TL.
+                    const perimeter = [0, 1, 3, 2] as const
+                    let inside = true
+                    for (let i = 0; i < 4 && inside; i++) {
+                      const a = perimeter[i]!
+                      const b = perimeter[(i + 1) % 4]!
+                      const cross = (c[b]!.x - c[a]!.x) * (py - c[a]!.y) - (c[b]!.y - c[a]!.y) * (px - c[a]!.x)
+                      if (cross < 0) inside = false
+                    }
+                    if (inside) {
+                      props.onQuadSelect(qi)
+                      return
+                    }
+                  }
+                  props.onQuadSelect(undefined)
+                }).catch(() => props.onQuadSelect(undefined))
+              }}
+            />
           </div>
+        </div>
+      </div>
+
+      <div class={[pipelineStyles.feedPanel, pipelineStyles.feedPanelMain]}>
+        <span class={pipelineStyles.feedLabel}>
+          Quad pattern{props.selectedQuadId !== undefined ? ` (ID ${props.selectedQuadId})` : ''}
+        </span>
+        <div class={pipelineStyles.feedContainer}>
+          <canvas ref={setPatternCanvas} class={pipelineStyles.feedCanvas} />
         </div>
       </div>
 

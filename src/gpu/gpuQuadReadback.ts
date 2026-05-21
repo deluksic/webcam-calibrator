@@ -12,17 +12,13 @@ const DICT_MISS_U32 = DECODED_TAG_ID_DICT_MISS >>> 0
 const UNKNOWN_U32 = DECODED_TAG_ID_UNKNOWN >>> 0
 const MODULES_PER_QUAD = 36
 
-/** GPU classify buffer uses 0=black, 1=white, 2=weak, 3=tie. */
+/** GPU classify buffer uses i32: 0=black, 1=white, -1=weak, -2=tie.
+ *  Read as u32 then convert to signed via |0. */
 function gpuPatternCellToHost(cell: number): TagPattern[number] {
-  if (cell === 1) {
-    return TAG_MODULE_CELL.white
-  }
-  if (cell === 2) {
-    return TAG_MODULE_CELL.weak
-  }
-  if (cell === 3) {
-    return TAG_MODULE_CELL.tie
-  }
+  const s = (cell | 0)
+  if (s === 1) return TAG_MODULE_CELL.white
+  if (s === -1) return TAG_MODULE_CELL.weak
+  if (s === -2) return TAG_MODULE_CELL.tie
   return TAG_MODULE_CELL.black
 }
 
