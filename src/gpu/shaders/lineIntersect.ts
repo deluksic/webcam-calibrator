@@ -1,5 +1,5 @@
 import { d, tgpu } from 'typegpu'
-import { abs } from 'typegpu/std'
+import { abs, sqrt } from 'typegpu/std'
 
 import { LINE_INTERSECT_DET_EPS } from '@/gpu/lineFitThresholds'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
@@ -9,23 +9,27 @@ export const LineIntersectResult = d.struct({
   ok: d.u32,
 })
 
-/** Infinite line n·p = d with unit n, plus segment midpoint for center estimation. */
+/** Infinite line n·p = d with unit n, plus segment midpoint and length. */
 export const LineNormalD = d.struct({
   nx: d.f32,
   ny: d.f32,
   d: d.f32,
   mx: d.f32,
   my: d.f32,
+  span: d.f32,
 })
 
 export const lineNormalFromEdge = tgpu.fn([EdgeLineEntry], LineNormalD)((line) => {
   'use gpu'
+  const dx = line.p1x - line.p0x
+  const dy = line.p1y - line.p0y
   return LineNormalD({
     nx: line.sumGx,
     ny: line.sumGy,
     d: line.nDotMean,
     mx: (line.p0x + line.p1x) * d.f32(0.5),
     my: (line.p0y + line.p1y) * d.f32(0.5),
+    span: sqrt(dx * dx + dy * dy),
   })
 })
 

@@ -168,15 +168,6 @@ export const solveQuadCornersAndHomography = tgpu.fn(
   QuadCornerSolveResult,
 )((lines) => {
   'use gpu'
-  // Scale reference: max distance between line midpoints.
-  let midDist = d.f32(0)
-  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
-    const i1 = (i + d.u32(1)) % d.u32(MAX_EDGES_PER_LABEL)
-    const dx = lines[i]!.mx - lines[i1]!.mx
-    const dy = lines[i]!.my - lines[i1]!.my
-    midDist = max(midDist, sqrt(dx * dx + dy * dy))
-  }
-
   // Reject staircase quads: two lines with nearly-parallel normals and
   // overlapping midpoints are duplicate edges from the same stair step.
   const pairs = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]]
@@ -185,9 +176,10 @@ export const solveQuadCornersAndHomography = tgpu.fn(
     const nj = lines[pair[1]]!
     const dxy = ni.nx * nj.nx + ni.ny * nj.ny
     if (abs(dxy) > d.f32(0.9)) {
+      const span = max(d.f32(1), ni.span)
       const ddx = ni.mx - nj.mx
       const ddy = ni.my - nj.my
-      if (sqrt(ddx * ddx + ddy * ddy) < midDist * d.f32(0.25)) {
+      if (sqrt(ddx * ddx + ddy * ddy) < span * d.f32(0.5)) {
         return QuadCornerSolveResult({
           failureCode: FAIL_PLAUSIBILITY,
           intersectionCount: d.u32(0),
@@ -199,8 +191,6 @@ export const solveQuadCornersAndHomography = tgpu.fn(
     }
   }
 
-  const maxCornerDist = midDist * d.f32(3)
-
   const corners = Corners4()
   let count = d.u32(0)
   for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
@@ -210,10 +200,15 @@ export const solveQuadCornersAndHomography = tgpu.fn(
     const hit = lineIntersectNormal(la.nx, la.ny, la.d, lb.nx, lb.ny, lb.d)
     corners[i] = d.vec2f(hit.point)
     if (hit.ok !== d.u32(0)) {
-      // Reject intersections far from the line segments (nearly-parallel edges).
+      // Intersection must be within 3× segment span from each line's midpoint
+      // and at least 0.5× span (not collapsed inside the segment).
       const da = length(d.vec2f(hit.point.x - la.mx, hit.point.y - la.my))
       const db = length(d.vec2f(hit.point.x - lb.mx, hit.point.y - lb.my))
-      if (da <= maxCornerDist && db <= maxCornerDist) {
+      const maxA = max(d.f32(1), la.span) * d.f32(3)
+      const maxB = max(d.f32(1), lb.span) * d.f32(3)
+      const minA = la.span * d.f32(0.5)
+      const minB = lb.span * d.f32(0.5)
+      if (da >= minA && da <= maxA && db >= minB && db <= maxB) {
         count = count + d.u32(1)
       }
     }
