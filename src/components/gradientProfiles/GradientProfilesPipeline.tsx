@@ -155,6 +155,8 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         g,
         pip.grid.quadCornersBuffer,
         pip.tagDecode.patternBuf,
+        pip.tagDecode.moduleWhiteBuf,
+        pip.tagDecode.moduleBlackBuf,
         240,
         format,
       ))

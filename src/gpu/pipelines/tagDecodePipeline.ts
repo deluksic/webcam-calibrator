@@ -115,7 +115,7 @@ export const PatternGrid = d.struct({ modules: d.arrayOf(d.i32, MODULES_PER_QUAD
 const PatternSchema = d.arrayOf(PatternGrid, MAX_QUADS)
 const ModuleVoteGrid = d.struct({ votes: d.arrayOf(d.atomic(d.u32), MODULES_PER_QUAD) })
 const ModuleVoteSchema = d.arrayOf(ModuleVoteGrid, MAX_QUADS)
-const ModuleVoteReadonlyGrid = d.struct({ votes: d.arrayOf(d.u32, MODULES_PER_QUAD) })
+export const ModuleVoteReadonlyGrid = d.struct({ votes: d.arrayOf(d.u32, MODULES_PER_QUAD) })
 const ModuleVoteReadonlySchema = d.arrayOf(ModuleVoteReadonlyGrid, MAX_QUADS)
 const QuadPixelHistSchema = d.arrayOf(d.atomic(d.u32), PER_QUAD_HIST)
 const QuadPixelHistReadonlySchema = d.arrayOf(d.u32, PER_QUAD_HIST)
@@ -1133,6 +1133,8 @@ export function createTagDecodeStage(
     histBuf: histStage.histBuf,
     thresholdBuf,
     patternBuf,
+    moduleWhiteBuf,
+    moduleBlackBuf,
     activeQuadCountBuf,
     encodeHistAndPeaks,
     encodeModuleVotePasses,

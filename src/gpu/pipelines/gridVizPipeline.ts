@@ -8,7 +8,7 @@ import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { MAX_QUADS, type QuadCountBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { PREMULTIPLIED_ALPHA_BLEND } from '@/gpu/pipelines/shared'
 
-import { PatternGrid } from '@/gpu/pipelines/tagDecodePipeline'
+import { ModuleVoteReadonlyGrid, PatternGrid } from '@/gpu/pipelines/tagDecodePipeline'
 import { stableHashToRgb01 } from '@/lib/hashStableColor'
 
 export const GRID_DIVISIONS = 8
@@ -346,6 +346,8 @@ export type GridVizQuadBuffer = ReturnType<typeof createGridVizStage>['quadCorne
 const SelectedQuadPatternLayout = tgpu.bindGroupLayout({
   quads: { storage: GridDataSchema, access: 'readonly' },
   pattern: { storage: d.arrayOf(PatternGrid, MAX_QUADS), access: 'readonly' },
+  moduleWhite: { storage: d.arrayOf(ModuleVoteReadonlyGrid, MAX_QUADS), access: 'readonly' },
+  moduleBlack: { storage: d.arrayOf(ModuleVoteReadonlyGrid, MAX_QUADS), access: 'readonly' },
   selectedId: { uniform: d.u32 },
 }).$name('selected-quad-pattern-bgl')
 
@@ -353,6 +355,8 @@ export function createSelectedQuadPatternStage(
   root: TgpuRoot,
   quadCornersBuffer: GridVizQuadBuffer,
   patternBuf: ReturnType<typeof root.createBuffer>,
+  moduleWhiteBuf: ReturnType<typeof root.createBuffer>,
+  moduleBlackBuf: ReturnType<typeof root.createBuffer>,
   canvasSize: number,
   presentationFormat: GPUTextureFormat,
 ) {
@@ -390,17 +394,65 @@ export function createSelectedQuadPatternStage(
     const col = d.u32(cell.x - d.i32(1))
     const cellIdx = row * d.u32(6) + col
     const quadId = SelectedQuadPatternLayout.$.selectedId
+
+    // Black square centered in cell, containing two white vote bars.
+    const cx = d.f32(cell.x)
+    const cy = d.f32(cell.y)
+    const fx = uv.x * d.f32(8) - cx  // 0..1 within cell
+    const fy = uv.y * d.f32(8) - cy
+    const sqL = d.f32(0.225)
+    const sqR = d.f32(0.775)
+    const sqB = d.f32(0.175)
+    const sqT = d.f32(0.825)
+    if (fx >= sqL && fx <= sqR && fy >= sqB && fy <= sqT) {
+      // Entire square background is black.
+      const pad = d.f32(0.15)
+      const gap = d.f32(0.06)
+      const aL = sqL + (sqR - sqL) * pad
+      const aR = sqR - (sqR - sqL) * pad
+      const aB = sqB + (sqT - sqB) * pad
+      const aT = sqT - (sqT - sqB) * pad
+      const mid = (aL + aR) * d.f32(0.5)
+      const halfGap = gap * d.f32(0.5)
+      const leftR = mid - halfGap
+      const rightL = mid + halfGap
+      // Black votes bar (left column)
+      if (fx >= aL && fx <= leftR && fy >= aB && fy <= aT) {
+        const b = d.f32(SelectedQuadPatternLayout.$.moduleBlack[quadId]!.votes[cellIdx]!)
+        const w = d.f32(SelectedQuadPatternLayout.$.moduleWhite[quadId]!.votes[cellIdx]!)
+        const maxH = max(d.f32(5), b + w)
+        const barBottom = aT - (aT - aB) * (b / maxH)
+        if (fy >= barBottom) {
+          return d.vec4f(0.85, 0.85, 0.85, 1)
+        }
+        return d.vec4f(0, 0, 0, 1)
+      }
+      // White votes bar (right column)
+      if (fx >= rightL && fx <= aR && fy >= aB && fy <= aT) {
+        const w = d.f32(SelectedQuadPatternLayout.$.moduleWhite[quadId]!.votes[cellIdx]!)
+        const b = d.f32(SelectedQuadPatternLayout.$.moduleBlack[quadId]!.votes[cellIdx]!)
+        const maxH = max(d.f32(5), b + w)
+        const barBottom = aT - (aT - aB) * (w / maxH)
+        if (fy >= barBottom) {
+          return d.vec4f(0.85, 0.85, 0.85, 1)
+        }
+        return d.vec4f(0, 0, 0, 1)
+      }
+      return d.vec4f(0, 0, 0, 1) // rest of square is black
+    }
+
+    // Outside square: decision color.
     const v = SelectedQuadPatternLayout.$.pattern[quadId]!.modules[cellIdx]!
-    if (v === d.u32(0)) {
+    if (v === d.i32(0)) {
       return d.vec4f(0, 0, 0, 1)
     }
-    if (v === d.u32(1)) {
+    if (v === d.i32(1)) {
       return d.vec4f(1, 1, 1, 1)
     }
-    if (v === d.u32(2)) {
+    if (v === d.i32(-1)) {
       return d.vec4f(0.2, 0.3, 1, 1) // blue: weak
     }
-    return d.vec4f(1, 0.15, 0.15, 1) // red: tie (v === 3)
+    return d.vec4f(1, 0.15, 0.15, 1) // red: tie (v === -2)
   })
 
   const indexBuf = root.createBuffer(d.arrayOf(d.u16, 6))
@@ -417,6 +469,8 @@ export function createSelectedQuadPatternStage(
   const bindGroup = root.createBindGroup(SelectedQuadPatternLayout, {
     quads: quadCornersBuffer,
     pattern: patternBuf as never,
+    moduleWhite: moduleWhiteBuf as never,
+    moduleBlack: moduleBlackBuf as never,
     selectedId: selectedIdBuf,
   })
 
