@@ -2,7 +2,7 @@
 import type { ColorAttachment } from 'typegpu'
 import type { TgpuRoot } from 'typegpu'
 import { d, tgpu, std, common } from 'typegpu'
-import { floor, max, min, mul, round, sqrt } from 'typegpu/std'
+import { ceil, floor, max, min, mul, round, sqrt } from 'typegpu/std'
 import { abs, atomicAdd, atomicMin, clamp, countOneBits, textureLoad } from 'typegpu/std'
 
 import { profileComputePass, profileRenderPass } from '@/gpu/gpuProfiling'
@@ -403,10 +403,9 @@ function createPeakThresholdStage(
     const blackLuma = (d.f32(blackPeak) + d.f32(0.5)) / nBins
     const whiteLuma = (d.f32(whitePeak) + d.f32(0.5)) / nBins
     const diff = whiteLuma - blackLuma
-    const gap = d.f32(TAG_DECODE_PEAK_GAP_FRAC)
-    const halfGap = diff * gap * d.f32(0.5)
-    const blackBound = blackLuma + halfGap
-    const whiteBound = whiteLuma - halfGap
+    const frac = d.f32(TAG_DECODE_PEAK_GAP_FRAC)
+    const blackBound = ceil(blackLuma + diff * frac)
+    const whiteBound = floor(whiteLuma - diff * frac)
 
     const c = layout.$.quads[quadId]!.screenCorners
     const e01 = sqrt((c[1]!.x - c[0]!.x) * (c[1]!.x - c[0]!.x) + (c[1]!.y - c[0]!.y) * (c[1]!.y - c[0]!.y))
