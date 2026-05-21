@@ -78,6 +78,8 @@ export function encodeGradientProfileCameraPresent(
     pipeline.render.labelViz.encodeToCanvas(enc, mainAttachment, pipeline.render.edgeLabelsBindGroup)
   } else if (displayMode === 'undistort') {
     pipeline.render.undistort.encodeToCanvas(enc, mainAttachment)
+    } else if (displayMode === 'voteDebug') {
+      pipeline.voteDebugDisplay.encodeDisplay(enc, mainAttachment)
     } else {
       pipeline.render.grayscale.encodeToCanvas(enc, mainAttachment)
     }

@@ -30,7 +30,7 @@ import { createQuadCornerHomographyStage } from '@/gpu/pipelines/quadCornerHomog
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
-import { createTagDecodeStage, createTagHistogramDisplayStage } from '@/gpu/pipelines/tagDecodePipeline'
+import { createTagDecodeStage, createTagHistogramDisplayStage, createVoteDebugDisplayStage } from '@/gpu/pipelines/tagDecodePipeline'
 import { createHostQuadReadbackStage } from '@/gpu/pipelines/hostQuadReadbackPipeline'
 import { allocUndistortUniform, createUndistortPipeline } from '@/gpu/pipelines/undistortPipeline'
 
@@ -46,6 +46,7 @@ export type GradientProfileDisplayMode =
   | 'fittedLines'
   | 'lineRejects'
   | 'quadGrid'
+  | 'voteDebug'
 
 export type GradientProfileNonGridDisplayMode = GradientProfileDisplayMode
 
@@ -66,6 +67,7 @@ export const GRADIENT_PROFILE_DISPLAY_MODES: ReadonlyArray<{
   { mode: 'quadReject', label: 'Quad reject', title: 'Labels colored by quad registration outcome' },
   { mode: 'quads', label: 'Quads' },
   { mode: 'quadGrid', label: 'Quad grid' },
+  { mode: 'voteDebug', label: 'Vote debug', title: 'Per-pixel vote classification' },
 ]
 
 function destroyGpuTexture(tex: GPUTexture | undefined) {
@@ -176,6 +178,7 @@ export function createGradientProfilePipeline(
   const tagHistogramDisplay = tagHistContext
     ? createTagHistogramDisplayStage(root, tagDecode.histBuf, tagDecode.thresholdBuf, presentationFormat)
     : undefined
+  const voteDebugDisplay = createVoteDebugDisplayStage(root, tagDecode.voteDebugTex, presentationFormat)
   const profile = createEdgeProfileStage(
     root,
     width,
@@ -311,6 +314,7 @@ export function createGradientProfilePipeline(
     orientHistViz,
     tagHistContext,
     tagHistogramDisplay,
+    voteDebugDisplay,
     lineFit,
     quadHomography,
     tagDecode,

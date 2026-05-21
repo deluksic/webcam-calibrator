@@ -2,7 +2,7 @@
 import type { ColorAttachment } from 'typegpu'
 import type { TgpuRoot } from 'typegpu'
 import { d, tgpu, std, common } from 'typegpu'
-import { ceil, floor, max, min, mul, round, sqrt } from 'typegpu/std'
+import { floor, max, min, mul, round, sqrt } from 'typegpu/std'
 import { abs, atomicAdd, atomicMin, clamp, countOneBits, textureLoad } from 'typegpu/std'
 
 import { profileComputePass, profileRenderPass } from '@/gpu/gpuProfiling'
@@ -404,8 +404,8 @@ function createPeakThresholdStage(
     const whiteLuma = (d.f32(whitePeak) + d.f32(0.5)) / nBins
     const diff = whiteLuma - blackLuma
     const frac = d.f32(TAG_DECODE_PEAK_GAP_FRAC)
-    const blackBound = ceil(blackLuma + diff * frac)
-    const whiteBound = floor(whiteLuma - diff * frac)
+    const blackBound = blackLuma + diff * frac
+    const whiteBound = whiteLuma - diff * frac
 
     const c = layout.$.quads[quadId]!.screenCorners
     const e01 = sqrt((c[1]!.x - c[0]!.x) * (c[1]!.x - c[0]!.x) + (c[1]!.y - c[0]!.y) * (c[1]!.y - c[0]!.y))
@@ -462,8 +462,14 @@ function createModuleVoteStage(
   moduleBlackBuf: ReturnType<typeof root.createBuffer<typeof ModuleVoteSchema>>,
   width: number,
   height: number,
-  dummyTexture: GPUTexture,
 ) {
+  const debugTex = root.device.createTexture({
+    label: 'tag-vote-debug',
+    size: [ width, height, 1 ],
+    format: 'rgba8unorm',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+  })
+
   const layout = tgpu.bindGroupLayout({
     quads: { storage: GridDataSchema, access: 'readonly' },
     grayTex: { texture: d.texture2d() },
@@ -501,23 +507,28 @@ function createModuleVoteStage(
     if (thr.valid === d.u32(0)) {
       return d.vec4f(0, 0, 0, 0)
     }
+    const mx = d.u32(floor(uv.x * d.f32(TAG_MODULES)))
+    const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
+    const inInterior = mx >= d.u32(1) && mx <= d.u32(6) && my >= d.u32(1) && my <= d.u32(6)
     const gray = textureLoad(layout.$.grayTex, d.vec2u(d.u32(pos.x), d.u32(pos.y)), d.i32(0)).x
     if (gray <= thr.blackBound) {
-      const mx = d.u32(floor(uv.x * d.f32(TAG_MODULES)))
-      const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
-      if (mx >= d.u32(1) && mx <= d.u32(6) && my >= d.u32(1) && my <= d.u32(6)) {
+      if (inInterior) {
         const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
         atomicAdd(layout.$.moduleBlack[quadId]!.votes[cellIdx]!, d.u32(1))
       }
-    } else if (gray >= thr.whiteBound) {
-      const mx = d.u32(floor(uv.x * d.f32(TAG_MODULES)))
-      const my = d.u32(floor(uv.y * d.f32(TAG_MODULES)))
-      if (mx >= d.u32(1) && mx <= d.u32(6) && my >= d.u32(1) && my <= d.u32(6)) {
+      return d.vec4f(0, 0, 0, 1)
+    }
+    if (gray >= thr.whiteBound) {
+      if (inInterior) {
         const cellIdx = (my - d.u32(1)) * d.u32(DATA_MODULES) + (mx - d.u32(1))
         atomicAdd(layout.$.moduleWhite[quadId]!.votes[cellIdx]!, d.u32(1))
       }
+      return d.vec4f(1, 1, 1, 1)
     }
-    return d.vec4f(0, 0, 0, 0)
+    if (inInterior) {
+      return d.vec4f(0.2, 0.3, 1, 1)
+    }
+    return d.vec4f(0, 0, 0, 1)
   })
 
   const pipeline = root
@@ -538,6 +549,7 @@ function createModuleVoteStage(
   })
 
   return {
+    debugTex,
     encodeModuleVotes(enc: GPUCommandEncoder, instanceCount: number) {
       if (instanceCount < 1) {
         return
@@ -545,7 +557,7 @@ function createModuleVoteStage(
       const pass = profileRenderPass(enc, pipeline, {
         label: 'tag-module-votes',
         colorAttachments: [
-          { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
+          { view: debugTex.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0.35, 0.35, 0.35, 1] },
         ],
       })
       pass.setViewport(0, 0, width, height, 0, 1)
@@ -1020,6 +1032,40 @@ export function createTagHistogramDisplayStage(
   return { encodeDisplay }
 }
 
+const voteDebugLayout = tgpu.bindGroupLayout({
+  voteTex: { texture: d.texture2d() },
+})
+
+export function createVoteDebugDisplayStage(
+  root: TgpuRoot,
+  voteDebugTex: GPUTexture,
+  presentationFormat: GPUTextureFormat,
+) {
+  const frag = tgpu.fragmentFn({
+    in: { pos: d.builtin.position },
+    out: d.vec4f,
+  })((i) => {
+    'use gpu'
+    return textureLoad(voteDebugLayout.$.voteTex, d.vec2u(d.u32(i.pos.x), d.u32(i.pos.y)), d.i32(0))
+  })
+
+  const pipeline = root.createRenderPipeline({
+    vertex: common.fullScreenTriangle,
+    fragment: frag,
+    targets: { format: presentationFormat },
+  })
+
+  const bindGroup = root.createBindGroup(voteDebugLayout, {
+    voteTex: voteDebugTex as never,
+  })
+
+  function encodeDisplay(enc: GPUCommandEncoder, colorAttachment: ColorAttachment) {
+    pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)
+  }
+
+  return { encodeDisplay }
+}
+
 export type TagDecodeStage = ReturnType<typeof createTagDecodeStage>
 
 export function createTagDecodeStage(
@@ -1063,7 +1109,6 @@ export function createTagDecodeStage(
     moduleBlackBuf,
     deps.width,
     deps.height,
-    histStage.dummyTexture,
   )
 
   const codewordBuffer = allocCodewordBuffer(root)
@@ -1135,6 +1180,7 @@ export function createTagDecodeStage(
     moduleWhiteBuf,
     moduleBlackBuf,
     activeQuadCountBuf,
+    voteDebugTex: voteStage.debugTex,
     encodeHistAndPeaks,
     encodeModuleVotePasses,
     encodeVotePasses,
