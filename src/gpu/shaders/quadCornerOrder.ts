@@ -1,5 +1,5 @@
 import { d, std, tgpu } from 'typegpu'
-import { abs, max, mul, sqrt } from 'typegpu/std'
+import { abs, length, max, mul, sqrt } from 'typegpu/std'
 
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { QUAD_MIN_EDGE_PX, QUAD_MIN_SIGNED_AREA_REL } from '@/gpu/lineFitThresholds'
@@ -168,6 +168,39 @@ export const solveQuadCornersAndHomography = tgpu.fn(
   QuadCornerSolveResult,
 )((lines) => {
   'use gpu'
+  // Scale reference: max distance between line midpoints.
+  let midDist = d.f32(0)
+  for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+    const i1 = (i + d.u32(1)) % d.u32(MAX_EDGES_PER_LABEL)
+    const dx = lines[i]!.mx - lines[i1]!.mx
+    const dy = lines[i]!.my - lines[i1]!.my
+    midDist = max(midDist, sqrt(dx * dx + dy * dy))
+  }
+
+  // Reject staircase quads: two lines with nearly-parallel normals and
+  // overlapping midpoints are duplicate edges from the same stair step.
+  const pairs = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]]
+  for (const pair of pairs) {
+    const ni = lines[pair[0]]!
+    const nj = lines[pair[1]]!
+    const dxy = ni.nx * nj.nx + ni.ny * nj.ny
+    if (abs(dxy) > d.f32(0.9)) {
+      const ddx = ni.mx - nj.mx
+      const ddy = ni.my - nj.my
+      if (sqrt(ddx * ddx + ddy * ddy) < midDist * d.f32(0.25)) {
+        return QuadCornerSolveResult({
+          failureCode: FAIL_PLAUSIBILITY,
+          intersectionCount: d.u32(0),
+          homography: invalidGridHomography(),
+          homographyOk: d.u32(0),
+          corners: collapsedScreenQuad(Corners4(), d.u32(0)),
+        })
+      }
+    }
+  }
+
+  const maxCornerDist = midDist * d.f32(3)
+
   const corners = Corners4()
   let count = d.u32(0)
   for (const i of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
@@ -177,7 +210,12 @@ export const solveQuadCornersAndHomography = tgpu.fn(
     const hit = lineIntersectNormal(la.nx, la.ny, la.d, lb.nx, lb.ny, lb.d)
     corners[i] = d.vec2f(hit.point)
     if (hit.ok !== d.u32(0)) {
-      count = count + d.u32(1)
+      // Reject intersections far from the line segments (nearly-parallel edges).
+      const da = length(d.vec2f(hit.point.x - la.mx, hit.point.y - la.my))
+      const db = length(d.vec2f(hit.point.x - lb.mx, hit.point.y - lb.my))
+      if (da <= maxCornerDist && db <= maxCornerDist) {
+        count = count + d.u32(1)
+      }
     }
   }
 
