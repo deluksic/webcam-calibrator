@@ -147,7 +147,7 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
     props.onLog(`Gradient profile pipeline ${width}×${height}`)
 
     const patCanvas = patternCanvas()
-    if (patCanvas && !patternStage()) {
+    if (patCanvas) {
       patCanvas.width = 240
       patCanvas.height = 240
       patternStageCtx = g.configureContext({ canvas: patCanvas, alphaMode: 'premultiplied' })
@@ -284,7 +284,14 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
                 void readGpuDetection(g, pip as never).then((result) => {
                   for (let qi = 0; qi < result.quads.length; qi++) {
                     const quad = result.quads[qi]!
+                    if (!quad.hasCorners) continue
                     const c = quad.corners
+                    // Skip degenerate quads (all corners nearly collinear or zero area).
+                    const area = Math.abs(
+                      (c[1]!.x - c[0]!.x) * (c[3]!.y - c[0]!.y) -
+                      (c[1]!.y - c[0]!.y) * (c[3]!.x - c[0]!.x)
+                    )
+                    if (area < 1) continue
                     // Corners in strip order: [0]=TL, [1]=TR, [2]=BL, [3]=BR.
                     // Cyclic perimeter: TL→TR→BR→BL→TL.
                     const perimeter = [0, 1, 3, 2] as const
