@@ -43,6 +43,9 @@ export function encodeCameraCompute(
     runComputeStage(enc, 'line-fit', (p) => pipeline.lineFit.encodeCompute(p))
     runComputeStage(enc, 'quad-homography', (p) => pipeline.quadHomography.encodeCompute(p))
 
+    pipeline.profile.encodeCompute(enc)
+    runComputeStage(enc, 'profile-minmax', (p) => pipeline.profile.encodeMinMaxPass(p))
+
     pipeline.publishQuadCount.encodePublish(enc)
     pipeline.tagDecode.encodeVotePasses(enc, MAX_QUADS)
     runComputeStage(enc, 'tag-decode', (p) => {

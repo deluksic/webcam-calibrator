@@ -26,6 +26,7 @@ import { createQuadCornerHomographyStage } from '@/gpu/pipelines/quadCornerHomog
 import { createReprojectionOverlayStage } from '@/gpu/pipelines/reprojectionOverlayPipeline'
 import { createHostQuadReadbackStage } from '@/gpu/pipelines/hostQuadReadbackPipeline'
 import { createTagDecodeStage } from '@/gpu/pipelines/tagDecodePipeline'
+import { createEdgeProfileStage } from '@/gpu/pipelines/edgeProfilePipeline'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
 import {
@@ -117,11 +118,23 @@ export function createCameraPipeline(
     quadCount: edgeHistogram.quadCount,
     quadDataBuffer: grid.quadCornersBuffer,
   })
+  const profile = createEdgeProfileStage(
+    root,
+    width,
+    height,
+    MAX_FLAT_EDGES,
+    grayTexView,
+    lineFit.lineOut,
+    grid.quadCornersBuffer,
+    edgeHistogram.quadCount,
+    presentationFormat,
+  )
   const tagDecode = createTagDecodeStage(root, {
     grayTexView,
     quadDataBuffer: grid.quadCornersBuffer,
     width,
     height,
+    thresholdBuf: profile.thresholdBuf,
   })
   const publishQuadCount = createQuadCountPublishStage(
     root,
@@ -189,6 +202,7 @@ export function createCameraPipeline(
     edgeHistogram,
     lineFit,
     quadHomography,
+    profile,
     tagDecode,
     publishQuadCount,
     hostQuadReadback,
