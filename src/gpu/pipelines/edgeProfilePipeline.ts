@@ -1,7 +1,7 @@
 // Per-edge 64-bin grayscale profiles along edge normal (black → white), via quad rasterization.
 import type { TgpuRoot } from 'typegpu'
 import { d, std, tgpu } from 'typegpu'
-import { atomicAdd, atomicLoad, atomicStore, floor, max, min, round, sqrt, textureLoad } from 'typegpu/std'
+import { atomicAdd, atomicLoad, atomicStore, floor, max, min, round, select, sqrt, textureLoad } from 'typegpu/std'
 
 import { profileComputePass, profileRenderPass } from '@/gpu/gpuProfiling'
 import { DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE } from '@/gpu/tagDecodeThresholds'
@@ -74,19 +74,13 @@ function createProfileAccumStage(
   width: number,
   height: number,
   maxFlatEdges: number,
+  presentationFormat: GPUTextureFormat,
 ) {
   const accumLayout = tgpu.bindGroupLayout({
     grayTex: { texture: d.texture2d(d.f32) },
     lineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
     profileBuckets: { storage: d.arrayOf(ProfileBucketAtomic), access: 'mutable' },
   }).$name('profile-accum-bgl')
-
-  const dummyTexture = root.device.createTexture({
-    label: 'profile-accum-dummy',
-    size: [width, height, 1],
-    format: 'rgba8unorm',
-    usage: GPUTextureUsage.RENDER_ATTACHMENT,
-  })
 
   const vert = tgpu.vertexFn({
     in: { vertexIndex: d.builtin.vertexIndex, instanceIndex: d.builtin.instanceIndex },
@@ -109,24 +103,21 @@ function createProfileAccumStage(
       nny = line.sumGy / gLen
     }
 
-    const halfNeg = d.f32(-PROFILE_NEIGHBORHOOD_HALF)
-    const tVals = [line.tSampleMin, line.tSampleMax, line.tSampleMin, line.tSampleMax] as const
-    const sideVals = [HALF_W_F, HALF_W_F, halfNeg, halfNeg] as const
+    // Quad strip: expand endpoints p0/p1 along normal by ±halfW
+    // v0=TL(p0,+half), v1=TR(p1,+half), v2=BL(p0,-half), v3=BR(p1,-half)
+    const isTop = vertexIndex === d.u32(0) || vertexIndex === d.u32(1)
+    const isP1 = vertexIndex === d.u32(1) || vertexIndex === d.u32(3)
+    const side = select(d.f32(-PROFILE_NEIGHBORHOOD_HALF), HALF_W_F, isTop)
+    const ex = select(line.p0x, line.p1x, isP1)
+    const ey = select(line.p0y, line.p1y, isP1)
 
-    const t = tVals[vertexIndex]!
-    const side = sideVals[vertexIndex]!
+    const px = ex + nnx * side
+    const py = ey + nny * side
 
-    // Point on line at parameter t: (nx * nDotMean - ny * t, ny * nDotMean + nx * t)
-    const lx = nnx * line.nDotMean - nny * t
-    const ly = nny * line.nDotMean + nnx * t
-    const px = lx + nnx * side
-    const py = ly + nny * side
-
-    // No Y-flip: clipY = 2*py/h - 1 so screenY = py (image coords match fragment pos)
     const fw = d.f32(width)
     const fh = d.f32(height)
     const clipX = (d.f32(2) * px) / fw - d.f32(1)
-    const clipY = (d.f32(2) * py) / fh - d.f32(1)
+    const clipY = d.f32(1) - (d.f32(2) * py) / fh
 
     return {
       outPos: d.vec4f(clipX, clipY, d.f32(0), d.f32(1)),
@@ -161,7 +152,7 @@ function createProfileAccumStage(
     .createRenderPipeline({
       vertex: vert,
       fragment: frag,
-      targets: { format: 'rgba8unorm' },
+      targets: { format: presentationFormat },
       primitive: { topology: 'triangle-strip' },
     })
     .$name('profile-accum-render')
@@ -170,6 +161,13 @@ function createProfileAccumStage(
     grayTex: grayTexView as never,
     lineOut,
     profileBuckets: profileBuckets as never,
+  })
+
+  const dummyTexture = root.device.createTexture({
+    label: 'profile-accum-dummy',
+    size: [width, height, 1],
+    format: presentationFormat,
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
   })
 
   function encodeAccum(enc: GPUCommandEncoder) {
@@ -327,6 +325,7 @@ export function createEdgeProfileStage(
   lineOut: EdgeLineOutBuffer,
   quadDataBuffer: GridVizQuadBuffer,
   quadCountBuf: unknown,
+  presentationFormat: GPUTextureFormat,
 ) {
   const bucketCount = maxFlatEdges * BUCKETS_PER_EDGE
   const profileBuckets = root.createBuffer(d.arrayOf(ProfileBucketAtomic, bucketCount)).$usage('storage')
@@ -334,7 +333,7 @@ export function createEdgeProfileStage(
 
   const { resetLayout, pipeline: resetPipeline } = createProfileResetPipeline(root, bucketCount)
   const { encodeAccum } = createProfileAccumStage(
-    root, grayTexView, lineOut, profileBuckets, width, height, maxFlatEdges,
+    root, grayTexView, lineOut, profileBuckets, width, height, maxFlatEdges, presentationFormat,
   )
   const { normalizeLayout, pipeline: normalizePipeline } = createProfileNormalizePipeline(root, bucketCount)
   const { thresholdBuf, encodeMinMax } = createProfileMinMaxStage(

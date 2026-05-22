@@ -167,6 +167,7 @@ export function createGradientProfilePipeline(
     lineFit.lineOut,
     grid.quadCornersBuffer,
     edgeHistogram.quadCount,
+    presentationFormat,
   )
   const tagDecode = createTagDecodeStage(root, {
     grayTexView,
