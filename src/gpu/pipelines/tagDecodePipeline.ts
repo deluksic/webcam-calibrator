@@ -881,7 +881,7 @@ function createCanonicalizeStage(
     layout.$.quadData[quadId]!.decodedRotation = bestRot
 
     const strip = quad.screenCorners
-    const rotated = rotateStripCorners(strip, bestRot)
+    const rotated = rotateStripCorners(strip, (d.u32(4) - bestRot) & d.u32(3))
     const hRes = tryHomographyFromCorners(rotated[0]!, rotated[1]!, rotated[2]!, rotated[3]!)
     layout.$.quadData[quadId]!.screenCorners = Corners4(rotated)
     layout.$.quadData[quadId]!.homography = d.mat3x3f(
