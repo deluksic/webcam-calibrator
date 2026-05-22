@@ -76,6 +76,14 @@ export function createCameraPipeline(
 
   const ingest = createCopyIngest(root, width, height)
   const gray = createGrayStage(root, width, height, ingest.grayTex)
+
+  // Double-buffered snapshots for the async present pass, so the gray image
+  // stays in sync with the frame that produced it (not the next compute frame).
+  const grayPresentBufs = [
+    root.createBuffer(d.arrayOf(d.f32, width * height)).$name('gray-present-0').$usage('storage', 'copyDst'),
+    root.createBuffer(d.arrayOf(d.f32, width * height)).$name('gray-present-1').$usage('storage', 'copyDst'),
+  ]
+
   const sobel = createSobelStage(root, width, height, gray.buffer)
   const nms = createEdgeFilterStage(root, width, height, sobel.buffer)
   const histogram = createHistogramStage(root, width, height, sobel.buffer, presentationFormat)
@@ -161,13 +169,21 @@ export function createCameraPipeline(
     labelBuffer: compact.compactLabelBuffer,
   })
   const grayscale = createGrayRenderPipeline(root, width, height, presentationFormat, {
-    grayBuffer: gray.buffer,
+    grayBuffer: grayPresentBufs[0]!,
     params: grayRenderParamsBuffer,
   })
+  const grayscaleBindGroups = [
+    grayscale.bindGroup,
+    root.createBindGroup(grayscale.layout, { grayBuffer: grayPresentBufs[1]!, params: grayRenderParamsBuffer }),
+  ]
   const grayscaleMsaa = createGrayRenderPipeline(root, width, height, presentationFormat, {
-    grayBuffer: gray.buffer,
+    grayBuffer: grayPresentBufs[0]!,
     params: grayRenderParamsBuffer,
   }, { sampleCount: RESULTS_MSAA_SAMPLE_COUNT })
+  const grayscaleMsaaBindGroups = [
+    grayscaleMsaa.bindGroup,
+    root.createBindGroup(grayscaleMsaa.layout, { grayBuffer: grayPresentBufs[1]!, params: grayRenderParamsBuffer }),
+  ]
   const sobelRender = createSobelRenderPipeline(root, width, height, presentationFormat, {
     sobelBuffer: sobel.buffer,
   })
@@ -193,6 +209,7 @@ export function createCameraPipeline(
     ingest,
     grayRenderParamsBuffer,
     gray,
+    grayPresentBufs,
     sobel,
     nms,
     histogram,
@@ -222,7 +239,9 @@ export function createCameraPipeline(
       labelViz,
       labelVizBindGroup,
       grayscale,
+      grayscaleBindGroups,
       grayscaleMsaa,
+      grayscaleMsaaBindGroups,
       sobel: sobelRender,
       filtered,
       undistort,

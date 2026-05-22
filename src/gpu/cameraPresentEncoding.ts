@@ -68,7 +68,7 @@ export function encodePresentNonGrid(
  * All layers render to a shared 4x MSAA texture. Only the final pass resolves
  * to the canvas so the multisampled content is preserved across passes.
  */
-export function encodeGridPresent(enc: GPUCommandEncoder, pipeline: CameraPipeline, timeSec: number): void {
+export function encodeGridPresent(enc: GPUCommandEncoder, pipeline: CameraPipeline, timeSec: number, presentIndex = 0): void {
   pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 1 })
 
   pipeline.msaa.ensureMsaa(pipeline.canvas.width, pipeline.canvas.height)
@@ -84,7 +84,7 @@ export function encodeGridPresent(enc: GPUCommandEncoder, pipeline: CameraPipeli
       loadOp: 'clear',
       storeOp: 'store',
     }
-    pipeline.render.grayscaleMsaa.encodeToCanvas(enc, attach)
+    pipeline.render.grayscaleMsaa.encodeToCanvas(enc, attach, pipeline.render.grayscaleMsaaBindGroups[presentIndex]!)
   }
 
   // Pass 2: Grid overlay → MSAA (drawIndirect instance count from publish pass)

@@ -29,6 +29,20 @@ export function encodeCameraCompute(
   pipeline.histogram.thresholdBinBuffer.write(Math.round(threshold * 255))
 
   runComputeStage(enc, 'gray', (p) => pipeline.gray.encodeCompute(p))
+
+  // Snapshot gray buffer so present reads the correct frame (not overwritten by next compute)
+  {
+    const idx = slot !== undefined ? slot.frameId % 2 : 0
+    const byteSize = pipeline.width * pipeline.height * 4
+    enc.copyBufferToBuffer(
+      pipeline.gray.buffer.buffer,
+      0,
+      pipeline.grayPresentBufs[idx]!.buffer,
+      0,
+      byteSize,
+    )
+  }
+
   runComputeStage(enc, 'sobel', (p) => pipeline.sobel.encodeCompute(p))
   if (pipeline.histogram.tickAccumFrame()) {
     runComputeStage(enc, 'histogram', (p) => pipeline.histogram.encodeAccumulateCompute(p))

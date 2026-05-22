@@ -261,7 +261,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           setGridOverlayQuads(overlayQuads)
 
           const presentEnc = gNow.device.createCommandEncoder({ label: 'grid frame present' })
-          encodeGridPresent(presentEnc, pip, performance.now() * 0.001)
+          encodeGridPresent(presentEnc, pip, performance.now() * 0.001, slot.frameId % 2)
           gNow.device.queue.submit([presentEnc.finish()])
 
           pi.onQuadDetection?.(tagged, { frameId: slot.frameId })
