@@ -8,7 +8,6 @@ import {
   encodeGradientProfileCameraPresent,
   encodeGradientProfilePlotPresent,
   encodeOrientHistPresent,
-  encodeTagHistPresent,
 } from '@/gpu/gradientProfilePresentEncoding'
 import { readGpuDetection } from '@/gpu/gpuQuadReadback'
 import { noteGpuProfileFrame } from '@/gpu/gpuProfiling'
@@ -16,7 +15,6 @@ import { initGPU } from '@/gpu/init'
 import { computeThreshold, THRESHOLD_PERCENTILE } from '@/gpu/pipelines/histogramPipelines'
 import { ORIENT_HIST_CANVAS_HEIGHT, ORIENT_HIST_CANVAS_WIDTH } from '@/gpu/pipelines/orientHistVizPipeline'
 import { createSelectedQuadPatternStage } from '@/gpu/pipelines/gridVizPipeline'
-import { TAG_HIST_CANVAS_W, TAG_HIST_CANVAS_H } from '@/gpu/pipelines/tagDecodePipeline'
 import { writeUndistortUniform } from '@/gpu/pipelines/undistortPipeline'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
 import { createElementSize } from '@/utils/createElementSize'
@@ -46,7 +44,6 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
   const [patternCanvas, setPatternCanvas] = createSignal<HTMLCanvasElement>()
   const [orientHistCanvas, setOrientHistCanvas] = createSignal<HTMLCanvasElement>()
   const [profileCanvas, setProfileCanvas] = createSignal<HTMLCanvasElement>()
-  const [tagHistCanvas, setTagHistCanvas] = createSignal<HTMLCanvasElement>()
   const [histCanvasEl, setHistCanvasEl] = createSignal<HTMLCanvasElement>()
   const [threshold, setThreshold] = createSignal(0, { ownedWrite: true })
 
@@ -139,7 +136,6 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
       orientCanvas,
       profCanvas,
       props.showHistogramCanvas ? histCanvasEl() : undefined,
-      tagHistCanvas(),
       width,
       height,
       format,
@@ -203,9 +199,6 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
         encodeGradientProfileCameraPresent(enc, gNow, pip, mode, performance.now() * 0.001)
         if (pip.orientHistViz) {
           encodeOrientHistPresent(enc, pip)
-        }
-        if (pip.tagHistogramDisplay) {
-          encodeTagHistPresent(enc, pip)
         }
         if (profCanvas.width > 0 && profCanvas.height > 0) {
           encodeGradientProfilePlotPresent(enc, pip, profCanvas.width, profCanvas.height)
@@ -336,25 +329,6 @@ export function GradientProfilesPipeline(props: GradientProfilesPipelineProps) {
               style={{
                 width: '100%',
                 'max-width': `${ORIENT_HIST_CANVAS_WIDTH}px`,
-                'image-rendering': 'pixelated',
-              }}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div class={[pipelineStyles.feedPanel, pipelineStyles.feedPanelMain]}>
-        <span class={pipelineStyles.feedLabel}>Tag grayscale histogram</span>
-        <div class={[pipelineStyles.feedContainer, pipelineStyles.orientHistScroll]}>
-          <div class={pipelineStyles.feedCanvasWrap}>
-            <canvas
-              ref={setTagHistCanvas}
-              class={pipelineStyles.feedCanvas}
-              width={TAG_HIST_CANVAS_W}
-              height={TAG_HIST_CANVAS_H}
-              style={{
-                width: '100%',
-                'max-width': `${TAG_HIST_CANVAS_W}px`,
                 'image-rendering': 'pixelated',
               }}
             />

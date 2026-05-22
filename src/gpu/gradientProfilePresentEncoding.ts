@@ -100,15 +100,6 @@ export function encodeOrientHistPresent(enc: GPUCommandEncoder, pipeline: Gradie
   viz.encodeDisplay(enc, { view: ctx, clearValue: { r: 0.1, g: 0.1, b: 0.14, a: 1 } })
 }
 
-export function encodeTagHistPresent(enc: GPUCommandEncoder, pipeline: GradientProfilePipeline): void {
-  const ctx = pipeline.tagHistContext
-  const viz = pipeline.tagHistogramDisplay
-  if (!ctx || !viz) {
-    return
-  }
-
-  viz.encodeDisplay(enc, { view: ctx, clearValue: { r: 0.08, g: 0.08, b: 0.1, a: 1 } })
-}
 
 export function encodeGradientProfilePlotPresent(
   enc: GPUCommandEncoder,

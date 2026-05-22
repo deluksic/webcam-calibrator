@@ -1,127 +1,52 @@
-// Per-label 64-bin grayscale profiles along edge normal (black → white).
+// Per-edge 64-bin grayscale profiles along edge normal (black → white), via quad rasterization.
 import type { TgpuRoot } from 'typegpu'
-import { tgpu, d, std } from 'typegpu'
-import { atomicAdd, atomicLoad, atomicStore, length, select, sqrt } from 'typegpu/std'
+import { d, std, tgpu } from 'typegpu'
+import { atomicAdd, atomicLoad, atomicStore, floor, max, min, round, sqrt, textureLoad } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
-import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
-import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
-import type { LabelToQuadIdBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import { profileComputePass, profileRenderPass } from '@/gpu/gpuProfiling'
+import { DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE } from '@/gpu/tagDecodeThresholds'
+import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
+import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
+import { GridDataSchema, type GridVizQuadBuffer } from '@/gpu/pipelines/gridVizPipeline'
 import {
   EdgeLineEntry,
   PROFILE_BUCKET_COUNT,
   PROFILE_NEIGHBORHOOD_HALF,
   type EdgeLineOutBuffer,
 } from '@/gpu/pipelines/edgeLineFitPipeline'
-import type { GrayTexToBufferBindResources } from '@/gpu/pipelines/grayPipeline'
-import { lineDirDot } from '@/gpu/shaders/linePca'
+import {
+  TagDecodeThresholdGpu,
+  TagDecodeThresholdSchema,
+} from '@/gpu/pipelines/tagDecodePipeline'
 
-const WORKGROUP_SIZE = 16
-/** 1D bucket reset/normalize: WG sized so MAX_FLAT_EDGES×64 buckets stay under 65535 workgroups/dim. */
+export { PROFILE_BUCKET_COUNT, PROFILE_NEIGHBORHOOD_HALF }
+
 const BUCKET_WORKGROUP_SIZE = 256
-const BUCKETS_PER_LABEL = PROFILE_BUCKET_COUNT
-
+const MINMAX_WG = 64
+const BUCKETS_PER_EDGE = PROFILE_BUCKET_COUNT
 const GRAY_FIXED_SCALE = 100000
+const HALF_W_F = d.f32(PROFILE_NEIGHBORHOOD_HALF)
+const NORM_SPAN = d.f32(2) * HALF_W_F
+const BUCKET_COUNT_F = d.f32(PROFILE_BUCKET_COUNT)
 
 const ProfileBucketAtomic = d.struct({
   sumGrayFixed: d.atomic(d.i32),
   count: d.atomic(d.u32),
 })
 
-/** Same layout as {@link ProfileBucketAtomic}; plain types for readonly vertex reads. */
 export const ProfileBucketGpu = d.struct({
   sumGrayFixed: d.i32,
   count: d.u32,
 })
 
-const FrameSizeUniform = d.struct({
-  width: d.u32,
-  height: d.u32,
-})
+// ---- reset ----
 
-function createProfileLayouts() {
+function createProfileResetPipeline(root: TgpuRoot, bucketCount: number) {
   const resetLayout = tgpu.bindGroupLayout({
     profileBuckets: { storage: d.arrayOf(ProfileBucketAtomic), access: 'mutable' },
     profileAvg: { storage: d.arrayOf(d.f32), access: 'mutable' },
   })
-  const accumLayout = tgpu.bindGroupLayout({
-    frame: { uniform: FrameSizeUniform },
-    grayBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
-    edgeBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
-    compactLabels: { storage: d.arrayOf(d.u32), access: 'readonly' },
-    labelToQuadId: { storage: d.arrayOf(d.u32), access: 'readonly' },
-    lineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
-    profileBuckets: { storage: d.arrayOf(ProfileBucketAtomic), access: 'mutable' },
-  })
-  const normalizeLayout = tgpu.bindGroupLayout({
-    profileBuckets: { storage: d.arrayOf(ProfileBucketAtomic), access: 'mutable' },
-    profileAvg: { storage: d.arrayOf(d.f32), access: 'mutable' },
-  })
-  return { resetLayout, accumLayout, normalizeLayout }
-}
 
-export function createEdgeProfileStage(
-  root: TgpuRoot,
-  width: number,
-  height: number,
-  maxComponents: number,
-  grayBuffer: GrayTexToBufferBindResources['grayBuffer'],
-  filteredBuffer: EdgeFilterBindResources['filteredBuffer'],
-  compactLabels: CompactLabelMapBuffer,
-  labelToQuadId: LabelToQuadIdBuffer,
-  lineOut: EdgeLineOutBuffer,
-) {
-  const bucketCount = maxComponents * BUCKETS_PER_LABEL
-  const profileBuckets = root.createBuffer(d.arrayOf(ProfileBucketAtomic, bucketCount)).$usage('storage')
-  const profileAvg = root.createBuffer(d.arrayOf(d.f32, bucketCount)).$usage('storage')
-  const frameUniform = root.createBuffer(FrameSizeUniform).$usage('uniform')
-
-  const layouts = createProfileLayouts()
-  const resetPipeline = createProfileResetPipeline(root, layouts.resetLayout, bucketCount)
-  const accumPipeline = createProfileAccumPipeline(root, layouts.accumLayout)
-  const normalizePipeline = createProfileNormalizePipeline(root, layouts.normalizeLayout, bucketCount)
-
-  const resetBindGroup = root.createBindGroup(layouts.resetLayout, {
-    profileBuckets,
-    profileAvg,
-  })
-  const accumBindGroup = root.createBindGroup(layouts.accumLayout, {
-    frame: frameUniform,
-    grayBuffer,
-    edgeBuffer: filteredBuffer,
-    compactLabels,
-    labelToQuadId,
-    lineOut,
-    profileBuckets,
-  })
-  const normalizeBindGroup = root.createBindGroup(layouts.normalizeLayout, {
-    profileBuckets,
-    profileAvg,
-  })
-
-  const wgX = Math.ceil(width / WORKGROUP_SIZE)
-  const wgY = Math.ceil(height / WORKGROUP_SIZE)
-  const bucketWg = Math.ceil(bucketCount / BUCKET_WORKGROUP_SIZE)
-
-  const encodeCompute = (pass: GPUComputePassEncoder) => {
-    frameUniform.write({ width: d.u32(width), height: d.u32(height) })
-    resetPipeline.with(pass).with(resetBindGroup).dispatchWorkgroups(bucketWg)
-    accumPipeline.with(pass).with(accumBindGroup).dispatchWorkgroups(wgX, wgY)
-    normalizePipeline.with(pass).with(normalizeBindGroup).dispatchWorkgroups(bucketWg)
-  }
-
-  return {
-    profileAvg,
-    profileBuckets,
-    encodeCompute,
-  }
-}
-
-function createProfileResetPipeline(
-  root: TgpuRoot,
-  resetLayout: ReturnType<typeof createProfileLayouts>['resetLayout'],
-  bucketCount: number,
-) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [BUCKET_WORKGROUP_SIZE, 1, 1],
@@ -135,120 +60,141 @@ function createProfileResetPipeline(
     atomicStore(resetLayout.$.profileBuckets[bid]!.count, d.u32(0))
     resetLayout.$.profileAvg[bid] = d.f32(0)
   })
-  return root.createComputePipeline({ compute: kernel })
+  const pipeline = root.createComputePipeline({ compute: kernel })
+  return { resetLayout, pipeline }
 }
 
-function createProfileAccumPipeline(
+// ---- accum (render pass: rasterize edge quads) ----
+
+function createProfileAccumStage(
   root: TgpuRoot,
-  accumLayout: ReturnType<typeof createProfileLayouts>['accumLayout'],
+  grayTexView: unknown,
+  lineOut: EdgeLineOutBuffer,
+  profileBuckets: ReturnType<typeof root.createBuffer>,
+  width: number,
+  height: number,
+  maxFlatEdges: number,
 ) {
-  const halfW = PROFILE_NEIGHBORHOOD_HALF
-  const bucketCountF = d.f32(PROFILE_BUCKET_COUNT)
-  const normSpan = d.f32(2) * d.f32(halfW)
+  const accumLayout = tgpu.bindGroupLayout({
+    grayTex: { texture: d.texture2d(d.f32) },
+    lineOut: { storage: d.arrayOf(EdgeLineEntry), access: 'readonly' },
+    profileBuckets: { storage: d.arrayOf(ProfileBucketAtomic), access: 'mutable' },
+  }).$name('profile-accum-bgl')
 
-  const kernel = tgpu.computeFn({
-    in: { gid: d.builtin.globalInvocationId },
-    workgroupSize: [WORKGROUP_SIZE, WORKGROUP_SIZE, 1],
-  })((input) => {
-    'use gpu'
-    const x = d.i32(input.gid.x)
-    const y = d.i32(input.gid.y)
-    const fw = d.i32(accumLayout.$.frame.width)
-    const fh = d.i32(accumLayout.$.frame.height)
-    if (x >= fw || y >= fh) {
-      return
-    }
-
-    const px = d.f32(x) + d.f32(0.5)
-    const py = d.f32(y) + d.f32(0.5)
-
-    let bestFlatIdx = d.u32(COMPONENT_LABEL_INVALID)
-    let bestAbsS = d.f32(1e30)
-    let bestNDotMean = d.f32(0)
-    let bestTSampleMin = d.f32(0)
-    let bestTSampleMax = d.f32(0)
-    let bestSumGx = d.f32(0)
-    let bestSumGy = d.f32(0)
-
-    for (const dy of std.range(-2, 3)) {
-      for (const dx of std.range(-2, 3)) {
-        const nx = x + dx
-        const ny = y + dy
-        if (nx >= d.i32(0) && nx < fw && ny >= d.i32(0) && ny < fh) {
-          const nIdx = d.u32(ny * fw + nx)
-          if (length(accumLayout.$.edgeBuffer[nIdx]!) > d.f32(0)) {
-            const packedLabel = accumLayout.$.compactLabels[nIdx]!
-            if (packedLabel !== d.u32(COMPONENT_LABEL_INVALID)) {
-              const edgeId = packedLabel % d.u32(4)
-              const lblId = packedLabel / d.u32(4)
-              const quadId = accumLayout.$.labelToQuadId[lblId]!
-              if (quadId === d.u32(COMPONENT_LABEL_INVALID)) {
-                continue
-              }
-              const flatIdx = quadId * d.u32(4) + edgeId
-              const line = accumLayout.$.lineOut[flatIdx]!
-              if (line.valid !== d.u32(0)) {
-                const gLen = sqrt(line.sumGx * line.sumGx + line.sumGy * line.sumGy)
-                if (gLen >= d.f32(1e-8)) {
-                  const nnx = line.sumGx / gLen
-                  const nny = line.sumGy / gLen
-                  const s = px * nnx + py * nny - line.nDotMean
-                  const absS = std.abs(s)
-                  const pick =
-                    bestFlatIdx === d.u32(COMPONENT_LABEL_INVALID) ||
-                    absS < bestAbsS ||
-                    (absS === bestAbsS && flatIdx < bestFlatIdx)
-                  if (pick) {
-                    bestFlatIdx = flatIdx
-                    bestAbsS = absS
-                    bestSumGx = line.sumGx
-                    bestSumGy = line.sumGy
-                    bestNDotMean = line.nDotMean
-                    bestTSampleMin = line.tSampleMin
-                    bestTSampleMax = line.tSampleMax
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    if (bestFlatIdx === d.u32(COMPONENT_LABEL_INVALID)) {
-      return
-    }
-
-    const gLen = sqrt(bestSumGx * bestSumGx + bestSumGy * bestSumGy)
-    const nnx = bestSumGx / gLen
-    const nny = bestSumGy / gLen
-    const s = px * nnx + py * nny - bestNDotMean
-    if (std.abs(s) > d.f32(halfW)) {
-      return
-    }
-    const t = lineDirDot(px, py, nnx, nny)
-    if (t < bestTSampleMin || t > bestTSampleMax) {
-      return
-    }
-
-    const bFloat = ((s + d.f32(halfW)) / normSpan) * bucketCountF
-    let b = d.u32(std.floor(bFloat))
-    b = std.min(std.max(b, d.u32(0)), d.u32(PROFILE_BUCKET_COUNT - 1))
-
-    const gray = accumLayout.$.grayBuffer[d.u32(y * fw + x)]!
-    const bucketIdx = bestFlatIdx * d.u32(BUCKETS_PER_LABEL) + b
-    const slot = accumLayout.$.profileBuckets[bucketIdx]!
-    atomicAdd(slot.sumGrayFixed, d.i32(gray * d.f32(GRAY_FIXED_SCALE)))
-    atomicAdd(slot.count, d.u32(1))
+  const dummyTexture = root.device.createTexture({
+    label: 'profile-accum-dummy',
+    size: [width, height, 1],
+    format: 'rgba8unorm',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
   })
-  return root.createComputePipeline({ compute: kernel })
+
+  const vert = tgpu.vertexFn({
+    in: { vertexIndex: d.builtin.vertexIndex, instanceIndex: d.builtin.instanceIndex },
+    out: {
+      outPos: d.builtin.position,
+      flatIdx: d.interpolate('flat', d.u32),
+      s: d.vec2f,
+    },
+  })(({ vertexIndex, instanceIndex }) => {
+    const line = accumLayout.$.lineOut[instanceIndex]!
+    if (line.valid === d.u32(0)) {
+      return { outPos: d.vec4f(-2, -2, 0, 1), flatIdx: instanceIndex, s: d.vec2f(0, 0) }
+    }
+
+    const gLen = sqrt(line.sumGx * line.sumGx + line.sumGy * line.sumGy)
+    let nnx = d.f32(0)
+    let nny = d.f32(0)
+    if (gLen >= d.f32(1e-8)) {
+      nnx = line.sumGx / gLen
+      nny = line.sumGy / gLen
+    }
+
+    const halfNeg = d.f32(-PROFILE_NEIGHBORHOOD_HALF)
+    const tVals = [line.tSampleMin, line.tSampleMax, line.tSampleMin, line.tSampleMax] as const
+    const sideVals = [HALF_W_F, HALF_W_F, halfNeg, halfNeg] as const
+
+    const t = tVals[vertexIndex]!
+    const side = sideVals[vertexIndex]!
+
+    // Point on line at parameter t: (nx * nDotMean - ny * t, ny * nDotMean + nx * t)
+    const lx = nnx * line.nDotMean - nny * t
+    const ly = nny * line.nDotMean + nnx * t
+    const px = lx + nnx * side
+    const py = ly + nny * side
+
+    // No Y-flip: clipY = 2*py/h - 1 so screenY = py (image coords match fragment pos)
+    const fw = d.f32(width)
+    const fh = d.f32(height)
+    const clipX = (d.f32(2) * px) / fw - d.f32(1)
+    const clipY = (d.f32(2) * py) / fh - d.f32(1)
+
+    return {
+      outPos: d.vec4f(clipX, clipY, d.f32(0), d.f32(1)),
+      flatIdx: instanceIndex,
+      s: d.vec2f(side, d.f32(0)),
+    }
+  })
+
+  const frag = tgpu.fragmentFn({
+    in: {
+      pos: d.builtin.position,
+      flatIdx: d.interpolate('flat', d.u32),
+      s: d.vec2f,
+    },
+    out: d.vec4f,
+  })(({ pos, flatIdx, s }) => {
+    const signedDist = s.x
+    const frac_ = (signedDist + HALF_W_F) / NORM_SPAN
+    let b = d.u32(floor(frac_ * BUCKET_COUNT_F))
+    b = min(max(b, d.u32(0)), d.u32(BUCKETS_PER_EDGE - 1))
+
+    const px = d.u32(pos.x)
+    const py = d.u32(pos.y)
+    const gray = textureLoad(accumLayout.$.grayTex, d.vec2u(px, py), d.i32(0)).x
+    const bucketIdx = flatIdx * d.u32(BUCKETS_PER_EDGE) + b
+    atomicAdd(accumLayout.$.profileBuckets[bucketIdx]!.sumGrayFixed, d.i32(gray * d.f32(GRAY_FIXED_SCALE)))
+    atomicAdd(accumLayout.$.profileBuckets[bucketIdx]!.count, d.u32(1))
+    return d.vec4f(0, 0, 0, 0)
+  })
+
+  const pipeline = root
+    .createRenderPipeline({
+      vertex: vert,
+      fragment: frag,
+      targets: { format: 'rgba8unorm' },
+      primitive: { topology: 'triangle-strip' },
+    })
+    .$name('profile-accum-render')
+
+  const bindGroup = root.createBindGroup(accumLayout, {
+    grayTex: grayTexView as never,
+    lineOut,
+    profileBuckets: profileBuckets as never,
+  })
+
+  function encodeAccum(enc: GPUCommandEncoder) {
+    const pass = profileRenderPass(enc, pipeline, {
+      label: 'profile-accum',
+      colorAttachments: [
+        { view: dummyTexture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] },
+      ],
+    })
+    pass.setViewport(0, 0, width, height, 0, 1)
+    pipeline.with(pass).with(bindGroup).draw(4, maxFlatEdges)
+    pass.end()
+  }
+
+  return { encodeAccum }
 }
 
-function createProfileNormalizePipeline(
-  root: TgpuRoot,
-  normalizeLayout: ReturnType<typeof createProfileLayouts>['normalizeLayout'],
-  bucketCount: number,
-) {
+// ---- normalize ----
+
+function createProfileNormalizePipeline(root: TgpuRoot, bucketCount: number) {
+  const normalizeLayout = tgpu.bindGroupLayout({
+    profileBuckets: { storage: d.arrayOf(ProfileBucketAtomic), access: 'mutable' },
+    profileAvg: { storage: d.arrayOf(d.f32), access: 'mutable' },
+  })
+
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [BUCKET_WORKGROUP_SIZE, 1, 1],
@@ -261,10 +207,175 @@ function createProfileNormalizePipeline(
     const slot = normalizeLayout.$.profileBuckets[bid]!
     const c = atomicLoad(slot.count)
     const sumFixed = atomicLoad(slot.sumGrayFixed)
-    const avg = select(d.f32(0), d.f32(sumFixed) / d.f32(c) / d.f32(GRAY_FIXED_SCALE), c > d.u32(0))
-    normalizeLayout.$.profileAvg[bid] = avg
+    if (c > d.u32(0)) {
+      normalizeLayout.$.profileAvg[bid] = d.f32(sumFixed) / d.f32(c) / d.f32(GRAY_FIXED_SCALE)
+    } else {
+      normalizeLayout.$.profileAvg[bid] = d.f32(0)
+    }
   })
-  return root.createComputePipeline({ compute: kernel })
+  const pipeline = root.createComputePipeline({ compute: kernel })
+  return { normalizeLayout, pipeline }
+}
+
+// ---- min/max extraction per quad ----
+
+function createProfileMinMaxStage(
+  root: TgpuRoot,
+  profileBuckets: ReturnType<typeof root.createBuffer>,
+  profileAvg: ReturnType<typeof root.createBuffer>,
+  quadDataBuffer: GridVizQuadBuffer,
+  quadCountBuf: unknown,
+) {
+  const minmaxLayout = tgpu.bindGroupLayout({
+    profileBuckets: { storage: d.arrayOf(ProfileBucketGpu), access: 'readonly' },
+    profileAvg: { storage: d.arrayOf(d.f32), access: 'readonly' },
+    quads: { storage: GridDataSchema, access: 'readonly' },
+    thresholds: { storage: TagDecodeThresholdSchema, access: 'mutable' },
+    activeQuadCount: { storage: d.arrayOf(d.u32, 1), access: 'readonly' },
+  }).$name('profile-minmax-bgl')
+
+  const thresholdBuf = root.createBuffer(TagDecodeThresholdSchema).$usage('storage').$name('tag-decode-thresholds')
+
+  const kernel = tgpu.computeFn({
+    in: { gid: d.builtin.globalInvocationId },
+    workgroupSize: [MINMAX_WG, 1, 1],
+  })((input) => {
+    'use gpu'
+    const quadId = d.u32(input.gid.x)
+    if (quadId >= minmaxLayout.$.activeQuadCount[0]!) {
+      return
+    }
+
+    let minGray = d.f32(1)
+    let maxGray = d.f32(0)
+
+    for (const b of tgpu.unroll(std.range(0, BUCKETS_PER_EDGE))) {
+      const bu = d.u32(b)
+      let bucketSum = d.f32(0)
+      let edgeCount = d.u32(0)
+
+      for (const e of tgpu.unroll(std.range(0, MAX_EDGES_PER_LABEL))) {
+        const flatIdx = quadId * d.u32(MAX_EDGES_PER_LABEL) + d.u32(e)
+        const idx = flatIdx * d.u32(BUCKETS_PER_EDGE) + bu
+        if (minmaxLayout.$.profileBuckets[idx]!.count > d.u32(0)) {
+          bucketSum = bucketSum + minmaxLayout.$.profileAvg[idx]!
+          edgeCount = edgeCount + d.u32(1)
+        }
+      }
+
+      if (edgeCount > d.u32(0)) {
+        const avg = bucketSum / d.f32(edgeCount)
+        minGray = min(minGray, avg)
+        maxGray = max(maxGray, avg)
+      }
+    }
+
+    const diff = maxGray - minGray
+    const gapFrac = d.f32(0.375)
+    const blackBound = minGray + diff * gapFrac
+    const whiteBound = maxGray - diff * gapFrac
+
+    const c = minmaxLayout.$.quads[quadId]!.screenCorners
+    const d01 = sqrt((c[1]!.x - c[0]!.x) * (c[1]!.x - c[0]!.x) + (c[1]!.y - c[0]!.y) * (c[1]!.y - c[0]!.y))
+    const d13 = sqrt((c[3]!.x - c[1]!.x) * (c[3]!.x - c[1]!.x) + (c[3]!.y - c[1]!.y) * (c[3]!.y - c[1]!.y))
+    const d32 = sqrt((c[2]!.x - c[3]!.x) * (c[2]!.x - c[3]!.x) + (c[2]!.y - c[3]!.y) * (c[2]!.y - c[3]!.y))
+    const d20 = sqrt((c[0]!.x - c[2]!.x) * (c[0]!.x - c[2]!.x) + (c[0]!.y - c[2]!.y) * (c[0]!.y - c[2]!.y))
+    let lMin = d01
+    lMin = min(lMin, d13)
+    lMin = min(lMin, d32)
+    lMin = min(lMin, d20)
+    const minVote = max(d.u32(2), d.u32(round(d.f32(DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE) * lMin)))
+
+    let valid = d.u32(0)
+    if (diff > d.f32(0.05) && whiteBound > blackBound) {
+      valid = d.u32(1)
+    }
+
+    minmaxLayout.$.thresholds[quadId] = TagDecodeThresholdGpu({
+      blackBound,
+      whiteBound,
+      minVoteTotal: minVote,
+      valid,
+    })
+  })
+
+  const pipeline = root.createComputePipeline({ compute: kernel }).$name('profile-minmax')
+
+  const bindGroup = root.createBindGroup(minmaxLayout, {
+    profileBuckets: profileBuckets as never,
+    profileAvg: profileAvg as never,
+    quads: quadDataBuffer as never,
+    thresholds: thresholdBuf,
+    activeQuadCount: quadCountBuf as never,
+  })
+
+  function encodeMinMax(pass: GPUComputePassEncoder) {
+    pipeline.with(pass).with(bindGroup).dispatchWorkgroups(Math.ceil(MAX_QUADS / MINMAX_WG))
+  }
+
+  return { thresholdBuf, encodeMinMax }
+}
+
+// ---- main stage ----
+
+export function createEdgeProfileStage(
+  root: TgpuRoot,
+  width: number,
+  height: number,
+  maxFlatEdges: number,
+  grayTexView: unknown,
+  lineOut: EdgeLineOutBuffer,
+  quadDataBuffer: GridVizQuadBuffer,
+  quadCountBuf: unknown,
+) {
+  const bucketCount = maxFlatEdges * BUCKETS_PER_EDGE
+  const profileBuckets = root.createBuffer(d.arrayOf(ProfileBucketAtomic, bucketCount)).$usage('storage')
+  const profileAvg = root.createBuffer(d.arrayOf(d.f32, bucketCount)).$usage('storage')
+
+  const { resetLayout, pipeline: resetPipeline } = createProfileResetPipeline(root, bucketCount)
+  const { encodeAccum } = createProfileAccumStage(
+    root, grayTexView, lineOut, profileBuckets, width, height, maxFlatEdges,
+  )
+  const { normalizeLayout, pipeline: normalizePipeline } = createProfileNormalizePipeline(root, bucketCount)
+  const { thresholdBuf, encodeMinMax } = createProfileMinMaxStage(
+    root, profileBuckets, profileAvg, quadDataBuffer, quadCountBuf,
+  )
+
+  const resetBindGroup = root.createBindGroup(resetLayout, { profileBuckets, profileAvg })
+  const normalizeBindGroup = root.createBindGroup(normalizeLayout, { profileBuckets, profileAvg })
+
+  const bucketWg = Math.ceil(bucketCount / BUCKET_WORKGROUP_SIZE)
+
+  const encodeCompute = (enc: GPUCommandEncoder) => {
+    // reset
+    runStage(enc, 'profile-reset', (p) => {
+      resetPipeline.with(p).with(resetBindGroup).dispatchWorkgroups(bucketWg)
+    })
+    // accum (render pass)
+    encodeAccum(enc)
+    // normalize
+    runStage(enc, 'profile-normalize', (p) => {
+      normalizePipeline.with(p).with(normalizeBindGroup).dispatchWorkgroups(bucketWg)
+    })
+  }
+
+  return {
+    profileAvg,
+    profileBuckets,
+    thresholdBuf,
+    encodeCompute,
+    encodeMinMaxPass: encodeMinMax,
+  }
+}
+
+function runStage(
+  enc: GPUCommandEncoder,
+  label: string,
+  dispatch: (pass: GPUComputePassEncoder) => void,
+) {
+  const pass = profileComputePass(enc, label, { label })
+  dispatch(pass)
+  pass.end()
 }
 
 export type ProfileAvgBuffer = ReturnType<typeof createEdgeProfileStage>['profileAvg']

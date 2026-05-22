@@ -30,7 +30,7 @@ import { createQuadCornerHomographyStage } from '@/gpu/pipelines/quadCornerHomog
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { createSobelStage } from '@/gpu/pipelines/sobelPipeline'
 import { createSobelRenderPipeline } from '@/gpu/pipelines/sobelRenderPipeline'
-import { createTagDecodeStage, createTagHistogramDisplayStage, createVoteDebugDisplayStage } from '@/gpu/pipelines/tagDecodePipeline'
+import { createTagDecodeStage, createVoteDebugDisplayStage } from '@/gpu/pipelines/tagDecodePipeline'
 import { createHostQuadReadbackStage } from '@/gpu/pipelines/hostQuadReadbackPipeline'
 import { allocUndistortUniform, createUndistortPipeline } from '@/gpu/pipelines/undistortPipeline'
 
@@ -80,7 +80,6 @@ export function createGradientProfilePipeline(
   orientHistCanvas: HTMLCanvasElement | undefined,
   profileCanvas: HTMLCanvasElement,
   histCanvas: HTMLCanvasElement | undefined,
-  tagHistCanvas: HTMLCanvasElement | undefined,
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
@@ -159,11 +158,22 @@ export function createGradientProfilePipeline(
     quadCount: edgeHistogram.quadCount,
     quadDataBuffer: grid.quadCornersBuffer,
   })
+  const profile = createEdgeProfileStage(
+    root,
+    width,
+    height,
+    MAX_FLAT_EDGES,
+    grayTexView,
+    lineFit.lineOut,
+    grid.quadCornersBuffer,
+    edgeHistogram.quadCount,
+  )
   const tagDecode = createTagDecodeStage(root, {
     grayTexView,
     quadDataBuffer: grid.quadCornersBuffer,
     width,
     height,
+    thresholdBuf: profile.thresholdBuf,
   })
   const hostQuadReadback = createHostQuadReadbackStage(root, grid.quadCornersBuffer)
   const publishQuadCount = createQuadCountPublishStage(
@@ -172,24 +182,7 @@ export function createGradientProfilePipeline(
     tagDecode.activeQuadCountBuf,
     grid.drawIndirectBuf,
   )
-  const tagHistContext = tagHistCanvas
-    ? root.configureContext({ canvas: tagHistCanvas, alphaMode: 'premultiplied' })
-    : undefined
-  const tagHistogramDisplay = tagHistContext
-    ? createTagHistogramDisplayStage(root, tagDecode.histBuf, tagDecode.thresholdBuf, presentationFormat)
-    : undefined
   const voteDebugDisplay = createVoteDebugDisplayStage(root, tagDecode.voteDebugTex, presentationFormat)
-  const profile = createEdgeProfileStage(
-    root,
-    width,
-    height,
-    MAX_FLAT_EDGES,
-    gray.buffer,
-    nms.filteredBuffer,
-    edgeHistogram.packedEdgeLabels,
-    edgeHistogram.labelToQuadId,
-    lineFit.lineOut,
-  )
   const profilePlot = createEdgeProfilePlotStage(root, presentationFormat)
   const plotBindGroup = profilePlot.createPlotBindGroup(lineFit.lineOut, profile.profileAvg, profile.profileBuckets)
 
@@ -312,8 +305,6 @@ export function createGradientProfilePipeline(
     boundaryFilter,
     edgeHistogram,
     orientHistViz,
-    tagHistContext,
-    tagHistogramDisplay,
     voteDebugDisplay,
     lineFit,
     quadHomography,

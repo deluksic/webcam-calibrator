@@ -48,7 +48,12 @@ export function encodeGradientProfileCompute(
   }
   runComputeStage(enc, 'line-fit', (p) => pipeline.lineFit.encodeCompute(p))
   runComputeStage(enc, 'quad-homography', (p) => pipeline.quadHomography.encodeCompute(p))
-  runComputeStage(enc, 'profile', (p) => pipeline.profile.encodeCompute(p))
+
+  // Profile needs a command encoder (contains render pass for edge quad rasterization)
+  pipeline.profile.encodeCompute(enc)
+  // Profile min/max extraction runs as a compute pass _after_ profile normalization,
+  // so thresholds are ready before tag decode voting.
+  runComputeStage(enc, 'profile-minmax', (p) => pipeline.profile.encodeMinMaxPass(p))
 
   pipeline.publishQuadCount.encodePublish(enc)
   pipeline.tagDecode.encodeVotePasses(enc, MAX_QUADS)
