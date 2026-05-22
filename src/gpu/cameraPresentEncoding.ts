@@ -62,48 +62,32 @@ export function encodePresentNonGrid(
 }
 
 /**
- * Grid mode: live gray buffer + GPU quad overlay + reprojection + histogram.
- * Appends to `enc`; does not submit.
+ * Grid mode: composites the frame-synced gray+grid offscreen texture with the
+ * async reprojection overlay. The base texture was rendered during the compute
+ * pass so it is always in sync with the detected quads.
  *
- * All layers render to a shared 4x MSAA texture. Only the final pass resolves
- * to the canvas so the multisampled content is preserved across passes.
+ * Appends to `enc`; does not submit.
  */
-export function encodeGridPresent(enc: GPUCommandEncoder, pipeline: CameraPipeline, timeSec: number, presentIndex = 0): void {
-  pipeline.grayRenderParamsBuffer.write({ timeSec, grayScale: 1 })
-
+export function encodeGridPresent(enc: GPUCommandEncoder, pipeline: CameraPipeline, _timeSec: number, presentIndex = 0): void {
   pipeline.msaa.ensureMsaa(pipeline.canvas.width, pipeline.canvas.height)
   const msaaView = pipeline.msaa.msaaColorTex!.createView()
   const canvasView = pipeline.context.getCurrentTexture().createView()
 
   const reprojN = pipeline.reproj.reprojOverlayDrawState.instanceCount
 
-  // Pass 1: Base layer → MSAA (clear + store; grid or reproj pass resolves)
+  // Pass 1: Base texture (gray + grid, rendered during compute) → MSAA (clear + store)
   {
-    const attach: ColorAttachment = {
+    const bg = pipeline.baseTexBindGroups[presentIndex]!
+    pipeline.baseTexToScreenPipeline.with(enc).withColorAttachment({
       view: msaaView,
       loadOp: 'clear',
-      storeOp: 'store',
-    }
-    pipeline.render.grayscaleMsaa.encodeToCanvas(enc, attach, pipeline.render.grayscaleMsaaBindGroups[presentIndex]!)
+      storeOp: reprojN === 0 ? 'discard' : 'store',
+      resolveTarget: reprojN === 0 ? canvasView : undefined,
+      clearValue: [0, 0, 0, 0],
+    }).with(bg).draw(3)
   }
 
-  // Pass 2: Grid overlay → MSAA (drawIndirect instance count from publish pass)
-  {
-    const gridFinal = reprojN === 0
-    const attach: ColorAttachment = {
-      view: msaaView,
-      loadOp: 'load',
-      storeOp: gridFinal ? 'discard' : 'store',
-      resolveTarget: gridFinal ? canvasView : undefined,
-    }
-    try {
-      pipeline.msaa.grid.encodeToCanvas(enc, attach, { hideNonDecoded: true })
-    } catch (e) {
-      console.error('[encodeGridPresent] gridViz failed:', e)
-    }
-  }
-
-  // Pass 3: Reprojection overlay → MSAA (load + discard + resolve to canvas)
+  // Pass 2: Reprojection overlay → MSAA (load + discard + resolve to canvas)
   if (reprojN > 0) {
     const attach: ColorAttachment = {
       view: msaaView,

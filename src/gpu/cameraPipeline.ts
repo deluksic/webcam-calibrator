@@ -1,5 +1,5 @@
 import type { TgpuRoot } from 'typegpu'
-import { d } from 'typegpu'
+import { d, tgpu, std, common } from 'typegpu'
 
 import { createFrameSlotPool } from '@/gpu/frameSlotPool'
 import type { FrameSlotPool } from '@/gpu/frameSlotPool'
@@ -77,13 +77,6 @@ export function createCameraPipeline(
   const ingest = createCopyIngest(root, width, height)
   const gray = createGrayStage(root, width, height, ingest.grayTex)
 
-  // Double-buffered snapshots for the async present pass, so the gray image
-  // stays in sync with the frame that produced it (not the next compute frame).
-  const grayPresentBufs = [
-    root.createBuffer(d.arrayOf(d.f32, width * height)).$name('gray-present-0').$usage('storage', 'copyDst'),
-    root.createBuffer(d.arrayOf(d.f32, width * height)).$name('gray-present-1').$usage('storage', 'copyDst'),
-  ]
-
   const sobel = createSobelStage(root, width, height, gray.buffer)
   const nms = createEdgeFilterStage(root, width, height, sobel.buffer)
   const histogram = createHistogramStage(root, width, height, sobel.buffer, presentationFormat)
@@ -113,6 +106,10 @@ export function createCameraPipeline(
     edgeHistogram.quadCount,
   )
   const grid = createGridVizStage(root, width, height, presentationFormat)
+  const gridNoMsaa = createGridVizStage(root, width, height, presentationFormat, {
+    quadCornersBuffer: grid.quadCornersBuffer,
+    drawIndirectBuf: grid.drawIndirectBuf,
+  })
   const gridMsaa = createGridVizStage(root, width, height, presentationFormat, {
     sampleCount: RESULTS_MSAA_SAMPLE_COUNT,
     quadCornersBuffer: grid.quadCornersBuffer,
@@ -169,21 +166,53 @@ export function createCameraPipeline(
     labelBuffer: compact.compactLabelBuffer,
   })
   const grayscale = createGrayRenderPipeline(root, width, height, presentationFormat, {
-    grayBuffer: grayPresentBufs[0]!,
+    grayBuffer: gray.buffer,
     params: grayRenderParamsBuffer,
   })
-  const grayscaleBindGroups = [
-    grayscale.bindGroup,
-    root.createBindGroup(grayscale.layout, { grayBuffer: grayPresentBufs[1]!, params: grayRenderParamsBuffer }),
-  ]
   const grayscaleMsaa = createGrayRenderPipeline(root, width, height, presentationFormat, {
-    grayBuffer: grayPresentBufs[0]!,
+    grayBuffer: gray.buffer,
     params: grayRenderParamsBuffer,
   }, { sampleCount: RESULTS_MSAA_SAMPLE_COUNT })
-  const grayscaleMsaaBindGroups = [
-    grayscaleMsaa.bindGroup,
-    root.createBindGroup(grayscaleMsaa.layout, { grayBuffer: grayPresentBufs[1]!, params: grayRenderParamsBuffer }),
+  // Double-buffered offscreen textures: gray+grid rendered during compute pass,
+  // composited with reprojection during async present pass.
+  const baseTex = [
+    root.device.createTexture({
+      label: 'camera-base-0',
+      size: [width, height, 1],
+      format: presentationFormat,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    }),
+    root.device.createTexture({
+      label: 'camera-base-1',
+      size: [width, height, 1],
+      format: presentationFormat,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    }),
   ]
+
+  const baseTexToScreenLayout = tgpu.bindGroupLayout({
+    baseTex: { texture: d.texture2d(d.f32), access: 'readonly' },
+  })
+  const baseTexToScreenFrag = tgpu.fragmentFn({
+    in: { pos: d.builtin.position },
+    out: d.vec4f,
+  })((i) => {
+    'use gpu'
+    const px = d.u32(i.pos.x)
+    const py = d.u32(i.pos.y)
+    return std.textureLoad(baseTexToScreenLayout.$.baseTex, d.vec2u(px, py), d.i32(0))
+  })
+  const baseTexToScreenPipeline = root.createRenderPipeline({
+    vertex: common.fullScreenTriangle,
+    fragment: baseTexToScreenFrag,
+    targets: { format: presentationFormat },
+    multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
+  }).$name('base-tex-to-screen')
+  const baseTexBindGroups = [
+    root.createBindGroup(baseTexToScreenLayout, { baseTex: baseTex[0]!.createView() }),
+    root.createBindGroup(baseTexToScreenLayout, { baseTex: baseTex[1]!.createView() }),
+  ]
+
   const sobelRender = createSobelRenderPipeline(root, width, height, presentationFormat, {
     sobelBuffer: sobel.buffer,
   })
@@ -209,7 +238,6 @@ export function createCameraPipeline(
     ingest,
     grayRenderParamsBuffer,
     gray,
-    grayPresentBufs,
     sobel,
     nms,
     histogram,
@@ -225,6 +253,7 @@ export function createCameraPipeline(
     hostQuadReadback,
     grid,
     reproj,
+    gridNoMsaa,
     msaa: {
       grid: gridMsaa,
       reproj: reprojMsaa,
@@ -234,14 +263,15 @@ export function createCameraPipeline(
       },
       ensureMsaa,
     },
+    baseTex,
+    baseTexToScreenPipeline,
+    baseTexBindGroups,
     render: {
       edges,
       labelViz,
       labelVizBindGroup,
       grayscale,
-      grayscaleBindGroups,
       grayscaleMsaa,
-      grayscaleMsaaBindGroups,
       sobel: sobelRender,
       filtered,
       undistort,
