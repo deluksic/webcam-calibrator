@@ -1,5 +1,5 @@
 import { d, tgpu } from 'typegpu'
-import { abs, sqrt } from 'typegpu/std'
+import { abs, length } from 'typegpu/std'
 
 import { LINE_INTERSECT_DET_EPS } from '@/gpu/lineFitThresholds'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
@@ -29,22 +29,22 @@ export const lineNormalFromEdge = tgpu.fn([EdgeLineEntry], LineNormalD)((line) =
     d: line.nDotMean,
     mx: (line.p0x + line.p1x) * d.f32(0.5),
     my: (line.p0y + line.p1y) * d.f32(0.5),
-    span: sqrt(dx * dx + dy * dy),
+    span: length(d.vec2f(dx, dy)),
   })
 })
 
 /** Intersection of n1·p = d1 and n2·p = d2. */
 export const lineIntersectNormal = tgpu.fn(
-  [d.f32, d.f32, d.f32, d.f32, d.f32, d.f32],
+  [d.vec2f, d.f32, d.vec2f, d.f32],
   LineIntersectResult,
-)((n1x, n1y, d1, n2x, n2y, d2) => {
+)((n1, d1, n2, d2) => {
   'use gpu'
-  const det = n1x * n2y - n2x * n1y
+  const det = n1.x * n2.y - n2.x * n1.y
   if (abs(det) < d.f32(LINE_INTERSECT_DET_EPS)) {
     return LineIntersectResult({ point: d.vec2f(0, 0), ok: d.u32(0) })
   }
   const invDet = d.f32(1) / det
-  const x = (n2y * d1 - n1y * d2) * invDet
-  const y = (n1x * d2 - n2x * d1) * invDet
+  const x = (n2.y * d1 - n1.y * d2) * invDet
+  const y = (n1.x * d2 - n2.x * d1) * invDet
   return LineIntersectResult({ point: d.vec2f(x, y), ok: d.u32(1) })
 })

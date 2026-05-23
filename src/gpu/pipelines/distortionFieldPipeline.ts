@@ -2,7 +2,7 @@ import { oklabToRgb } from '@typegpu/color'
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import { common, std } from 'typegpu'
-import { abs, clamp, exp, fwidth, length, max, min, mix, pow, round, select } from 'typegpu/std'
+import { abs, clamp, dot, exp, fwidth, length, max, min, mix, mul, pow, round, select, sub } from 'typegpu/std'
 import { sdBox2d } from '@typegpu/sdf'
 
 import { PinholeIntrinsicsGpu, RationalDistortion8Gpu } from '@/gpu/schemas/cameraGpuUniforms'
@@ -183,27 +183,23 @@ export function createDistortionFieldStage(
     const yn = (yPx - intr.cy) / intr.fy
 
     const xyD = forwardDistortNormalized(d.vec2f(xn, yn), dist)
-    const xd = xyD.x
-    const yd = xyD.y
+    const dxy = sub(xyD, d.vec2f(xn, yn))
 
     /** Raw displacement in OKLab chroma space (before any clamping). */
-    const dxPx = (xd - xn) * intr.fx * vp.scale * d.f32(0.2)
-    const dyPx = (yd - yn) * intr.fy * vp.scale * d.f32(0.2)
+    const dxPx = dxy.x * intr.fx * vp.scale * d.f32(0.2)
+    const dyPx = dxy.y * intr.fy * vp.scale * d.f32(0.2)
     const chromaMagRaw = length(d.vec2f(dxPx, dyPx))
 
     /** Geometric |Δ| in image pixels (independent of visualization scale). */
-    const dispPhysX = (xd - xn) * intr.fx
-    const dispPhysY = (yd - yn) * intr.fy
-    const magPhys = length(d.vec2f(dispPhysX, dispPhysY))
+    const dispPhys = mul(dxy, d.vec2f(intr.fx, intr.fy))
+    const magPhys = length(dispPhys)
     const fw = max(fwidth(magPhys), d.f32(1e-4))
 
     /** Raw normalized dot product: displacement direction vs toward-center direction, in [-1, 1]. */
-    const toCenterX = intr.cx - xPx
-    const toCenterY = intr.cy - yPx
-    const toCenterLen = max(length(d.vec2f(toCenterX, toCenterY)), d.f32(1e-8))
-    const dispLen = max(length(d.vec2f(dispPhysX, dispPhysY)), d.f32(1e-8))
-    const dotToCenterRaw =
-      (dispPhysX * toCenterX + dispPhysY * toCenterY) / (dispLen * toCenterLen)
+    const toCenter = sub(d.vec2f(intr.cx, intr.cy), d.vec2f(xPx, yPx))
+    const toCenterLen = max(length(toCenter), d.f32(1e-8))
+    const dispLen = max(length(dispPhys), d.f32(1e-8))
+    const dotToCenterRaw = dot(dispPhys, toCenter) / (dispLen * toCenterLen)
 
     /** Two spacings: whole px vs 0.1 px; per-level mask [0,1] then brightness weights, then OkLab L scale. */
     const isoMajor = isoLevelPlateauMask(magPhys, 1, 0.5, 1, fw)

@@ -8,7 +8,7 @@
 // The edges display pipeline computes magnitude from length() on-the-fly.
 import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
-import { length, select } from 'typegpu/std'
+import { add, div, length, select, sub } from 'typegpu/std'
 
 export const edgeFilterLayout = tgpu.bindGroupLayout({
   sobelBuffer: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
@@ -76,24 +76,21 @@ export function createEdgeFilterPipeline(
     }
 
     // Gradient direction (perpendicular to edge) for NMS — round to nearest int pixel
-    const gxn = g.x / gm
-    const gyn = g.y / gm
-    const stepX = d.i32(std.select(gxn - d.f32(0.5), gxn + d.f32(0.5), gxn >= d.f32(0)))
-    const stepY = d.i32(std.select(gyn - d.f32(0.5), gyn + d.f32(0.5), gyn >= d.f32(0)))
-    const nxP = x + stepX
-    const nyP = y + stepY
-    const nxN = x - stepX
-    const nyN = y - stepY
+    const gDir = div(g, gm)
+    const step = d.vec2i(select(sub(gDir, d.f32(0.5)), add(gDir, d.f32(0.5)), gDir >= d.vec2f(0)))
+    const pos = d.vec2i(x, y)
+    const posP = add(pos, step)
+    const posN = sub(pos, step)
 
     // Collect neighbor magnitudes (0 if out of bounds)
     let gmPos = d.f32(0)
-    if (nxP >= d.i32(0) && nxP < w && nyP >= d.i32(0) && nyP < h) {
-      const idxP = d.u32(nyP) * d.u32(w) + d.u32(nxP)
+    if (posP.x >= d.i32(0) && posP.x < w && posP.y >= d.i32(0) && posP.y < h) {
+      const idxP = d.u32(posP.y) * d.u32(w) + d.u32(posP.x)
       gmPos = length(edgeFilterLayout.$.sobelBuffer[idxP]!)
     }
     let gmNeg = d.f32(0)
-    if (nxN >= d.i32(0) && nxN < w && nyN >= d.i32(0) && nyN < h) {
-      const idxN = d.u32(nyN) * d.u32(w) + d.u32(nxN)
+    if (posN.x >= d.i32(0) && posN.x < w && posN.y >= d.i32(0) && posN.y < h) {
+      const idxN = d.u32(posN.y) * d.u32(w) + d.u32(posN.x)
       gmNeg = length(edgeFilterLayout.$.sobelBuffer[idxN]!)
     }
 

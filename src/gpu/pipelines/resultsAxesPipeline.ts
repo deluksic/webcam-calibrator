@@ -11,7 +11,7 @@ import {
 import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import { arrayOf, u16 } from 'typegpu/data'
-import { clamp, fwidth, max, min, mix, mul, select, smoothstep, sqrt } from 'typegpu/std'
+import { clamp, dot, fwidth, max, min, mix, mul, select, smoothstep, sqrt } from 'typegpu/std'
 
 import { resultsCameraBindLayout, type ResultsCameraBindGroup } from '@/gpu/pipelines/resultsCameraTransform'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
@@ -95,7 +95,7 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
       const tipPixelOffsetFromFramebufferCenter = d.vec2f(ndcTip.x * halfWH.x, ndcTip.y * halfWH.y)
 
       const spine = tipPixelOffsetFromFramebufferCenter - originPixelOffsetFromFramebufferCenter
-      const spineLenSq = spine.x * spine.x + spine.y * spine.y
+      const spineLenSq = dot(spine, spine)
       const spineLen = sqrt(max(spineLenSq, d.f32(0)))
       const rStroke = min(u.axisPolylineHalfStrokePixels, spineLen * d.f32(1 / 16))
       const A = LineControlPoint({ position: originPixelOffsetFromFramebufferCenter, radius: rStroke })
@@ -114,7 +114,7 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
         measured.x - originPixelOffsetFromFramebufferCenter.x,
         measured.y - originPixelOffsetFromFramebufferCenter.y,
       )
-      const t = clamp((fromO.x * spine.x + fromO.y * spine.y) / max(spineLenSq, d.f32(1e-8)), d.f32(0), d.f32(1))
+      const t = clamp(dot(fromO, spine) / max(spineLenSq, d.f32(1e-8)), d.f32(0), d.f32(1))
       const ndcZ = ndcZ0 * (d.f32(1) - t) + ndcZ1 * t
 
       // `lineSegmentVariableWidth`: vertex 0/1 = spine (B/C); ≥2 = extrusion + caps. Interpolation gives smooth uv.y across the stroke.

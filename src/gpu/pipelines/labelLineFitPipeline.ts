@@ -538,7 +538,7 @@ function createLabelRefineAccumPipeline(
     atomicAdd(ir.sumYYFixed, yFixed * yFixed)
     atomicAdd(ir.count, d.u32(1))
 
-    const tAlong = lineDirDot(px, py, nx, ny)
+    const tAlong = lineDirDot(d.vec2f(px, py), d.vec2f(nx, ny))
     const tFixed = d.i32(tAlong * d.f32(T_FIXED_SCALE))
     atomicMin(ir.tMinFixed, tFixed)
     atomicMax(ir.tMaxFixed, tFixed)
@@ -604,7 +604,7 @@ function createLabelExtentPipeline(
       return
     }
 
-    const tAlong = lineDirDot(px, py, nx, ny)
+    const tAlong = lineDirDot(d.vec2f(px, py), d.vec2f(nx, ny))
     const ir = layout.$.labelInlierStats[slot]!
     const tFixed = d.i32(tAlong * d.f32(T_FIXED_SCALE))
     atomicAdd(ir.count, d.u32(1))
@@ -665,7 +665,7 @@ function createLabelScatterPipeline(
         if (tSampleMax - tSampleMin < d.f32(EDGE_MIN_SPAN_PX)) {
           valid = d.u32(0)
         } else {
-          const ends = lineSegmentEndpoints(sumGx, sumGy, nDotMean, tSampleMin, tSampleMax)
+          const ends = lineSegmentEndpoints(d.vec2f(sumGx, sumGy), nDotMean, tSampleMin, tSampleMax)
           p0x = ends.p0.x
           p0y = ends.p0.y
           p1x = ends.p1.x

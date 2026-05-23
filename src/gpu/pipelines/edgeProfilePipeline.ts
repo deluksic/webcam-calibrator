@@ -1,7 +1,7 @@
 // Per-edge 64-bin grayscale profiles along edge normal (black → white), via quad rasterization.
 import type { TgpuRoot } from 'typegpu'
 import { d, std, tgpu } from 'typegpu'
-import { atomicAdd, atomicLoad, atomicStore, floor, max, min, round, select, sqrt, textureLoad } from 'typegpu/std'
+import { add, atomicAdd, atomicLoad, atomicStore, distance, floor, length, max, min, mul, round, select, textureLoad } from 'typegpu/std'
 
 import { profileComputePass, profileRenderPass } from '@/gpu/gpuProfiling'
 import { DECODE_MIN_VOTE_FRACTION_OF_QUAD_EDGE } from '@/gpu/tagDecodeThresholds'
@@ -95,7 +95,7 @@ function createProfileAccumStage(
       return { outPos: d.vec4f(-2, -2, 0, 1), flatIdx: instanceIndex, s: d.vec2f(0, 0) }
     }
 
-    const gLen = sqrt(line.sumGx * line.sumGx + line.sumGy * line.sumGy)
+    const gLen = length(d.vec2f(line.sumGx, line.sumGy))
     let nnx = d.f32(0)
     let nny = d.f32(0)
     if (gLen >= d.f32(1e-8)) {
@@ -108,16 +108,13 @@ function createProfileAccumStage(
     const isTop = vertexIndex === d.u32(0) || vertexIndex === d.u32(1)
     const isP1 = vertexIndex === d.u32(1) || vertexIndex === d.u32(3)
     const side = select(d.f32(-PROFILE_NEIGHBORHOOD_HALF), HALF_W_F, isTop)
-    const ex = select(line.p0x, line.p1x, isP1)
-    const ey = select(line.p0y, line.p1y, isP1)
-
-    const px = ex + nnx * side
-    const py = ey + nny * side
+    const e = d.vec2f(select(line.p0x, line.p1x, isP1), select(line.p0y, line.p1y, isP1))
+    const p = add(e, mul(d.vec2f(nnx, nny), side))
 
     const fw = d.f32(width)
     const fh = d.f32(height)
-    const clipX = (d.f32(2) * px) / fw - d.f32(1)
-    const clipY = d.f32(1) - (d.f32(2) * py) / fh
+    const clipX = (d.f32(2) * p.x) / fw - d.f32(1)
+    const clipY = d.f32(1) - (d.f32(2) * p.y) / fh
 
     return {
       outPos: d.vec4f(clipX, clipY, d.f32(0), d.f32(1)),
@@ -274,10 +271,10 @@ function createProfileMinMaxStage(
     const whiteBound = maxGray - diff * gapFrac
 
     const c = minmaxLayout.$.quads[quadId]!.screenCorners
-    const d01 = sqrt((c[1]!.x - c[0]!.x) * (c[1]!.x - c[0]!.x) + (c[1]!.y - c[0]!.y) * (c[1]!.y - c[0]!.y))
-    const d13 = sqrt((c[3]!.x - c[1]!.x) * (c[3]!.x - c[1]!.x) + (c[3]!.y - c[1]!.y) * (c[3]!.y - c[1]!.y))
-    const d32 = sqrt((c[2]!.x - c[3]!.x) * (c[2]!.x - c[3]!.x) + (c[2]!.y - c[3]!.y) * (c[2]!.y - c[3]!.y))
-    const d20 = sqrt((c[0]!.x - c[2]!.x) * (c[0]!.x - c[2]!.x) + (c[0]!.y - c[2]!.y) * (c[0]!.y - c[2]!.y))
+    const d01 = distance(c[0]!, c[1]!)
+    const d13 = distance(c[1]!, c[3]!)
+    const d32 = distance(c[2]!, c[3]!)
+    const d20 = distance(c[0]!, c[2]!)
     let lMin = d01
     lMin = min(lMin, d13)
     lMin = min(lMin, d32)

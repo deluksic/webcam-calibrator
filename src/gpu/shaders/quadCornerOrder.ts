@@ -1,5 +1,5 @@
 import { d, std, tgpu } from 'typegpu'
-import { abs, length, max, mul, sqrt } from 'typegpu/std'
+import { abs, distance, dot, length, max, mul, sub } from 'typegpu/std'
 
 import { MAX_EDGES_PER_LABEL } from '@/gpu/lineFitThresholds'
 import { QUAD_MIN_EDGE_PX, QUAD_MIN_SIGNED_AREA_REL } from '@/gpu/lineFitThresholds'
@@ -99,9 +99,7 @@ export const quadDegeneracyOk = tgpu.fn(
     const i1 = (i + d.u32(1)) % d.u32(MAX_EDGES_PER_LABEL)
     const p0 = corners[cyclicIdx[i]!]!
     const p1 = corners[cyclicIdx[i1]!]!
-    const dx = p1.x - p0.x
-    const dy = p1.y - p0.y
-    if (sqrt(dx * dx + dy * dy) < d.f32(QUAD_MIN_EDGE_PX)) {
+    if (distance(p0, p1) < d.f32(QUAD_MIN_EDGE_PX)) {
       return 0
     }
   }
@@ -174,12 +172,10 @@ export const solveQuadCornersAndHomography = tgpu.fn(
   for (const pair of pairs) {
     const ni = lines[pair[0]]!
     const nj = lines[pair[1]]!
-    const dxy = ni.nx * nj.nx + ni.ny * nj.ny
+    const dxy = dot(d.vec2f(ni.nx, ni.ny), d.vec2f(nj.nx, nj.ny))
     if (abs(dxy) > d.f32(0.9)) {
       const span = max(d.f32(1), ni.span)
-      const ddx = ni.mx - nj.mx
-      const ddy = ni.my - nj.my
-      if (sqrt(ddx * ddx + ddy * ddy) < span * d.f32(0.5)) {
+      if (distance(d.vec2f(ni.mx, ni.my), d.vec2f(nj.mx, nj.my)) < span * d.f32(0.5)) {
         return QuadCornerSolveResult({
           failureCode: FAIL_PLAUSIBILITY,
           intersectionCount: d.u32(0),
@@ -197,13 +193,13 @@ export const solveQuadCornersAndHomography = tgpu.fn(
     const i1 = (i + d.u32(1)) % d.u32(MAX_EDGES_PER_LABEL)
     const la = lines[i]!
     const lb = lines[i1]!
-    const hit = lineIntersectNormal(la.nx, la.ny, la.d, lb.nx, lb.ny, lb.d)
+    const hit = lineIntersectNormal(d.vec2f(la.nx, la.ny), la.d, d.vec2f(lb.nx, lb.ny), lb.d)
     corners[i] = d.vec2f(hit.point)
     if (hit.ok !== d.u32(0)) {
       // Intersection must be within 3× segment span from each line's midpoint
       // and at least 0.5× span (not collapsed inside the segment).
-      const da = length(d.vec2f(hit.point.x - la.mx, hit.point.y - la.my))
-      const db = length(d.vec2f(hit.point.x - lb.mx, hit.point.y - lb.my))
+      const da = length(sub(hit.point, d.vec2f(la.mx, la.my)))
+      const db = length(sub(hit.point, d.vec2f(lb.mx, lb.my)))
       const maxA = max(d.f32(1), la.span) * d.f32(3)
       const maxB = max(d.f32(1), lb.span) * d.f32(3)
       const minA = la.span * d.f32(0.5)

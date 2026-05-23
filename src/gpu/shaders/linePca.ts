@@ -1,5 +1,5 @@
 import { d, tgpu } from 'typegpu'
-import { abs, max, select, sqrt } from 'typegpu/std'
+import { abs, dot, length, max, select, sqrt } from 'typegpu/std'
 
 export const PCA_ISOTROPY_MAX = 0.15
 /** sxx / syy below this → treat as vertical edge in image (constant x). */
@@ -12,23 +12,23 @@ export const LineSegmentEndpoints = d.struct({
 
 /** Segment endpoints for unit normal n and t along dir = (n.y, -n.x). */
 export const lineSegmentEndpoints = tgpu.fn(
-  [d.f32, d.f32, d.f32, d.f32, d.f32],
+  [d.vec2f, d.f32, d.f32, d.f32],
   LineSegmentEndpoints,
-)((nx, ny, nDotMean, tMin, tMax) => {
+)((n, nDotMean, tMin, tMax) => {
   'use gpu'
   return LineSegmentEndpoints({
-    p0: d.vec2f(nDotMean * nx + tMin * ny, nDotMean * ny - tMin * nx),
-    p1: d.vec2f(nDotMean * nx + tMax * ny, nDotMean * ny - tMax * nx),
+    p0: d.vec2f(nDotMean * n.x + tMin * n.y, nDotMean * n.y - tMin * n.x),
+    p1: d.vec2f(nDotMean * n.x + tMax * n.y, nDotMean * n.y - tMax * n.x),
   })
 })
 
 /** dot(p, dir) for the same (n, t) frame as {@link lineSegmentEndpoints}. */
 export const lineDirDot = tgpu.fn(
-  [d.f32, d.f32, d.f32, d.f32],
+  [d.vec2f, d.vec2f],
   d.f32,
-)((px, py, nx, ny) => {
+)((p, n) => {
   'use gpu'
-  return px * ny - py * nx
+  return p.x * n.y - p.y * n.x
 })
 
 /** TLS normal agrees with segment normal (|dot| >= cosMaxAngle). */
@@ -37,7 +37,7 @@ export const tlsAgreesWithNormal = tgpu.fn(
   d.u32,
 )((tlsNx, tlsNy, refNx, refNy, cosMaxAngle) => {
   'use gpu'
-  const ddot = abs(tlsNx * refNx + tlsNy * refNy)
+  const ddot = abs(dot(d.vec2f(tlsNx, tlsNy), d.vec2f(refNx, refNy)))
   return select(d.u32(0), d.u32(1), ddot >= cosMaxAngle)
 })
 
@@ -108,11 +108,11 @@ export const tlsNormalFromMoments = tgpu.fn(
 
   let nx = sxy
   let ny = lamMin - sxx
-  let len = sqrt(nx * nx + ny * ny)
+  let len = length(d.vec2f(nx, ny))
   if (len < d.f32(1e-10)) {
     nx = lamMin - syy
     ny = sxy
-    len = sqrt(nx * nx + ny * ny)
+    len = length(d.vec2f(nx, ny))
   }
   if (len < d.f32(1e-10)) {
     return TlsNormalResult({ nx: d.f32(0), ny: d.f32(0), lamMin, lamMax, ok: d.u32(0) })
