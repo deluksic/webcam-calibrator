@@ -1,0 +1,27 @@
+[project]
+name = "render-model"
+version = "0.1.0"
+description = "Differentiable tag rendering and camera response model (JAX + optax)"
+readme = "README.md"
+authors = [
+    { name = "David Emanuel Luksic", email = "deluksic@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "jax==0.4.38",
+    "jaxlib==0.4.38",
+    "marimo>=0.23.8",
+    "matplotlib>=3.10.9",
+    "numpy>=2.4.6",
+    "optax>=0.2.5",
+    "pillow>=12.2.0",
+    "plotly>=6.7.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.16,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["render_model"]
+module-root = "src"

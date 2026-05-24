@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.marimo/
+__marimo__
+test_images

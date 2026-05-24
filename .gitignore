@@ -5,6 +5,7 @@ output/
 # Dependencies
 node_modules/
 .pnpm-store/
+python/.venv/
 
 # OS
 .DS_Store
