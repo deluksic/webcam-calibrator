@@ -63,6 +63,7 @@ from render_model.pipeline import (
 from render_model.psf import KERNEL_RADIUS, apply_gaussian_psf, gaussian_kernel_1d
 from render_model.renderer import (
     bbox_mask,
+    quad_mask,
     filtered_squares,
     render_tag,
     render_tag_antialiased,
@@ -105,6 +106,7 @@ __all__ = [
     "apply_render_model",
     "apply_sharpening",
     "bbox_mask",
+    "quad_mask",
     "bin_down",
     "build_tag_pattern",
     "centered_diff_limits",

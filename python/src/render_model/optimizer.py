@@ -13,7 +13,7 @@ from render_model.homography import (
     homography_to_params,
     params_to_homography,
 )
-from render_model.pipeline import RenderModelParams, render_with_model
+from render_model.pipeline import SUPERSAMPLE, RenderModelParams, render_with_model
 
 HOMOGRAPHY_PARAM_COUNT = 8
 CAMERA_PARAM_COUNT = 6
@@ -57,6 +57,7 @@ class OptimizeRenderConfig:
     psf_continuation_start: float | None = None
     psf_continuation_steps: int | None = None
     momentum: float = 0.9
+    supersample: int = SUPERSAMPLE
 
 
 def _psf_continuation_steps(config: OptimizeRenderConfig) -> int:
@@ -248,7 +249,10 @@ def make_render_model_loss(
         )
         if config is not None and optimize_camera:
             camera = apply_psf_continuation_to_camera(camera, step, config)
-        rendered = render_with_model(H, tag_pattern, height, width, camera)
+        ss = config.supersample if config is not None else SUPERSAMPLE
+        rendered = render_with_model(
+            H, tag_pattern, height, width, camera, supersample=ss
+        )
         diff2 = (rendered - target) ** 2
         if loss_mask is not None:
             pixel_loss = jnp.sum(diff2 * loss_mask) / jnp.maximum(jnp.sum(loss_mask), 1.0)
@@ -288,7 +292,10 @@ def make_joint_render_model_loss(
         camera = vector_to_model_params(params["camera"])
         if config is not None:
             camera = apply_psf_continuation_to_camera(camera, step, config)
-        rendered = render_with_model(H, tag_pattern, height, width, camera)
+        ss = config.supersample if config is not None else SUPERSAMPLE
+        rendered = render_with_model(
+            H, tag_pattern, height, width, camera, supersample=ss
+        )
         diff2 = (rendered - target) ** 2
         if loss_mask is not None:
             pixel_loss = jnp.sum(diff2 * loss_mask) / jnp.maximum(jnp.sum(loss_mask), 1.0)
@@ -320,7 +327,10 @@ def make_render_model_loss_fixed_h(
         camera = vector_to_model_params(camera_vec)
         if config is not None:
             camera = apply_psf_continuation_to_camera(camera, step, config)
-        rendered = render_with_model(H, tag_pattern, height, width, camera)
+        ss = config.supersample if config is not None else SUPERSAMPLE
+        rendered = render_with_model(
+            H, tag_pattern, height, width, camera, supersample=ss
+        )
         diff2 = (rendered - target) ** 2
         if loss_mask is not None:
             return jnp.sum(diff2 * loss_mask) / jnp.maximum(jnp.sum(loss_mask), 1.0)

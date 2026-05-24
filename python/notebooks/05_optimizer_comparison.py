@@ -115,7 +115,7 @@ def _(
 
     target = render_with_model(H_gt, tag_pattern, image_height, image_width, camera_gt)
     gt_image_corners = corners_from_homography(H_gt, TAG_CANONICAL_CORNERS)
-    loss_mask = bbox_mask(gt_image_corners, image_height, image_width, margin=2.0)
+    loss_mask = bbox_mask(gt_image_corners, image_height, image_width, margin=3.5)
 
     corner_init_model = "uniform_normal"
     corner_normal_sigma_px = 1.0

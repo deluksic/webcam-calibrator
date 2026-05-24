@@ -455,20 +455,71 @@ def render_tag_filtered(
     )
 
 
+def _segment_distance_sq(
+    px: jnp.ndarray,
+    py: jnp.ndarray,
+    x0: jnp.ndarray,
+    y0: jnp.ndarray,
+    x1: jnp.ndarray,
+    y1: jnp.ndarray,
+) -> jnp.ndarray:
+    """Squared distance from (px, py) to the closed segment (x0, y0)-(x1, y1)."""
+    dx = x1 - x0
+    dy = y1 - y0
+    len_sq = dx * dx + dy * dy + jnp.float32(1e-12)
+    t = jnp.clip(((px - x0) * dx + (py - y0) * dy) / len_sq, 0.0, 1.0)
+    qx = x0 + t * dx
+    qy = y0 + t * dy
+    return (px - qx) ** 2 + (py - qy) ** 2
+
+
+def _inside_convex_quad(
+    px: jnp.ndarray,
+    py: jnp.ndarray,
+    corners: jnp.ndarray,
+) -> jnp.ndarray:
+    """True where pixel centers lie inside the convex quad (any consistent winding)."""
+    n = corners.shape[0]
+    crosses = []
+    for i in range(n):
+        x0, y0 = corners[i, 0], corners[i, 1]
+        x1, y1 = corners[(i + 1) % n, 0], corners[(i + 1) % n, 1]
+        crosses.append((px - x0) * (y1 - y0) - (py - y0) * (x1 - x0))
+    cross_stack = jnp.stack(crosses, axis=0)
+    return jnp.all(cross_stack >= 0.0, axis=0) | jnp.all(cross_stack <= 0.0, axis=0)
+
+
+def quad_mask(
+    corners: jnp.ndarray,
+    height: int,
+    width: int,
+    margin: float = 3.5,
+) -> jnp.ndarray:
+    """Binary mask: tag quad interior plus a ``margin``-px band along its edges.
+
+    Follows the perspective quad (not an axis-aligned bounding box).
+    """
+    cx, cy = _pixel_centers(height, width)
+    inside = _inside_convex_quad(cx, cy, corners)
+    n = corners.shape[0]
+    edge_dists = []
+    for i in range(n):
+        x0, y0 = corners[i, 0], corners[i, 1]
+        x1, y1 = corners[(i + 1) % n, 0], corners[(i + 1) % n, 1]
+        edge_dists.append(_segment_distance_sq(cx, cy, x0, y0, x1, y1))
+    min_dist = jnp.sqrt(jnp.min(jnp.stack(edge_dists, axis=0), axis=0))
+    margin_f = jnp.float32(margin)
+    return (inside | (min_dist <= margin_f)).astype(jnp.float32)
+
+
 def bbox_mask(
     corners: jnp.ndarray,
     height: int,
     width: int,
-    margin: float = 20.0,
+    margin: float = 3.5,
 ) -> jnp.ndarray:
-    """Binary mask covering the tag quad bounding box (+ margin)."""
-    x0 = jnp.floor(jnp.min(corners[:, 0]) - margin)
-    x1 = jnp.ceil(jnp.max(corners[:, 0]) + margin)
-    y0 = jnp.floor(jnp.min(corners[:, 1]) - margin)
-    y1 = jnp.ceil(jnp.max(corners[:, 1]) + margin)
-    cx, cy = _pixel_centers(height, width)
-    inside = (cx >= x0) & (cx < x1) & (cy >= y0) & (cy < y1)
-    return inside.astype(jnp.float32)
+    """Alias for :func:`quad_mask` (perspective quad + edge margin)."""
+    return quad_mask(corners, height, width, margin=margin)
 
 
 def l2_loss(pred: jnp.ndarray, target: jnp.ndarray) -> jnp.ndarray:

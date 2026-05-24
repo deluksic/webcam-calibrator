@@ -11,7 +11,7 @@ from render_model.gamma import apply_gamma
 from render_model.psf import apply_gaussian_psf
 from render_model.sharpen import apply_sharpening
 
-SUPERSAMPLE = 4
+SUPERSAMPLE = 1
 
 
 @jax.tree_util.register_dataclass

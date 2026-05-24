@@ -422,15 +422,15 @@ def _(
 ):
     target = jnp.asarray(photo, dtype=jnp.float32)
     init_image_corners = corners_from_homography(H_init, src_corners)
-    loss_mask = bbox_mask(init_image_corners, image_height, image_width, margin=2.0)
+    loss_mask = bbox_mask(init_image_corners, image_height, image_width, margin=3.5)
 
     camera_init = RenderModelParams(
         psf_sigma=jnp.float32(1.0),
         sharpen_amount=jnp.float32(0.4),
         sharpen_sigma=jnp.float32(1.0),
-        gamma=jnp.float32(2.2),
-        black_level=jnp.float32(0.05),
-        white_level=jnp.float32(0.85),
+        gamma=jnp.float32(2.0),
+        black_level=jnp.float32(0.2),
+        white_level=jnp.float32(0.8),
     )
     return camera_init, loss_mask, target
 
@@ -449,12 +449,12 @@ def _(
 ):
     config = OptimizeRenderConfig(
         learning_rate=2e-3,
-        n_steps=800,
+        n_steps=400,
         corner_weight=0.0,
         loss_mask=loss_mask,
         optimize_homography=True,
         optimize_camera=True,
-        camera_lr_scale=1.0,
+        camera_lr_scale=5.0,
     )
     H_opt, camera_opt, losses = optimize_render_model(
         H_init,
@@ -528,9 +528,9 @@ def _(
 
     _fig, _axes = plt.subplots(1, 4, figsize=(14, 3.5))
     for _ax, _img, _title in [
-        (_axes[0], photo, "Photo"),
-        (_axes[1], init_render, "Init render"),
-        (_axes[2], opt_render, "Optimized render"),
+        (_axes[0], init_render, "Init render"),
+        (_axes[1], opt_render, "Optimized render"),
+        (_axes[2], photo, "Photo"),
         (_axes[3], diff, "Photo − optimized"),
     ]:
         _kw = dict(cmap="gray", vmin=0.0, vmax=1.0, extent=imshow_extent(image_width, image_height))

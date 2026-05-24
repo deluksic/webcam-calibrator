@@ -23,6 +23,18 @@ Requires Python 3.11+ (macOS x86_64: JAX is pinned to 0.4.38 for wheel availabil
 uv run marimo edit notebooks/04_optimize_render_model.py
 ```
 
+## Retina test images (`*_2x` → `*_1x`)
+
+Drop `image_502_2x.png` etc. into a folder, then halve and remove the 2x files:
+
+```bash
+uv run python scripts/downscale_2x_to_1x.py notebooks/test_images
+uv run python scripts/downscale_2x_to_1x.py --dry-run path/to/photos
+uv run python scripts/downscale_2x_to_1x.py --replace notebooks/test_images
+```
+
+Writes `image_502_1x.png` by decimating every other pixel (no Lanczos), scales `.corners.json` if present, deletes `*_2x` sources.
+
 ## Package layout
 
 | Module | Role |

@@ -139,7 +139,7 @@ def _(
 ):
     target = render_with_model(H_gt, tag_pattern, image_height, image_width, camera_gt)
     gt_image_corners = corners_from_homography(H_gt, src_corners)
-    loss_mask = bbox_mask(gt_image_corners, image_height, image_width, margin=3.0)
+    loss_mask = bbox_mask(gt_image_corners, image_height, image_width, margin=3.5)
     return loss_mask, target
 
 
