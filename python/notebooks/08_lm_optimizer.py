@@ -213,7 +213,7 @@ def _(image_name, mo):
 @app.cell
 def _(OptimizeLMConfig, loss_mask):
     lm_config = OptimizeLMConfig(
-        n_steps=10,
+        n_steps=100,
         loss_mask=loss_mask,
     )
     return (lm_config,)

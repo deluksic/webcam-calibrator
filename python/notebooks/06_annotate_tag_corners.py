@@ -1,4 +1,4 @@
-"""Fit render_model to a real photo — clicks are init only, no corner ground truth."""
+"""Annotate tag corners on test photos (writes ``<image>.corners.json``)."""
 
 import marimo
 
@@ -18,49 +18,15 @@ def _():
     import json
     from pathlib import Path
 
-    import jax.numpy as jnp
     import matplotlib.pyplot as plt
     import numpy as np
     import plotly.graph_objects as go
     from PIL import Image
 
-    from render_model import (
-        OptimizeRenderConfig,
-        RenderModelParams,
-        TAG_CANONICAL_CORNERS,
-        bbox_mask,
-        build_tag_pattern,
-        centered_diff_limits,
-        configure_matplotlib_image_display,
-        corners_from_homography,
-        homography_from_corners,
-        imshow_extent,
-        model_params_to_vector,
-        optimize_render_model,
-        render_with_model,
-    )
+    from render_model import configure_matplotlib_image_display, imshow_extent
 
     configure_matplotlib_image_display()
-    return (
-        Image,
-        OptimizeRenderConfig,
-        Path,
-        RenderModelParams,
-        TAG_CANONICAL_CORNERS,
-        bbox_mask,
-        build_tag_pattern,
-        centered_diff_limits,
-        corners_from_homography,
-        go,
-        homography_from_corners,
-        imshow_extent,
-        jnp,
-        json,
-        np,
-        optimize_render_model,
-        plt,
-        render_with_model,
-    )
+    return Image, Path, go, imshow_extent, json, np, plt
 
 
 @app.cell
@@ -87,12 +53,7 @@ def _(Path):
     )
     if not test_image_paths:
         raise FileNotFoundError(f"No images in {test_images_dir}")
-    return (
-        corners_json_path,
-        tag_id_from_filename,
-        test_image_paths,
-        test_images_dir,
-    )
+    return corners_json_path, tag_id_from_filename, test_image_paths, test_images_dir
 
 
 @app.cell
@@ -112,17 +73,7 @@ def _(mo, test_image_paths):
 
 
 @app.cell
-def _(
-    Image,
-    TAG_CANONICAL_CORNERS,
-    build_tag_pattern,
-    corners_json_path,
-    image_selector,
-    jnp,
-    np,
-    tag_id_from_filename,
-    test_images_dir,
-):
+def _(Image, corners_json_path, image_selector, tag_id_from_filename, test_images_dir):
     image_name = image_selector.value
     image_path = test_images_dir / image_name
     corners_path = corners_json_path(image_path)
@@ -130,32 +81,19 @@ def _(
 
     photo = np.asarray(Image.open(image_path).convert("L"), dtype=np.float32) / 255.0
     image_height, image_width = photo.shape
-    tag_pattern = build_tag_pattern(tag_id)
-    src_corners = jnp.asarray(TAG_CANONICAL_CORNERS, dtype=jnp.float32)
-    return (
-        corners_path,
-        image_height,
-        image_name,
-        image_width,
-        photo,
-        src_corners,
-        tag_id,
-        tag_pattern,
-    )
+    return corners_path, image_height, image_name, image_width, photo, tag_id
 
 
 @app.cell
 def _(image_name, mo, tag_id):
     mo.md(f"""
-    # Fit render_model to real photo
+    # Annotate tag corners
 
     **Image:** `{image_name}` · **Tag id:** {tag_id}
 
-    Clicks are **initialization only** (not ground truth, not in the loss).
-
     1. Pick an image from `test_images/` (use `*_1x.png` for Retina captures)
     2. **Drag a small box** on each corner — TL → TR → BR → BL (Plotly heatmap)
-    3. Check the preview, then click **Run optimization**
+    3. Check the preview, then click **Save corners**
     """)
     return
 
@@ -354,7 +292,7 @@ def _(get_corners, imshow_extent, np, photo, plt, show_picker, use_saved):
             )
         _ax.set_xlim(0, photo.shape[1])
         _ax.set_ylim(photo.shape[0], 0)
-        _ax.set_title("Corner preview (before optimization)")
+        _ax.set_title("Corner preview")
         _ax.axis("off")
         _fig.tight_layout()
         _preview = _fig
@@ -365,9 +303,9 @@ def _(get_corners, imshow_extent, np, photo, plt, show_picker, use_saved):
 
 @app.cell
 def _(mo):
-    run_optimization = mo.ui.run_button(label="Run optimization")
-    run_optimization
-    return (run_optimization,)
+    save_corners = mo.ui.run_button(label="Save corners")
+    save_corners
+    return (save_corners,)
 
 
 @app.cell
@@ -378,199 +316,26 @@ def _(
     json,
     mo,
     np,
-    run_optimization,
+    save_corners,
     use_saved,
 ):
-    _status = mo.md("")
-
     if use_saved.value and entries is not None:
-        init_corners_px = np.asarray(entries, dtype=np.float32)
-        _status = mo.md(f"Using saved corners.\n\n```\n{init_corners_px.tolist()}\n```")
-    else:
-        mo.stop(
-            not run_optimization.value,
-            mo.md("**4/4 corners set** — click **Run optimization** when ready."),
+        corners_px = np.asarray(entries, dtype=np.float32)
+        mo.md(
+            f"Using saved corners from `{corners_path.name}`.\n\n"
+            f"```\n{corners_px.tolist()}\n```"
         )
-        init_corners_px = np.asarray(list(get_corners()), dtype=np.float32)
-        corners_path.write_text(json.dumps(init_corners_px.tolist(), indent=2))
-        _status = mo.md(
-            f"Saved `{corners_path.name}`.\n\n```\n{init_corners_px.tolist()}\n```"
-        )
+        return
 
-    _status
-    return (init_corners_px,)
-
-
-@app.cell
-def _(homography_from_corners, init_corners_px, jnp, src_corners):
-    H_init = homography_from_corners(src_corners, jnp.asarray(init_corners_px, dtype=jnp.float32))
-    return (H_init,)
-
-
-@app.cell
-def _(
-    H_init,
-    RenderModelParams,
-    bbox_mask,
-    corners_from_homography,
-    image_height,
-    image_width,
-    jnp,
-    photo,
-    src_corners,
-):
-    target = jnp.asarray(photo, dtype=jnp.float32)
-    init_image_corners = corners_from_homography(H_init, src_corners)
-    loss_mask = bbox_mask(init_image_corners, image_height, image_width, margin=3.5)
-
-    camera_init = RenderModelParams(
-        psf_sigma=jnp.float32(1.0),
-        sharpen_amount=jnp.float32(0.4),
-        sharpen_sigma=jnp.float32(1.0),
-        gamma=jnp.float32(2.0),
-        black_level=jnp.float32(0.2),
-        white_level=jnp.float32(0.8),
+    mo.stop(
+        not save_corners.value,
+        mo.md("**4/4 corners set** — click **Save corners** when ready."),
     )
-    return camera_init, loss_mask, target
-
-
-@app.cell
-def _(
-    H_init,
-    OptimizeRenderConfig,
-    camera_init,
-    image_height,
-    image_width,
-    loss_mask,
-    optimize_render_model,
-    tag_pattern,
-    target,
-):
-    config = OptimizeRenderConfig(
-        learning_rate=2e-3,
-        n_steps=400,
-        corner_weight=0.0,
-        loss_mask=loss_mask,
-        optimize_homography=True,
-        optimize_camera=True,
-        camera_lr_scale=5.0,
-    )
-    H_opt, camera_opt, losses = optimize_render_model(
-        H_init,
-        target,
-        tag_pattern,
-        image_height,
-        image_width,
-        camera_init=camera_init,
-        config=config,
-    )
-    return H_opt, camera_opt, config, losses
-
-
-@app.cell
-def _(camera_init, camera_opt, config, image_name, losses, mo, tag_id):
-    def _fmt_cam(name, p):
-        return (
-            f"**{name}:** psf={float(p.psf_sigma):.3f}, "
-            f"sharpen={float(p.sharpen_amount):.3f}, "
-            f"sharpen σ={float(p.sharpen_sigma):.3f}, γ={float(p.gamma):.3f}, "
-            f"black={float(p.black_level):.3f}, "
-            f"white={float(p.white_level):.3f}"
-        )
-
+    corners_px = np.asarray(list(get_corners()), dtype=np.float32)
+    corners_path.write_text(json.dumps(corners_px.tolist(), indent=2))
     mo.md(
-        f"""
-        ### Results — `{image_name}` (tag {tag_id}, pixel-only loss, {config.n_steps} steps)
-
-        - **Final loss:** {losses[-1]:.6f} (init {losses[0]:.6f})
-        - {_fmt_cam("Camera init", camera_init)}
-        - {_fmt_cam("Camera opt", camera_opt)}
-
-        Visual overlap is the metric — no corner GT.
-        """
+        f"Saved `{corners_path.name}`.\n\n```\n{corners_px.tolist()}\n```"
     )
-    return
-
-
-@app.cell
-def _(
-    H_init,
-    H_opt,
-    camera_init,
-    camera_opt,
-    centered_diff_limits,
-    image_height,
-    image_width,
-    imshow_extent,
-    np,
-    photo,
-    plt,
-    render_with_model,
-    tag_pattern,
-):
-    init_render = np.asarray(
-        render_with_model(H_init, tag_pattern, image_height, image_width, camera_init)
-    )
-    opt_render = np.asarray(
-        render_with_model(H_opt, tag_pattern, image_height, image_width, camera_opt)
-    )
-    diff = photo - opt_render
-    vdiff = centered_diff_limits(diff)
-
-    _fig, _axes = plt.subplots(1, 4, figsize=(14, 3.5))
-    for _ax, _img, _title in [
-        (_axes[0], init_render, "Init render"),
-        (_axes[1], opt_render, "Optimized render"),
-        (_axes[2], photo, "Photo"),
-        (_axes[3], diff, "Photo − optimized"),
-    ]:
-        _kw = dict(cmap="gray", vmin=0.0, vmax=1.0, extent=imshow_extent(image_width, image_height))
-        if _title.startswith("Photo −"):
-            _ax.imshow(_img, cmap="RdBu_r", vmin=-vdiff, vmax=vdiff, extent=_kw["extent"])
-        else:
-            _ax.imshow(_img, **_kw)
-        _ax.set_title(_title)
-        _ax.axis("off")
-    _fig.tight_layout()
-    _fig
-    return
-
-
-@app.cell
-def _(
-    H_init,
-    H_opt,
-    corners_from_homography,
-    imshow_extent,
-    init_corners_px,
-    np,
-    photo,
-    plt,
-    src_corners,
-):
-    _pred_init = np.asarray(corners_from_homography(H_init, src_corners))
-    _pred_opt = np.asarray(corners_from_homography(H_opt, src_corners))
-    _fig, _ax = plt.subplots(figsize=(8, 6))
-    _ax.imshow(photo, cmap="gray", vmin=0, vmax=1.0, extent=imshow_extent(photo.shape[1], photo.shape[0]))
-    for _pts, _color, _label in [
-        (init_corners_px, "red", "Your clicks (init)"),
-        (_pred_init, "orange", "H_init corners"),
-        (_pred_opt, "cyan", "H_opt corners"),
-    ]:
-        _ax.plot(
-            np.r_[_pts[:, 0], _pts[0, 0]],
-            np.r_[_pts[:, 1], _pts[0, 1]],
-            color=_color,
-            lw=1.5,
-            label=_label,
-        )
-    _ax.set_xlim(0, photo.shape[1])
-    _ax.set_ylim(photo.shape[0], 0)
-    _ax.legend(loc="upper right", fontsize=8)
-    _ax.set_title("Corner drift (clicks were starting point only)")
-    _ax.axis("off")
-    _fig.tight_layout()
-    _fig
     return
 
 

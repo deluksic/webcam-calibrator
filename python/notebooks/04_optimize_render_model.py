@@ -1,4 +1,4 @@
-"""Optimize homography (+ optional camera) against a render_model target."""
+"""Optimize homography + camera (LM) against a render_model target."""
 
 import marimo
 
@@ -21,7 +21,7 @@ def _():
     import numpy as np
 
     from render_model import (
-        OptimizeRenderConfig,
+        OptimizeLMConfig,
         RenderModelParams,
         TAG_CANONICAL_CORNERS,
         bbox_mask,
@@ -30,17 +30,15 @@ def _():
         corner_rmse,
         corners_from_homography,
         imshow_extent,
-        model_params_to_vector,
         numpy_dlt_homography,
         numpy_sample_normal_offset_corners,
         numpy_sample_uniform_normal_offset_corners,
-        optimize_render_model,
+        optimize_render_model_lm,
         render_with_model,
-        vector_to_model_params,
     )
 
     return (
-        OptimizeRenderConfig,
+        OptimizeLMConfig,
         RenderModelParams,
         TAG_CANONICAL_CORNERS,
         bbox_mask,
@@ -50,12 +48,11 @@ def _():
         corners_from_homography,
         imshow_extent,
         jnp,
-        model_params_to_vector,
         np,
         numpy_dlt_homography,
         numpy_sample_normal_offset_corners,
         numpy_sample_uniform_normal_offset_corners,
-        optimize_render_model,
+        optimize_render_model_lm,
         plt,
         render_with_model,
     )
@@ -99,7 +96,7 @@ def _(
     H_gt = jnp.asarray(numpy_dlt_homography(src_corners, gt_corners), dtype=jnp.float32)
     camera_gt = RenderModelParams(
         psf_sigma=jnp.float32(0.9),
-        sharpen_amount=jnp.float32(0.6),
+        sharpen_amount=jnp.float32(2),
         sharpen_sigma=jnp.float32(1.1),
         gamma=jnp.float32(2.2),
         black_level=jnp.float32(0.2),
@@ -177,29 +174,23 @@ def _(
 def _(
     H_gt,
     H_init,
-    OptimizeRenderConfig,
+    OptimizeLMConfig,
     camera_init,
     corner_rmse,
     gt_corners,
     image_height,
     image_width,
     loss_mask,
-    optimize_render_model,
+    optimize_render_model_lm,
     src_corners,
     tag_pattern,
     target,
 ):
-    config = OptimizeRenderConfig(
-        learning_rate=5e-4,
-        n_steps=1000,
-        optimizer="adam",
-        corner_weight=1.0,
+    config = OptimizeLMConfig(
+        n_steps=120,
         loss_mask=loss_mask,
-        optimize_homography=True,
-        optimize_camera=True,
-        camera_lr_scale=5.0,
     )
-    H_opt, camera_opt, losses = optimize_render_model(
+    H_opt, camera_opt, losses = optimize_render_model_lm(
         H_init,
         target,
         tag_pattern,
@@ -207,8 +198,6 @@ def _(
         image_width,
         camera_init=camera_init,
         config=config,
-        src_corners=src_corners,
-        target_corners=gt_corners,
     )
     init_corner_err = float(corner_rmse(H_init, src_corners, gt_corners))
     opt_corner_err = float(corner_rmse(H_opt, src_corners, gt_corners))
@@ -232,7 +221,6 @@ def _(
     init_corner_err,
     losses,
     mo,
-    model_params_to_vector,
     opt_corner_err,
 ):
     def _fmt_camera(name, p):
@@ -254,7 +242,7 @@ def _(
             | After optimize | {opt_corner_err:.4f} |
             | GT | {gt_corner_err:.4f} |
 
-            **Final loss:** {losses[-1]:.6f} ({len(losses)} steps)
+            **Final masked MSE:** {losses[-1]:.6f} ({len(losses) - 1} LM steps)
 
             {_fmt_camera("Camera GT", camera_gt)}
 
@@ -273,18 +261,18 @@ def _(losses, plt):
     _steps = range(len(losses))
 
     _ax_lin.plot(_steps, losses, color="tab:orange")
-    _ax_lin.set_xlabel("step")
-    _ax_lin.set_ylabel("combined loss")
+    _ax_lin.set_xlabel("step (0 = init)")
+    _ax_lin.set_ylabel("masked MSE")
     _ax_lin.set_title("Linear")
     _ax_lin.grid(True, alpha=0.3)
 
     _ax_log.semilogy(_steps, losses, color="tab:orange")
-    _ax_log.set_xlabel("step")
-    _ax_log.set_ylabel("combined loss")
+    _ax_log.set_xlabel("step (0 = init)")
+    _ax_log.set_ylabel("masked MSE")
     _ax_log.set_title("Log")
     _ax_log.grid(True, alpha=0.3, which="both")
 
-    _fig_loss.suptitle("Joint H + camera optimization", fontsize=12)
+    _fig_loss.suptitle("Joint H + camera (LM)", fontsize=12)
     _fig_loss.tight_layout()
     _fig_loss
     return
