@@ -56,7 +56,6 @@ def _():
         imshow_extent,
         jnp,
         json,
-        model_params_to_vector,
         np,
         optimize_render_model,
         plt,
@@ -469,22 +468,14 @@ def _(
 
 
 @app.cell
-def _(
-    camera_init,
-    camera_opt,
-    config,
-    image_name,
-    losses,
-    mo,
-    model_params_to_vector,
-    tag_id,
-):
+def _(camera_init, camera_opt, config, image_name, losses, mo, tag_id):
     def _fmt_cam(name, p):
-        v = model_params_to_vector(p)
         return (
-            f"**{name}:** psf={float(v[0]):.3f}, sharpen={float(v[1]):.3f}, "
-            f"sharpen σ={float(v[2]):.3f}, γ={float(v[3]):.3f}, "
-            f"black={float(v[4]):.3f}, white={float(v[5]):.3f}"
+            f"**{name}:** psf={float(p.psf_sigma):.3f}, "
+            f"sharpen={float(p.sharpen_amount):.3f}, "
+            f"sharpen σ={float(p.sharpen_sigma):.3f}, γ={float(p.gamma):.3f}, "
+            f"black={float(p.black_level):.3f}, "
+            f"white={float(p.white_level):.3f}"
         )
 
     mo.md(

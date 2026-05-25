@@ -23,9 +23,21 @@ def imshow_extent(width: int, height: int) -> tuple[float, float, float, float]:
     return (0.0, float(width), float(height), 0.0)
 
 
-def centered_diff_limits(diff: np.ndarray, *, floor: float = 1e-6) -> float:
-    """Symmetric ±limit for a diverging colormap on ``target - pred``."""
+def centered_diff_limits(
+    diff: np.ndarray,
+    *,
+    mask: np.ndarray | None = None,
+    floor: float = 1e-6,
+) -> float:
+    """Symmetric ±limit for a diverging colormap on ``target - pred``.
+
+  If ``mask`` is given, only masked pixels contribute (e.g. training loss region).
+    """
     arr = np.asarray(diff, dtype=np.float64)
+    if mask is not None:
+        arr = arr[np.asarray(mask, dtype=bool)]
+        if arr.size == 0:
+            return floor
     return float(max(np.max(np.abs(arr)), floor))
 
 

@@ -56,7 +56,6 @@ def _():
         imshow_extent,
         jnp,
         json,
-        model_params_to_vector,
         np,
         optimize_render_model,
         plt,
@@ -355,13 +354,7 @@ def _(
 
 
 @app.cell
-def _(
-    experiment_rows,
-    mo,
-    model_params_to_vector,
-    sample_names,
-    variant_labels,
-):
+def _(experiment_rows, mo, sample_names, variant_labels):
     _header = "| Image | Variant | psf σ | sharpen | sharpen σ | γ | black | white |"
     _sep = "| --- | --- | --- | --- | --- | --- | --- | --- |"
     _lines = [_header, _sep]
@@ -371,10 +364,12 @@ def _(
             _row = next(
                 r for r in experiment_rows if r["image"] == _img_name and r["variant"] == _vlabel
             )
-            _v = model_params_to_vector(_row["camera_opt"])
+            _c = _row["camera_opt"]
             _lines.append(
-                f"| {_img_name} | {_vlabel} | {float(_v[0]):.4f} | {float(_v[1]):.4f} | "
-                f"{float(_v[2]):.4f} | {float(_v[3]):.4f} | {float(_v[4]):.4f} | {float(_v[5]):.4f} |"
+                f"| {_img_name} | {_vlabel} | {float(_c.psf_sigma):.4f} | "
+                f"{float(_c.sharpen_amount):.4f} | {float(_c.sharpen_sigma):.4f} | "
+                f"{float(_c.gamma):.4f} | "
+                f"{float(_c.black_level):.4f} | {float(_c.white_level):.4f} |"
             )
 
     mo.md("### Converged camera params\n\n" + "\n".join(_lines))

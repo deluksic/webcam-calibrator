@@ -12,6 +12,20 @@ from render_model.psf import apply_gaussian_psf
 from render_model.sharpen import apply_sharpening
 
 SUPERSAMPLE = 1
+LEVEL_GAP = jnp.float32(1e-3)
+
+
+def sanitize_levels(
+    black_level: jax.Array,
+    white_level: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    """Clip to ``[0, 1]`` with ``white > black``."""
+    black = jnp.clip(black_level, 0.0, 1.0)
+    white = jnp.clip(white_level, 0.0, 1.0)
+    white = jnp.maximum(white, black + LEVEL_GAP)
+    white = jnp.minimum(white, 1.0)
+    black = jnp.minimum(black, white - LEVEL_GAP)
+    return black, white
 
 
 @jax.tree_util.register_dataclass
@@ -61,9 +75,11 @@ def bin_down(image: jax.Array, factor: int = SUPERSAMPLE) -> jax.Array:
 
 
 def apply_render_model(image: jax.Array, params: RenderModelParams) -> jax.Array:
-    """Post-process an existing image: sharpen → gamma."""
-    sharpened = apply_sharpening(image, params.sharpen_amount, params.sharpen_sigma)
-    return apply_gamma(sharpened, params.gamma)
+    """Post-process an existing image: sharpen → gamma → clip to display range."""
+    sharpened = apply_sharpening(
+        image, params.sharpen_amount, params.sharpen_sigma
+    )
+    return jnp.clip(apply_gamma(sharpened, params.gamma), 0.0, 1.0)
 
 
 def render_with_model_stages(
@@ -76,6 +92,7 @@ def render_with_model_stages(
     supersample: int = SUPERSAMPLE,
 ) -> RenderModelStages:
     """Render tag through the full camera model, returning each pipeline stage."""
+    black_level, white_level = sanitize_levels(params.black_level, params.white_level)
     hi_height = height * supersample
     hi_width = width * supersample
     H_hi = scale_homography(H, supersample)
@@ -85,13 +102,15 @@ def render_with_model_stages(
         tag_pattern,
         hi_height,
         hi_width,
-        black_level=params.black_level,
-        white_level=params.white_level,
+        black_level=black_level,
+        white_level=white_level,
     )
     hi_blurred = apply_gaussian_psf(hi_res, params.psf_sigma * supersample)
     binned = bin_down(hi_blurred, supersample)
-    sharpened = apply_sharpening(binned, params.sharpen_amount, params.sharpen_sigma)
-    final = apply_gamma(sharpened, params.gamma)
+    sharpened = apply_sharpening(
+        binned, params.sharpen_amount, params.sharpen_sigma
+    )
+    final = jnp.clip(apply_gamma(sharpened, params.gamma), 0.0, 1.0)
     return RenderModelStages(hi_res, hi_blurred, binned, sharpened, final)
 
 

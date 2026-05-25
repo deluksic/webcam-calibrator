@@ -11,6 +11,6 @@ def apply_sharpening(
     amount: jax.Array,
     sigma: jax.Array,
 ) -> jax.Array:
-    """Unsharp mask: ``image + amount * (image - blurred)``."""
+    """Unsharp mask: ``image + amount * (image - blurred)``, floored at zero."""
     blurred = apply_gaussian_psf(image, sigma)
-    return image + amount * (image - blurred)
+    return jnp.maximum(image + amount * (image - blurred), 0.0)

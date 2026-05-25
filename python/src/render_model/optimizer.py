@@ -13,10 +13,33 @@ from render_model.homography import (
     homography_to_params,
     params_to_homography,
 )
+from render_model.camera_params import (
+    decode_joint_params_per_step,
+    model_params_to_vector,
+    vector_to_model_params,
+)
 from render_model.pipeline import SUPERSAMPLE, RenderModelParams, render_with_model
 
 HOMOGRAPHY_PARAM_COUNT = 8
 CAMERA_PARAM_COUNT = 6
+JOINT_PARAM_COUNT = HOMOGRAPHY_PARAM_COUNT + CAMERA_PARAM_COUNT
+
+JOINT_PARAM_NAMES: tuple[str, ...] = (
+    "h00",
+    "h01",
+    "h02",
+    "h10",
+    "h11",
+    "h12",
+    "h20",
+    "h21",
+    "psf σ",
+    "sharpen",
+    "sharpen σ",
+    "γ",
+    "black",
+    "white",
+)
 
 # Relative LR multipliers on homography_to_params order (see homography.py).
 # Higher on translation / diagonal (scale); lower on off-diagonals (rotation/shear).
@@ -95,30 +118,6 @@ def apply_psf_continuation_to_camera(
             start=config.psf_continuation_start,
             n_steps=_psf_continuation_steps(config),
         ),
-    )
-
-
-def model_params_to_vector(params: RenderModelParams) -> jnp.ndarray:
-    return jnp.stack(
-        [
-            params.psf_sigma,
-            params.sharpen_amount,
-            params.sharpen_sigma,
-            params.gamma,
-            params.black_level,
-            params.white_level,
-        ]
-    )
-
-
-def vector_to_model_params(values: jnp.ndarray) -> RenderModelParams:
-    return RenderModelParams(
-        psf_sigma=values[0],
-        sharpen_amount=values[1],
-        sharpen_sigma=values[2],
-        gamma=values[3],
-        black_level=values[4],
-        white_level=values[5],
     )
 
 
@@ -371,6 +370,98 @@ def _make_optimizer(
     return optax.chain(clip, base)
 
 
+class OptimizationParamTrace(NamedTuple):
+    H: jnp.ndarray
+    camera: RenderModelParams
+    losses: list[float]
+    params_per_step: jnp.ndarray
+    """Raw packed optimization coordinates (not for display)."""
+    params_physical_per_step: jnp.ndarray
+    """Physical joint parameters ``(steps, 14)`` for plotting."""
+
+
+def _compile_adam_param_trace(
+    loss_fn: Callable[..., jnp.ndarray],
+    opt: optax.GradientTransformation,
+    n_steps: int,
+) -> Callable[..., Any]:
+    @jax.jit
+    def run(
+        params: jnp.ndarray, opt_state: optax.OptState
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        steps = jnp.arange(n_steps, dtype=jnp.int32)
+
+        def body(
+            carry: tuple[jnp.ndarray, optax.OptState], step: jax.Array
+        ) -> tuple[tuple[jnp.ndarray, optax.OptState], tuple[jnp.ndarray, jnp.ndarray]]:
+            p, state = carry
+            loss, grads = jax.value_and_grad(lambda packed: loss_fn(packed, step))(p)
+            updates, state = opt.update(grads, state, p)
+            p = optax.apply_updates(p, updates)
+            return (p, state), (loss, p)
+
+        (params, _), (losses, param_hist) = jax.lax.scan(
+            body, (params, opt_state), steps
+        )
+        return params, losses, param_hist
+
+    return run
+
+
+def optimize_render_model_with_param_trace(
+    H_init: jnp.ndarray,
+    target: jnp.ndarray,
+    tag_pattern: jnp.ndarray,
+    height: int,
+    width: int,
+    *,
+    camera_init: RenderModelParams | None = None,
+    config: OptimizeRenderConfig | None = None,
+) -> OptimizationParamTrace:
+    """Joint H + camera Adam with per-step packed parameter history."""
+    from render_model.pipeline import default_params
+
+    config = config or OptimizeRenderConfig()
+    if not (config.optimize_homography and config.optimize_camera):
+        raise ValueError("param trace requires joint H + camera optimization")
+
+    camera_init = camera_init or default_params()
+    packed_init = _pack_opt_params(
+        homography_to_params(H_init),
+        model_params_to_vector(camera_init),
+        optimize_homography=True,
+        optimize_camera=True,
+    )
+    loss_fn = make_render_model_loss(
+        target,
+        tag_pattern,
+        height,
+        width,
+        fixed_camera=camera_init,
+        loss_mask=config.loss_mask,
+        corner_weight=0.0,
+        optimize_homography=True,
+        optimize_camera=True,
+        config=config,
+    )
+    opt = _make_optimizer(packed_init, config)
+    opt_state = opt.init(packed_init)
+    run = _compile_adam_param_trace(loss_fn, opt, config.n_steps)
+    packed, losses, param_hist = run(packed_init, opt_state)
+    params_per_step = jnp.concatenate([packed_init[None, :], param_hist], axis=0)
+    h_out, camera_out = _unpack_opt_params(
+        packed, optimize_homography=True, optimize_camera=True
+    )
+    assert h_out is not None and camera_out is not None
+    return OptimizationParamTrace(
+        params_to_homography(h_out),
+        vector_to_model_params(camera_out),
+        [float(x) for x in losses],
+        params_per_step,
+        decode_joint_params_per_step(params_per_step),
+    )
+
+
 def _compile_optimize(
     loss_fn: Callable[..., jnp.ndarray],
     opt: optax.GradientTransformation,
@@ -605,3 +696,230 @@ def optimize_render_model(
     else:
         camera_final = camera_init
     return H_opt, camera_final, losses
+
+
+@dataclass(frozen=True)
+class OptimizeLMConfig:
+    """Levenberg–Marquardt on masked pixel residuals (joint H + camera)."""
+
+    n_steps: int = 30
+    initial_damping: float = 1e-2
+    damping_factor: float = 10.0
+    min_damping: float = 1e-8
+    max_damping: float = 1e8
+    loss_mask: jnp.ndarray | None = None
+    supersample: int = SUPERSAMPLE
+
+
+def make_render_model_residuals(
+    target: jnp.ndarray,
+    tag_pattern: jnp.ndarray,
+    height: int,
+    width: int,
+    *,
+    optimize_homography: bool = True,
+    optimize_camera: bool = True,
+    loss_mask: jnp.ndarray | None = None,
+    supersample: int = SUPERSAMPLE,
+) -> Callable[[jnp.ndarray], jnp.ndarray]:
+    """Masked sqrt-weighted pixel residuals; sum(r²) equals masked MSE."""
+
+    def residuals(packed: jnp.ndarray) -> jnp.ndarray:
+        h_params, camera_vec = _unpack_opt_params(
+            packed,
+            optimize_homography=optimize_homography,
+            optimize_camera=optimize_camera,
+        )
+        assert h_params is not None and camera_vec is not None
+        H = params_to_homography(h_params)
+        camera = vector_to_model_params(camera_vec)
+        rendered = render_with_model(
+            H, tag_pattern, height, width, camera, supersample=supersample
+        )
+        diff = rendered - target
+        if loss_mask is not None:
+            weight = jnp.sqrt(loss_mask / jnp.maximum(jnp.sum(loss_mask), 1.0))
+            return (diff * weight).ravel()
+        return (diff / jnp.sqrt(jnp.maximum(diff.size, 1))).ravel()
+
+    return residuals
+
+
+def _compile_lm_optimize(
+    residual_fn: Callable[[jnp.ndarray], jnp.ndarray],
+    n_steps: int,
+    *,
+    damping_factor: float,
+    min_damping: float,
+    max_damping: float,
+) -> Callable[[jnp.ndarray, jnp.ndarray], tuple[jnp.ndarray, jnp.ndarray]]:
+    @jax.jit
+    def run(packed: jnp.ndarray, damping: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        def body(
+            carry: tuple[jnp.ndarray, jnp.ndarray], _: None
+        ) -> tuple[tuple[jnp.ndarray, jnp.ndarray], jnp.ndarray]:
+            p, lam = carry
+            r = residual_fn(p)
+            J = jax.jacfwd(residual_fn)(p)
+            g = J.T @ r
+            hess = J.T @ J + lam * jnp.eye(p.shape[0], dtype=p.dtype)
+            delta = jnp.linalg.solve(hess, -g)
+            p_try = p + delta
+            r_try = residual_fn(p_try)
+            loss = jnp.sum(r * r)
+            loss_try = jnp.sum(r_try * r_try)
+            accept = loss_try < loss
+            p = jnp.where(accept, p_try, p)
+            lam = jnp.where(accept, lam / damping_factor, lam * damping_factor)
+            lam = jnp.clip(lam, min_damping, max_damping)
+            return (p, lam), jnp.where(accept, loss_try, loss)
+
+        (packed, _), losses = jax.lax.scan(body, (packed, damping), None, length=n_steps)
+        return packed, losses
+
+    return run
+
+
+def optimize_render_model_lm(
+    H_init: jnp.ndarray,
+    target: jnp.ndarray,
+    tag_pattern: jnp.ndarray,
+    height: int,
+    width: int,
+    *,
+    camera_init: RenderModelParams | None = None,
+    config: OptimizeLMConfig | None = None,
+) -> tuple[jnp.ndarray, RenderModelParams, list[float]]:
+    """Joint homography + camera fit via Levenberg–Marquardt on pixel residuals."""
+    from render_model.pipeline import default_params
+
+    config = config or OptimizeLMConfig()
+    camera_init = camera_init or default_params()
+    packed = _pack_opt_params(
+        homography_to_params(H_init),
+        model_params_to_vector(camera_init),
+        optimize_homography=True,
+        optimize_camera=True,
+    )
+    residual_fn = make_render_model_residuals(
+        target,
+        tag_pattern,
+        height,
+        width,
+        loss_mask=config.loss_mask,
+        supersample=config.supersample,
+    )
+    init_loss = float(jnp.sum(residual_fn(packed) ** 2))
+    run = _compile_lm_optimize(
+        residual_fn,
+        config.n_steps,
+        damping_factor=config.damping_factor,
+        min_damping=config.min_damping,
+        max_damping=config.max_damping,
+    )
+    packed, step_losses = run(
+        packed, jnp.asarray(config.initial_damping, dtype=jnp.float32)
+    )
+    losses = [init_loss, *[float(x) for x in step_losses]]
+    h_out, camera_out = _unpack_opt_params(
+        packed, optimize_homography=True, optimize_camera=True
+    )
+    assert h_out is not None and camera_out is not None
+    return (
+        params_to_homography(h_out),
+        vector_to_model_params(camera_out),
+        losses,
+    )
+
+
+def _compile_lm_param_trace(
+    residual_fn: Callable[[jnp.ndarray], jnp.ndarray],
+    n_steps: int,
+    *,
+    damping_factor: float,
+    min_damping: float,
+    max_damping: float,
+) -> Callable[[jnp.ndarray, jnp.ndarray], tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
+    @jax.jit
+    def run(
+        packed: jnp.ndarray, damping: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        def body(
+            carry: tuple[jnp.ndarray, jnp.ndarray], _: None
+        ) -> tuple[tuple[jnp.ndarray, jnp.ndarray], tuple[jnp.ndarray, jnp.ndarray]]:
+            p, lam = carry
+            r = residual_fn(p)
+            J = jax.jacfwd(residual_fn)(p)
+            g = J.T @ r
+            hess = J.T @ J + lam * jnp.eye(p.shape[0], dtype=p.dtype)
+            delta = jnp.linalg.solve(hess, -g)
+            p_try = p + delta
+            r_try = residual_fn(p_try)
+            loss = jnp.sum(r * r)
+            loss_try = jnp.sum(r_try * r_try)
+            accept = loss_try < loss
+            p = jnp.where(accept, p_try, p)
+            lam = jnp.where(accept, lam / damping_factor, lam * damping_factor)
+            lam = jnp.clip(lam, min_damping, max_damping)
+            return (p, lam), (loss, p)
+
+        (packed, _), (losses, param_hist) = jax.lax.scan(
+            body, (packed, damping), None, length=n_steps
+        )
+        return packed, losses, param_hist
+
+    return run
+
+
+def optimize_render_model_lm_with_param_trace(
+    H_init: jnp.ndarray,
+    target: jnp.ndarray,
+    tag_pattern: jnp.ndarray,
+    height: int,
+    width: int,
+    *,
+    camera_init: RenderModelParams | None = None,
+    config: OptimizeLMConfig | None = None,
+) -> OptimizationParamTrace:
+    """Joint H + camera LM with per-step packed parameter history."""
+    from render_model.pipeline import default_params
+
+    config = config or OptimizeLMConfig()
+    camera_init = camera_init or default_params()
+    packed_init = _pack_opt_params(
+        homography_to_params(H_init),
+        model_params_to_vector(camera_init),
+        optimize_homography=True,
+        optimize_camera=True,
+    )
+    residual_fn = make_render_model_residuals(
+        target,
+        tag_pattern,
+        height,
+        width,
+        loss_mask=config.loss_mask,
+        supersample=config.supersample,
+    )
+    init_loss = float(jnp.sum(residual_fn(packed_init) ** 2))
+    run = _compile_lm_param_trace(
+        residual_fn,
+        config.n_steps,
+        damping_factor=config.damping_factor,
+        min_damping=config.min_damping,
+        max_damping=config.max_damping,
+    )
+    packed, step_losses, param_hist = run(
+        packed_init, jnp.asarray(config.initial_damping, dtype=jnp.float32)
+    )
+    params_per_step = jnp.concatenate([packed_init[None, :], param_hist], axis=0)
+    h_out, camera_out = _unpack_opt_params(
+        packed, optimize_homography=True, optimize_camera=True
+    )
+    assert h_out is not None and camera_out is not None
+    return OptimizationParamTrace(
+        params_to_homography(h_out),
+        vector_to_model_params(camera_out),
+        [init_loss, *[float(x) for x in step_losses]],
+        params_per_step,
+        decode_joint_params_per_step(params_per_step),
+    )

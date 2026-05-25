@@ -105,17 +105,10 @@ def _(mo):
         mo.hstack([sharpen_sigma, gamma]),
         mo.hstack([black_level, white_level]),
     ])
-    return (
-        black_level,
-        gamma,
-        psf_sigma,
-        sharpen_amount,
-        sharpen_sigma,
-        white_level,
-    )
+    return black_level, gamma, psf_sigma, sharpen_amount, sharpen_sigma, white_level
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     H,
     RenderModelParams,
@@ -142,7 +135,7 @@ def _(
     return params, stages
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo, np, pixelated_grid, stages):
     panels = [
         ("Iñigo AA (4×)", np.asarray(stages.hi_res)),
@@ -158,7 +151,7 @@ def _(mo, np, pixelated_grid, stages):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(H, jax, jnp, mo, params, render_with_model_stages, tag_pattern):
     def loss_fn(p):
         out = render_with_model_stages(H, tag_pattern, 128, 128, p).final
