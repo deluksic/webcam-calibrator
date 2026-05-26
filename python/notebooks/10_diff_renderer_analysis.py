@@ -607,13 +607,13 @@ def _(all_results, export_data, frames, mo, np):
     _flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_ASPECT_RATIO
 
     _t0 = cv2.calibrateCameraRO(
-        _obj_pts, _init_img_pts, (_w, _h), _n_corners, _K_mat.copy(), _dist.copy(),
+        _obj_pts, _init_img_pts, (_w, _h), 0, _K_mat.copy(), _dist.copy(),
         flags=_flags,
     )
     _rms_init, _K_init, _dist_init, _rvecs_init, _tvecs_init, _ = _t0
 
     _t1 = cv2.calibrateCameraRO(
-        _obj_pts, _ref_img_pts, (_w, _h), _n_corners, _K_mat.copy(), _dist.copy(),
+        _obj_pts, _ref_img_pts, (_w, _h), 0, _K_mat.copy(), _dist.copy(),
         flags=_flags,
     )
     _rms_ref, _K_ref, _dist_ref, _rvecs_ref, _tvecs_ref, _ = _t1
