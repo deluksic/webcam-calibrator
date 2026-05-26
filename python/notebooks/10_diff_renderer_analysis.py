@@ -725,20 +725,54 @@ def _(all_results, export_data, frames, mo, np):
         mo.ui.table(_corner_rows, selection=None, page_size=10),
     ])
 
+    return (
+        calib_data := {
+            "rvecs_ref": _rvecs_ref,
+            "tvecs_ref": _tvecs_ref,
+            "K_ref": _K_ref,
+            "dist_ref": _dist_ref,
+            "new_obj_ref": _new_obj_ref,
+            "ref_img_pts": _ref_img_pts,
+            "frame_ids": _frame_ids,
+            "n_frames": _n_frames,
+            "obj_template": _obj_template,
+        },
+    )
+
 
 @app.cell
-def _(all_results, frame_selector, frames, go, mo, np):
-    """Quiver plot: direction and magnitude of LM corner movement (first frame)."""
+def _(all_results, calib_data, frame_selector, frames, go, np):
+    """Reprojection error arrows: fitted corners → calibration reprojection."""
     mo.stop(not all_results, mo.md("Run optimization first."))
+
+    import cv2
 
     _fi = frame_selector.value
     _results = all_results.get(_fi, [])
     mo.stop(not _results, mo.md("No results for selected frame."))
 
     _frame = frames[_fi]
+    _fid = _frame["frameId"]
     _img = _frame["image"]
     _h, _w = _img.shape
 
+    _fidx = calib_data["frame_ids"].index(_fid)
+    _rv = calib_data["rvecs_ref"][_fidx]
+    _tv = calib_data["tvecs_ref"][_fidx]
+    _K = calib_data["K_ref"]
+    _dist = calib_data["dist_ref"]
+    _obj = calib_data["new_obj_ref"]
+
+    _proj, _ = cv2.projectPoints(_obj, _rv, _tv, _K, _dist)
+    _proj = _proj.reshape(-1, 2)
+
+    # Build lookup: (tagId, cornerIdx) → reprojected point.
+    # Ordering matches the calibration's object template.
+    _proj_map = {}
+    for _ci, (_tid, _corner_i, _obj) in enumerate(calib_data["obj_template"]):
+        _proj_map[(_tid, _corner_i)] = _proj[_ci]
+
+    _scale = 50  # amplify pixel errors for visibility
     _fig = go.Figure()
     _fig.add_trace(
         go.Heatmap(
@@ -748,22 +782,39 @@ def _(all_results, frame_selector, frames, go, mo, np):
     )
 
     for _r in _results:
-        _ic = _r["initCorners"]
+        _tid = _r["tagId"]
         _fc = _r["finalCorners"]
         for _ci in range(4):
+            _rp = _proj_map.get((_tid, _ci))
+            if _rp is None:
+                continue
+            _dx = (_rp[0] - _fc[_ci, 0]) * _scale
+            _dy = (_rp[1] - _fc[_ci, 1]) * _scale
             _fig.add_trace(
                 go.Scatter(
-                    x=[_ic[_ci, 0], _fc[_ci, 0]],
-                    y=[_ic[_ci, 1], _fc[_ci, 1]],
-                    mode="lines+markers",
+                    x=[_fc[_ci, 0], _fc[_ci, 0] + _dx],
+                    y=[_fc[_ci, 1], _fc[_ci, 1] + _dy],
+                    mode="lines",
                     line=dict(color="red", width=1),
-                    marker=dict(size=4, color=["red", "cyan"]),
                     showlegend=False,
-                    hovertext=f"Tag {_r['tagId']} corner {_ci}: "
-                              f"{np.linalg.norm(_fc[_ci] - _ic[_ci]):.2f} px",
+                    hovertext=(
+                        f"Tag {_tid} corner {_ci}: "
+                        f"{np.sqrt((_rp[0] - _fc[_ci, 0])**2 + (_rp[1] - _fc[_ci, 1])**2):.4f} px"
+                    ),
                     hoverinfo="text",
                 )
             )
+        # Cyan dots at fitted corners
+        _fig.add_trace(
+            go.Scatter(
+                x=_fc[:, 0], y=_fc[:, 1],
+                mode="markers",
+                marker=dict(color="cyan", size=3),
+                showlegend=False,
+                hovertext=f"Tag {_tid}",
+                hoverinfo="text",
+            )
+        )
 
     _fig.update_layout(
         dragmode="pan",
@@ -772,7 +823,7 @@ def _(all_results, frame_selector, frames, go, mo, np):
                    showgrid=False, zeroline=False),
         showlegend=False,
         height=min(900, max(700, _h)),
-        title=f"Frame {_frame['frameId']} — corner movement direction (red→cyan)",
+        title=f"Frame {_fid} — reprojection error arrows (×{_scale}, {_scale*0.01:.0f}px→1px)",
     )
     mo.ui.plotly(_fig, config={"scrollZoom": True, "displayModeBar": True})
     return
