@@ -731,7 +731,20 @@ def _(all_results, cv2, export_data, frames, mo, np):
         mo.md("### Refined per-corner-index RMS"),
         mo.ui.table(_corner_rows, selection=None, page_size=10),
     ])
-    return
+
+    calib_data = {
+        "rvecs_ref": _rvecs_ref,
+        "tvecs_ref": _tvecs_ref,
+        "K_ref": _K_ref,
+        "dist_ref": _dist_ref,
+        "new_obj_ref": _new_obj_ref,
+        "ref_img_pts": _ref_img_pts,
+        "frame_ids": _frame_ids,
+        "n_frames": _n_frames,
+        "obj_template": _obj_template,
+        "proj_by_frame": _proj_by_frame,
+    }
+    return (calib_data,)
 
 
 @app.cell
