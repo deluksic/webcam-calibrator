@@ -53,7 +53,12 @@ def _(Path):
     )
     if not test_image_paths:
         raise FileNotFoundError(f"No images in {test_images_dir}")
-    return corners_json_path, tag_id_from_filename, test_image_paths, test_images_dir
+    return (
+        corners_json_path,
+        tag_id_from_filename,
+        test_image_paths,
+        test_images_dir,
+    )
 
 
 @app.cell
@@ -73,7 +78,14 @@ def _(mo, test_image_paths):
 
 
 @app.cell
-def _(Image, corners_json_path, image_selector, tag_id_from_filename, test_images_dir):
+def _(
+    Image,
+    corners_json_path,
+    image_selector,
+    np,
+    tag_id_from_filename,
+    test_images_dir,
+):
     image_name = image_selector.value
     image_path = test_images_dir / image_name
     corners_path = corners_json_path(image_path)
@@ -309,24 +321,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    corners_path,
-    entries,
-    get_corners,
-    json,
-    mo,
-    np,
-    save_corners,
-    use_saved,
-):
-    if use_saved.value and entries is not None:
-        corners_px = np.asarray(entries, dtype=np.float32)
-        mo.md(
-            f"Using saved corners from `{corners_path.name}`.\n\n"
-            f"```\n{corners_px.tolist()}\n```"
-        )
-        return
-
+def _(corners_path, get_corners, json, mo, np, save_corners):
     mo.stop(
         not save_corners.value,
         mo.md("**4/4 corners set** — click **Save corners** when ready."),

@@ -9,13 +9,38 @@ from render_model.display import (
     pixelated_grid,
     pixelated_image,
 )
-from render_model.gamma import apply_gamma
+from render_model.gamma import apply_gamma, invert_gamma
+from render_model.lm_gif import (
+    render_frame_at_step,
+    renders_from_lm_trace,
+    renders_from_physical_params,
+    write_lm_trace_gif,
+    write_optimization_gif,
+)
+from render_model.level_inference import (
+    aa_black_white_sample_masks,
+    camera_with_inferred_levels,
+    infer_black_white_from_target,
+    infer_black_white_levels,
+)
+from render_model.level_gradients import (
+    BlackWhiteGradientMaps,
+    compute_black_white_gradient_maps,
+    plot_black_white_gradient_maps,
+)
 from render_model.homography import (
     corner_rmse,
+    corner_shifts_from_homography,
+    corners_from_corner_shifts,
     corners_from_homography,
     homography_from_corners,
     homography_to_params,
+    image_corners_to_normalized,
+    normalized_corners_to_image,
+    normalized_dlt_homography,
     numpy_dlt_homography,
+    numpy_image_corners_to_normalized,
+    numpy_normalized_corners_to_image,
     numpy_sample_normal_offset_corners,
     numpy_sample_uniform_normal_offset_corners,
     params_to_homography,
@@ -30,6 +55,8 @@ from render_model.optimizer import (
     JOINT_PARAM_NAMES,
     OptimizationParamTrace,
     OptimizeLMConfig,
+    compile_lm_run,
+    make_render_model_residuals,
     optimize_render_model_lm,
     optimize_render_model_lm_with_param_trace,
 )
@@ -45,7 +72,11 @@ from render_model.pipeline import (
     scale_homography,
 )
 from render_model.psf import KERNEL_RADIUS, apply_gaussian_psf, gaussian_kernel_1d
-from render_model.renderer import bbox_mask, render_tag_antialiased
+from render_model.loss_mask import loss_mask_from_corners
+from render_model.renderer import (
+    render_tag_antialiased,
+    tag_cell_modules_at_pixels,
+)
 from render_model.sharpen import apply_sharpening
 from render_model.tag_data import TAG_CANONICAL_CORNERS, TAG_GRID_SIZE, build_tag_pattern
 
@@ -62,35 +93,58 @@ __all__ = [
     "RenderModelParams",
     "RenderModelStages",
     "apply_gamma",
+    "invert_gamma",
+    "aa_black_white_sample_masks",
+    "BlackWhiteGradientMaps",
+    "camera_with_inferred_levels",
+    "infer_black_white_from_target",
+    "infer_black_white_levels",
+    "compute_black_white_gradient_maps",
+    "plot_black_white_gradient_maps",
     "apply_gaussian_psf",
     "apply_render_model",
     "apply_sharpening",
-    "bbox_mask",
+    "loss_mask_from_corners",
     "bin_down",
     "build_tag_pattern",
     "camera_params_physical_vector",
     "centered_diff_limits",
     "configure_matplotlib_image_display",
     "corner_rmse",
+    "corner_shifts_from_homography",
+    "corners_from_corner_shifts",
     "corners_from_homography",
+    "image_corners_to_normalized",
+    "normalized_corners_to_image",
+    "numpy_image_corners_to_normalized",
+    "numpy_normalized_corners_to_image",
     "decode_joint_params_per_step",
     "default_params",
     "gaussian_kernel_1d",
     "homography_from_corners",
     "homography_to_params",
+    "normalized_dlt_homography",
     "imshow_extent",
     "model_params_to_vector",
     "numpy_dlt_homography",
     "numpy_sample_normal_offset_corners",
     "numpy_sample_uniform_normal_offset_corners",
+    "compile_lm_run",
+    "make_render_model_residuals",
     "optimize_render_model_lm",
     "optimize_render_model_lm_with_param_trace",
     "params_to_homography",
     "pixelated_grid",
     "pixelated_image",
+    "render_frame_at_step",
     "render_tag_antialiased",
+    "renders_from_lm_trace",
+    "renders_from_physical_params",
+    "tag_cell_modules_at_pixels",
     "render_with_model",
     "render_with_model_stages",
     "scale_homography",
     "vector_to_model_params",
+    "write_lm_trace_gif",
+    "write_optimization_gif",
 ]

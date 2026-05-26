@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 from jax.nn import sigmoid, softplus
 
+from render_model.lighting import bounded_light_grads, raw_from_light_grads
 from render_model.pipeline import LEVEL_GAP, RenderModelParams, sanitize_levels
 
 GAMMA_MIN = 1.0
@@ -31,6 +32,7 @@ def model_params_to_vector(params: RenderModelParams) -> jnp.ndarray:
     sharpen_sigma = jnp.clip(params.sharpen_sigma, SHARPEN_SIGMA_MIN, SHARPEN_SIGMA_MAX)
     span = white - black
     span_denom = jnp.maximum(1.0 - black - LEVEL_GAP, LEVEL_GAP)
+    raw_u, raw_v = raw_from_light_grads(params.light_grad_u, params.light_grad_v)
     return jnp.stack(
         [
             _softplus_inv(psf - PSF_SIGMA_MIN),
@@ -42,6 +44,8 @@ def model_params_to_vector(params: RenderModelParams) -> jnp.ndarray:
             _logit((gamma - GAMMA_MIN) / (GAMMA_MAX - GAMMA_MIN)),
             _logit(black / jnp.maximum(1.0 - LEVEL_GAP, LEVEL_GAP)),
             _logit((span - LEVEL_GAP) / span_denom),
+            raw_u,
+            raw_v,
         ]
     )
 
@@ -57,15 +61,21 @@ def camera_params_physical_vector(params: RenderModelParams) -> jnp.ndarray:
             params.gamma,
             black,
             white,
+            params.light_grad_u,
+            params.light_grad_v,
         ]
     )
 
 
 def decode_joint_params_per_step(packed: jnp.ndarray) -> jnp.ndarray:
-    """Decode packed LM/Adam history to physical ``(steps, 14)`` joint parameters."""
+    """Decode packed LM history to plottable physical units ``(steps, 16)``.
+
+    First 8 entries are corner shifts in pixels (same as the packed LM vector).
+    Remaining 8 are decoded camera parameters (psf, sharpen, …, light u/v).
+    """
 
     def decode_row(row: jnp.ndarray) -> jnp.ndarray:
-        cam = camera_params_physical_vector(vector_to_model_params(row[8:14]))
+        cam = camera_params_physical_vector(vector_to_model_params(row[8:16]))
         return jnp.concatenate([row[:8], cam])
 
     return jax.vmap(decode_row)(packed)
@@ -82,6 +92,7 @@ def vector_to_model_params(values: jnp.ndarray) -> RenderModelParams:
     black_level = (1.0 - LEVEL_GAP) * sigmoid(values[4])
     span = LEVEL_GAP + (1.0 - black_level - LEVEL_GAP) * sigmoid(values[5])
     white_level = black_level + span
+    light_grad_u, light_grad_v = bounded_light_grads(values[6], values[7])
     return RenderModelParams(
         psf_sigma=psf_sigma,
         sharpen_amount=sharpen_amount,
@@ -89,4 +100,6 @@ def vector_to_model_params(values: jnp.ndarray) -> RenderModelParams:
         gamma=gamma,
         black_level=black_level,
         white_level=white_level,
+        light_grad_u=light_grad_u,
+        light_grad_v=light_grad_v,
     )

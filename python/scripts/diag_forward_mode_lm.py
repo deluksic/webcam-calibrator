@@ -18,7 +18,7 @@ from render_model import (
     OptimizeLMConfig,
     RenderModelParams,
     TAG_CANONICAL_CORNERS,
-    bbox_mask,
+    loss_mask_from_corners,
     build_tag_pattern,
     corners_from_homography,
     homography_from_corners,
@@ -52,7 +52,7 @@ def load_problem(image_path: Path):
     H_init = homography_from_corners(src_corners, jnp.asarray(init_corners_px))
     tag_pattern = build_tag_pattern(tag_id_from_filename(image_path.name))
     init_corners = corners_from_homography(H_init, src_corners)
-    loss_mask = bbox_mask(init_corners, height, width, margin=3.5)
+    loss_mask = loss_mask_from_corners(init_corners, height, width)
     target = jnp.asarray(photo, dtype=np.float32)
     camera_init = RenderModelParams(
         psf_sigma=jnp.float32(0.5),
@@ -61,6 +61,8 @@ def load_problem(image_path: Path):
         gamma=jnp.float32(2.0),
         black_level=jnp.float32(0.2),
         white_level=jnp.float32(0.8),
+        light_grad_u=jnp.float32(0.0),
+        light_grad_v=jnp.float32(0.0),
     )
     packed = _pack_opt_params(
         homography_to_params(H_init),

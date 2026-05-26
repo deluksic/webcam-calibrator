@@ -9,3 +9,10 @@ def apply_gamma(image: jax.Array, gamma: jax.Array) -> jax.Array:
     eps = jnp.float32(1e-6)
     x = jnp.maximum(image, eps)
     return x ** (1.0 / gamma)
+
+
+def invert_gamma(display: jax.Array, gamma: jax.Array) -> jax.Array:
+    """Map display values back to linear light: ``display ** gamma``."""
+    eps = jnp.float32(1e-6)
+    x = jnp.maximum(display, eps)
+    return x ** gamma

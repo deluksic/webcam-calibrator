@@ -12,12 +12,45 @@ def apply_homography(H: jnp.ndarray, pts: jnp.ndarray) -> jnp.ndarray:
     return mapped[:, :2] / mapped[:, 2:3]
 
 
+def dlt_homography_four_point(src: jnp.ndarray, dst: jnp.ndarray) -> jnp.ndarray:
+    """Exact DLT for 4 correspondences with ``h22 = 1`` (8×8 linear solve).
+
+    Prefer this over the null-space SVD/eigh path: ``jnp.linalg.solve`` has a stable
+    JVP and round-trips ``corners_from_homography`` ↔ ``H`` for consistent corner-space LM.
+    """
+    if src.shape != (4, 2) or dst.shape != (4, 2):
+        raise ValueError("src and dst must be 4x2")
+
+    M = jnp.zeros((8, 8), dtype=jnp.float32)
+    b = jnp.zeros(8, dtype=jnp.float32)
+    for i in range(4):
+        x, y = src[i, 0], src[i, 1]
+        u, v = dst[i, 0], dst[i, 1]
+        M = M.at[2 * i].set(jnp.array([x, y, 1.0, 0.0, 0.0, 0.0, -u * x, -u * y]))
+        b = b.at[2 * i].set(u)
+        M = M.at[2 * i + 1].set(jnp.array([0.0, 0.0, 0.0, x, y, 1.0, -v * x, -v * y]))
+        b = b.at[2 * i + 1].set(v)
+
+    p = jnp.linalg.solve(M, b)
+    return jnp.array(
+        [
+            [p[0], p[1], p[2]],
+            [p[3], p[4], p[5]],
+            [p[6], p[7], 1.0],
+        ],
+        dtype=jnp.float32,
+    )
+
+
 def dlt_homography(src: jnp.ndarray, dst: jnp.ndarray) -> jnp.ndarray:
     """Direct Linear Transform: 4+ point correspondences -> 3x3 H (h22=1)."""
     if src.shape != dst.shape or src.shape[-1] != 2:
         raise ValueError("src and dst must be Nx2 with the same shape")
 
     n = src.shape[0]
+    if n == 4:
+        return dlt_homography_four_point(src, dst)
+
     A = jnp.zeros((2 * n, 9), dtype=jnp.float32)
     for i in range(n):
         x, y = src[i, 0], src[i, 1]
@@ -25,8 +58,8 @@ def dlt_homography(src: jnp.ndarray, dst: jnp.ndarray) -> jnp.ndarray:
         A = A.at[2 * i].set([-x, -y, -1.0, 0.0, 0.0, 0.0, u * x, u * y, u])
         A = A.at[2 * i + 1].set([0.0, 0.0, 0.0, -x, -y, -1.0, v * x, v * y, v])
 
-    _, _, vh = jnp.linalg.svd(A)
-    h = vh[-1, :]
+    _, eigvecs = jnp.linalg.eigh(A.T @ A)
+    h = eigvecs[:, 0]
     H = h.reshape(3, 3)
     return H / H[2, 2]
 
@@ -101,6 +134,94 @@ def corners_from_homography(H: jnp.ndarray, src_corners: jnp.ndarray) -> jnp.nda
     return apply_homography(H, src_corners)
 
 
+def corners_from_corner_shifts(
+    ref_corners: jnp.ndarray,
+    shifts: jnp.ndarray,
+) -> jnp.ndarray:
+    """Image-space quad ``ref_corners + shifts`` (``shifts`` is length-8 or 4×2)."""
+    ref_corners = jnp.asarray(ref_corners, dtype=jnp.float32)
+    return ref_corners + jnp.asarray(shifts, dtype=jnp.float32).reshape(4, 2)
+
+
+def corner_shifts_from_corners(
+    ref_corners: jnp.ndarray,
+    corners: jnp.ndarray,
+) -> jnp.ndarray:
+    """Per-corner pixel shifts (8-vector) relative to ``ref_corners``."""
+    return (jnp.asarray(corners, dtype=jnp.float32) - jnp.asarray(ref_corners, dtype=jnp.float32)).ravel()
+
+
+def corner_shifts_from_homography(
+    H: jnp.ndarray,
+    ref_corners: jnp.ndarray,
+    src_corners: jnp.ndarray,
+) -> jnp.ndarray:
+    """Shifts (8-vector) from ``H`` vs a fixed reference quad."""
+    return corner_shifts_from_corners(
+        ref_corners, corners_from_homography(H, src_corners)
+    )
+
+
+def image_corners_to_normalized(
+    corners: jnp.ndarray,
+    width: int | jnp.ndarray,
+    height: int | jnp.ndarray,
+) -> jnp.ndarray:
+    """Map image-space corners (x, y) in pixels to [-1, 1] per axis."""
+    w = jnp.asarray(width, dtype=corners.dtype)
+    h = jnp.asarray(height, dtype=corners.dtype)
+    return jnp.stack(
+        [
+            2.0 * corners[:, 0] / w - 1.0,
+            2.0 * corners[:, 1] / h - 1.0,
+        ],
+        axis=-1,
+    )
+
+
+def normalized_corners_to_image(
+    corners: jnp.ndarray,
+    width: int | jnp.ndarray,
+    height: int | jnp.ndarray,
+) -> jnp.ndarray:
+    """Map [-1, 1] normalized corners back to image pixels (x, y)."""
+    w = jnp.asarray(width, dtype=corners.dtype)
+    h = jnp.asarray(height, dtype=corners.dtype)
+    return jnp.stack(
+        [
+            (corners[:, 0] + 1.0) * w * 0.5,
+            (corners[:, 1] + 1.0) * h * 0.5,
+        ],
+        axis=-1,
+    )
+
+
+def numpy_image_corners_to_normalized(
+    corners: np.ndarray,
+    width: int,
+    height: int,
+) -> np.ndarray:
+    return np.asarray(
+        image_corners_to_normalized(
+            jnp.asarray(corners, dtype=jnp.float32), width, height
+        ),
+        dtype=np.float32,
+    )
+
+
+def numpy_normalized_corners_to_image(
+    corners: np.ndarray,
+    width: int,
+    height: int,
+) -> np.ndarray:
+    return np.asarray(
+        normalized_corners_to_image(
+            jnp.asarray(corners, dtype=jnp.float32), width, height
+        ),
+        dtype=np.float32,
+    )
+
+
 def corner_reprojection_loss(
     H: jnp.ndarray,
     src_corners: jnp.ndarray,
@@ -118,6 +239,32 @@ def corner_rmse(
 ) -> jnp.ndarray:
     """L2 RMSE between H-mapped src corners and target corners."""
     return jnp.sqrt(corner_reprojection_loss(H, src_corners, target_corners))
+
+
+def normalized_dlt_homography(src: jnp.ndarray, dst: jnp.ndarray) -> jnp.ndarray:
+    """DLT with Hartley normalization on dst (image-space corners).
+
+    Translates dst to its centroid and scales so mean point distance = √2 before
+    solving, then denormalizes the result. This keeps the DLT system well-conditioned
+    and improves autodiff stability when dst coordinates are large (e.g. 100–1000 px).
+    """
+    centroid = dst.mean(axis=0)
+    diffs = dst - centroid
+    scale = jnp.sqrt(2.0) / jnp.maximum(
+        jnp.sqrt(jnp.mean(jnp.sum(diffs ** 2, axis=1))), 1e-6
+    )
+    T = jnp.array(
+        [
+            [scale, 0.0, -scale * centroid[0]],
+            [0.0, scale, -scale * centroid[1]],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=jnp.float32,
+    )
+    dst_h = jnp.concatenate([dst, jnp.ones((dst.shape[0], 1), dtype=dst.dtype)], axis=1)
+    dst_n = (T @ dst_h.T).T[:, :2]
+    H_n = dlt_homography(src, dst_n)
+    return jnp.linalg.inv(T) @ H_n
 
 
 def numpy_dlt_homography(src: np.ndarray, dst: np.ndarray) -> np.ndarray:

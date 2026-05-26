@@ -11,6 +11,8 @@ Tag coordinates use the same edge convention: cell index i covers [i, i + 1).
 import jax
 import jax.numpy as jnp
 
+from render_model.lighting import apply_planar_exposure
+
 # White halo around the tag grid so outer black-border edges AA like interior cells.
 TAG_PAD_CELLS = 4
 
@@ -168,6 +170,28 @@ def _sample_tag_periodic(
     return out
 
 
+def tag_cell_modules_at_pixels(
+    H: jnp.ndarray,
+    tag_pattern: jnp.ndarray,
+    height: int,
+    width: int,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Dominant tag cell module (0=black, 1=white) and valid-warp flag per output pixel."""
+    cx, cy = _pixel_centers(height, width)
+    tx, ty = inverse_warp_coords(H, height, width, cx, cy)
+    ci = jnp.floor(tx - 0.5).astype(jnp.int32)
+    cj = jnp.floor(ty - 0.5).astype(jnp.int32)
+    padded = _pad_tag_pattern(tag_pattern)
+    grid_h, grid_w = padded.shape
+    pi = ci + TAG_PAD_CELLS
+    pj = cj + TAG_PAD_CELLS
+    valid = (pi >= 0) & (pi < grid_w) & (pj >= 0) & (pj < grid_h)
+    pi_c = jnp.clip(pi, 0, grid_w - 1)
+    pj_c = jnp.clip(pj, 0, grid_h - 1)
+    module = padded[pj_c, pi_c]
+    return module, valid.astype(jnp.float32)
+
+
 def sample_tag_filtered(
     tag_pattern: jnp.ndarray,
     tx: jnp.ndarray,
@@ -201,10 +225,12 @@ def render_tag_antialiased(
     *,
     black_level: jax.Array | float = 0.0,
     white_level: jax.Array | float = 1.0,
+    light_grad_u: jax.Array | float = 0.0,
+    light_grad_v: jax.Array | float = 0.0,
 ) -> jnp.ndarray:
     """Inverse warp + Iñigo analytical box-filter per tag module."""
     tx, ty, ddx, ddy = tag_footprint(H, height, width)
-    return sample_tag_filtered(
+    linear = sample_tag_filtered(
         tag_pattern,
         tx,
         ty,
@@ -213,57 +239,4 @@ def render_tag_antialiased(
         black_level=black_level,
         white_level=white_level,
     )
-
-
-def _segment_distance_sq(
-    px: jnp.ndarray,
-    py: jnp.ndarray,
-    x0: jnp.ndarray,
-    y0: jnp.ndarray,
-    x1: jnp.ndarray,
-    y1: jnp.ndarray,
-) -> jnp.ndarray:
-    """Squared distance from (px, py) to the closed segment (x0, y0)-(x1, y1)."""
-    dx = x1 - x0
-    dy = y1 - y0
-    len_sq = dx * dx + dy * dy + jnp.float32(1e-12)
-    t = jnp.clip(((px - x0) * dx + (py - y0) * dy) / len_sq, 0.0, 1.0)
-    qx = x0 + t * dx
-    qy = y0 + t * dy
-    return (px - qx) ** 2 + (py - qy) ** 2
-
-
-def _inside_convex_quad(
-    px: jnp.ndarray,
-    py: jnp.ndarray,
-    corners: jnp.ndarray,
-) -> jnp.ndarray:
-    """True where pixel centers lie inside the convex quad (any consistent winding)."""
-    n = corners.shape[0]
-    crosses = []
-    for i in range(n):
-        x0, y0 = corners[i, 0], corners[i, 1]
-        x1, y1 = corners[(i + 1) % n, 0], corners[(i + 1) % n, 1]
-        crosses.append((px - x0) * (y1 - y0) - (py - y0) * (x1 - x0))
-    cross_stack = jnp.stack(crosses, axis=0)
-    return jnp.all(cross_stack >= 0.0, axis=0) | jnp.all(cross_stack <= 0.0, axis=0)
-
-
-def bbox_mask(
-    corners: jnp.ndarray,
-    height: int,
-    width: int,
-    margin: float = 3.5,
-) -> jnp.ndarray:
-    """Binary mask: tag quad interior plus a ``margin``-px band along its edges."""
-    cx, cy = _pixel_centers(height, width)
-    inside = _inside_convex_quad(cx, cy, corners)
-    n = corners.shape[0]
-    edge_dists = []
-    for i in range(n):
-        x0, y0 = corners[i, 0], corners[i, 1]
-        x1, y1 = corners[(i + 1) % n, 0], corners[(i + 1) % n, 1]
-        edge_dists.append(_segment_distance_sq(cx, cy, x0, y0, x1, y1))
-    min_dist = jnp.sqrt(jnp.min(jnp.stack(edge_dists, axis=0), axis=0))
-    margin_f = jnp.float32(margin)
-    return (inside | (min_dist <= margin_f)).astype(jnp.float32)
+    return apply_planar_exposure(linear, tx, ty, light_grad_u, light_grad_v)

@@ -3,7 +3,7 @@
 import jax
 import jax.numpy as jnp
 
-KERNEL_RADIUS = 3
+KERNEL_RADIUS = 5
 
 
 def gaussian_kernel_1d(sigma: jax.Array) -> jax.Array:

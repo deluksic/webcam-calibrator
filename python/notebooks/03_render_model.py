@@ -130,6 +130,8 @@ def _(
         gamma=jnp.float32(gamma.value),
         black_level=jnp.float32(black_level.value),
         white_level=jnp.float32(white_level.value),
+        light_grad_u=jnp.float32(0.0),
+        light_grad_v=jnp.float32(0.0),
     )
     stages = render_with_model_stages(H, tag_pattern, image_size, image_size, params)
     return params, stages

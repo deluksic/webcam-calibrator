@@ -30,43 +30,56 @@ def _():
         OptimizeLMConfig,
         RenderModelParams,
         TAG_CANONICAL_CORNERS,
-        bbox_mask,
+        loss_mask_from_corners,
         build_tag_pattern,
         camera_params_physical_vector,
         centered_diff_limits,
         configure_matplotlib_image_display,
+        corners_from_corner_shifts,
         corners_from_homography,
         homography_from_corners,
         imshow_extent,
-        optimize_render_model_lm,
-        optimize_render_model_lm_with_param_trace,
+        OptimizationParamTrace,
+        camera_with_inferred_levels,
+        compile_lm_run,
+        decode_joint_params_per_step,
+        make_render_model_residuals,
+        model_params_to_vector,
         render_with_model,
         vector_to_model_params,
+        write_lm_trace_gif,
     )
 
     configure_matplotlib_image_display()
     return (
         Image,
         JOINT_PARAM_NAMES,
+        OptimizationParamTrace,
         OptimizeLMConfig,
         Path,
         RenderModelParams,
         TAG_CANONICAL_CORNERS,
-        bbox_mask,
         build_tag_pattern,
+        camera_with_inferred_levels,
         centered_diff_limits,
+        compile_lm_run,
+        corners_from_corner_shifts,
         corners_from_homography,
+        decode_joint_params_per_step,
         homography_from_corners,
         imshow_extent,
         jax,
         jnp,
         json,
+        loss_mask_from_corners,
+        make_render_model_residuals,
+        model_params_to_vector,
         np,
-        optimize_render_model_lm,
-        optimize_render_model_lm_with_param_trace,
         plt,
         render_with_model,
         time,
+        vector_to_model_params,
+        write_lm_trace_gif,
     )
 
 
@@ -119,18 +132,16 @@ def _(mo, ready_image_paths):
         label="Image (saved corners only)",
         full_width=True,
     )
-    compile_jit = mo.ui.run_button(label="Compile (warmup JIT)")
-    run_optimization = mo.ui.run_button(label="Run LM optimization")
+    run_lm = mo.ui.run_button(label="Run LM optimization")
     mo.vstack([
         image_selector,
-        compile_jit,
-        run_optimization,
+        run_lm,
         mo.md(
-            "1. Pick an image · 2. **Compile** (JIT, untimed) · "
-            "3. **Run LM optimization** (execution only)"
+            "Changing the image re-runs the **compile** cell (JAX JIT). "
+            "Click **Run** to execute LM (timed in the run cell)."
         ),
     ])
-    return compile_jit, image_selector, run_optimization
+    return image_selector, run_lm
 
 
 @app.cell
@@ -138,7 +149,6 @@ def _(
     Image,
     RenderModelParams,
     TAG_CANONICAL_CORNERS,
-    bbox_mask,
     build_tag_pattern,
     corners_from_homography,
     corners_json_path,
@@ -146,6 +156,7 @@ def _(
     image_selector,
     jnp,
     json,
+    loss_mask_from_corners,
     mo,
     np,
     ready_image_paths,
@@ -166,15 +177,17 @@ def _(
     _tag_id = tag_id_from_filename(_image_name)
     _tag_pattern = build_tag_pattern(_tag_id)
     _init_corners = corners_from_homography(_H_init, _src_corners)
-    _loss_mask = bbox_mask(_init_corners, _height, _width, margin=3.5)
+    _loss_mask = loss_mask_from_corners(_init_corners, _height, _width)
     _target = jnp.asarray(_photo, dtype=jnp.float32)
-    _camera_init = RenderModelParams(
-        psf_sigma=jnp.float32(0.5),
+    camera_init_seed = RenderModelParams(
+        psf_sigma=jnp.float32(1.5),
         sharpen_amount=jnp.float32(1.0),
-        sharpen_sigma=jnp.float32(1.0),
-        gamma=jnp.float32(2.0),
+        sharpen_sigma=jnp.float32(0.6),
+        gamma=jnp.float32(1.75),
         black_level=jnp.float32(0.2),
         white_level=jnp.float32(0.8),
+        light_grad_u=jnp.float32(0.0),
+        light_grad_v=jnp.float32(0.0),
     )
 
     image_name = _image_name
@@ -186,10 +199,9 @@ def _(
     tag_pattern = _tag_pattern
     loss_mask = _loss_mask
     target = _target
-    camera_init = _camera_init
     return (
         H_init,
-        camera_init,
+        camera_init_seed,
         image_height,
         image_name,
         image_width,
@@ -202,115 +214,123 @@ def _(
 
 
 @app.cell
-def _(image_name, mo):
-    get_warm_key, set_warm_key = mo.state("")
-
-    if get_warm_key() and get_warm_key() != image_name:
-        set_warm_key("")
-    return get_warm_key, set_warm_key
-
-
-@app.cell
-def _(OptimizeLMConfig, loss_mask):
-    lm_config = OptimizeLMConfig(
-        n_steps=100,
+def _(
+    H_init,
+    camera_init_seed,
+    camera_with_inferred_levels,
+    image_height,
+    image_width,
+    loss_mask,
+    tag_pattern,
+    target,
+):
+    camera_init = camera_with_inferred_levels(
+        camera_init_seed,
+        target,
+        H_init,
+        tag_pattern,
+        image_height,
+        image_width,
         loss_mask=loss_mask,
     )
-    return (lm_config,)
+    return (camera_init,)
 
 
 @app.cell
 def _(
     H_init,
+    OptimizeLMConfig,
+    TAG_CANONICAL_CORNERS,
     camera_init,
-    compile_jit,
-    get_warm_key,
-    image_height,
-    image_name,
-    image_width,
-    jax,
-    lm_config,
-    mo,
-    optimize_render_model_lm,
-    set_warm_key,
-    tag_pattern,
-    target,
-    time,
-):
-    _status = mo.md("Click **Compile (warmup JIT)** before running LM optimization.")
-
-    if compile_jit.value:
-        _t0 = time.perf_counter()
-        _H_lm, _camera_lm, _losses_lm = optimize_render_model_lm(
-            H_init,
-            target,
-            tag_pattern,
-            image_height,
-            image_width,
-            camera_init=camera_init,
-            config=lm_config,
-        )
-        jax.block_until_ready(_H_lm)
-        _compile_s = time.perf_counter() - _t0
-        set_warm_key(image_name)
-        _status = mo.md(
-            f"**Compiled** for `{image_name}` — LM JIT: {_compile_s:.2f}s\n\n"
-            "Now click **Run LM optimization**."
-        )
-    elif get_warm_key() == image_name:
-        _status = mo.md(f"**Already compiled** for `{image_name}` — ready to run.")
-
-    _status
-    return
-
-
-@app.cell
-def _(get_warm_key, image_name, mo, run_optimization):
-    mo.stop(
-        get_warm_key() != image_name,
-        mo.md(f"Compile JIT for `{image_name}` first."),
-    )
-    mo.stop(
-        not run_optimization.value,
-        mo.md("Click **Run LM optimization**."),
-    )
-    return
-
-
-@app.cell
-def _(
-    H_init,
-    camera_init,
+    corners_from_homography,
     image_height,
     image_width,
-    jax,
-    lm_config,
-    optimize_render_model_lm_with_param_trace,
+    jnp,
+    loss_mask,
+    make_render_model_residuals,
+    model_params_to_vector,
     tag_pattern,
     target,
-    time,
 ):
-    _t0 = time.perf_counter()
-    _lm_trace = optimize_render_model_lm_with_param_trace(
-        H_init,
+    lm_config = OptimizeLMConfig(n_steps=20, loss_mask=loss_mask)
+    ref_corners = corners_from_homography(H_init, TAG_CANONICAL_CORNERS)
+    packed_init = jnp.concatenate(
+        [
+            jnp.zeros(8, dtype=jnp.float32),
+            model_params_to_vector(camera_init),
+        ]
+    )
+    residual_fn = make_render_model_residuals(
         target,
         tag_pattern,
         image_height,
         image_width,
-        camera_init=camera_init,
-        config=lm_config,
+        ref_corners=ref_corners,
+        loss_mask=loss_mask,
     )
-    jax.block_until_ready(_lm_trace.H)
-    lm_wall_s = time.perf_counter() - _t0
-    H_lm = _lm_trace.H
-    camera_lm = _lm_trace.camera
-    losses_lm = _lm_trace.losses
-    params_lm = _lm_trace.params_physical_per_step
-    return H_lm, camera_lm, lm_wall_s, losses_lm, params_lm
+    lm_damping = jnp.asarray(lm_config.initial_damping, dtype=jnp.float32)
+    init_loss = float(jnp.sum(residual_fn(packed_init) ** 2))
+    return (
+        init_loss,
+        lm_config,
+        lm_damping,
+        packed_init,
+        ref_corners,
+        residual_fn,
+    )
 
 
 @app.cell
-def _(camera_init, camera_lm, image_name, lm_wall_s, losses_lm, mo, tag_id):
+def _(compile_lm_run, jax, lm_config, lm_damping, packed_init, residual_fn):
+    lm_run = compile_lm_run(residual_fn, lm_config)
+    _warm_packed, _, _ = lm_run(packed_init, lm_damping)
+    jax.block_until_ready(_warm_packed)
+    return (lm_run,)
+
+
+@app.cell
+def _(
+    OptimizationParamTrace,
+    TAG_CANONICAL_CORNERS,
+    corners_from_corner_shifts,
+    decode_joint_params_per_step,
+    homography_from_corners,
+    init_loss,
+    jax,
+    jnp,
+    lm_damping,
+    lm_run,
+    mo,
+    packed_init,
+    ref_corners,
+    run_lm,
+    time,
+    vector_to_model_params,
+):
+    mo.stop(not run_lm.value, mo.md("Click **Run LM optimization**."))
+    _t0 = time.perf_counter()
+    packed, step_losses, param_hist = lm_run(packed_init, lm_damping)
+    jax.block_until_ready(packed)
+    lm_run_s = time.perf_counter() - _t0
+    corners_px = corners_from_corner_shifts(ref_corners, packed[:8])
+    H_lm = homography_from_corners(jnp.asarray(TAG_CANONICAL_CORNERS), corners_px)
+    camera_lm = vector_to_model_params(packed[8:16])
+    params_per_step = jnp.concatenate([packed_init[None, :], param_hist], axis=0)
+    params_lm = decode_joint_params_per_step(params_per_step)
+    losses_lm = [init_loss, *[float(x) for x in step_losses]]
+    lm_trace = OptimizationParamTrace(
+        H_lm,
+        camera_lm,
+        losses_lm,
+        params_per_step,
+        params_lm,
+        ref_corners,
+    )
+    return H_lm, camera_lm, lm_run_s, lm_trace, losses_lm, params_lm
+
+
+@app.cell
+def _(camera_init, camera_lm, image_name, lm_run_s, losses_lm, mo, tag_id):
     def _fmt_cam(_label: str, _p) -> str:
         return (
             f"**{_label}:** psf={float(_p.psf_sigma):.3f}, "
@@ -326,7 +346,7 @@ def _(camera_init, camera_lm, image_name, lm_wall_s, losses_lm, mo, tag_id):
 
         - **Steps:** {len(losses_lm) - 1}
         - **Final loss:** {losses_lm[-1]:.6f} (init {losses_lm[0]:.6f})
-        - **Exec time (post-JIT):** {lm_wall_s:.2f}s
+        - **Run (execute):** {lm_run_s:.2f}s (compile time = marimo runtime on the cell above)
 
         {_fmt_cam("Camera init", camera_init)}
         {_fmt_cam("LM", camera_lm)}
@@ -370,6 +390,91 @@ def _(JOINT_PARAM_NAMES, np, params_lm, plt):
     _fig.supxlabel("step (0 = init)")
     _fig.tight_layout()
     _fig
+    return
+
+
+@app.cell
+def _(
+    Path,
+    image_height,
+    image_name,
+    image_width,
+    lm_trace,
+    mo,
+    tag_pattern,
+    target,
+    write_lm_trace_gif,
+):
+    _gif_dir = Path(__file__).parent / "_lm_gifs"
+    _stem = Path(image_name).stem
+    _gif_path = write_lm_trace_gif(
+        _gif_dir / f"08_{_stem}.gif",
+        lm_trace,
+        tag_pattern,
+        image_height,
+        image_width,
+        target=target,
+        step_stride=2,
+        duration_ms=100,
+        scale=6,
+    )
+    mo.vstack([
+        mo.md(f"### LM render animation — `{image_name}` (photo | render per step)"),
+        mo.image(_gif_path, width="100%"),
+        mo.md(f"Saved to `{_gif_path}`"),
+    ])
+    return
+
+
+@app.cell
+def _(
+    H_init,
+    H_lm,
+    TAG_CANONICAL_CORNERS,
+    corners_from_homography,
+    image_height,
+    image_width,
+    imshow_extent,
+    jnp,
+    np,
+    photo,
+    plt,
+):
+    def _plot_quad(ax, corners, *, color, label, linewidth=1.5, linestyle="-"):
+        ax.plot(
+            np.r_[corners[:, 0], corners[0, 0]],
+            np.r_[corners[:, 1], corners[0, 1]],
+            color=color,
+            linewidth=linewidth,
+            linestyle=linestyle,
+            label=label,
+            zorder=5,
+        )
+
+    _src = jnp.asarray(TAG_CANONICAL_CORNERS, dtype=jnp.float32)
+    _corners_init = np.asarray(corners_from_homography(H_init, _src))
+    _corners_final = np.asarray(corners_from_homography(H_lm, _src))
+
+    _fig_corners, _ax_corners = plt.subplots(figsize=(5.5, 4.5))
+    _ax_corners.imshow(
+        photo,
+        cmap="gray",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+        extent=imshow_extent(image_width, image_height),
+        origin="upper",
+    )
+    _ax_corners.set_xlim(0.0, float(image_width))
+    _ax_corners.set_ylim(float(image_height), 0.0)
+    _ax_corners.set_aspect("equal")
+    _ax_corners.set_title("Corners (pixels): initial vs final")
+    _ax_corners.axis("off")
+    _plot_quad(_ax_corners, _corners_init, color="red", label="Initial", linestyle="--")
+    _plot_quad(_ax_corners, _corners_final, color="cyan", label="Final", linestyle="--")
+    _ax_corners.legend(loc="upper center", bbox_to_anchor=(0.5, -0.04), ncol=2, fontsize=8)
+    _fig_corners.tight_layout()
+    _fig_corners
     return
 
 

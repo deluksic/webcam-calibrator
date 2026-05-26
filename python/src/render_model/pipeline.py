@@ -39,6 +39,8 @@ class RenderModelParams:
     gamma: jax.Array
     black_level: jax.Array
     white_level: jax.Array
+    light_grad_u: jax.Array
+    light_grad_v: jax.Array
 
 
 class RenderModelStages(NamedTuple):
@@ -57,6 +59,8 @@ def default_params() -> RenderModelParams:
         gamma=jnp.float32(2.2),
         black_level=jnp.float32(0.0),
         white_level=jnp.float32(1.0),
+        light_grad_u=jnp.float32(0.0),
+        light_grad_v=jnp.float32(0.0),
     )
 
 
@@ -104,6 +108,8 @@ def render_with_model_stages(
         hi_width,
         black_level=black_level,
         white_level=white_level,
+        light_grad_u=params.light_grad_u,
+        light_grad_v=params.light_grad_v,
     )
     hi_blurred = apply_gaussian_psf(hi_res, params.psf_sigma * supersample)
     binned = bin_down(hi_blurred, supersample)
