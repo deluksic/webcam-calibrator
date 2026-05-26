@@ -194,7 +194,7 @@ def _(
 ):
     mo.stop(not run_all_button.value, mo.md("Click **Run** to start per-tag optimization on all frames."))
 
-    _lm_steps = 12
+    _lm_steps = 30
     _df = jnp.float32(10.0)
     _lo = jnp.float32(1e-8)
     _hi = jnp.float32(1e8)
@@ -310,7 +310,7 @@ def _(
         _cw2 = camera_with_inferred_levels(_seed, _tw, _Hw, _pw, _ch, _cw, loss_mask=_mw)
         _ = _lm_run(
             jnp.concatenate([jnp.zeros(8, dtype=jnp.float32), model_params_to_vector(_cw2)]),
-            jnp.float32(1e-2), _tw, _pw, _cc, _mw,
+            jnp.float32(1e-3), _tw, _pw, _cc, _mw,
         )
         jax.block_until_ready(_)
         _compile_total += time.perf_counter() - _t0
@@ -339,7 +339,7 @@ def _(
             _ci = camera_with_inferred_levels(_seed, _targ, _Hi, _pat, _crop_h, _crop_w, loss_mask=_mask)
             _pi = jnp.concatenate([jnp.zeros(8, dtype=jnp.float32), model_params_to_vector(_ci)])
             _t0 = time.perf_counter()
-            _p, _sl, _h = _lm_run(_pi, jnp.float32(1e-2), _targ, _pat, _cc2, _mask)
+            _p, _sl, _h = _lm_run(_pi, jnp.float32(1e-3), _targ, _pat, _cc2, _mask)
             jax.block_until_ready(_p)
             _elapsed = time.perf_counter() - _t0
             _run_total += _elapsed
