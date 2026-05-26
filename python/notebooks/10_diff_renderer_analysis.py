@@ -640,7 +640,7 @@ def _(all_results, export_data, frames, mo, np):
         export_data.get("distortion", [0, 0, 0, 0, 0, 0, 0, 0]), dtype=np.float64
     )
 
-    _flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_ASPECT_RATIO
+    _flags = cv2.CALIB_USE_INTRINSIC_GUESS
     _criteria = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 200, 1e-10)
 
     _t0 = cv2.calibrateCameraRO(
