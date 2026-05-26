@@ -647,23 +647,23 @@ def _(all_results, export_data, frames, mo, np):
         _obj_pts, _init_img_pts, (_w, _h), _anchor_tr_idx, _K_mat.copy(), _dist.copy(),
         flags=_flags, criteria=_criteria,
     )
-    _rms_init, _K_init, _dist_init, _rvecs_init, _tvecs_init, _ = _t0
+    _rms_init, _K_init, _dist_init, _rvecs_init, _tvecs_init, _new_obj_init = _t0
 
     _t1 = cv2.calibrateCameraRO(
         _obj_pts, _ref_img_pts, (_w, _h), _anchor_tr_idx, _K_mat.copy(), _dist.copy(),
         flags=_flags, criteria=_criteria,
     )
-    _rms_ref, _K_ref, _dist_ref, _rvecs_ref, _tvecs_ref, _ = _t1
+    _rms_ref, _K_ref, _dist_ref, _rvecs_ref, _tvecs_ref, _new_obj_ref = _t1
 
-    # Per-view reprojection errors
+    # Per-view reprojection errors using refined object points (matching OpenCV RMS)
     _per_view_init = []
     _per_view_ref = []
     for _vi in range(_n_frames):
         _pi, _ = cv2.projectPoints(
-            _obj_pts[_vi], _rvecs_init[_vi], _tvecs_init[_vi], _K_init, _dist_init,
+            _new_obj_init, _rvecs_init[_vi], _tvecs_init[_vi], _K_init, _dist_init,
         )
         _pr, _ = cv2.projectPoints(
-            _obj_pts[_vi], _rvecs_ref[_vi], _tvecs_ref[_vi], _K_ref, _dist_ref,
+            _new_obj_ref, _rvecs_ref[_vi], _tvecs_ref[_vi], _K_ref, _dist_ref,
         )
         _per_view_init.append(
             float(np.sqrt(np.mean((_pi.reshape(-1, 2) - _init_img_pts[_vi]) ** 2)))
@@ -684,7 +684,7 @@ def _(all_results, export_data, frames, mo, np):
     _corner_errs = {0: [], 1: [], 2: [], 3: []}
     for _vi in range(_n_frames):
         _proj, _ = cv2.projectPoints(
-            _obj_pts[_vi], _rvecs_ref[_vi], _tvecs_ref[_vi], _K_ref, _dist_ref,
+            _new_obj_ref, _rvecs_ref[_vi], _tvecs_ref[_vi], _K_ref, _dist_ref,
         )
         _proj = _proj.reshape(-1, 2)
         _img = _ref_img_pts[_vi]
