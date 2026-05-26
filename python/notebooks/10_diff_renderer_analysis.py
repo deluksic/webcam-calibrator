@@ -546,23 +546,52 @@ def _(all_results, export_data, frames, mo, np):
     import cv2
 
     _K = export_data.get("K")
-    _targets = export_data.get("updatedTargets", [])
     _img_size = export_data.get("imageSize")
 
     mo.stop(
-        not _K or not _targets or not _img_size,
-        mo.md("Export missing K/updatedTargets/imageSize — skipping."),
+        not _K or not _img_size,
+        mo.md("Export missing K/imageSize — skipping."),
     )
 
     _w, _h = _img_size["width"], _img_size["height"]
 
-    # Build object-point template from updatedTargets (real-world units).
-    # Sort by tagId for consistent ordering across frames.
+    # Learn layout from first frame's init corners, matching TypeScript
+    # learnLayoutFromFrame. UNIT_SQUARE and initCorners are both strip order.
+    _first_results = all_results.get(0, [])
+    mo.stop(
+        len(_first_results) < 2,
+        mo.md(f"Need >=2 tags in first frame (have {len(_first_results)})."),
+    )
+
+    _sorted = sorted(_first_results, key=lambda r: r["tagId"])
+    _anchor = _sorted[0]
+    _unit_square = np.array(
+        [[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.float64
+    )  # strip: TL, TR, BL, BR
+
+    _H_anchor, _ = cv2.findHomography(_unit_square, _anchor["initCorners"], method=0)
+    _H_inv = np.linalg.inv(_H_anchor)
+
+    # Map each tag's strip-ordered init corners through H_inv → object space
+    _layout = {}
+    for _r in _sorted:
+        _obj = cv2.perspectiveTransform(
+            _r["initCorners"].astype(np.float64).reshape(1, 4, 2), _H_inv
+        ).reshape(4, 2)
+        _layout[_r["tagId"]] = _obj
+
+    # Zero-mean in xy
+    _all = np.concatenate(list(_layout.values()), axis=0)
+    _mean = _all.mean(axis=0)
+    for _tid in _layout:
+        _layout[_tid] = _layout[_tid] - _mean
+
+    # Build object-point template (strip order, sorted by tagId)
     _obj_template = []
-    for _t in sorted(_targets, key=lambda x: x["tagId"]):
+    for _tid in sorted(_layout):
+        _oc = _layout[_tid]
         for _ci in range(4):
-            _c = _t["corners"][_ci]
-            _obj_template.append((_t["tagId"], _ci, [_c["x"], _c["y"], _c["z"]]))
+            _obj_template.append((_tid, _ci, [float(_oc[_ci, 0]), float(_oc[_ci, 1]), 0.0]))
 
     # Build per-frame image points for shared tags
     _obj_pts, _init_img_pts, _ref_img_pts = [], [], []
@@ -597,12 +626,10 @@ def _(all_results, export_data, frames, mo, np):
     _n_frames = len(_obj_pts)
     _n_corners = _obj_pts[0].shape[0]
 
-    # iFixedPoint: index of the first tag's TR corner (corner 1 in strip order)
-    # within objectPoints[0]. Must be in [1, n_corners-2] for object-releasing.
+    # iFixedPoint: anchor tag's TR corner (= corner 1 in strip order)
     _anchor_tr_idx = None
-    _first_tag_id = _obj_template[0][0]
     for _i, (_tid, _ci, _obj) in enumerate(_obj_template):
-        if _tid == _first_tag_id and _ci == 1:
+        if _tid == _anchor["tagId"] and _ci == 1:
             _anchor_tr_idx = _i
             break
 
