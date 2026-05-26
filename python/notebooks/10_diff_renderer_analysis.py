@@ -182,54 +182,120 @@ def _(
 
     _frame = frames[frame_selector.value]
     _img = _frame["image"]
-    _h, _w = _img.shape
-    _target = jnp.asarray(_img, dtype=jnp.float32)
+    _full_h, _full_w = _img.shape
     _tags = _frame["tags"]
 
     mo.md(
-        f"### Frame {_frame['frameId']} — {_w}×{_h}, {len(_tags)} tags"
+        f"### Frame {_frame['frameId']} — {_full_w}×{_full_h}, {len(_tags)} tags"
     )
 
-    _results = []
-    _lm_steps = 12
+    # -- compute uniform crop size from max tag extent (corners + moat + margin) --
 
-    for _ti, _tag in enumerate(_tags):
-        _tag_id = _tag["tagId"]
+    _tag_infos = []  # (tag_id, init_corners_np, bbox_x0, y0, x1, y1)
+    _max_crop_w = 0
+    _max_crop_h = 0
+
+    for _tag in _tags:
         _corners_raw = _tag["corners"]
         _init_corners_np = np.array(
             [[c["x"], c["y"]] for c in _corners_raw], dtype=np.float32
         )
-        _init_corners = jnp.asarray(_init_corners_np)
+        _init_corners_j = jnp.asarray(_init_corners_np)
+
+        # Moat = 1/8 of shortest side (matches loss_mask padding)
+        _sides = []
+        for _i in range(4):
+            _j = (_i + 1) % 4
+            _dx = _init_corners_np[_j, 0] - _init_corners_np[_i, 0]
+            _dy = _init_corners_np[_j, 1] - _init_corners_np[_i, 1]
+            _sides.append(np.sqrt(_dx * _dx + _dy * _dy))
+        _moat = np.min(_sides) / 8.0
+
+        _x0 = int(np.floor(np.min(_init_corners_np[:, 0]) - _moat))
+        _y0 = int(np.floor(np.min(_init_corners_np[:, 1]) - _moat))
+        _x1 = int(np.ceil(np.max(_init_corners_np[:, 0]) + _moat))
+        _y1 = int(np.ceil(np.max(_init_corners_np[:, 1]) + _moat))
+
+        _tag_infos.append({
+            "tagId": _tag["tagId"],
+            "initCorners": _init_corners_np,
+            "x0": _x0,
+            "y0": _y0,
+            "x1": _x1,
+            "y1": _y1,
+        })
+
+        _max_crop_w = max(_max_crop_w, _x1 - _x0)
+        _max_crop_h = max(_max_crop_h, _y1 - _y0)
+
+    _margin = 6  # extra pixels for safety
+    _crop_w = _max_crop_w + _margin
+    _crop_h = _max_crop_h + _margin
+
+    mo.md(
+        f"Tag crop size: **{_crop_w}×{_crop_h}** px "
+        f"(max tag extent + {_margin}px margin, from {_full_w}×{_full_h} full frame)"
+    )
+
+    # -- per-tag optimization on cropped regions --
+
+    _results = []
+    _lm_steps = 12
+    _seed = RenderModelParams(
+        psf_sigma=jnp.float32(1.5),
+        sharpen_amount=jnp.float32(1.0),
+        sharpen_sigma=jnp.float32(0.6),
+        gamma=jnp.float32(1.75),
+        black_level=jnp.float32(0.2),
+        white_level=jnp.float32(0.8),
+        light_grad_u=jnp.float32(0.0),
+        light_grad_v=jnp.float32(0.0),
+    )
+
+    for _info in _tag_infos:
+        _tag_id = _info["tagId"]
+        _init_corners_full = jnp.asarray(_info["initCorners"])
+        _x0, _y0 = _info["x0"], _info["y0"]
+        _x1, _y1 = _info["x1"], _info["y1"]
+
+        # Center crop within the uniform-size window
+        _tag_w = _x1 - _x0
+        _tag_h = _y1 - _y0
+        _off_x = (_crop_w - _tag_w) // 2
+        _off_y = (_crop_h - _tag_h) // 2
+        _crop_x0 = _x0 - _off_x
+        _crop_y0 = _y0 - _off_y
+
+        # Clamp crop to image bounds
+        _crop_x0 = max(0, _crop_x0)
+        _crop_y0 = max(0, _crop_y0)
+        _crop_x1 = min(_full_w, _crop_x0 + _crop_w)
+        _crop_y1 = min(_full_h, _crop_y0 + _crop_h)
+
+        # Extract crop and build target
+        _crop = _img[_crop_y0:_crop_y1, _crop_x0:_crop_x1]
+        _ch = _crop.shape[0]
+        _cw = _crop.shape[1]
+        _target = jnp.asarray(_crop, dtype=jnp.float32)
+
+        # Adjust corners to crop coordinates
+        _init_corners_crop = _init_corners_full - jnp.array([_crop_x0, _crop_y0], dtype=jnp.float32)
 
         _pattern = build_tag_pattern(_tag_id)
         _H_init = homography_from_corners(
-            jnp.asarray(TAG_CANONICAL_CORNERS, dtype=jnp.float32), _init_corners
+            jnp.asarray(TAG_CANONICAL_CORNERS, dtype=jnp.float32),
+            _init_corners_crop,
         )
-        _mask = loss_mask_from_corners(_init_corners, _h, _w)
-
-        _seed = RenderModelParams(
-            psf_sigma=jnp.float32(1.5),
-            sharpen_amount=jnp.float32(1.0),
-            sharpen_sigma=jnp.float32(0.6),
-            gamma=jnp.float32(1.75),
-            black_level=jnp.float32(0.2),
-            white_level=jnp.float32(0.8),
-            light_grad_u=jnp.float32(0.0),
-            light_grad_v=jnp.float32(0.0),
-        )
+        _mask = loss_mask_from_corners(_init_corners_crop, _ch, _cw)
 
         _cam_init = camera_with_inferred_levels(
-            _seed, _target, _H_init, _pattern, _h, _w, loss_mask=_mask
+            _seed, _target, _H_init, _pattern, _ch, _cw, loss_mask=_mask,
         )
 
         _config = OptimizeLMConfig(n_steps=_lm_steps, loss_mask=_mask)
         _residual_fn = make_render_model_residuals(
-            _target,
-            _pattern,
-            _h,
-            _w,
-            ref_corners=_init_corners,
-            loss_mask=_mask,
+            _target, _pattern, _ch, _cw,
+            ref_corners=_init_corners_crop, loss_mask=_mask,
         )
 
         _packed_init = jnp.concatenate(
@@ -243,7 +309,9 @@ def _(
         jax.block_until_ready(_packed)
         _elapsed = time.perf_counter() - _t0
 
-        _final_corners = corners_from_corner_shifts(_init_corners, _packed[:8])
+        # Convert corners back to full-image coordinates
+        _final_corners_crop = corners_from_corner_shifts(_init_corners_crop, _packed[:8])
+        _final_corners_full = _final_corners_crop + jnp.array([_crop_x0, _crop_y0], dtype=jnp.float32)
         _final_cam = vector_to_model_params(_packed[8:16])
 
         _init_mse = float(_step_losses[0]) if len(_step_losses) > 0 else float(
@@ -251,15 +319,17 @@ def _(
         )
         _final_mse = float(_step_losses[-1])
 
-        _corner_deltas = np.asarray(_final_corners) - _init_corners_np
+        _init_np = np.asarray(_init_corners_full)
+        _final_np = np.asarray(_final_corners_full)
+        _corner_deltas = _final_np - _init_np
         _corner_movements = np.sqrt(
             _corner_deltas[:, 0] ** 2 + _corner_deltas[:, 1] ** 2
         )
 
         _results.append({
             "tagId": _tag_id,
-            "initCorners": _init_corners_np,
-            "finalCorners": np.asarray(_final_corners),
+            "initCorners": _init_np,
+            "finalCorners": _final_np,
             "initMse": _init_mse,
             "finalMse": _final_mse,
             "cornerMovements": _corner_movements,
