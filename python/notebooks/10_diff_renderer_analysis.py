@@ -505,7 +505,13 @@ def _(STRIP_TO_CYCLIC_5, frame_selector, frames, go, mo, np, results):
         title=f"Frame {_frame['frameId']} — dashed=init, solid=optimized",
     )
 
-    mo.ui.plotly(_fig, config={"displayModeBar": True})
+    mo.Html(
+        _fig.to_html(
+            config={"scrollZoom": True, "displayModeBar": True},
+            include_plotlyjs="cdn",
+            full_html=False,
+        )
+    )
     return
 
 
