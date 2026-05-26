@@ -144,9 +144,10 @@ def _(frames, mo):
         f"Frame {f['frameId']} ({len(f['tags'])} tags)": i
         for i, f in enumerate(frames)
     }
+    _default_key = next(iter(_options.keys()))
     frame_selector = mo.ui.dropdown(
         options=_options,
-        value=0,
+        value=_default_key,
         label="Select frame to analyze",
         full_width=True,
     )
