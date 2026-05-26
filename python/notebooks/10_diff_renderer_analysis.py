@@ -546,22 +546,50 @@ def _(all_results, export_data, frames, mo, np):
     import cv2
 
     _K = export_data.get("K")
-    _targets = export_data.get("updatedTargets", [])
     _img_size = export_data.get("imageSize")
 
     mo.stop(
-        not _K or not _targets or not _img_size,
-        mo.md("Export missing K/updatedTargets/imageSize — skipping calibration comparison."),
+        not _K or not _img_size,
+        mo.md("Export missing K/imageSize — skipping calibration comparison."),
     )
 
     _w, _h = _img_size["width"], _img_size["height"]
 
-    # Build object-point template from updatedTargets
-    _obj_template = []  # list of (tagId, cornerId, [x, y, z])
-    for _t in _targets:
+    # Learn layout from first frame's init corners (anchor = lowest tagId),
+    # matching the TypeScript learnLayoutFromFrame flow.
+    _first_results = all_results.get(0, [])
+    mo.stop(
+        len(_first_results) < 2,
+        mo.md(f"Need >=2 tags in first frame (have {len(_first_results)})."),
+    )
+
+    _sorted = sorted(_first_results, key=lambda r: r["tagId"])
+    _anchor = _sorted[0]
+    # Compute anchor homography (init corners → unit square)
+    _src_corners = np.array(
+        [[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float64
+    )  # TL, TR, BR, BL
+    _H_anchor, _ = cv2.findHomography(_anchor["initCorners"], _src_corners)
+    _H_inv = np.linalg.inv(_H_anchor)
+
+    # Map each tag's init corners through H_inv to get object-space layout
+    _layout = {}  # tagId → 4×2 object corners (z=0 plane, xy only)
+    for _r in _sorted:
+        _pts = _r["initCorners"]  # N×2
+        _obj = cv2.perspectiveTransform(_pts.reshape(1, 4, 2).astype(np.float64), _H_inv)
+        _layout[_r["tagId"]] = _obj.reshape(4, 2)
+
+    # Zero-mean in xy (matches layoutWithZeroMeanInPlane)
+    _all_xy = np.concatenate(list(_layout.values()), axis=0)
+    _mean = _all_xy.mean(axis=0)
+    for _tid in _layout:
+        _layout[_tid] = _layout[_tid] - _mean
+
+    # Build object-point template from learned layout
+    _obj_template = []
+    for _tid, _obj_corners in sorted(_layout.items()):
         for _ci in range(4):
-            _c = _t["corners"][_ci]
-            _obj_template.append((_t["tagId"], _ci, [_c["x"], _c["y"], _c["z"]]))
+            _obj_template.append((_tid, _ci, [float(_obj_corners[_ci, 0]), float(_obj_corners[_ci, 1]), 0.0]))
 
     # Build per-frame image points for shared tags
     _obj_pts = []
@@ -598,6 +626,15 @@ def _(all_results, export_data, frames, mo, np):
     _n_frames = len(_obj_pts)
     _n_corners = _obj_pts[0].shape[0]
 
+    # iFixedPoint: index of anchor tag's TR corner (= corner 1 in strip order)
+    # within the flat objectPoints[0] array. Must be in [1, n_corners-2].
+    _anchor_tag_id = _anchor["tagId"]
+    _anchor_tr_idx = None
+    for _i, (_tid, _ci, _obj) in enumerate(_obj_template):
+        if _tid == _anchor_tag_id and _ci == 1:
+            _anchor_tr_idx = _i
+            break
+
     _K_mat = np.array(
         [[_K["fx"], 0, _K["cx"]], [0, _K["fy"], _K["cy"]], [0, 0, 1]], dtype=np.float64
     )
@@ -605,19 +642,17 @@ def _(all_results, export_data, frames, mo, np):
         export_data.get("distortion", [0, 0, 0, 0, 0, 0, 0, 0]), dtype=np.float64
     )
 
-    # calibrateCameraRO with iFixedPoint = n_corners: all object points fixed.
-    # Both runs use the same updatedTargets — RMS directly reflects corner quality.
     _flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_ASPECT_RATIO
     _criteria = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 200, 1e-10)
 
     _t0 = cv2.calibrateCameraRO(
-        _obj_pts, _init_img_pts, (_w, _h), _n_corners, _K_mat.copy(), _dist.copy(),
+        _obj_pts, _init_img_pts, (_w, _h), _anchor_tr_idx, _K_mat.copy(), _dist.copy(),
         flags=_flags, criteria=_criteria,
     )
     _rms_init, _K_init, _dist_init, _rvecs_init, _tvecs_init, _ = _t0
 
     _t1 = cv2.calibrateCameraRO(
-        _obj_pts, _ref_img_pts, (_w, _h), _n_corners, _K_mat.copy(), _dist.copy(),
+        _obj_pts, _ref_img_pts, (_w, _h), _anchor_tr_idx, _K_mat.copy(), _dist.copy(),
         flags=_flags, criteria=_criteria,
     )
     _rms_ref, _K_ref, _dist_ref, _rvecs_ref, _tvecs_ref, _ = _t1
