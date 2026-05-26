@@ -28,29 +28,33 @@ def _():
     from render_model import (
         JOINT_PARAM_NAMES,
         TAG_CANONICAL_CORNERS,
-        OptimizeLMConfig,
         RenderModelParams,
         build_tag_pattern,
         camera_with_inferred_levels,
-        compile_lm_run,
         corners_from_corner_shifts,
         homography_from_corners,
         loss_mask_from_corners,
-        make_render_model_residuals,
         model_params_to_vector,
         vector_to_model_params,
     )
+    from render_model.pipeline import SUPERSAMPLE, render_with_model
+
+    CANONICAL = jnp.asarray(TAG_CANONICAL_CORNERS, dtype=jnp.float32)
+
+    # Strip → cyclic index permutation for Plotly polygon outlines.
+    # Strip order:  [TL, TR, BL, BR]  → Cyclic: [TL, TR, BR, BL]
+    STRIP_TO_CYCLIC = [0, 1, 3, 2, 0]
 
     return (
+        CANONICAL,
         JOINT_PARAM_NAMES,
         Image,
-        OptimizeLMConfig,
         Path,
         RenderModelParams,
-        TAG_CANONICAL_CORNERS,
+        STRIP_TO_CYCLIC,
+        SUPERSAMPLE,
         build_tag_pattern,
         camera_with_inferred_levels,
-        compile_lm_run,
         corners_from_corner_shifts,
         go,
         homography_from_corners,
@@ -58,10 +62,10 @@ def _():
         jnp,
         json,
         loss_mask_from_corners,
-        make_render_model_residuals,
         model_params_to_vector,
         np,
         plt,
+        render_with_model,
         time,
         vector_to_model_params,
     )
@@ -158,22 +162,22 @@ def _(frames, mo):
 
 @app.cell
 def _(
-    OptimizeLMConfig,
+    CANONICAL,
     RenderModelParams,
-    TAG_CANONICAL_CORNERS,
+    SUPERSAMPLE,
     build_tag_pattern,
     camera_with_inferred_levels,
-    compile_lm_run,
     corners_from_corner_shifts,
     frame_selector,
     frames,
     homography_from_corners,
+    jax,
     jnp,
     loss_mask_from_corners,
-    make_render_model_residuals,
     model_params_to_vector,
     mo,
     np,
+    render_with_model,
     run_button,
     time,
     vector_to_model_params,
@@ -191,7 +195,7 @@ def _(
 
     # -- compute uniform crop size from max tag extent (corners + moat + margin) --
 
-    _tag_infos = []  # (tag_id, init_corners_np, bbox_x0, y0, x1, y1)
+    _tag_infos = []
     _max_crop_w = 0
     _max_crop_h = 0
 
@@ -200,8 +204,6 @@ def _(
         _init_corners_np = np.array(
             [[c["x"], c["y"]] for c in _corners_raw], dtype=np.float32
         )
-        _init_corners_j = jnp.asarray(_init_corners_np)
-
         # Moat = 1/8 of shortest side (matches loss_mask padding)
         _sides = []
         for _i in range(4):
@@ -219,16 +221,13 @@ def _(
         _tag_infos.append({
             "tagId": _tag["tagId"],
             "initCorners": _init_corners_np,
-            "x0": _x0,
-            "y0": _y0,
-            "x1": _x1,
-            "y1": _y1,
+            "x0": _x0, "y0": _y0, "x1": _x1, "y1": _y1,
         })
 
         _max_crop_w = max(_max_crop_w, _x1 - _x0)
         _max_crop_h = max(_max_crop_h, _y1 - _y0)
 
-    _margin = 6  # extra pixels for safety
+    _margin = 6
     _crop_w = _max_crop_w + _margin
     _crop_h = _max_crop_h + _margin
 
@@ -237,10 +236,12 @@ def _(
         f"(max tag extent + {_margin}px margin, from {_full_w}×{_full_h} full frame)"
     )
 
-    # -- per-tag optimization on cropped regions --
+    # -- single-compiled LM for the uniform crop size --
 
-    _results = []
     _lm_steps = 12
+    _df = jnp.float32(10.0)
+    _lo = jnp.float32(1e-8)
+    _hi = jnp.float32(1e8)
     _seed = RenderModelParams(
         psf_sigma=jnp.float32(1.5),
         sharpen_amount=jnp.float32(1.0),
@@ -252,74 +253,130 @@ def _(
         light_grad_v=jnp.float32(0.0),
     )
 
+    # Generic residual: all tag-specific data is explicit → JIT-compiled once.
+    @jax.jit
+    def _lm_run(packed_init, damping, target, tag_pattern, ref_corners, loss_mask):
+        def _residual(packed):
+            shifts = packed[:8]
+            cam_vec = packed[8:16]
+            _corners = corners_from_corner_shifts(ref_corners, shifts)
+            _H = homography_from_corners(CANONICAL, _corners)
+            rendered = render_with_model(
+                _H, tag_pattern, _crop_h, _crop_w,
+                vector_to_model_params(cam_vec),
+                supersample=SUPERSAMPLE,
+            )
+            diff = rendered - target
+            w = jnp.sqrt(loss_mask / jnp.maximum(jnp.sum(loss_mask), 1.0))
+            return (diff * w).ravel()
+
+        def _step(carry, _step_idx):
+            p, lam = carry
+            r = _residual(p)
+            J = jax.jacfwd(_residual)(p)
+            hess = J.T @ J + lam * jnp.eye(16, dtype=p.dtype)
+            delta = jnp.linalg.solve(hess, -(J.T @ r))
+            p_try = p + delta
+            loss = jnp.sum(r * r)
+            loss_try = jnp.sum(_residual(p_try) ** 2)
+            accept = loss_try < loss
+            p = jnp.where(accept, p_try, p)
+            lam = jnp.clip(jnp.where(accept, lam / _df, lam * _df), _lo, _hi)
+            return (p, lam), (jnp.where(accept, loss_try, loss), p)
+
+        steps = jnp.arange(_lm_steps, dtype=jnp.int32)
+        (packed, _), (losses, hist) = jax.lax.scan(
+            _step, (packed_init, damping), steps,
+        )
+        return packed, losses, hist
+
+    # Warm-up: compile once with the first tag's data
+    _first = _tag_infos[0]
+    _t0 = time.perf_counter()
+    _init_c = jnp.asarray(_first["initCorners"])
+    _x0, _y0 = _first["x0"], _first["y0"]
+    _off_x = (_crop_w - (_first["x1"] - _x0)) // 2
+    _off_y = (_crop_h - (_first["y1"] - _y0)) // 2
+    _crop_x0_warm = max(0, _x0 - _off_x)
+    _crop_y0_warm = max(0, _y0 - _off_y)
+    _crop_warm = np.pad(
+        _img[_crop_y0_warm:_crop_y0_warm + _crop_h, _crop_x0_warm:_crop_x0_warm + _crop_w],
+        ((0, max(0, _crop_h - (min(_full_h, _crop_y0_warm + _crop_h) - _crop_y0_warm))),
+         (0, max(0, _crop_w - (min(_full_w, _crop_x0_warm + _crop_w) - _crop_x0_warm)))),
+        mode='constant',
+    )
+    _ch_warm, _cw_warm = _crop_warm.shape
+    _target_warm = jnp.asarray(_crop_warm, dtype=jnp.float32)
+    _corners_crop_warm = _init_c - jnp.array([_crop_x0_warm, _crop_y0_warm], dtype=jnp.float32)
+    _H_warm = homography_from_corners(CANONICAL, _corners_crop_warm)
+    _pat_warm = build_tag_pattern(_first["tagId"])
+    _mask_warm = loss_mask_from_corners(_corners_crop_warm, _ch_warm, _cw_warm)
+    _cam_warm = camera_with_inferred_levels(
+        _seed, _target_warm, _H_warm, _pat_warm, _ch_warm, _cw_warm, loss_mask=_mask_warm,
+    )
+    _packed_warm = jnp.concatenate(
+        [jnp.zeros(8, dtype=jnp.float32), model_params_to_vector(_cam_warm)]
+    )
+    _damping_warm = jnp.float32(1e-2)
+    _ = _lm_run(_packed_warm, _damping_warm, _target_warm, _pat_warm, _corners_crop_warm, _mask_warm)
+    jax.block_until_ready(_)
+    _compile_s = time.perf_counter() - _t0
+    mo.md(f"LM compiled in **{_compile_s:.1f}s** (warm-up with first tag)")
+
+    # -- run LM for every tag using the same compiled function --
+
+    _results = []
+    _total_s = 0.0
+
     for _info in _tag_infos:
         _tag_id = _info["tagId"]
-        _init_corners_full = jnp.asarray(_info["initCorners"])
+        _init_c = jnp.asarray(_info["initCorners"])
         _x0, _y0 = _info["x0"], _info["y0"]
         _x1, _y1 = _info["x1"], _info["y1"]
 
-        # Center crop within the uniform-size window
-        _tag_w = _x1 - _x0
-        _tag_h = _y1 - _y0
-        _off_x = (_crop_w - _tag_w) // 2
-        _off_y = (_crop_h - _tag_h) // 2
-        _crop_x0 = _x0 - _off_x
-        _crop_y0 = _y0 - _off_y
+        _off_x = (_crop_w - (_x1 - _x0)) // 2
+        _off_y = (_crop_h - (_y1 - _y0)) // 2
+        _crop_x0 = max(0, _x0 - _off_x)
+        _crop_y0 = max(0, _y0 - _off_y)
 
-        # Clamp crop to image bounds
-        _crop_x0 = max(0, _crop_x0)
-        _crop_y0 = max(0, _crop_y0)
-        _crop_x1 = min(_full_w, _crop_x0 + _crop_w)
-        _crop_y1 = min(_full_h, _crop_y0 + _crop_h)
+        # Extract exact-size crop, padding at image edges if needed
+        _raw = _img[_crop_y0:_crop_y0 + _crop_h, _crop_x0:_crop_x0 + _crop_w]
+        _pad_bottom = _crop_h - _raw.shape[0]
+        _pad_right = _crop_w - _raw.shape[1]
+        if _pad_bottom > 0 or _pad_right > 0:
+            _raw = np.pad(_raw, ((0, _pad_bottom), (0, _pad_right)), mode='constant')
+        _target = jnp.asarray(_raw, dtype=jnp.float32)
 
-        # Extract crop and build target
-        _crop = _img[_crop_y0:_crop_y1, _crop_x0:_crop_x1]
-        _ch = _crop.shape[0]
-        _cw = _crop.shape[1]
-        _target = jnp.asarray(_crop, dtype=jnp.float32)
-
-        # Adjust corners to crop coordinates
-        _init_corners_crop = _init_corners_full - jnp.array([_crop_x0, _crop_y0], dtype=jnp.float32)
-
+        _corners_crop = _init_c - jnp.array([_crop_x0, _crop_y0], dtype=jnp.float32)
         _pattern = build_tag_pattern(_tag_id)
-        _H_init = homography_from_corners(
-            jnp.asarray(TAG_CANONICAL_CORNERS, dtype=jnp.float32),
-            _init_corners_crop,
-        )
-        _mask = loss_mask_from_corners(_init_corners_crop, _ch, _cw)
-
+        _H_init = homography_from_corners(CANONICAL, _corners_crop)
+        _mask = loss_mask_from_corners(_corners_crop, _crop_h, _crop_w)
         _cam_init = camera_with_inferred_levels(
-            _seed, _target, _H_init, _pattern, _ch, _cw, loss_mask=_mask,
+            _seed, _target, _H_init, _pattern, _crop_h, _crop_w, loss_mask=_mask,
         )
-
-        _config = OptimizeLMConfig(n_steps=_lm_steps, loss_mask=_mask)
-        _residual_fn = make_render_model_residuals(
-            _target, _pattern, _ch, _cw,
-            ref_corners=_init_corners_crop, loss_mask=_mask,
-        )
-
         _packed_init = jnp.concatenate(
             [jnp.zeros(8, dtype=jnp.float32), model_params_to_vector(_cam_init)]
         )
+        _damping = jnp.float32(1e-2)
 
-        _lm_run = compile_lm_run(_residual_fn, _config)
-        _damping = jnp.asarray(_config.initial_damping, dtype=jnp.float32)
         _t0 = time.perf_counter()
-        _packed, _step_losses, _param_hist = _lm_run(_packed_init, _damping)
+        _packed, _step_losses, _hist = _lm_run(
+            _packed_init, _damping, _target, _pattern, _corners_crop, _mask,
+        )
         jax.block_until_ready(_packed)
         _elapsed = time.perf_counter() - _t0
+        _total_s += _elapsed
 
-        # Convert corners back to full-image coordinates
-        _final_corners_crop = corners_from_corner_shifts(_init_corners_crop, _packed[:8])
-        _final_corners_full = _final_corners_crop + jnp.array([_crop_x0, _crop_y0], dtype=jnp.float32)
+        _final_corners_crop = corners_from_corner_shifts(_corners_crop, _packed[:8])
+        _final_corners_full = _final_corners_crop + jnp.array(
+            [_crop_x0, _crop_y0], dtype=jnp.float32
+        )
         _final_cam = vector_to_model_params(_packed[8:16])
 
-        _init_mse = float(_step_losses[0]) if len(_step_losses) > 0 else float(
-            jnp.sum(_residual_fn(_packed_init) ** 2)
-        )
+        _init_mse = float(_step_losses[0])
         _final_mse = float(_step_losses[-1])
 
-        _init_np = np.asarray(_init_corners_full)
+        _init_np = np.asarray(_init_c)
         _final_np = np.asarray(_final_corners_full)
         _corner_deltas = _final_np - _init_np
         _corner_movements = np.sqrt(
@@ -343,14 +400,14 @@ def _(
 
     mo.md(
         f"Optimized **{len(results)}** tags "
-        f"({_lm_steps} LM steps each). "
-        f"Total time: {sum(r['elapsed'] for r in results):.1f}s"
+        f"(compile {_compile_s:.1f}s, run {_total_s:.1f}s, "
+        f"{_lm_steps} LM steps each)."
     )
     return results
 
 
 @app.cell
-def _(frame_selector, frames, go, mo, np, results):
+def _(STRIP_TO_CYCLIC, frame_selector, frames, go, mo, np, results):
     mo.stop(not results, mo.md("Run optimization first."))
 
     _frame = frames[frame_selector.value]
@@ -378,13 +435,15 @@ def _(frame_selector, frames, go, mo, np, results):
     for _ri, _r in enumerate(results):
         _color = _colors[_ri % len(_colors)]
 
-        _ic = _r["initCorners"]
-        _fc = _r["finalCorners"]
+        # Corners are in strip order (TL, TR, BL, BR).
+        # Reorder to cyclic (TL, TR, BR, BL) for closed polygon outlines.
+        _ic = _r["initCorners"][STRIP_TO_CYCLIC]
+        _fc = _r["finalCorners"][STRIP_TO_CYCLIC]
 
         _fig.add_trace(
             go.Scatter(
-                x=list(_ic[:, 0]) + [_ic[0, 0]],
-                y=list(_ic[:, 1]) + [_ic[0, 1]],
+                x=list(_ic[:, 0]),
+                y=list(_ic[:, 1]),
                 mode="lines",
                 line=dict(color=_color, dash="dash", width=1.5),
                 name=f"Tag {_r['tagId']} init",
@@ -396,8 +455,8 @@ def _(frame_selector, frames, go, mo, np, results):
 
         _fig.add_trace(
             go.Scatter(
-                x=list(_fc[:, 0]) + [_fc[0, 0]],
-                y=list(_fc[:, 1]) + [_fc[0, 1]],
+                x=list(_fc[:, 0]),
+                y=list(_fc[:, 1]),
                 mode="lines",
                 line=dict(color=_color, dash="solid", width=2),
                 name=f"Tag {_r['tagId']} opt",
