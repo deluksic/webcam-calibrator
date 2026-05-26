@@ -609,16 +609,17 @@ def _(all_results, export_data, frames, mo, np):
     # independently. The fair comparison: can refined corners achieve lower RMS
     # when the solver is free to adjust K, distortion, R|t, and object points?
     _flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_ASPECT_RATIO
+    _criteria = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 200, 1e-10)
 
     _t0 = cv2.calibrateCameraRO(
         _obj_pts, _init_img_pts, (_w, _h), 0, _K_mat.copy(), _dist.copy(),
-        flags=_flags,
+        flags=_flags, criteria=_criteria,
     )
     _rms_init, _K_init, _dist_init, _rvecs_init, _tvecs_init, _ = _t0
 
     _t1 = cv2.calibrateCameraRO(
         _obj_pts, _ref_img_pts, (_w, _h), 0, _K_mat.copy(), _dist.copy(),
-        flags=_flags,
+        flags=_flags, criteria=_criteria,
     )
     _rms_ref, _K_ref, _dist_ref, _rvecs_ref, _tvecs_ref, _ = _t1
 
@@ -639,17 +640,6 @@ def _(all_results, export_data, frames, mo, np):
             float(np.sqrt(np.mean((_pr.reshape(-1, 2) - _ref_img_pts[_vi]) ** 2)))
         )
 
-    mo.md(
-        f"## calibrateCameraRO ({_n_frames} frames, {_n_corners} corners)\n\n"
-        f"| | Init | Refined | Δ |\n"
-        f"|---|---|---|---|\n"
-        f"| **RMS (px)** | {_rms_init:.4f} | {_rms_ref:.4f} | {_rms_init - _rms_ref:+.4f} |\n"
-        f"| **fx** | {_K_init[0,0]:.2f} | {_K_ref[0,0]:.2f} | {_K_init[0,0] - _K_ref[0,0]:+.2f} |\n"
-        f"| **fy** | {_K_init[1,1]:.2f} | {_K_ref[1,1]:.2f} | {_K_init[1,1] - _K_ref[1,1]:+.2f} |\n"
-        f"| **cx** | {_K_init[0,2]:.2f} | {_K_ref[0,2]:.2f} | {_K_init[0,2] - _K_ref[0,2]:+.2f} |\n"
-        f"| **cy** | {_K_init[1,2]:.2f} | {_K_ref[1,2]:.2f} | {_K_init[1,2] - _K_ref[1,2]:+.2f} |\n"
-    )
-
     _per_view_rows = []
     for _vi in range(_n_frames):
         _per_view_rows.append({
@@ -659,16 +649,6 @@ def _(all_results, export_data, frames, mo, np):
             "Δ": f"{_per_view_init[_vi] - _per_view_ref[_vi]:+.4f}",
         })
 
-    mo.md("### Per-frame RMS")
-    mo.ui.table(_per_view_rows, selection=None, page_size=20)
-
-    # Compare with original export calibration RMS
-    mo.md(
-        f"Export calibration overall RMS: **{export_data.get('rmsPx', '?')}** px  "
-        f"(for reference — may differ due to frame/tag subset)"
-    )
-
-    # Per-corner reprojection error breakdown for the refined calibration
     _corner_errs = {0: [], 1: [], 2: [], 3: []}
     for _vi in range(_n_frames):
         _proj, _ = cv2.projectPoints(
@@ -680,8 +660,6 @@ def _(all_results, export_data, frames, mo, np):
             _corner_errs[_ci % 4].append(
                 float(np.sqrt(np.sum((_proj[_ci] - _img[_ci]) ** 2)))
             )
-
-    mo.md("### Refined per-corner-index RMS")
     _corner_names = ["TL", "TR", "BR", "BL"]
     _corner_rows = []
     for _ci in range(4):
@@ -693,7 +671,27 @@ def _(all_results, export_data, frames, mo, np):
             "Max (px)": f"{np.max(_errs):.4f}",
             "Count": len(_errs),
         })
-    mo.ui.table(_corner_rows, selection=None, page_size=10)
+
+    mo.vstack([
+        mo.md(
+            f"## calibrateCameraRO ({_n_frames} frames, {_n_corners} corners)\n\n"
+            f"| | Init | Refined | Δ |\n"
+            f"|---|---|---|---|\n"
+            f"| **RMS (px)** | {_rms_init:.4f} | {_rms_ref:.4f} | {_rms_init - _rms_ref:+.4f} |\n"
+            f"| **fx** | {_K_init[0,0]:.2f} | {_K_ref[0,0]:.2f} | {_K_init[0,0] - _K_ref[0,0]:+.2f} |\n"
+            f"| **fy** | {_K_init[1,1]:.2f} | {_K_ref[1,1]:.2f} | {_K_init[1,1] - _K_ref[1,1]:+.2f} |\n"
+            f"| **cx** | {_K_init[0,2]:.2f} | {_K_ref[0,2]:.2f} | {_K_init[0,2] - _K_ref[0,2]:+.2f} |\n"
+            f"| **cy** | {_K_init[1,2]:.2f} | {_K_ref[1,2]:.2f} | {_K_init[1,2] - _K_ref[1,2]:+.2f} |\n"
+        ),
+        mo.md("### Per-frame RMS"),
+        mo.ui.table(_per_view_rows, selection=None, page_size=20),
+        mo.md(
+            f"Export calibration overall RMS: **{export_data.get('rmsPx', '?')}** px  "
+            f"(for reference — may differ due to frame/tag subset)"
+        ),
+        mo.md("### Refined per-corner-index RMS"),
+        mo.ui.table(_corner_rows, selection=None, page_size=10),
+    ])
 
 
 @app.cell
