@@ -501,11 +501,11 @@ def _(STRIP_TO_CYCLIC_5, frame_selector, frames, go, mo, np, results):
         ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         margin=dict(l=40, r=20, t=60, b=40),
-        height=700,
+        height=min(900, max(700, _h)),
         title=f"Frame {_frame['frameId']} — dashed=init, solid=optimized",
     )
 
-    mo.ui.plotly(_fig, config={"scrollZoom": True, "displayModeBar": True})
+    mo.ui.plotly(_fig, config={"displayModeBar": True})
     return
 
 
