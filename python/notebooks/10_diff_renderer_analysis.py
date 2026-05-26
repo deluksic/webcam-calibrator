@@ -663,11 +663,91 @@ def _(all_results, export_data, frames, mo, np):
     mo.ui.table(_per_view_rows, selection=None, page_size=20)
 
     # Compare with original export calibration RMS
-    _export_rms = export_data.get("perFrameRmsPx", [])
     mo.md(
         f"Export calibration overall RMS: **{export_data.get('rmsPx', '?')}** px  "
         f"(for reference — may differ due to frame/tag subset)"
     )
+
+    # Per-corner reprojection error breakdown for the refined calibration
+    _corner_errs = {0: [], 1: [], 2: [], 3: []}
+    for _vi in range(_n_frames):
+        _proj, _ = cv2.projectPoints(
+            _obj_pts[_vi], _rvecs_ref[_vi], _tvecs_ref[_vi], _K_ref, _dist_ref,
+        )
+        _proj = _proj.reshape(-1, 2)
+        _img = _ref_img_pts[_vi]
+        for _ci in range(_n_corners):
+            _corner_errs[_ci % 4].append(
+                float(np.sqrt(np.sum((_proj[_ci] - _img[_ci]) ** 2)))
+            )
+
+    mo.md("### Refined per-corner-index RMS")
+    _corner_names = ["TL", "TR", "BR", "BL"]
+    _corner_rows = []
+    for _ci in range(4):
+        _errs = np.array(_corner_errs[_ci])
+        _corner_rows.append({
+            "Corner": _corner_names[_ci],
+            "Mean (px)": f"{np.mean(_errs):.4f}",
+            "Median (px)": f"{np.median(_errs):.4f}",
+            "Max (px)": f"{np.max(_errs):.4f}",
+            "Count": len(_errs),
+        })
+    mo.ui.table(_corner_rows, selection=None, page_size=10)
+
+
+@app.cell
+def _(all_results, frame_selector, frames, go, mo, np):
+    """Quiver plot: direction and magnitude of LM corner movement (first frame)."""
+    mo.stop(not all_results, mo.md("Run optimization first."))
+
+    _fi = frame_selector.value
+    _results = all_results.get(_fi, [])
+    if not _results:
+        mo.md("No results for selected frame.")
+        return
+
+    _frame = frames[_fi]
+    _img = _frame["image"]
+    _h, _w = _img.shape
+
+    _fig = go.Figure()
+    _fig.add_trace(
+        go.Heatmap(
+            z=_img, x0=0.5, dx=1.0, y0=0.5, dy=1.0,
+            colorscale="gray", showscale=False, zmin=0.0, zmax=1.0,
+        )
+    )
+
+    for _r in _results:
+        _ic = _r["initCorners"]
+        _fc = _r["finalCorners"]
+        for _ci in range(4):
+            _fig.add_trace(
+                go.Scatter(
+                    x=[_ic[_ci, 0], _fc[_ci, 0]],
+                    y=[_ic[_ci, 1], _fc[_ci, 1]],
+                    mode="lines+markers",
+                    line=dict(color="red", width=1),
+                    marker=dict(size=4, color=["red", "cyan"]),
+                    showlegend=False,
+                    hovertext=f"Tag {_r['tagId']} corner {_ci}: "
+                              f"{np.linalg.norm(_fc[_ci] - _ic[_ci]):.2f} px",
+                    hoverinfo="text",
+                )
+            )
+
+    _fig.update_layout(
+        dragmode="pan",
+        xaxis=dict(range=[0, _w], constrain="domain", showgrid=False, zeroline=False),
+        yaxis=dict(range=[_h, 0], constrain="domain", scaleanchor="x", scaleratio=1,
+                   showgrid=False, zeroline=False),
+        showlegend=False,
+        height=min(900, max(700, _h)),
+        title=f"Frame {_frame['frameId']} — corner movement direction (red→cyan)",
+    )
+    mo.ui.plotly(_fig, config={"scrollZoom": True, "displayModeBar": True})
+    return
 
 
 @app.cell
