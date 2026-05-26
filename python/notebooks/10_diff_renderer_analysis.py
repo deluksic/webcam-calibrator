@@ -605,9 +605,10 @@ def _(all_results, export_data, frames, mo, np):
         export_data.get("distortion", [0, 0, 0, 0, 0, 0, 0, 0]), dtype=np.float64
     )
 
-    # Fix K and distortion — only optimize R|t and object points.
-    # This isolates corner quality: strictly better corners → strictly lower RMS.
-    _flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_INTRINSIC
+    # Both calibrations start from the same K/distortion guess and optimize
+    # independently. The fair comparison: can refined corners achieve lower RMS
+    # when the solver is free to adjust K, distortion, R|t, and object points?
+    _flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_ASPECT_RATIO
 
     _t0 = cv2.calibrateCameraRO(
         _obj_pts, _init_img_pts, (_w, _h), 0, _K_mat.copy(), _dist.copy(),
@@ -639,10 +640,14 @@ def _(all_results, export_data, frames, mo, np):
         )
 
     mo.md(
-        f"## calibrateCameraRO ({_n_frames} frames, {_n_corners} corners, K fixed)\n\n"
+        f"## calibrateCameraRO ({_n_frames} frames, {_n_corners} corners)\n\n"
         f"| | Init | Refined | Δ |\n"
         f"|---|---|---|---|\n"
         f"| **RMS (px)** | {_rms_init:.4f} | {_rms_ref:.4f} | {_rms_init - _rms_ref:+.4f} |\n"
+        f"| **fx** | {_K_init[0,0]:.2f} | {_K_ref[0,0]:.2f} | {_K_init[0,0] - _K_ref[0,0]:+.2f} |\n"
+        f"| **fy** | {_K_init[1,1]:.2f} | {_K_ref[1,1]:.2f} | {_K_init[1,1] - _K_ref[1,1]:+.2f} |\n"
+        f"| **cx** | {_K_init[0,2]:.2f} | {_K_ref[0,2]:.2f} | {_K_init[0,2] - _K_ref[0,2]:+.2f} |\n"
+        f"| **cy** | {_K_init[1,2]:.2f} | {_K_ref[1,2]:.2f} | {_K_init[1,2] - _K_ref[1,2]:+.2f} |\n"
     )
 
     _per_view_rows = []
