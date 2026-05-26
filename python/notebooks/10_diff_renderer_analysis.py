@@ -555,7 +555,6 @@ def _(all_results, export_data, frames, mo, np):
     )
 
     _w, _h = _img_size["width"], _img_size["height"]
-    _fx, _fy, _cx, _cy = _K["fx"], _K["fy"], _K["cx"], _K["cy"]
 
     # Build object-point template from updatedTargets
     _obj_template = []  # list of (tagId, cornerId, [x, y, z])
@@ -564,10 +563,10 @@ def _(all_results, export_data, frames, mo, np):
             _c = _t["corners"][_ci]
             _obj_template.append((_t["tagId"], _ci, [_c["x"], _c["y"], _c["z"]]))
 
-    # Build per-frame image points (init and refined) for shared tags
-    _obj_pts = []       # N_frames × N_corners × 3
-    _init_img_pts = []  # N_frames × N_corners × 2
-    _ref_img_pts = []   # N_frames × N_corners × 2
+    # Build per-frame image points for shared tags
+    _obj_pts = []
+    _init_img_pts = []
+    _ref_img_pts = []
     _frame_ids = []
 
     for _fi, _frame in enumerate(frames):
@@ -575,9 +574,7 @@ def _(all_results, export_data, frames, mo, np):
         if not _fr:
             continue
         _res_by_tag = {r["tagId"]: r for r in _fr}
-        _oi = []
-        _ii = []
-        _ri = []
+        _oi, _ii, _ri = [], [], []
         for _tid, _ci, _obj in _obj_template:
             _r = _res_by_tag.get(_tid)
             if _r is None:
@@ -601,10 +598,16 @@ def _(all_results, export_data, frames, mo, np):
     _n_frames = len(_obj_pts)
     _n_corners = _obj_pts[0].shape[0]
 
-    _K_mat = np.array([[_fx, 0, _cx], [0, _fy, _cy], [0, 0, 1]], dtype=np.float64)
-    _dist = np.array(export_data.get("distortion", [0, 0, 0, 0, 0, 0, 0, 0]), dtype=np.float64)
+    _K_mat = np.array(
+        [[_K["fx"], 0, _K["cx"]], [0, _K["fy"], _K["cy"]], [0, 0, 1]], dtype=np.float64
+    )
+    _dist = np.array(
+        export_data.get("distortion", [0, 0, 0, 0, 0, 0, 0, 0]), dtype=np.float64
+    )
 
-    _flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_ASPECT_RATIO
+    # Fix K and distortion — only optimize R|t and object points.
+    # This isolates corner quality: strictly better corners → strictly lower RMS.
+    _flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_INTRINSIC
 
     _t0 = cv2.calibrateCameraRO(
         _obj_pts, _init_img_pts, (_w, _h), 0, _K_mat.copy(), _dist.copy(),
@@ -618,38 +621,30 @@ def _(all_results, export_data, frames, mo, np):
     )
     _rms_ref, _K_ref, _dist_ref, _rvecs_ref, _tvecs_ref, _ = _t1
 
-    # Compute per-view reprojection errors manually
+    # Per-view reprojection errors
     _per_view_init = []
-    for _vi in range(_n_frames):
-        _proj, _ = cv2.projectPoints(
-            _obj_pts[_vi], _rvecs_init[_vi], _tvecs_init[_vi],
-            _K_init, _dist_init,
-        )
-        _per_view_init.append(
-            float(np.sqrt(np.mean((_proj.reshape(-1, 2) - _init_img_pts[_vi]) ** 2)))
-        )
     _per_view_ref = []
     for _vi in range(_n_frames):
-        _proj, _ = cv2.projectPoints(
-            _obj_pts[_vi], _rvecs_ref[_vi], _tvecs_ref[_vi],
-            _K_ref, _dist_ref,
+        _pi, _ = cv2.projectPoints(
+            _obj_pts[_vi], _rvecs_init[_vi], _tvecs_init[_vi], _K_init, _dist_init,
+        )
+        _pr, _ = cv2.projectPoints(
+            _obj_pts[_vi], _rvecs_ref[_vi], _tvecs_ref[_vi], _K_ref, _dist_ref,
+        )
+        _per_view_init.append(
+            float(np.sqrt(np.mean((_pi.reshape(-1, 2) - _init_img_pts[_vi]) ** 2)))
         )
         _per_view_ref.append(
-            float(np.sqrt(np.mean((_proj.reshape(-1, 2) - _ref_img_pts[_vi]) ** 2)))
+            float(np.sqrt(np.mean((_pr.reshape(-1, 2) - _ref_img_pts[_vi]) ** 2)))
         )
 
     mo.md(
-        f"## calibrateCameraRO comparison ({_n_frames} frames, {_n_corners} corners each)\n\n"
+        f"## calibrateCameraRO ({_n_frames} frames, {_n_corners} corners, K fixed)\n\n"
         f"| | Init | Refined | Δ |\n"
         f"|---|---|---|---|\n"
         f"| **RMS (px)** | {_rms_init:.4f} | {_rms_ref:.4f} | {_rms_init - _rms_ref:+.4f} |\n"
-        f"| **fx** | {_K_init[0,0]:.2f} | {_K_ref[0,0]:.2f} | {_K_init[0,0] - _K_ref[0,0]:+.2f} |\n"
-        f"| **fy** | {_K_init[1,1]:.2f} | {_K_ref[1,1]:.2f} | {_K_init[1,1] - _K_ref[1,1]:+.2f} |\n"
-        f"| **cx** | {_K_init[0,2]:.2f} | {_K_ref[0,2]:.2f} | {_K_init[0,2] - _K_ref[0,2]:+.2f} |\n"
-        f"| **cy** | {_K_init[1,2]:.2f} | {_K_ref[1,2]:.2f} | {_K_init[1,2] - _K_ref[1,2]:+.2f} |\n"
     )
 
-    # Per-frame RMS comparison table
     _per_view_rows = []
     for _vi in range(_n_frames):
         _per_view_rows.append({
@@ -661,7 +656,13 @@ def _(all_results, export_data, frames, mo, np):
 
     mo.md("### Per-frame RMS")
     mo.ui.table(_per_view_rows, selection=None, page_size=20)
-    return
+
+    # Compare with original export calibration RMS
+    _export_rms = export_data.get("perFrameRmsPx", [])
+    mo.md(
+        f"Export calibration overall RMS: **{export_data.get('rmsPx', '?')}** px  "
+        f"(for reference — may differ due to frame/tag subset)"
+    )
 
 
 @app.cell
