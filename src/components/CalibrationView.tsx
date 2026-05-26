@@ -35,6 +35,8 @@ function CalibrationView() {
   }>()
   const [currentTagged, setCurrentTagged] = createSignal<DetectedQuad[]>([])
 
+  let requestGraySnapshot: ((callback: (grayData: Float32Array) => void) => void) | null = null
+
   const calibratedExtrinsics = createMemo(() => {
     const c = runCtx.calib()
     if (!c || c.kind !== 'ok') {
@@ -67,7 +69,11 @@ function CalibrationView() {
     return refined
   })
 
-  const attemptAddPooledFrame = (tagged: DetectedQuad[], source: 'manual' | 'autoFirst'): boolean => {
+  const attemptAddPooledFrame = (
+    tagged: DetectedQuad[],
+    source: 'manual' | 'autoFirst',
+    grayInfo?: { data: Float32Array; width: number; height: number },
+  ): boolean => {
     const r = runCtx.run()
     if (r.collection !== 'running') {
       if (source === 'manual') {
@@ -160,7 +166,7 @@ function CalibrationView() {
     runCtx.setRun((prev) => {
       const { next, evicted } = mergeCalibrationFramesTopK(
         prev.framePool,
-        [{ frameId: Date.now(), tags: frameTagsModel }],
+        [{ frameId: Date.now(), tags: frameTagsModel, grayData: grayInfo?.data, imageWidth: grayInfo?.width, imageHeight: grayInfo?.height }],
         DEFAULT_CALIBRATION_TOP_K,
       )
       return {
@@ -177,7 +183,10 @@ function CalibrationView() {
     return true
   }
 
-  const onQuadDetection = (quads: DetectedQuad[]) => {
+  const onQuadDetection = (
+    quads: DetectedQuad[],
+    meta?: { frameId: number; grayData?: Float32Array },
+  ) => {
     runCtx.noteCustomTagsFromDetection(quads)
     runCtx.setRun((r) => ({
       ...r,
@@ -187,12 +196,30 @@ function CalibrationView() {
 
     const rNow = runCtx.run()
     if (rNow.collection === 'running' && rNow.framePool.length < 1) {
-      attemptAddPooledFrame(quads, 'autoFirst')
+      const gray = meta?.grayData
+      const frameSize = runCtx.videoFrameSize()
+      attemptAddPooledFrame(
+        quads,
+        'autoFirst',
+        gray && gray.length > 0 && frameSize
+          ? { data: gray, width: frameSize.width, height: frameSize.height }
+          : undefined,
+      )
     }
   }
 
   const handleSnapshotClick = () => {
-    attemptAddPooledFrame(currentTagged(), 'manual')
+    if (requestGraySnapshot) {
+      requestGraySnapshot((grayData) => {
+        attemptAddPooledFrame(currentTagged(), 'manual', {
+          data: grayData,
+          width: runCtx.videoFrameSize()?.width ?? 0,
+          height: runCtx.videoFrameSize()?.height ?? 0,
+        })
+      })
+    } else {
+      attemptAddPooledFrame(currentTagged(), 'manual')
+    }
   }
 
   /** Same notion as first snapshot: need two distinct decoded IDs to learn layout (not "?"). */
@@ -403,6 +430,9 @@ function CalibrationView() {
             onReprojectionFrame={(m) => setReproj(m)}
             onFrameSize={runCtx.setVideoFrameSize}
             onQuadSnapshotRequest={handleSnapshotClick}
+            setRequestGraySnapshot={(fn) => {
+              requestGraySnapshot = fn
+            }}
           />
         </div>
       </Errored>

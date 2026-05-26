@@ -127,35 +127,44 @@ export function hostQuadsToDetected(
 /**
  * Read GPU tag results after compute+decode+pack.
  * Reads {@link HostQuadReadback} (no homography mat3x3f) — not `quadCornersBuffer`.
+ * When `readGray` is true, also reads the gray buffer from the same GPU submission
+ * to guarantee no frame drift between corner data and pixel values.
  */
 export async function readGpuDetection(
   root: TgpuRoot,
   pipeline: CameraPipeline,
-): Promise<{ quads: DetectedQuad[]; quadCount: number }> {
+  readGray?: boolean,
+): Promise<{ quads: DetectedQuad[]; quadCount: number; grayData: Float32Array }> {
   // All reads fire in one Promise.all — every copy command is submitted to the GPU
   // queue before any of them resolve. This avoids a two-phase race where quadCount
   // and quad data came from different frames.
   const maxPattern = MAX_DETECTED_TAGS * MODULES_PER_QUAD
 
-  const [quadCountRaw, allHostQuads, patternRaw, sourceLabelIds] = await Promise.all([
+  const grayPromise = readGray ? pipeline.gray.buffer.read() : Promise.resolve([] as number[])
+
+  const [quadCountRaw, allHostQuads, patternRaw, sourceLabelIds, grayRaw] = await Promise.all([
     pipeline.edgeHistogram.quadCount.read(),
     pipeline.hostQuadReadback.hostQuadReadbackBuffer.read(),
     readU32Prefix(root.device, pipeline.tagDecode.patternBuf.buffer, maxPattern),
     readU32Prefix(root.device, pipeline.edgeHistogram.quadSourceLabelId.buffer, MAX_DETECTED_TAGS),
+    grayPromise,
   ])
 
   const quadCount = Array.isArray(quadCountRaw) ? (quadCountRaw[0] ?? 0) : Number(quadCountRaw)
   const n = Math.min(quadCount, MAX_DETECTED_TAGS)
 
   if (n <= 0) {
-    return { quads: [], quadCount: 0 }
+    return { quads: [], quadCount: 0, grayData: new Float32Array(0) }
   }
 
   const hostQuads = (Array.isArray(allHostQuads) ? allHostQuads : []).slice(0, n)
   const patternFlat = patternRaw.slice(0, n * MODULES_PER_QUAD).map((v) => Number(v))
 
+  const grayData = Array.isArray(grayRaw) ? new Float32Array(grayRaw) : new Float32Array(0)
+
   return {
     quads: hostQuadsToDetected(hostQuads, n, sourceLabelIds.slice(0, n), patternFlat),
     quadCount,
+    grayData,
   }
 }

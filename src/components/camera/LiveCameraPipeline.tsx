@@ -42,13 +42,15 @@ export type LiveCameraPipelineProps = {
   showHistogramCanvas: boolean
   stream: MediaStream | undefined
   onLog: (msg: string) => void
-  onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number }) => void
+  onQuadDetection?: (quads: DetectedQuad[], meta: { frameId: number; grayData?: Float32Array }) => void
   /** When set, feed GPU reprojection overlay and report live metrics. */
   liveCalibration: LiveCalibrationPayload | undefined | (() => LiveCalibrationPayload | undefined)
   onReprojectionFrame?: (m: { rms: number; tagCount: number; tiltDeg: number; dist: number } | undefined) => void
   onFrameSize?: (size: { width: number; height: number }) => void
   /** Called when snapshot button is pressed - passes current tagged quads. */
   onQuadSnapshotRequest?: () => void
+  /** Registers a function to capture the next frame's gray buffer alongside detection. */
+  setRequestGraySnapshot?: (fn: (callback: (grayData: Float32Array) => void) => void) => void
   /** Extra controls (camera select, mode buttons, …). */
   toolbar?: JSX.Element
   /** Advisory 75%×75% framing guide over the **displayed** canvas (same box as tag overlays). */
@@ -194,6 +196,15 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
 
     let lastAppliedDetectionFrameId = -1
 
+    let captureGrayOnNextDetection = false
+    let onGraySnapshotCallback: ((grayData: Float32Array) => void) | null = null
+
+    const requestGraySnapshot = (callback: (grayData: Float32Array) => void) => {
+      captureGrayOnNextDetection = true
+      onGraySnapshotCallback = callback
+    }
+    props.setRequestGraySnapshot?.(requestGraySnapshot)
+
     const scheduleQuadDetection = (slot: FrameSlot, sf: boolean) => {
       const gNow = gpu()
       if (!gNow) {
@@ -201,7 +212,10 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
         return
       }
 
-      void detectForSlot(gNow, pip, slot)
+      const readGray = captureGrayOnNextDetection
+      captureGrayOnNextDetection = false
+
+      void detectForSlot(gNow, pip, slot, readGray)
         .then((result) => {
           if (disposed) {
             return
@@ -264,7 +278,16 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
           encodeGridPresent(presentEnc, pip, performance.now() * 0.001, slot.frameId % 2)
           gNow.device.queue.submit([presentEnc.finish()])
 
-          pi.onQuadDetection?.(tagged, { frameId: slot.frameId })
+          pi.onQuadDetection?.(tagged, {
+            frameId: slot.frameId,
+            grayData: result.grayData.length > 0 ? result.grayData : undefined,
+          })
+
+          const cb = onGraySnapshotCallback
+          if (cb && result.grayData.length > 0) {
+            onGraySnapshotCallback = null
+            cb(result.grayData)
+          }
         })
         .catch((e) => {
           if (!disposed) {

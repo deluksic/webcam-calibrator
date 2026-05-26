@@ -39,6 +39,7 @@ const initialRun: CalibRun = {
 export type CalibrationLatestMeta = {
   validSolveFrameCount: number
   video?: { width: number; height: number }
+  framePool?: CalibrationFrameObservation[]
 }
 
 export type { CustomTagOverlaySession }
@@ -100,6 +101,7 @@ export function CalibrationRunProvider(props: ParentProps) {
       setLatestCalibration(r, {
         validSolveFrameCount: countValidSolveFrames(run().framePool, layout()),
         video: videoFrameSize(),
+        framePool: run().framePool,
       })
     }
   }

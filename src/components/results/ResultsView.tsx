@@ -6,7 +6,7 @@ import { CalibrationLibraryPanel } from '@/components/calibration/CalibrationLib
 import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
 import { ResultsDistortionCanvas } from '@/components/results/ResultsDistortionCanvas'
 import { ResultsOrbitCanvas } from '@/components/results/ResultsOrbitCanvas'
-import { downloadCalibrationOkJson } from '@/components/results/exportCalibrationJson'
+import { downloadCalibrationOkWithImages } from '@/components/results/exportCalibrationJson'
 import { buildResultsCalibrationScene } from '@/components/results/resultsCalibrationScene'
 import { initGPU } from '@/gpu/init'
 import { calibrationDefinedCornerCount } from '@/gpu/pipelines/resultsSceneCpu'
@@ -139,7 +139,12 @@ export function ResultsView() {
     if (c === undefined || c.kind !== 'ok') {
       return
     }
-    downloadCalibrationOkJson(c)
+    const meta = latestCalibrationMeta()
+    if (meta?.framePool?.length) {
+      downloadCalibrationOkWithImages(c, meta.framePool)
+    } else {
+      downloadCalibrationOkWithImages(c, [])
+    }
   }
 
   return (

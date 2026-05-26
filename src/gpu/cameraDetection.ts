@@ -11,12 +11,14 @@ export async function detectForSlot(
   root: TgpuRoot,
   pipeline: CameraPipeline,
   slot: FrameSlot,
+  readGray?: boolean,
 ): Promise<{
   quads: DetectedQuad[]
   quadCount: number
   frameId: number
   slot: FrameSlot
+  grayData: Float32Array
 }> {
-  const { quads, quadCount } = await readGpuDetection(root, pipeline)
-  return { quads, quadCount, frameId: slot.frameId, slot }
+  const { quads, quadCount, grayData } = await readGpuDetection(root, pipeline, readGray)
+  return { quads, quadCount, frameId: slot.frameId, slot, grayData }
 }

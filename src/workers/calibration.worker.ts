@@ -35,6 +35,14 @@ export type CalibrationOk = {
   perFrameRmsPx: [number, number][]
   imageSize: { width: number; height: number }
   cameraId: string
+  /** PNG filenames keyed by frameId string. Files are in the same directory as the JSON. */
+  frameImages?: Record<string, string>
+  /** Raw per-frame tag detections with image file reference. */
+  observations?: {
+    frameId: number
+    imageFile: string
+    tags: { tagId: number; corners: [Point, Point, Point, Point] }[]
+  }[]
 }
 
 export type CalibrationErr = {

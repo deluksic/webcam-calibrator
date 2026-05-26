@@ -41,4 +41,8 @@ export interface ObjectTag {
 export interface CalibrationFrameObservation {
   frameId: number
   tags: ImageTag[]
+  /** Raw GPU gray buffer values (0-1) — same frame as the tag corners. */
+  grayData?: Float32Array
+  imageWidth?: number
+  imageHeight?: number
 }
