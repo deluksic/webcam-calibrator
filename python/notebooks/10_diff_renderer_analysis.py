@@ -44,7 +44,7 @@ def _():
     # Canonical corners are cyclic: TL, TR, BR, BL.
     # GPU export corners are strip: TL, TR, BL, BR.
     # Reorder image corners to cyclic before any render_model call.
-    STRIP_TO_CYCLIC_4 = [0, 1, 3, 2]
+    STRIP_TO_CYCLIC_4 = jnp.array([0, 1, 3, 2], dtype=jnp.int32)
     # Same but with closing vertex for Plotly polygon outlines.
     STRIP_TO_CYCLIC_5 = [0, 1, 3, 2, 0]
 
