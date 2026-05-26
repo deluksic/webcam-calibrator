@@ -549,9 +549,10 @@ def _(all_results, export_data, frames, mo, np):
     _targets = export_data.get("updatedTargets", [])
     _img_size = export_data.get("imageSize")
 
-    if not _K or not _targets or not _img_size:
-        mo.md("Export missing K/updatedTargets/imageSize — skipping calibration comparison.")
-        return
+    mo.stop(
+        not _K or not _targets or not _img_size,
+        mo.md("Export missing K/updatedTargets/imageSize — skipping calibration comparison."),
+    )
 
     _w, _h = _img_size["width"], _img_size["height"]
     _fx, _fy, _cx, _cy = _K["fx"], _K["fy"], _K["cx"], _K["cy"]
@@ -592,9 +593,10 @@ def _(all_results, export_data, frames, mo, np):
         _ref_img_pts.append(np.array(_ri, dtype=np.float32))
         _frame_ids.append(_frame["frameId"])
 
-    if len(_obj_pts) < 3:
-        mo.md(f"Need >=3 frames with shared tags (have {len(_obj_pts)}).")
-        return
+    mo.stop(
+        len(_obj_pts) < 3,
+        mo.md(f"Need >=3 frames with shared tags (have {len(_obj_pts)})."),
+    )
 
     _n_frames = len(_obj_pts)
     _n_corners = _obj_pts[0].shape[0]
