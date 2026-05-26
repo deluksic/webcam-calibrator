@@ -206,10 +206,8 @@ def _(
 
     for _tag in _tags:
         _corners_raw = _tag["corners"]
-        # GPU corners are at pixel indices; renderer convention places
-        # pixel centers at (col+0.5, row+0.5). Shift to align.
         _init_corners_np = np.array(
-            [[c["x"] + 0.5, c["y"] + 0.5] for c in _corners_raw], dtype=np.float32
+            [[c["x"], c["y"]] for c in _corners_raw], dtype=np.float32
         )
         # Moat = 1/8 of shortest side (matches loss_mask padding)
         _sides = []
@@ -429,11 +427,13 @@ def _(STRIP_TO_CYCLIC_5, frame_selector, frames, go, mo, np, results):
     _fig.add_trace(
         go.Heatmap(
             z=_img,
+            x0=0.5, dx=1.0,
+            y0=0.5, dy=1.0,
             colorscale="gray",
             showscale=False,
             zmin=0.0,
             zmax=1.0,
-            hovertemplate="(%{x}, %{y})<extra></extra>",
+            hovertemplate="(%{x:.1f}, %{y:.1f})<extra></extra>",
         )
     )
 
@@ -482,6 +482,7 @@ def _(STRIP_TO_CYCLIC_5, frame_selector, frames, go, mo, np, results):
         )
 
     _fig.update_layout(
+        dragmode="pan",
         xaxis=dict(
             range=[0, _w],
             constrain="domain",
@@ -504,7 +505,7 @@ def _(STRIP_TO_CYCLIC_5, frame_selector, frames, go, mo, np, results):
         title=f"Frame {_frame['frameId']} — dashed=init, solid=optimized",
     )
 
-    mo.ui.plotly(_fig)
+    mo.ui.plotly(_fig, config={"scrollZoom": True, "displayModeBar": True})
     return
 
 
