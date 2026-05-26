@@ -703,9 +703,7 @@ def _(all_results, frame_selector, frames, go, mo, np):
 
     _fi = frame_selector.value
     _results = all_results.get(_fi, [])
-    if not _results:
-        mo.md("No results for selected frame.")
-        return
+    mo.stop(not _results, mo.md("No results for selected frame."))
 
     _frame = frames[_fi]
     _img = _frame["image"]
