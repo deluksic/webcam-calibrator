@@ -9,6 +9,7 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
@@ -48,13 +49,10 @@ def _():
     STRIP_TO_CYCLIC_4 = jnp.array([0, 1, 3, 2], dtype=jnp.int32)
     # Same but with closing vertex for Plotly polygon outlines.
     STRIP_TO_CYCLIC_5 = [0, 1, 3, 2, 0]
-
     return (
         CANONICAL,
-        JOINT_PARAM_NAMES,
         Image,
         Path,
-        cv2,
         RenderModelParams,
         STRIP_TO_CYCLIC_4,
         STRIP_TO_CYCLIC_5,
@@ -62,6 +60,7 @@ def _():
         build_tag_pattern,
         camera_with_inferred_levels,
         corners_from_corner_shifts,
+        cv2,
         go,
         homography_from_corners,
         jax,
@@ -95,7 +94,7 @@ def _(mo):
 
 
 @app.cell
-def _(Path, image_dir, json, json_file, mo, np):
+def _(Image, Path, image_dir, json, json_file, mo, np):
     mo.stop(not json_file.value, mo.md("Upload a JSON file to begin."))
 
     _contents = json_file.contents()
@@ -145,7 +144,7 @@ def _(Path, image_dir, json, json_file, mo, np):
     image_dir_path = _image_dir
 
     mo.md(f"Loaded **{len(frames)}** frames with images from `{_image_dir}`.")
-    return export_data, frames, image_dir_path
+    return export_data, frames
 
 
 @app.cell
@@ -186,8 +185,8 @@ def _(
     jax,
     jnp,
     loss_mask_from_corners,
-    model_params_to_vector,
     mo,
+    model_params_to_vector,
     np,
     render_with_model,
     run_all_button,
@@ -379,7 +378,7 @@ def _(
 
 
 @app.cell
-def _(STRIP_TO_CYCLIC_5, all_results, frame_selector, frames, go, mo, np):
+def _(STRIP_TO_CYCLIC_5, all_results, frame_selector, frames, go, mo):
     mo.stop(not all_results, mo.md("Run optimization first."))
 
     _fi = frame_selector.value
@@ -732,25 +731,11 @@ def _(all_results, cv2, export_data, frames, mo, np):
         mo.md("### Refined per-corner-index RMS"),
         mo.ui.table(_corner_rows, selection=None, page_size=10),
     ])
-
-    return (
-        calib_data := {
-            "rvecs_ref": _rvecs_ref,
-            "tvecs_ref": _tvecs_ref,
-            "K_ref": _K_ref,
-            "dist_ref": _dist_ref,
-            "new_obj_ref": _new_obj_ref,
-            "ref_img_pts": _ref_img_pts,
-            "frame_ids": _frame_ids,
-            "n_frames": _n_frames,
-            "obj_template": _obj_template,
-            "proj_by_frame": _proj_by_frame,
-        },
-    )
+    return
 
 
 @app.cell
-def _(all_results, calib_data, frame_selector, frames, go, np):
+def _(all_results, calib_data, frame_selector, frames, go, mo, np):
     """Reprojection error arrows: fitted corners → calibration reprojection."""
     mo.stop(not all_results, mo.md("Run optimization first."))
 
