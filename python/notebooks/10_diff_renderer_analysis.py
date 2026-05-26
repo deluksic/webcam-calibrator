@@ -41,9 +41,12 @@ def _():
 
     CANONICAL = jnp.asarray(TAG_CANONICAL_CORNERS, dtype=jnp.float32)
 
-    # Strip → cyclic index permutation for Plotly polygon outlines.
-    # Strip order:  [TL, TR, BL, BR]  → Cyclic: [TL, TR, BR, BL]
-    STRIP_TO_CYCLIC = [0, 1, 3, 2, 0]
+    # Canonical corners are cyclic: TL, TR, BR, BL.
+    # GPU export corners are strip: TL, TR, BL, BR.
+    # Reorder image corners to cyclic before any render_model call.
+    STRIP_TO_CYCLIC_4 = [0, 1, 3, 2]
+    # Same but with closing vertex for Plotly polygon outlines.
+    STRIP_TO_CYCLIC_5 = [0, 1, 3, 2, 0]
 
     return (
         CANONICAL,
@@ -51,7 +54,8 @@ def _():
         Image,
         Path,
         RenderModelParams,
-        STRIP_TO_CYCLIC,
+        STRIP_TO_CYCLIC_4,
+        STRIP_TO_CYCLIC_5,
         SUPERSAMPLE,
         build_tag_pattern,
         camera_with_inferred_levels,
@@ -164,6 +168,7 @@ def _(frames, mo):
 def _(
     CANONICAL,
     RenderModelParams,
+    STRIP_TO_CYCLIC_4,
     SUPERSAMPLE,
     build_tag_pattern,
     camera_with_inferred_levels,
@@ -307,7 +312,8 @@ def _(
     )
     _ch_warm, _cw_warm = _crop_warm.shape
     _target_warm = jnp.asarray(_crop_warm, dtype=jnp.float32)
-    _corners_crop_warm = _init_c - jnp.array([_crop_x0_warm, _crop_y0_warm], dtype=jnp.float32)
+    # Reorder strip→cyclic to match CANONICAL ordering
+    _corners_crop_warm = (_init_c - jnp.array([_crop_x0_warm, _crop_y0_warm], dtype=jnp.float32))[STRIP_TO_CYCLIC_4]
     _H_warm = homography_from_corners(CANONICAL, _corners_crop_warm)
     _pat_warm = build_tag_pattern(_first["tagId"])
     _mask_warm = loss_mask_from_corners(_corners_crop_warm, _ch_warm, _cw_warm)
@@ -347,7 +353,8 @@ def _(
             _raw = np.pad(_raw, ((0, _pad_bottom), (0, _pad_right)), mode='constant')
         _target = jnp.asarray(_raw, dtype=jnp.float32)
 
-        _corners_crop = _init_c - jnp.array([_crop_x0, _crop_y0], dtype=jnp.float32)
+        # Reorder strip→cyclic to match CANONICAL ordering
+        _corners_crop = (_init_c - jnp.array([_crop_x0, _crop_y0], dtype=jnp.float32))[STRIP_TO_CYCLIC_4]
         _pattern = build_tag_pattern(_tag_id)
         _H_init = homography_from_corners(CANONICAL, _corners_crop)
         _mask = loss_mask_from_corners(_corners_crop, _crop_h, _crop_w)
@@ -368,7 +375,8 @@ def _(
         _total_s += _elapsed
 
         _final_corners_crop = corners_from_corner_shifts(_corners_crop, _packed[:8])
-        _final_corners_full = _final_corners_crop + jnp.array(
+        # Reorder cyclic→strip for result storage (STRIP_TO_CYCLIC_4 is self-inverse)
+        _final_corners_full = _final_corners_crop[STRIP_TO_CYCLIC_4] + jnp.array(
             [_crop_x0, _crop_y0], dtype=jnp.float32
         )
         _final_cam = vector_to_model_params(_packed[8:16])
@@ -407,7 +415,7 @@ def _(
 
 
 @app.cell
-def _(STRIP_TO_CYCLIC, frame_selector, frames, go, mo, np, results):
+def _(STRIP_TO_CYCLIC_5, frame_selector, frames, go, mo, np, results):
     mo.stop(not results, mo.md("Run optimization first."))
 
     _frame = frames[frame_selector.value]
@@ -437,8 +445,8 @@ def _(STRIP_TO_CYCLIC, frame_selector, frames, go, mo, np, results):
 
         # Corners are in strip order (TL, TR, BL, BR).
         # Reorder to cyclic (TL, TR, BR, BL) for closed polygon outlines.
-        _ic = _r["initCorners"][STRIP_TO_CYCLIC]
-        _fc = _r["finalCorners"][STRIP_TO_CYCLIC]
+        _ic = _r["initCorners"][STRIP_TO_CYCLIC_5]
+        _fc = _r["finalCorners"][STRIP_TO_CYCLIC_5]
 
         _fig.add_trace(
             go.Scatter(
