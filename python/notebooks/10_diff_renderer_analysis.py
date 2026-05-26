@@ -206,8 +206,10 @@ def _(
 
     for _tag in _tags:
         _corners_raw = _tag["corners"]
+        # GPU corners are at pixel indices; renderer convention places
+        # pixel centers at (col+0.5, row+0.5). Shift to align.
         _init_corners_np = np.array(
-            [[c["x"], c["y"]] for c in _corners_raw], dtype=np.float32
+            [[c["x"] + 0.5, c["y"] + 0.5] for c in _corners_raw], dtype=np.float32
         )
         # Moat = 1/8 of shortest side (matches loss_mask padding)
         _sides = []
