@@ -147,6 +147,13 @@ def _(Path, image_dir, json, json_file, mo, np):
 
 
 @app.cell
+def _(mo):
+    run_all_button = mo.ui.run_button(label="Run per-tag LM on ALL frames")
+    mo.vstack([run_all_button, mo.md("Runs differential-renderer LM optimization on every tag in every frame.")])
+    return (run_all_button,)
+
+
+@app.cell
 def _(frames, mo):
     _options = {
         f"Frame {f['frameId']} ({len(f['tags'])} tags)": i
@@ -156,12 +163,11 @@ def _(frames, mo):
     frame_selector = mo.ui.dropdown(
         options=_options,
         value=_default_key,
-        label="Select frame to analyze",
+        label="Select frame to inspect",
         full_width=True,
     )
-    run_button = mo.ui.run_button(label="Run per-tag LM optimization")
-    mo.vstack([frame_selector, run_button])
-    return frame_selector, run_button
+    mo.vstack([frame_selector])
+    return (frame_selector,)
 
 
 @app.cell
@@ -173,7 +179,6 @@ def _(
     build_tag_pattern,
     camera_with_inferred_levels,
     corners_from_corner_shifts,
-    frame_selector,
     frames,
     homography_from_corners,
     jax,
@@ -183,65 +188,11 @@ def _(
     mo,
     np,
     render_with_model,
-    run_button,
+    run_all_button,
     time,
     vector_to_model_params,
 ):
-    mo.stop(not run_button.value, mo.md("Click **Run** to start per-tag optimization."))
-
-    _frame = frames[frame_selector.value]
-    _img = _frame["image"]
-    _full_h, _full_w = _img.shape
-    _tags = _frame["tags"]
-
-    mo.md(
-        f"### Frame {_frame['frameId']} — {_full_w}×{_full_h}, {len(_tags)} tags"
-    )
-
-    # -- compute uniform crop size from max tag extent (corners + moat + margin) --
-
-    _tag_infos = []
-    _max_crop_w = 0
-    _max_crop_h = 0
-
-    for _tag in _tags:
-        _corners_raw = _tag["corners"]
-        _init_corners_np = np.array(
-            [[c["x"], c["y"]] for c in _corners_raw], dtype=np.float32
-        )
-        # Moat = 1/8 of shortest side (matches loss_mask padding)
-        _sides = []
-        for _i in range(4):
-            _j = (_i + 1) % 4
-            _dx = _init_corners_np[_j, 0] - _init_corners_np[_i, 0]
-            _dy = _init_corners_np[_j, 1] - _init_corners_np[_i, 1]
-            _sides.append(np.sqrt(_dx * _dx + _dy * _dy))
-        _moat = np.min(_sides) / 8.0
-
-        _x0 = int(np.floor(np.min(_init_corners_np[:, 0]) - _moat))
-        _y0 = int(np.floor(np.min(_init_corners_np[:, 1]) - _moat))
-        _x1 = int(np.ceil(np.max(_init_corners_np[:, 0]) + _moat))
-        _y1 = int(np.ceil(np.max(_init_corners_np[:, 1]) + _moat))
-
-        _tag_infos.append({
-            "tagId": _tag["tagId"],
-            "initCorners": _init_corners_np,
-            "x0": _x0, "y0": _y0, "x1": _x1, "y1": _y1,
-        })
-
-        _max_crop_w = max(_max_crop_w, _x1 - _x0)
-        _max_crop_h = max(_max_crop_h, _y1 - _y0)
-
-    _margin = 6
-    _crop_w = _max_crop_w + _margin
-    _crop_h = _max_crop_h + _margin
-
-    mo.md(
-        f"Tag crop size: **{_crop_w}×{_crop_h}** px "
-        f"(max tag extent + {_margin}px margin, from {_full_w}×{_full_h} full frame)"
-    )
-
-    # -- single-compiled LM for the uniform crop size --
+    mo.stop(not run_all_button.value, mo.md("Click **Run** to start per-tag optimization on all frames."))
 
     _lm_steps = 12
     _df = jnp.float32(10.0)
@@ -258,169 +209,182 @@ def _(
         light_grad_v=jnp.float32(0.0),
     )
 
-    # Generic residual: all tag-specific data is explicit → JIT-compiled once.
-    @jax.jit
-    def _lm_run(packed_init, damping, target, tag_pattern, ref_corners, loss_mask):
-        def _residual(packed):
-            shifts = packed[:8]
-            cam_vec = packed[8:16]
-            _corners = corners_from_corner_shifts(ref_corners, shifts)
-            _H = homography_from_corners(CANONICAL, _corners)
-            rendered = render_with_model(
-                _H, tag_pattern, _crop_h, _crop_w,
-                vector_to_model_params(cam_vec),
-                supersample=SUPERSAMPLE,
+    _all_results = {}  # frame_index → sorted list of tag result dicts
+    _compile_total = 0.0
+    _run_total = 0.0
+    _total_tags = 0
+
+    for _fi, _frame in enumerate(frames):
+        _img = _frame["image"]
+        _full_h, _full_w = _img.shape
+        _tags = _frame["tags"]
+
+        # -- compute uniform crop size from max tag extent --
+        _tag_infos = []
+        _max_crop_w = 0
+        _max_crop_h = 0
+        for _tag in _tags:
+            _corners_raw = _tag["corners"]
+            _init_corners_np = np.array(
+                [[c["x"], c["y"]] for c in _corners_raw], dtype=np.float32
             )
-            diff = rendered - target
-            w = jnp.sqrt(loss_mask / jnp.maximum(jnp.sum(loss_mask), 1.0))
-            return (diff * w).ravel()
+            _sides = []
+            for _i in range(4):
+                _j = (_i + 1) % 4
+                _dx = _init_corners_np[_j, 0] - _init_corners_np[_i, 0]
+                _dy = _init_corners_np[_j, 1] - _init_corners_np[_i, 1]
+                _sides.append(np.sqrt(_dx * _dx + _dy * _dy))
+            _moat = np.min(_sides) / 8.0
+            _x0 = int(np.floor(np.min(_init_corners_np[:, 0]) - _moat))
+            _y0 = int(np.floor(np.min(_init_corners_np[:, 1]) - _moat))
+            _x1 = int(np.ceil(np.max(_init_corners_np[:, 0]) + _moat))
+            _y1 = int(np.ceil(np.max(_init_corners_np[:, 1]) + _moat))
+            _tag_infos.append({
+                "tagId": _tag["tagId"],
+                "initCorners": _init_corners_np,
+                "x0": _x0, "y0": _y0, "x1": _x1, "y1": _y1,
+            })
+            _max_crop_w = max(_max_crop_w, _x1 - _x0)
+            _max_crop_h = max(_max_crop_h, _y1 - _y0)
 
-        def _step(carry, _step_idx):
-            p, lam = carry
-            r = _residual(p)
-            J = jax.jacfwd(_residual)(p)
-            hess = J.T @ J + lam * jnp.eye(16, dtype=p.dtype)
-            delta = jnp.linalg.solve(hess, -(J.T @ r))
-            p_try = p + delta
-            loss = jnp.sum(r * r)
-            loss_try = jnp.sum(_residual(p_try) ** 2)
-            accept = loss_try < loss
-            p = jnp.where(accept, p_try, p)
-            lam = jnp.clip(jnp.where(accept, lam / _df, lam * _df), _lo, _hi)
-            return (p, lam), (jnp.where(accept, loss_try, loss), p)
+        _margin = 6
+        _crop_w = _max_crop_w + _margin
+        _crop_h = _max_crop_h + _margin
 
-        steps = jnp.arange(_lm_steps, dtype=jnp.int32)
-        (packed, _), (losses, hist) = jax.lax.scan(
-            _step, (packed_init, damping), steps,
-        )
-        return packed, losses, hist
+        # Per-frame JIT-compiled LM
+        @jax.jit
+        def _lm_run(packed_init, damping, target, tag_pattern, ref_corners, loss_mask):
+            def _residual(packed):
+                shifts = packed[:8]
+                cam_vec = packed[8:16]
+                _c = corners_from_corner_shifts(ref_corners, shifts)
+                _H = homography_from_corners(CANONICAL, _c)
+                rendered = render_with_model(
+                    _H, tag_pattern, _crop_h, _crop_w,
+                    vector_to_model_params(cam_vec),
+                    supersample=SUPERSAMPLE,
+                )
+                diff = rendered - target
+                w = jnp.sqrt(loss_mask / jnp.maximum(jnp.sum(loss_mask), 1.0))
+                return (diff * w).ravel()
+            def _step(carry, _step_idx):
+                p, lam = carry
+                r = _residual(p)
+                J = jax.jacfwd(_residual)(p)
+                hess = J.T @ J + lam * jnp.eye(16, dtype=p.dtype)
+                delta = jnp.linalg.solve(hess, -(J.T @ r))
+                p_try = p + delta
+                loss = jnp.sum(r * r)
+                loss_try = jnp.sum(_residual(p_try) ** 2)
+                accept = loss_try < loss
+                p = jnp.where(accept, p_try, p)
+                lam = jnp.clip(jnp.where(accept, lam / _df, lam * _df), _lo, _hi)
+                return (p, lam), (jnp.where(accept, loss_try, loss), p)
+            steps = jnp.arange(_lm_steps, dtype=jnp.int32)
+            (packed, _), (losses, hist) = jax.lax.scan(
+                _step, (packed_init, damping), steps,
+            )
+            return packed, losses, hist
 
-    # Warm-up: compile once with the first tag's data
-    _first = _tag_infos[0]
-    _t0 = time.perf_counter()
-    _init_c = jnp.asarray(_first["initCorners"])
-    _x0, _y0 = _first["x0"], _first["y0"]
-    _off_x = (_crop_w - (_first["x1"] - _x0)) // 2
-    _off_y = (_crop_h - (_first["y1"] - _y0)) // 2
-    _crop_x0_warm = max(0, _x0 - _off_x)
-    _crop_y0_warm = max(0, _y0 - _off_y)
-    _crop_warm = np.pad(
-        _img[_crop_y0_warm:_crop_y0_warm + _crop_h, _crop_x0_warm:_crop_x0_warm + _crop_w],
-        ((0, max(0, _crop_h - (min(_full_h, _crop_y0_warm + _crop_h) - _crop_y0_warm))),
-         (0, max(0, _crop_w - (min(_full_w, _crop_x0_warm + _crop_w) - _crop_x0_warm)))),
-        mode='constant',
-    )
-    _ch_warm, _cw_warm = _crop_warm.shape
-    _target_warm = jnp.asarray(_crop_warm, dtype=jnp.float32)
-    # Reorder strip→cyclic to match CANONICAL ordering
-    _corners_crop_warm = (_init_c - jnp.array([_crop_x0_warm, _crop_y0_warm], dtype=jnp.float32))[STRIP_TO_CYCLIC_4]
-    _H_warm = homography_from_corners(CANONICAL, _corners_crop_warm)
-    _pat_warm = build_tag_pattern(_first["tagId"])
-    _mask_warm = loss_mask_from_corners(_corners_crop_warm, _ch_warm, _cw_warm)
-    _cam_warm = camera_with_inferred_levels(
-        _seed, _target_warm, _H_warm, _pat_warm, _ch_warm, _cw_warm, loss_mask=_mask_warm,
-    )
-    _packed_warm = jnp.concatenate(
-        [jnp.zeros(8, dtype=jnp.float32), model_params_to_vector(_cam_warm)]
-    )
-    _damping_warm = jnp.float32(1e-2)
-    _ = _lm_run(_packed_warm, _damping_warm, _target_warm, _pat_warm, _corners_crop_warm, _mask_warm)
-    jax.block_until_ready(_)
-    _compile_s = time.perf_counter() - _t0
-    mo.md(f"LM compiled in **{_compile_s:.1f}s** (warm-up with first tag)")
-
-    # -- run LM for every tag using the same compiled function --
-
-    _results = []
-    _total_s = 0.0
-
-    for _info in _tag_infos:
-        _tag_id = _info["tagId"]
-        _init_c = jnp.asarray(_info["initCorners"])
-        _x0, _y0 = _info["x0"], _info["y0"]
-        _x1, _y1 = _info["x1"], _info["y1"]
-
-        _off_x = (_crop_w - (_x1 - _x0)) // 2
-        _off_y = (_crop_h - (_y1 - _y0)) // 2
-        _crop_x0 = max(0, _x0 - _off_x)
-        _crop_y0 = max(0, _y0 - _off_y)
-
-        # Extract exact-size crop, padding at image edges if needed
-        _raw = _img[_crop_y0:_crop_y0 + _crop_h, _crop_x0:_crop_x0 + _crop_w]
-        _pad_bottom = _crop_h - _raw.shape[0]
-        _pad_right = _crop_w - _raw.shape[1]
-        if _pad_bottom > 0 or _pad_right > 0:
-            _raw = np.pad(_raw, ((0, _pad_bottom), (0, _pad_right)), mode='constant')
-        _target = jnp.asarray(_raw, dtype=jnp.float32)
-
-        # Reorder strip→cyclic to match CANONICAL ordering
-        _corners_crop = (_init_c - jnp.array([_crop_x0, _crop_y0], dtype=jnp.float32))[STRIP_TO_CYCLIC_4]
-        _pattern = build_tag_pattern(_tag_id)
-        _H_init = homography_from_corners(CANONICAL, _corners_crop)
-        _mask = loss_mask_from_corners(_corners_crop, _crop_h, _crop_w)
-        _cam_init = camera_with_inferred_levels(
-            _seed, _target, _H_init, _pattern, _crop_h, _crop_w, loss_mask=_mask,
-        )
-        _packed_init = jnp.concatenate(
-            [jnp.zeros(8, dtype=jnp.float32), model_params_to_vector(_cam_init)]
-        )
-        _damping = jnp.float32(1e-2)
-
+        # Warm-up
+        _first = _tag_infos[0]
         _t0 = time.perf_counter()
-        _packed, _step_losses, _hist = _lm_run(
-            _packed_init, _damping, _target, _pattern, _corners_crop, _mask,
+        _init_c = jnp.asarray(_first["initCorners"])
+        _x0, _y0 = _first["x0"], _first["y0"]
+        _off_x = (_crop_w - (_first["x1"] - _x0)) // 2
+        _off_y = (_crop_h - (_first["y1"] - _y0)) // 2
+        _cx = max(0, _x0 - _off_x)
+        _cy = max(0, _y0 - _off_y)
+        _warm = np.pad(
+            _img[_cy:_cy + _crop_h, _cx:_cx + _crop_w],
+            ((0, max(0, _crop_h - min(_full_h, _cy + _crop_h) + _cy)),
+             (0, max(0, _crop_w - min(_full_w, _cx + _crop_w) + _cx))),
+            mode='constant',
         )
-        jax.block_until_ready(_packed)
-        _elapsed = time.perf_counter() - _t0
-        _total_s += _elapsed
-
-        _final_corners_crop = corners_from_corner_shifts(_corners_crop, _packed[:8])
-        # Reorder cyclic→strip for result storage (STRIP_TO_CYCLIC_4 is self-inverse)
-        _final_corners_full = _final_corners_crop[STRIP_TO_CYCLIC_4] + jnp.array(
-            [_crop_x0, _crop_y0], dtype=jnp.float32
+        _ch, _cw = _warm.shape
+        _tw = jnp.asarray(_warm, dtype=jnp.float32)
+        _cc = (_init_c - jnp.array([_cx, _cy], dtype=jnp.float32))[STRIP_TO_CYCLIC_4]
+        _Hw = homography_from_corners(CANONICAL, _cc)
+        _pw = build_tag_pattern(_first["tagId"])
+        _mw = loss_mask_from_corners(_cc, _ch, _cw)
+        _cw2 = camera_with_inferred_levels(_seed, _tw, _Hw, _pw, _ch, _cw, loss_mask=_mw)
+        _ = _lm_run(
+            jnp.concatenate([jnp.zeros(8, dtype=jnp.float32), model_params_to_vector(_cw2)]),
+            jnp.float32(1e-2), _tw, _pw, _cc, _mw,
         )
-        _final_cam = vector_to_model_params(_packed[8:16])
+        jax.block_until_ready(_)
+        _compile_total += time.perf_counter() - _t0
 
-        _init_mse = float(_step_losses[0])
-        _final_mse = float(_step_losses[-1])
+        # Run every tag in this frame
+        _fr = []
+        for _info in _tag_infos:
+            _tid = _info["tagId"]
+            _ic = jnp.asarray(_info["initCorners"])
+            _x0, _y0 = _info["x0"], _info["y0"]
+            _x1, _y1 = _info["x1"], _info["y1"]
+            _ox = (_crop_w - (_x1 - _x0)) // 2
+            _oy = (_crop_h - (_y1 - _y0)) // 2
+            _cx = max(0, _x0 - _ox)
+            _cy = max(0, _y0 - _oy)
+            _raw = _img[_cy:_cy + _crop_h, _cx:_cx + _crop_w]
+            _pb = _crop_h - _raw.shape[0]
+            _pr = _crop_w - _raw.shape[1]
+            if _pb > 0 or _pr > 0:
+                _raw = np.pad(_raw, ((0, _pb), (0, _pr)), mode='constant')
+            _targ = jnp.asarray(_raw, dtype=jnp.float32)
+            _cc2 = (_ic - jnp.array([_cx, _cy], dtype=jnp.float32))[STRIP_TO_CYCLIC_4]
+            _pat = build_tag_pattern(_tid)
+            _Hi = homography_from_corners(CANONICAL, _cc2)
+            _mask = loss_mask_from_corners(_cc2, _crop_h, _crop_w)
+            _ci = camera_with_inferred_levels(_seed, _targ, _Hi, _pat, _crop_h, _crop_w, loss_mask=_mask)
+            _pi = jnp.concatenate([jnp.zeros(8, dtype=jnp.float32), model_params_to_vector(_ci)])
+            _t0 = time.perf_counter()
+            _p, _sl, _h = _lm_run(_pi, jnp.float32(1e-2), _targ, _pat, _cc2, _mask)
+            jax.block_until_ready(_p)
+            _elapsed = time.perf_counter() - _t0
+            _run_total += _elapsed
+            _fcc = corners_from_corner_shifts(_cc2, _p[:8])
+            _ff = _fcc[STRIP_TO_CYCLIC_4] + jnp.array([_cx, _cy], dtype=jnp.float32)
+            _fc = vector_to_model_params(_p[8:16])
+            _in = np.asarray(_ic)
+            _fn = np.asarray(_ff)
+            _deltas = _fn - _in
+            _mov = np.sqrt(_deltas[:, 0] ** 2 + _deltas[:, 1] ** 2)
+            _fr.append({
+                "tagId": _tid,
+                "initCorners": _in,
+                "finalCorners": _fn,
+                "initMse": float(_sl[0]),
+                "finalMse": float(_sl[-1]),
+                "cornerMovements": _mov,
+                "meanMovement": float(np.mean(_mov)),
+                "maxMovement": float(np.max(_mov)),
+                "camera": _fc,
+                "elapsed": _elapsed,
+            })
 
-        _init_np = np.asarray(_init_c)
-        _final_np = np.asarray(_final_corners_full)
-        _corner_deltas = _final_np - _init_np
-        _corner_movements = np.sqrt(
-            _corner_deltas[:, 0] ** 2 + _corner_deltas[:, 1] ** 2
-        )
+        _all_results[_fi] = sorted(_fr, key=lambda r: r["tagId"])
+        _total_tags += len(_fr)
 
-        _results.append({
-            "tagId": _tag_id,
-            "initCorners": _init_np,
-            "finalCorners": _final_np,
-            "initMse": _init_mse,
-            "finalMse": _final_mse,
-            "cornerMovements": _corner_movements,
-            "meanMovement": float(np.mean(_corner_movements)),
-            "maxMovement": float(np.max(_corner_movements)),
-            "camera": _final_cam,
-            "elapsed": _elapsed,
-        })
-
-    results = sorted(_results, key=lambda r: r["tagId"])
+    all_results = _all_results
 
     mo.md(
-        f"Optimized **{len(results)}** tags "
-        f"(compile {_compile_s:.1f}s, run {_total_s:.1f}s, "
+        f"Optimized **{_total_tags}** tags across **{len(frames)}** frames "
+        f"(compile {_compile_total:.1f}s, run {_run_total:.1f}s, "
         f"{_lm_steps} LM steps each)."
     )
-    return results
+    return (all_results,)
 
 
 @app.cell
-def _(STRIP_TO_CYCLIC_5, frame_selector, frames, go, mo, np, results):
-    mo.stop(not results, mo.md("Run optimization first."))
+def _(STRIP_TO_CYCLIC_5, all_results, frame_selector, frames, go, mo, np):
+    mo.stop(not all_results, mo.md("Run optimization first."))
 
-    _frame = frames[frame_selector.value]
+    _fi = frame_selector.value
+    _frame = frames[_fi]
     _img = _frame["image"]
     _h, _w = _img.shape
+    _results = all_results.get(_fi, [])
 
     _fig = go.Figure()
 
@@ -442,11 +406,8 @@ def _(STRIP_TO_CYCLIC_5, frame_selector, frames, go, mo, np, results):
         "#911eb4", "#42d4f4", "#f032e6", "#bfef45", "#fabed4",
     ]
 
-    for _ri, _r in enumerate(results):
+    for _ri, _r in enumerate(_results):
         _color = _colors[_ri % len(_colors)]
-
-        # Corners are in strip order (TL, TR, BL, BR).
-        # Reorder to cyclic (TL, TR, BR, BL) for closed polygon outlines.
         _ic = _r["initCorners"][STRIP_TO_CYCLIC_5]
         _fc = _r["finalCorners"][STRIP_TO_CYCLIC_5]
 
@@ -462,7 +423,6 @@ def _(STRIP_TO_CYCLIC_5, frame_selector, frames, go, mo, np, results):
                 hoverinfo="text",
             )
         )
-
         _fig.add_trace(
             go.Scatter(
                 x=list(_fc[:, 0]),
@@ -509,11 +469,12 @@ def _(STRIP_TO_CYCLIC_5, frame_selector, frames, go, mo, np, results):
 
 
 @app.cell
-def _(mo, results):
-    mo.stop(not results, mo.md("Run optimization first."))
+def _(all_results, frame_selector, mo):
+    mo.stop(not all_results, mo.md("Run optimization first."))
 
+    _results = all_results.get(frame_selector.value, [])
     _rows = []
-    for _r in results:
+    for _r in _results:
         _cam = _r["camera"]
         _rows.append({
             "Tag ID": _r["tagId"],
@@ -539,10 +500,144 @@ def _(mo, results):
 
 
 @app.cell
-def _(mo, np, plt, results):
-    mo.stop(not results, mo.md("Run optimization first."))
+def _(all_results, frames, mo, np):
+    """Per-frame aggregate: mean corner movement and MSE improvement."""
+    mo.stop(not all_results, mo.md("Run optimization first."))
 
-    _all_movements = np.concatenate([r["cornerMovements"] for r in results])
+    _rows = []
+    for _fi, _frame in enumerate(frames):
+        _fr = all_results.get(_fi, [])
+        if not _fr:
+            continue
+        _movements = np.concatenate([r["cornerMovements"] for r in _fr])
+        _init_mse = np.mean([r["initMse"] for r in _fr])
+        _final_mse = np.mean([r["finalMse"] for r in _fr])
+        _rows.append({
+            "Frame": _frame["frameId"],
+            "Tags": len(_fr),
+            "Mean Δ (px)": f"{np.mean(_movements):.3f}",
+            "Max Δ (px)": f"{np.max(_movements):.3f}",
+            "Mean init MSE": f"{_init_mse:.4f}",
+            "Mean final MSE": f"{_final_mse:.4f}",
+            "MSE improved": f"{_init_mse - _final_mse:+.4f}",
+        })
+
+    _all_mov = np.concatenate([
+        np.concatenate([r["cornerMovements"] for r in all_results.get(_fi, [])])
+        for _fi in range(len(frames))
+    ])
+
+    mo.md("## Aggregate per-frame summary")
+    mo.ui.table(_rows, selection=None, page_size=20)
+    mo.md(
+        f"**All frames:** {len(_rows)} frames,  "
+        f"mean Δ **{np.mean(_all_mov):.3f}** px,  "
+        f"median Δ {np.median(_all_mov):.3f} px,  "
+        f"max Δ {np.max(_all_mov):.3f} px"
+    )
+    return
+
+
+@app.cell
+def _(all_results, export_data, frames, mo, np):
+    """Compare reprojection error: init vs refined corners across ALL frames."""
+    mo.stop(not all_results, mo.md("Run optimization first."))
+
+    _K = export_data.get("K")
+    _extrinsics = export_data.get("extrinsics", [])
+    _targets = export_data.get("updatedTargets", [])
+
+    if not _K or not _extrinsics or not _targets:
+        mo.md("Export missing K/extrinsics/updatedTargets — skipping reprojection comparison.")
+        return
+
+    _ext_by_fid = {e["frameId"]: e for e in _extrinsics}
+    _obj_by_tag = {}
+    for _t in _targets:
+        _tc = _t["corners"]
+        _obj_by_tag[_t["tagId"]] = np.array(
+            [[c["x"], c["y"]] for c in _tc], dtype=np.float64
+        )
+    _fx, _fy, _cx, _cy = _K["fx"], _K["fy"], _K["cx"], _K["cy"]
+
+    _init_errs = []
+    _refined_errs = []
+    _frame_summary = []
+
+    for _fi, _frame in enumerate(frames):
+        _fid = _frame["frameId"]
+        _ext = _ext_by_fid.get(_fid)
+        if _ext is None:
+            continue
+        _results = all_results.get(_fi, [])
+        if not _results:
+            continue
+        _res_by_tag = {r["tagId"]: r for r in _results}
+
+        _R = np.array(_ext["R"], dtype=np.float64).reshape(3, 3)
+        _t = np.array([_ext["t"]["x"], _ext["t"]["y"], _ext["t"]["z"]], dtype=np.float64)
+
+        _f_init = []
+        _f_ref = []
+        for _tag_id, _obj in _obj_by_tag.items():
+            _r = _res_by_tag.get(_tag_id)
+            if _r is None:
+                continue
+            _P_obj = np.column_stack([_obj, np.zeros((4,), dtype=np.float64)])
+            _P_cam = (_R @ _P_obj.T + _t.reshape(3, 1)).T
+            _P_img = (_P_cam[:, :2] * np.array([_fx, _fy]) / _P_cam[:, 2:3] +
+                      np.array([_cx, _cy]))
+            _f_init.extend(
+                np.sqrt(np.sum((_r["initCorners"] - _P_img) ** 2, axis=1)).tolist()
+            )
+            _f_ref.extend(
+                np.sqrt(np.sum((_r["finalCorners"] - _P_img) ** 2, axis=1)).tolist()
+            )
+        if _f_init:
+            _frame_summary.append({
+                "frameId": _fid,
+                "n corners": len(_f_init),
+                "Init mean": f"{np.mean(_f_init):.3f}",
+                "Refined mean": f"{np.mean(_f_ref):.3f}",
+                "Δ mean": f"{np.mean(_f_init) - np.mean(_f_ref):+.3f}",
+            })
+            _init_errs.extend(_f_init)
+            _refined_errs.extend(_f_ref)
+
+    _init_arr = np.array(_init_errs)
+    _ref_arr = np.array(_refined_errs)
+
+    mo.md("## Reprojection comparison (calibrated model, all frames)")
+
+    if _frame_summary:
+        mo.ui.table(_frame_summary, selection=None, page_size=20)
+
+    mo.md(
+        f"**Init** ({len(_init_arr)} corners):  "
+        f"mean **{np.mean(_init_arr):.3f}** px,  "
+        f"median {np.median(_init_arr):.3f} px,  "
+        f"p95 {np.percentile(_init_arr, 95):.3f} px\n\n"
+        f"**Refined** ({len(_ref_arr)} corners):  "
+        f"mean **{np.mean(_ref_arr):.3f}** px,  "
+        f"median {np.median(_ref_arr):.3f} px,  "
+        f"p95 {np.percentile(_ref_arr, 95):.3f} px\n\n"
+        f"Mean reprojection Δ: **{np.mean(_init_arr) - np.mean(_ref_arr):+.3f}** px "
+        f"(negative = refined closer to calibrated model)"
+    )
+    return
+
+
+@app.cell
+def _(all_results, mo, np, plt):
+    mo.stop(not all_results, mo.md("Run optimization first."))
+
+    _movements = []
+    _tag_count = 0
+    for _fr in all_results.values():
+        for _r in _fr:
+            _movements.extend(_r["cornerMovements"].tolist())
+            _tag_count += 1
+    _all_movements = np.array(_movements)
 
     _fig, _ax = plt.subplots(figsize=(8, 4))
     _ax.hist(_all_movements, bins=30, color="C0", alpha=0.8, edgecolor="white")
@@ -550,7 +645,7 @@ def _(mo, np, plt, results):
     _ax.axvline(np.median(_all_movements), color="C2", linestyle="--", label=f"Median: {np.median(_all_movements):.2f} px")
     _ax.set_xlabel("Corner movement (pixels)")
     _ax.set_ylabel("Count")
-    _ax.set_title(f"Corner movement distribution ({len(_all_movements)} corners, {len(results)} tags)")
+    _ax.set_title(f"Corner movement distribution ({len(_all_movements)} corners, {_tag_count} tags, all frames)")
     _ax.legend()
     _ax.grid(True, alpha=0.3)
     _fig.tight_layout()
