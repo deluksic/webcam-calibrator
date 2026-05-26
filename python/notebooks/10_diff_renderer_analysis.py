@@ -14,6 +14,7 @@ def _():
 
 @app.cell
 def _():
+    import cv2
     import json
     import time
     from pathlib import Path
@@ -53,6 +54,7 @@ def _():
         JOINT_PARAM_NAMES,
         Image,
         Path,
+        cv2,
         RenderModelParams,
         STRIP_TO_CYCLIC_4,
         STRIP_TO_CYCLIC_5,
@@ -539,11 +541,9 @@ def _(all_results, frames, mo, np):
 
 
 @app.cell
-def _(all_results, export_data, frames, mo, np):
+def _(all_results, cv2, export_data, frames, mo, np):
     """Re-run calibrateCameraRO comparing init vs refined corners."""
     mo.stop(not all_results, mo.md("Run optimization first."))
-
-    import cv2
 
     _K = export_data.get("K")
     _img_size = export_data.get("imageSize")
@@ -672,6 +672,14 @@ def _(all_results, export_data, frames, mo, np):
             float(np.sqrt(np.mean((_pr.reshape(-1, 2) - _ref_img_pts[_vi]) ** 2)))
         )
 
+    # Precompute reprojected points for each frame (used by quiver visualization)
+    _proj_by_frame = {}
+    for _vi, _fid in enumerate(_frame_ids):
+        _p, _ = cv2.projectPoints(
+            _new_obj_ref, _rvecs_ref[_vi], _tvecs_ref[_vi], _K_ref, _dist_ref,
+        )
+        _proj_by_frame[_fid] = _p.reshape(-1, 2)
+
     _per_view_rows = []
     for _vi in range(_n_frames):
         _per_view_rows.append({
@@ -736,6 +744,7 @@ def _(all_results, export_data, frames, mo, np):
             "frame_ids": _frame_ids,
             "n_frames": _n_frames,
             "obj_template": _obj_template,
+            "proj_by_frame": _proj_by_frame,
         },
     )
 
@@ -744,8 +753,6 @@ def _(all_results, export_data, frames, mo, np):
 def _(all_results, calib_data, frame_selector, frames, go, np):
     """Reprojection error arrows: fitted corners → calibration reprojection."""
     mo.stop(not all_results, mo.md("Run optimization first."))
-
-    import cv2
 
     _fi = frame_selector.value
     _results = all_results.get(_fi, [])
@@ -756,18 +763,9 @@ def _(all_results, calib_data, frame_selector, frames, go, np):
     _img = _frame["image"]
     _h, _w = _img.shape
 
-    _fidx = calib_data["frame_ids"].index(_fid)
-    _rv = calib_data["rvecs_ref"][_fidx]
-    _tv = calib_data["tvecs_ref"][_fidx]
-    _K = calib_data["K_ref"]
-    _dist = calib_data["dist_ref"]
-    _obj = calib_data["new_obj_ref"]
+    _proj = calib_data["proj_by_frame"][_fid]
 
-    _proj, _ = cv2.projectPoints(_obj, _rv, _tv, _K, _dist)
-    _proj = _proj.reshape(-1, 2)
-
-    # Build lookup: (tagId, cornerIdx) → reprojected point.
-    # Ordering matches the calibration's object template.
+    # Build lookup: (tagId, cornerIdx) → reprojected point
     _proj_map = {}
     for _ci, (_tid, _corner_i, _obj) in enumerate(calib_data["obj_template"]):
         _proj_map[(_tid, _corner_i)] = _proj[_ci]
