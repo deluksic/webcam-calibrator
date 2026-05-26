@@ -546,61 +546,26 @@ def _(all_results, export_data, frames, mo, np):
     import cv2
 
     _K = export_data.get("K")
+    _targets = export_data.get("updatedTargets", [])
     _img_size = export_data.get("imageSize")
 
     mo.stop(
-        not _K or not _img_size,
-        mo.md("Export missing K/imageSize — skipping calibration comparison."),
+        not _K or not _targets or not _img_size,
+        mo.md("Export missing K/updatedTargets/imageSize — skipping."),
     )
 
     _w, _h = _img_size["width"], _img_size["height"]
 
-    # Learn layout from first frame's init corners (anchor = lowest tagId),
-    # matching the TypeScript learnLayoutFromFrame flow.
-    _first_results = all_results.get(0, [])
-    mo.stop(
-        len(_first_results) < 2,
-        mo.md(f"Need >=2 tags in first frame (have {len(_first_results)})."),
-    )
-
-    _sorted = sorted(_first_results, key=lambda r: r["tagId"])
-    _anchor = _sorted[0]
-    # Compute anchor homography (init corners → unit square).
-    # initCorners are strip order (TL,TR,BL,BR); reorder to cyclic (TL,TR,BR,BL).
-    _src_corners = np.array(
-        [[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float64
-    )  # cyclic: TL, TR, BR, BL
-    _anchor_corners_cyclic = _anchor["initCorners"][[0, 1, 3, 2]]  # strip → cyclic
-    _H_anchor, _ = cv2.findHomography(_anchor_corners_cyclic, _src_corners)
-    _H_inv = np.linalg.inv(_H_anchor)
-
-    # Map each tag's init corners through H_inv to get object-space layout.
-    # Transform in cyclic order, store in strip order (original input).
-    _layout = {}  # tagId → 4×2 object corners, strip order
-    for _r in _sorted:
-        _pts_cyclic = _r["initCorners"][[0, 1, 3, 2]]  # strip → cyclic
-        _obj_cyclic = cv2.perspectiveTransform(
-            _pts_cyclic.reshape(1, 4, 2).astype(np.float64), _H_inv
-        ).reshape(4, 2)
-        # Convert back to strip order for storage: cyclic→strip via [0,1,3,2]
-        _layout[_r["tagId"]] = _obj_cyclic[[0, 1, 3, 2]]
-
-    # Zero-mean in xy (matches layoutWithZeroMeanInPlane)
-    _all_xy = np.concatenate(list(_layout.values()), axis=0)
-    _mean = _all_xy.mean(axis=0)
-    for _tid in _layout:
-        _layout[_tid] = _layout[_tid] - _mean
-
-    # Build object-point template from learned layout
+    # Build object-point template from updatedTargets (real-world units).
+    # Sort by tagId for consistent ordering across frames.
     _obj_template = []
-    for _tid, _obj_corners in sorted(_layout.items()):
+    for _t in sorted(_targets, key=lambda x: x["tagId"]):
         for _ci in range(4):
-            _obj_template.append((_tid, _ci, [float(_obj_corners[_ci, 0]), float(_obj_corners[_ci, 1]), 0.0]))
+            _c = _t["corners"][_ci]
+            _obj_template.append((_t["tagId"], _ci, [_c["x"], _c["y"], _c["z"]]))
 
     # Build per-frame image points for shared tags
-    _obj_pts = []
-    _init_img_pts = []
-    _ref_img_pts = []
+    _obj_pts, _init_img_pts, _ref_img_pts = [], [], []
     _frame_ids = []
 
     for _fi, _frame in enumerate(frames):
@@ -632,12 +597,12 @@ def _(all_results, export_data, frames, mo, np):
     _n_frames = len(_obj_pts)
     _n_corners = _obj_pts[0].shape[0]
 
-    # iFixedPoint: index of anchor tag's TR corner (= corner 1 in strip order)
-    # within the flat objectPoints[0] array. Must be in [1, n_corners-2].
-    _anchor_tag_id = _anchor["tagId"]
+    # iFixedPoint: index of the first tag's TR corner (corner 1 in strip order)
+    # within objectPoints[0]. Must be in [1, n_corners-2] for object-releasing.
     _anchor_tr_idx = None
+    _first_tag_id = _obj_template[0][0]
     for _i, (_tid, _ci, _obj) in enumerate(_obj_template):
-        if _tid == _anchor_tag_id and _ci == 1:
+        if _tid == _first_tag_id and _ci == 1:
             _anchor_tr_idx = _i
             break
 
