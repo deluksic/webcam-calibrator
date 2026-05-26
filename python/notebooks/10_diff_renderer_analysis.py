@@ -540,90 +540,105 @@ def _(all_results, frames, mo, np):
 
 @app.cell
 def _(all_results, export_data, frames, mo, np):
-    """Compare reprojection error: init vs refined corners across ALL frames."""
+    """Re-run calibrateCameraRO comparing init vs refined corners."""
     mo.stop(not all_results, mo.md("Run optimization first."))
 
-    _K = export_data.get("K")
-    _extrinsics = export_data.get("extrinsics", [])
-    _targets = export_data.get("updatedTargets", [])
+    import cv2
 
-    if not _K or not _extrinsics or not _targets:
-        mo.md("Export missing K/extrinsics/updatedTargets — skipping reprojection comparison.")
+    _K = export_data.get("K")
+    _targets = export_data.get("updatedTargets", [])
+    _img_size = export_data.get("imageSize")
+
+    if not _K or not _targets or not _img_size:
+        mo.md("Export missing K/updatedTargets/imageSize — skipping calibration comparison.")
         return
 
-    _ext_by_fid = {e["frameId"]: e for e in _extrinsics}
-    _obj_by_tag = {}
-    for _t in _targets:
-        _tc = _t["corners"]
-        _obj_by_tag[_t["tagId"]] = np.array(
-            [[c["x"], c["y"]] for c in _tc], dtype=np.float64
-        )
+    _w, _h = _img_size["width"], _img_size["height"]
     _fx, _fy, _cx, _cy = _K["fx"], _K["fy"], _K["cx"], _K["cy"]
 
-    _init_errs = []
-    _refined_errs = []
-    _frame_summary = []
+    # Build object-point template from updatedTargets
+    _obj_template = []  # list of (tagId, cornerId, [x, y, z])
+    for _t in _targets:
+        for _ci in range(4):
+            _c = _t["corners"][_ci]
+            _obj_template.append((_t["tagId"], _ci, [_c["x"], _c["y"], _c["z"]]))
+
+    # Build per-frame image points (init and refined) for shared tags
+    _obj_pts = []       # N_frames × N_corners × 3
+    _init_img_pts = []  # N_frames × N_corners × 2
+    _ref_img_pts = []   # N_frames × N_corners × 2
+    _frame_ids = []
 
     for _fi, _frame in enumerate(frames):
-        _fid = _frame["frameId"]
-        _ext = _ext_by_fid.get(_fid)
-        if _ext is None:
+        _fr = all_results.get(_fi)
+        if not _fr:
             continue
-        _results = all_results.get(_fi, [])
-        if not _results:
-            continue
-        _res_by_tag = {r["tagId"]: r for r in _results}
-
-        _R = np.array(_ext["R"], dtype=np.float64).reshape(3, 3)
-        _t = np.array([_ext["t"]["x"], _ext["t"]["y"], _ext["t"]["z"]], dtype=np.float64)
-
-        _f_init = []
-        _f_ref = []
-        for _tag_id, _obj in _obj_by_tag.items():
-            _r = _res_by_tag.get(_tag_id)
+        _res_by_tag = {r["tagId"]: r for r in _fr}
+        _oi = []
+        _ii = []
+        _ri = []
+        for _tid, _ci, _obj in _obj_template:
+            _r = _res_by_tag.get(_tid)
             if _r is None:
-                continue
-            _P_obj = np.column_stack([_obj, np.zeros((4,), dtype=np.float64)])
-            _P_cam = (_R @ _P_obj.T + _t.reshape(3, 1)).T
-            _P_img = (_P_cam[:, :2] * np.array([_fx, _fy]) / _P_cam[:, 2:3] +
-                      np.array([_cx, _cy]))
-            _f_init.extend(
-                np.sqrt(np.sum((_r["initCorners"] - _P_img) ** 2, axis=1)).tolist()
-            )
-            _f_ref.extend(
-                np.sqrt(np.sum((_r["finalCorners"] - _P_img) ** 2, axis=1)).tolist()
-            )
-        if _f_init:
-            _frame_summary.append({
-                "frameId": _fid,
-                "n corners": len(_f_init),
-                "Init mean": f"{np.mean(_f_init):.3f}",
-                "Refined mean": f"{np.mean(_f_ref):.3f}",
-                "Δ mean": f"{np.mean(_f_init) - np.mean(_f_ref):+.3f}",
-            })
-            _init_errs.extend(_f_init)
-            _refined_errs.extend(_f_ref)
+                _oi.clear()
+                break
+            _oi.append(_obj)
+            _ii.append(_r["initCorners"][_ci].tolist())
+            _ri.append(_r["finalCorners"][_ci].tolist())
+        if len(_oi) < 6:
+            continue
+        _obj_pts.append(np.array(_oi, dtype=np.float32))
+        _init_img_pts.append(np.array(_ii, dtype=np.float32))
+        _ref_img_pts.append(np.array(_ri, dtype=np.float32))
+        _frame_ids.append(_frame["frameId"])
 
-    _init_arr = np.array(_init_errs)
-    _ref_arr = np.array(_refined_errs)
+    if len(_obj_pts) < 3:
+        mo.md(f"Need >=3 frames with shared tags (have {len(_obj_pts)}).")
+        return
 
-    mo.md("## Reprojection comparison (calibrated model, all frames)")
+    _n_frames = len(_obj_pts)
+    _n_corners = _obj_pts[0].shape[0]
 
-    if _frame_summary:
-        mo.ui.table(_frame_summary, selection=None, page_size=20)
+    _K_mat = np.array([[_fx, 0, _cx], [0, _fy, _cy], [0, 0, 1]], dtype=np.float64)
+    _dist = np.array(export_data.get("distortion", [0, 0, 0, 0, 0, 0, 0, 0]), dtype=np.float64)
+
+    _flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_ASPECT_RATIO
+
+    _t0 = cv2.calibrateCameraRO(
+        _obj_pts, _init_img_pts, (_w, _h), _K_mat.copy(), _dist.copy(),
+        flags=_flags,
+    )
+    _rms_init, _K_init, _dist_init, _rvecs_init, _tvecs_init, _, _, _per_view_init = _t0
+
+    _t1 = cv2.calibrateCameraRO(
+        _obj_pts, _ref_img_pts, (_w, _h), _K_mat.copy(), _dist.copy(),
+        flags=_flags,
+    )
+    _rms_ref, _K_ref, _dist_ref, _rvecs_ref, _tvecs_ref, _, _, _per_view_ref = _t1
 
     mo.md(
-        f"**Init** ({len(_init_arr)} corners):  "
-        f"mean **{np.mean(_init_arr):.3f}** px,  "
-        f"median {np.median(_init_arr):.3f} px,  "
-        f"p95 {np.percentile(_init_arr, 95):.3f} px\n\n"
-        f"**Refined** ({len(_ref_arr)} corners):  "
-        f"mean **{np.mean(_ref_arr):.3f}** px,  "
-        f"median {np.median(_ref_arr):.3f} px,  "
-        f"p95 {np.percentile(_ref_arr, 95):.3f} px\n\n"
-        f"Mean reprojection Δ: **{np.mean(_init_arr) - np.mean(_ref_arr):+.3f}** px "
-        f"(negative = refined closer to calibrated model)"
+        f"## calibrateCameraRO comparison ({_n_frames} frames, {_n_corners} corners each)\n\n"
+        f"| | Init | Refined | Δ |\n"
+        f"|---|---|---|---|\n"
+        f"| **RMS (px)** | {_rms_init:.4f} | {_rms_ref:.4f} | {_rms_init - _rms_ref:+.4f} |\n"
+        f"| **fx** | {_K_init[0,0]:.2f} | {_K_ref[0,0]:.2f} | {_K_init[0,0] - _K_ref[0,0]:+.2f} |\n"
+        f"| **fy** | {_K_init[1,1]:.2f} | {_K_ref[1,1]:.2f} | {_K_init[1,1] - _K_ref[1,1]:+.2f} |\n"
+        f"| **cx** | {_K_init[0,2]:.2f} | {_K_ref[0,2]:.2f} | {_K_init[0,2] - _K_ref[0,2]:+.2f} |\n"
+        f"| **cy** | {_K_init[1,2]:.2f} | {_K_ref[1,2]:.2f} | {_K_init[1,2] - _K_ref[1,2]:+.2f} |\n"
     )
+
+    # Per-frame RMS comparison table
+    _per_view_rows = []
+    for _vi in range(_n_frames):
+        _per_view_rows.append({
+            "Frame": _frame_ids[_vi],
+            "Init RMS": f"{_per_view_init[_vi]:.4f}",
+            "Refined RMS": f"{_per_view_ref[_vi]:.4f}",
+            "Δ": f"{_per_view_init[_vi] - _per_view_ref[_vi]:+.4f}",
+        })
+
+    mo.md("### Per-frame RMS")
+    mo.ui.table(_per_view_rows, selection=None, page_size=20)
     return
 
 
