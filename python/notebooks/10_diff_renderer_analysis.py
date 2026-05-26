@@ -610,13 +610,33 @@ def _(all_results, export_data, frames, mo, np):
         _obj_pts, _init_img_pts, (_w, _h), _n_corners, _K_mat.copy(), _dist.copy(),
         flags=_flags,
     )
-    _rms_init, _K_init, _dist_init, _rvecs_init, _tvecs_init, _, _, _per_view_init = _t0
+    _rms_init, _K_init, _dist_init, _rvecs_init, _tvecs_init, _ = _t0
 
     _t1 = cv2.calibrateCameraRO(
         _obj_pts, _ref_img_pts, (_w, _h), _n_corners, _K_mat.copy(), _dist.copy(),
         flags=_flags,
     )
-    _rms_ref, _K_ref, _dist_ref, _rvecs_ref, _tvecs_ref, _, _, _per_view_ref = _t1
+    _rms_ref, _K_ref, _dist_ref, _rvecs_ref, _tvecs_ref, _ = _t1
+
+    # Compute per-view reprojection errors manually
+    _per_view_init = []
+    for _vi in range(_n_frames):
+        _proj, _ = cv2.projectPoints(
+            _obj_pts[_vi], _rvecs_init[_vi], _tvecs_init[_vi],
+            _K_init, _dist_init,
+        )
+        _per_view_init.append(
+            float(np.sqrt(np.mean((_proj.reshape(-1, 2) - _init_img_pts[_vi]) ** 2)))
+        )
+    _per_view_ref = []
+    for _vi in range(_n_frames):
+        _proj, _ = cv2.projectPoints(
+            _obj_pts[_vi], _rvecs_ref[_vi], _tvecs_ref[_vi],
+            _K_ref, _dist_ref,
+        )
+        _per_view_ref.append(
+            float(np.sqrt(np.mean((_proj.reshape(-1, 2) - _ref_img_pts[_vi]) ** 2)))
+        )
 
     mo.md(
         f"## calibrateCameraRO comparison ({_n_frames} frames, {_n_corners} corners each)\n\n"
