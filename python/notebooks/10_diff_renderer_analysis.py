@@ -565,19 +565,25 @@ def _(all_results, export_data, frames, mo, np):
 
     _sorted = sorted(_first_results, key=lambda r: r["tagId"])
     _anchor = _sorted[0]
-    # Compute anchor homography (init corners → unit square)
+    # Compute anchor homography (init corners → unit square).
+    # initCorners are strip order (TL,TR,BL,BR); reorder to cyclic (TL,TR,BR,BL).
     _src_corners = np.array(
         [[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float64
-    )  # TL, TR, BR, BL
-    _H_anchor, _ = cv2.findHomography(_anchor["initCorners"], _src_corners)
+    )  # cyclic: TL, TR, BR, BL
+    _anchor_corners_cyclic = _anchor["initCorners"][[0, 1, 3, 2]]  # strip → cyclic
+    _H_anchor, _ = cv2.findHomography(_anchor_corners_cyclic, _src_corners)
     _H_inv = np.linalg.inv(_H_anchor)
 
-    # Map each tag's init corners through H_inv to get object-space layout
-    _layout = {}  # tagId → 4×2 object corners (z=0 plane, xy only)
+    # Map each tag's init corners through H_inv to get object-space layout.
+    # Transform in cyclic order, store in strip order (original input).
+    _layout = {}  # tagId → 4×2 object corners, strip order
     for _r in _sorted:
-        _pts = _r["initCorners"]  # N×2
-        _obj = cv2.perspectiveTransform(_pts.reshape(1, 4, 2).astype(np.float64), _H_inv)
-        _layout[_r["tagId"]] = _obj.reshape(4, 2)
+        _pts_cyclic = _r["initCorners"][[0, 1, 3, 2]]  # strip → cyclic
+        _obj_cyclic = cv2.perspectiveTransform(
+            _pts_cyclic.reshape(1, 4, 2).astype(np.float64), _H_inv
+        ).reshape(4, 2)
+        # Convert back to strip order for storage: cyclic→strip via [0,1,3,2]
+        _layout[_r["tagId"]] = _obj_cyclic[[0, 1, 3, 2]]
 
     # Zero-mean in xy (matches layoutWithZeroMeanInPlane)
     _all_xy = np.concatenate(list(_layout.values()), axis=0)
