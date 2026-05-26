@@ -605,20 +605,19 @@ def _(all_results, export_data, frames, mo, np):
         export_data.get("distortion", [0, 0, 0, 0, 0, 0, 0, 0]), dtype=np.float64
     )
 
-    # Both calibrations start from the same K/distortion guess and optimize
-    # independently. The fair comparison: can refined corners achieve lower RMS
-    # when the solver is free to adjust K, distortion, R|t, and object points?
+    # calibrateCameraRO with iFixedPoint = n_corners: all object points fixed.
+    # Both runs use the same updatedTargets — RMS directly reflects corner quality.
     _flags = cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_FIX_ASPECT_RATIO
     _criteria = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 200, 1e-10)
 
     _t0 = cv2.calibrateCameraRO(
-        _obj_pts, _init_img_pts, (_w, _h), 0, _K_mat.copy(), _dist.copy(),
+        _obj_pts, _init_img_pts, (_w, _h), _n_corners, _K_mat.copy(), _dist.copy(),
         flags=_flags, criteria=_criteria,
     )
     _rms_init, _K_init, _dist_init, _rvecs_init, _tvecs_init, _ = _t0
 
     _t1 = cv2.calibrateCameraRO(
-        _obj_pts, _ref_img_pts, (_w, _h), 0, _K_mat.copy(), _dist.copy(),
+        _obj_pts, _ref_img_pts, (_w, _h), _n_corners, _K_mat.copy(), _dist.copy(),
         flags=_flags, criteria=_criteria,
     )
     _rms_ref, _K_ref, _dist_ref, _rvecs_ref, _tvecs_ref, _ = _t1
