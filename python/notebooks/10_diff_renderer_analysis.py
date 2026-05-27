@@ -189,6 +189,8 @@ def _(
 ):
     mo.stop(not run_all_button.value, mo.md("Click **Run** to start per-tag optimization on all frames."))
 
+    _custom_codes = export_data.get("customTagCodes")
+
     _lm_steps = 30
     _df = jnp.float32(10.0)
     _lo = jnp.float32(1e-8)
@@ -300,7 +302,7 @@ def _(
         _tw = jnp.asarray(_warm, dtype=jnp.float32)
         _cc = (_init_c - jnp.array([_cx, _cy], dtype=jnp.float32))[STRIP_TO_CYCLIC_4]
         _Hw = homography_from_corners(CANONICAL, _cc)
-        _pw = build_tag_pattern(_first["tagId"])
+        _pw = build_tag_pattern(_first["tagId"], _custom_codes)
         _mw = loss_mask_from_corners(_cc, _ch, _cw)
         _cw2 = camera_with_inferred_levels(_seed, _tw, _Hw, _pw, _ch, _cw, loss_mask=_mw)
         _ = _lm_run(
@@ -328,7 +330,7 @@ def _(
                 _raw = np.pad(_raw, ((0, _pb), (0, _pr)), mode='constant')
             _targ = jnp.asarray(_raw, dtype=jnp.float32)
             _cc2 = (_ic - jnp.array([_cx, _cy], dtype=jnp.float32))[STRIP_TO_CYCLIC_4]
-            _pat = build_tag_pattern(_tid)
+            _pat = build_tag_pattern(_tid, _custom_codes)
             _Hi = homography_from_corners(CANONICAL, _cc2)
             _mask = loss_mask_from_corners(_cc2, _crop_h, _crop_w)
             _ci = camera_with_inferred_levels(_seed, _targ, _Hi, _pat, _crop_h, _crop_w, loss_mask=_mask)

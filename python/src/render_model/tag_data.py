@@ -65,9 +65,19 @@ def code_to_interior_pattern(code: int) -> np.ndarray:
     return interior
 
 
-def build_tag_pattern(tag_id: int = 0) -> jnp.ndarray:
+def build_tag_pattern(tag_id: int = 0, custom_codes: list[str] | None = None) -> jnp.ndarray:
     """Build an 8×8 float32 pattern in [0, 1] (1=white, 0=black)."""
-    code = tag36h11_code(tag_id)
+    if tag_id < 0:
+        if not custom_codes:
+            raise ValueError(f"custom tag id {tag_id} requires custom_codes")
+        idx = -tag_id - 1
+        if idx < 0 or idx >= len(custom_codes):
+            raise ValueError(
+                f"custom tag id {tag_id} index {idx} out of range [0, {len(custom_codes)})"
+            )
+        code = int(custom_codes[idx])
+    else:
+        code = tag36h11_code(tag_id)
     interior = code_to_interior_pattern(code)
     grid = np.ones((TAG_GRID_SIZE, TAG_GRID_SIZE), dtype=np.float32)
     grid[0, :] = 0.0
