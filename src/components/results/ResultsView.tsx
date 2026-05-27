@@ -194,7 +194,7 @@ export function ResultsView() {
                 disabled={!canExportCalibrationJson()}
                 onClick={exportCalibrationJson}
               >
-                Export JSON
+                Download ZIP
               </button>
             </div>
           </div>
@@ -208,7 +208,7 @@ export function ResultsView() {
           <Show when={hasOkDisplay()}>
             <p class={styles.successLine}>
               Drag to orbit the board (touch: two-finger drag; pinch or scroll to zoom). The panel on the right shows
-              the distortion field. Use <strong>Export JSON</strong> when you are done.
+              the distortion field. Use <strong>Download ZIP</strong> when you are done.
             </p>
           </Show>
           <Show when={gpuRoot()}>
