@@ -426,7 +426,7 @@ def _(
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     H_init,
     H_lm,
@@ -478,7 +478,7 @@ def _(
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     H_init,
     H_lm,

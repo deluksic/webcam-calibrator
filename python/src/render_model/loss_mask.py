@@ -6,6 +6,7 @@ from render_model.renderer import _pixel_centers
 
 # AprilTag 8×8 module grid: one black border cell per side → moat = side / 8.
 _APRILTAG_MOAT_SIDE_FRACTION = jnp.float32(1.0 / 8.0)
+_MIN_MOAT_PX = jnp.float32(3.0)
 
 
 def _segment_distance_sq(
@@ -55,8 +56,9 @@ def _quad_min_side_length(corners: jnp.ndarray) -> jnp.float32:
 
 
 def _april_tag_moat_pixels(corners: jnp.ndarray) -> jnp.float32:
-    """Inward moat width in pixels: one AprilTag border cell (⅛ of shortest side)."""
-    return _quad_min_side_length(corners) * _APRILTAG_MOAT_SIDE_FRACTION
+    """Inward moat width in pixels: max(3, ⅛ of shortest side)."""
+    april_tag = _quad_min_side_length(corners) * _APRILTAG_MOAT_SIDE_FRACTION
+    return jnp.maximum(april_tag, _MIN_MOAT_PX)
 
 
 def _tag_quad_mask(
@@ -84,8 +86,9 @@ def loss_mask_from_corners(
     height: int,
     width: int,
 ) -> jnp.ndarray:
-    """Mask for LM loss and level inference: inside the warped tag quad, inset by ⅛ min side.
+    """Mask for LM loss and level inference: inside the warped tag quad plus edge moat.
 
-    Moat width matches the AprilTag black border (one module cell on an 8×8 grid).
+    Moat width is max(3 px, ⅛ of shortest side), matching AprilTag border scale on
+    large tags and a minimum inset on small ones.
     """
     return _tag_quad_mask(corners, height, width, _april_tag_moat_pixels(corners))
