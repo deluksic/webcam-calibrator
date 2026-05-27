@@ -51,6 +51,8 @@ export type LiveCameraPipelineProps = {
   onQuadSnapshotRequest?: () => void
   /** Registers a function to capture the next frame's gray buffer alongside detection. */
   setRequestGraySnapshot?: (fn: (callback: (grayData: Float32Array) => void) => void) => void
+  /** Registers a function to update the GPU custom tag dictionary at runtime. */
+  setUpdateCustomDict?: (fn: (codes: bigint[]) => void) => void
   /** Extra controls (camera select, mode buttons, …). */
   toolbar?: JSX.Element
   /** Advisory 75%×75% framing guide over the **displayed** canvas (same box as tag overlays). */
@@ -204,6 +206,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
       onGraySnapshotCallback = callback
     }
     props.setRequestGraySnapshot?.(requestGraySnapshot)
+    props.setUpdateCustomDict?.((codes) => pip.tagDecode.updateCustomCodewords(codes))
 
     const scheduleQuadDetection = (slot: FrameSlot, sf: boolean) => {
       const gNow = gpu()

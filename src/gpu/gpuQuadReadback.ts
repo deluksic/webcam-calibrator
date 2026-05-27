@@ -2,14 +2,11 @@ import type { TgpuRoot } from 'typegpu'
 
 import type { CameraPipeline } from '@/gpu/cameraPipeline'
 import type { DetectedQuad } from '@/gpu/detectedQuad'
-import { DECODED_TAG_ID_DICT_MISS, DECODED_TAG_ID_UNKNOWN, MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
+import { MAX_DETECTED_TAGS } from '@/gpu/pipelines/gridVizPipeline'
 import type { HostQuadReadback } from '@/gpu/pipelines/hostQuadReadbackPipeline'
 import { quadAreaPx } from '@/lib/calibrationQuality'
 import type { Corners } from '@/lib/geometry'
 import { TAG_MODULE_CELL, type TagPattern } from '@/lib/tagModuleCell'
-
-const DICT_MISS_U32 = DECODED_TAG_ID_DICT_MISS >>> 0
-const UNKNOWN_U32 = DECODED_TAG_ID_UNKNOWN >>> 0
 const MODULES_PER_QUAD = 36
 
 /** GPU classify buffer uses i32: 0=black, 1=white, -1=weak, -2=tie.
@@ -75,16 +72,17 @@ function hostQuadToDetected(quad: HostQuadReadback, label: number, pattern?: Tag
   const h = maxY - minY
   const aspectRatio = h > 0 ? w / h : 1
 
-  const tagU32 = quad.decodedTagId >>> 0
+  const kind = quad.tagKind
   let decodedTagId: number | undefined
   let decodedRotation: number | undefined
-  let vizTagId: number | undefined
+  let decodedTagKind: 'tag36h11' | 'custom' | 'clean' | undefined
 
-  if (tagU32 !== UNKNOWN_U32 && tagU32 !== DICT_MISS_U32) {
-    decodedTagId = tagU32
+  if (kind === 1) {
+    decodedTagId = quad.decodedTagId // i32: >=0 standard, <0 custom
     decodedRotation = 0
-  } else if (tagU32 === DICT_MISS_U32) {
-    vizTagId = DICT_MISS_U32
+    decodedTagKind = decodedTagId < 0 ? 'custom' : 'tag36h11'
+  } else if (kind === 2) {
+    decodedTagKind = 'clean'
   }
 
   return {
@@ -101,10 +99,10 @@ function hostQuadToDetected(quad: HostQuadReadback, label: number, pattern?: Tag
       minR2: quad.debug.minR2,
       intersectionCount: quad.debug.intersectionCount,
     },
-    vizTagId,
+    vizTagId: undefined,
     decodedTagId,
     decodedRotation,
-    decodedTagKind: decodedTagId !== undefined ? 'tag36h11' : undefined,
+    decodedTagKind,
   }
 }
 

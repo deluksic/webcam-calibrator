@@ -21,5 +21,5 @@ export function acceptQuadForTagUse(quad: DetectedQuad, showFallbacks: boolean):
   if (quad.pattern ? patternHasAnyTie(quad.pattern) : false) {
     return false
   }
-  return typeof quad.decodedTagId === 'number'
+  return typeof quad.decodedTagId === 'number' || quad.decodedTagKind === 'clean'
 }

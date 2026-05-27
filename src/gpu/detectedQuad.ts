@@ -4,7 +4,7 @@ import type { TagPattern } from '@/lib/tagModuleCell'
 /** Compact label sentinel — must match GPU shaders and pointer-jump output. */
 export const COMPONENT_LABEL_INVALID = 0xffff_ffff
 
-export type DecodedTagKind = 'tag36h11' | 'custom'
+export type DecodedTagKind = 'tag36h11' | 'custom' | 'clean'
 
 export interface CornerDebugInfo {
   failureCode: number
@@ -24,7 +24,7 @@ export interface DetectedQuad {
   /** True when GPU corner pipeline succeeded (`failureCode === 0`). */
   hasCorners: boolean
   cornerDebug: CornerDebugInfo | undefined
-  /** Grid tint when decode failed but pattern looked valid (`DECODED_TAG_ID_DICT_MISS`). */
+  /** Deprecated; no longer used (replaced by `tagKind` discriminant). */
   vizTagId?: number
   decodedTagId?: number
   decodedRotation?: number

@@ -26,16 +26,15 @@ export const TagIdGridOverlay: Component<{
           max(abs(c()[0].y - c()[1].y), abs(c()[1].y - c()[2].y), abs(c()[2].y - c()[3].y), abs(c()[3].y - c()[0].y))
 
         const label = () => {
-          const id = quad().decodedTagId
+          const q = quad()
+          const id = q.decodedTagId
           if (id === undefined) {
+            if (q.decodedTagKind === 'clean') return '*'
             return undefined
           }
           if (id < 0) {
             const ot = props.customTagOverlay?.()
-            if (!ot) {
-              return '*'
-            }
-            if (!ot.collectionRunning) {
+            if (!ot || !ot.collectionRunning) {
               return '*'
             }
             const idx = ot.sessionIndexByCustomTagId.get(id)
@@ -43,8 +42,10 @@ export const TagIdGridOverlay: Component<{
           }
           return displayLabelForTagId(id)
         }
-        const id = () => quad().decodedTagId
-        const customStyled = () => typeof id() === 'number' && id()! < 0 && props.customTagOverlay !== undefined
+        const customStyled = () => {
+          const q = quad()
+          return q.decodedTagKind === 'clean' || (typeof q.decodedTagId === 'number' && q.decodedTagId < 0 && props.customTagOverlay !== undefined)
+        }
         return (
           <Show when={label() !== undefined}>
             <div

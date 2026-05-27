@@ -17,6 +17,8 @@ import type { Corners3 } from '@/lib/calibrationTypes'
 import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
 import { isProgressShapedError, percentile, type SnapshotFeedback } from '@/lib/calibrationViewUtils'
 import { formatFixed } from '@/lib/formatFixed'
+import { canonicalizeBinaryPatternMinCode } from '@/lib/tag36h11'
+import { patternHasAnyTie } from '@/lib/tagModuleCell'
 import { learnLayoutFromFrame, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 
@@ -36,6 +38,7 @@ function CalibrationView() {
   const [currentTagged, setCurrentTagged] = createSignal<DetectedQuad[]>([])
 
   let requestGraySnapshot: ((callback: (grayData: Float32Array) => void) => void) | null = null
+  let updateCustomDict: ((codes: bigint[]) => void) | null = null
 
   const calibratedExtrinsics = createMemo(() => {
     const c = runCtx.calib()
@@ -73,6 +76,7 @@ function CalibrationView() {
     tagged: DetectedQuad[],
     source: 'manual' | 'autoFirst',
     grayInfo?: { data: Float32Array; width: number; height: number },
+    customTagByCode?: Map<string, number>,
   ): boolean => {
     const r = runCtx.run()
     if (r.collection !== 'running') {
@@ -97,9 +101,17 @@ function CalibrationView() {
       if (!acceptQuadForTagUse(q, false)) {
         continue
       }
-      if (typeof q.decodedTagId === 'number') {
+      let tagId = q.decodedTagId
+      // CPU-side custom tag ID assignment when dictionary was just uploaded
+      if (tagId === undefined && customTagByCode && q.decodedTagKind === 'clean' && q.pattern && !patternHasAnyTie(q.pattern)) {
+        const canon = canonicalizeBinaryPatternMinCode(q.pattern)
+        if (canon) {
+          tagId = customTagByCode.get(canon.code.toString())
+        }
+      }
+      if (typeof tagId === 'number') {
         tags.push({
-          tagId: q.decodedTagId,
+          tagId,
           rotation: q.decodedRotation ?? 0,
           corners: q.corners,
           score: calibrationQuadScore(q),
@@ -222,18 +234,24 @@ function CalibrationView() {
     }
   }
 
-  /** Same notion as first snapshot: need two distinct decoded IDs to learn layout (not "?"). */
+  /** Distinct tag identities visible: decoded IDs + clean undecoded patterns. */
   const decodedUniqueTagCountOnFrame = createMemo(() => {
     const ids = new Set<number>()
+    const cleanCodes = new Set<string>()
     for (const q of currentTagged()) {
       if (!acceptQuadForTagUse(q, false)) {
         continue
       }
       if (typeof q.decodedTagId === 'number') {
         ids.add(q.decodedTagId)
+      } else if (q.decodedTagKind === 'clean' && q.pattern && !patternHasAnyTie(q.pattern)) {
+        const canon = canonicalizeBinaryPatternMinCode(q.pattern)
+        if (canon) {
+          cleanCodes.add(canon.code.toString())
+        }
       }
     }
-    return ids.size
+    return ids.size + cleanCodes.size
   })
 
   const canPressStart = createMemo(() => decodedUniqueTagCountOnFrame() >= 2)
@@ -433,6 +451,9 @@ function CalibrationView() {
             setRequestGraySnapshot={(fn) => {
               requestGraySnapshot = fn
             }}
+            setUpdateCustomDict={(fn) => {
+              updateCustomDict = fn
+            }}
           />
         </div>
       </Errored>
@@ -465,8 +486,37 @@ function CalibrationView() {
             setSnapshotFeedback({ kind: 'idle' })
             calibrationLibrary.setSelectedId(undefined)
             runCtx.startSession()
+
+            // Auto-build custom dictionary from clean patterns in current frame.
+            let customTagByCode: Map<string, number> | undefined
+            const tagged = currentTagged()
+            if (updateCustomDict) {
+              const customCodes: bigint[] = []
+              const seen = new Set<string>()
+              for (const q of tagged) {
+                if (
+                  q.hasCorners &&
+                  q.cornerDebug?.failureCode === 0 &&
+                  q.decodedTagKind === 'clean' &&
+                  q.pattern &&
+                  !patternHasAnyTie(q.pattern)
+                ) {
+                  const canon = canonicalizeBinaryPatternMinCode(q.pattern)
+                  if (canon) {
+                    const key = canon.code.toString()
+                    if (!seen.has(key)) {
+                      seen.add(key)
+                      customCodes.push(canon.code)
+                    }
+                  }
+                }
+              }
+              updateCustomDict(customCodes)
+              customTagByCode = new Map(customCodes.map((c, i) => [c.toString(), -(i + 1)]))
+            }
+
             // Same frame as Start — do not wait for the next onQuadDetection tick.
-            attemptAddPooledFrame(currentTagged(), 'autoFirst')
+            attemptAddPooledFrame(tagged, 'autoFirst', undefined, customTagByCode)
           }}
         >
           {runCtx.run().collection === 'running' ? `Snapshot (${runCtx.run().stats.framesAccepted})` : 'Start'}
@@ -495,6 +545,7 @@ function CalibrationView() {
           onClick={() => {
             setReproj(undefined)
             setSnapshotFeedback({ kind: 'idle' })
+            updateCustomDict?.([])
             runCtx.resetSession()
           }}
         >

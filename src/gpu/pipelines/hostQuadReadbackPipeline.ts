@@ -13,8 +13,9 @@ export const HostQuadCorners = d.arrayOf(d.vec2f, 4)
 export const HostQuadReadbackGpu = d.struct({
   screenCorners: HostQuadCorners,
   debug: QuadDebug,
-  decodedTagId: d.u32,
+  decodedTagId: d.i32,
   decodedRotation: d.u32,
+  tagKind: d.u32,
 })
 
 export type HostQuadReadback = d.Infer<typeof HostQuadReadbackGpu>
@@ -46,6 +47,7 @@ function createHostQuadPackPipeline(root: TgpuRoot, layout: ReturnType<typeof cr
       debug: src.debug,
       decodedTagId: src.decodedTagId,
       decodedRotation: src.decodedRotation,
+      tagKind: src.tagKind,
     })
   })
 

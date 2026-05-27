@@ -13,7 +13,6 @@ import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import type { EdgeLineOutBuffer } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
 import {
-  DECODED_TAG_ID_UNKNOWN,
   GridDataSchema,
   QuadDataGpu,
   QuadDebug,
@@ -67,8 +66,9 @@ function createQuadCornerHomographyPipeline(
       screenCorners: deadScreen,
       debug: emptyDebug,
       // Tag decode runs after homography in a later compute pass — initialized as unknown here.
-      decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
+      decodedTagId: d.i32(0),
       decodedRotation: d.u32(0),
+      tagKind: d.u32(0),
     })
 
     if (quadId >= nQuads) {
@@ -98,8 +98,9 @@ function createQuadCornerHomographyPipeline(
             minR2: d.f32(0),
             intersectionCount: d.f32(0),
           }),
-          decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
+          decodedTagId: d.i32(0),
           decodedRotation: d.u32(0),
+          tagKind: d.u32(0),
         })
         return
       }
@@ -115,8 +116,9 @@ function createQuadCornerHomographyPipeline(
             minR2: d.f32(0),
             intersectionCount: d.f32(0),
           }),
-          decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
+          decodedTagId: d.i32(0),
           decodedRotation: d.u32(0),
+          tagKind: d.u32(0),
         })
         return
       }
@@ -136,8 +138,9 @@ function createQuadCornerHomographyPipeline(
         minR2: d.f32(0),
         intersectionCount: d.f32(solved.intersectionCount),
       }),
-      decodedTagId: d.u32(DECODED_TAG_ID_UNKNOWN),
+      decodedTagId: d.i32(0),
       decodedRotation: d.u32(0),
+      tagKind: d.u32(0),
     })
   })
 

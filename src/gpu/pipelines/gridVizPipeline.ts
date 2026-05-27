@@ -35,19 +35,16 @@ export const QuadDataGpu = d.struct({
   /** Degenerate H only: affine quad from line intersections (may show a strip diagonal kink). */
   screenCorners: QuadScreenCorners,
   debug: QuadDebug,
-  /** `0xFFFFFFFF` = unknown — solid black (no hash). Same convention as CPU. */
-  decodedTagId: d.u32,
+  /** Valid when tagKind === 1: standard tag ID (>=0) or custom tag ID (<0). */
+  decodedTagId: d.i32,
   /** Clockwise quarter-turns from canonical orientation (0-3). */
   decodedRotation: d.u32,
+  /** 0=dead, 1=decoded, 2=clean-undecoded. */
+  tagKind: d.u32,
 })
 
 export type QuadData = d.Infer<typeof QuadDataGpu>
 
-/** Sentinel: no decoded id (GPU draws black, no hash). */
-export const DECODED_TAG_ID_UNKNOWN = 0xffff_ffff
-
-/** Vote pattern passed quality gate but dictionary decode failed — distinct tint in grid viz + “?” label. */
-export const DECODED_TAG_ID_DICT_MISS = 0xffff_fffe
 
 export const GridDataSchema = d.arrayOf(QuadDataGpu, MAX_INSTANCES)
 
@@ -159,7 +156,8 @@ export function createGridVizPipeline(
       edgeCount: d.f32,
       minR2: d.f32,
       intersectionCount: d.f32,
-      decodedTagId: d.interpolate('flat', d.u32),
+      decodedTagId: d.interpolate('flat', d.i32),
+      tagKind: d.interpolate('flat', d.u32),
     },
   })(({ vertexIndex, instanceIndex }) => {
     const quad = gridVizLayout.$.quads[instanceIndex]!
@@ -212,6 +210,7 @@ export function createGridVizPipeline(
       minR2: debug.minR2,
       intersectionCount: debug.intersectionCount,
       decodedTagId: quad.decodedTagId,
+      tagKind: quad.tagKind,
     }
   })
 
@@ -242,33 +241,39 @@ export function createGridVizPipeline(
     in: {
       uv: d.vec2f,
       failureCode: d.interpolate('flat', d.u32),
-      decodedTagId: d.interpolate('flat', d.u32),
+      decodedTagId: d.interpolate('flat', d.i32),
+      tagKind: d.interpolate('flat', d.u32),
     },
     out: d.vec4f,
-  })(({ uv, failureCode, decodedTagId }) => {
+  })(({ uv, failureCode, decodedTagId, tagKind }) => {
     'use gpu'
-    // Derivatives must run before any branch on flat per-instance decodedTagId (WGSL uniformity).
+    // Derivatives must run before any branch on flat per-instance values (WGSL uniformity).
     const ddx = dpdx(uv)
     const ddy = dpdy(uv)
     const grid = gridTextureGradBox(uv, ddx, ddy, GRID_DIVISIONS)
-    const a = 0.2 + 0.75 * grid
 
+    // tagKind 0 = dead → hidden in calibrate mode
     if (gridVizLayout.$.hideNonDecoded === d.u32(1)) {
-      if (
-        decodedTagId === d.u32(DECODED_TAG_ID_UNKNOWN) ||
-        decodedTagId === d.u32(DECODED_TAG_ID_DICT_MISS)
-      ) {
+      if (tagKind === d.u32(0)) {
         return d.vec4f(0, 0, 0, 0)
       }
     }
 
-    if (failureCode === d.u32(0) && decodedTagId === d.u32(DECODED_TAG_ID_DICT_MISS)) {
-      const amber = d.vec3f(0.92, 0.62, 0.18)
-      return d.vec4f(mul(amber, d.vec3f(0.5, 0.5, 0.5)), 0.32 + 0.68 * grid)
+    // tagKind 2 = clean undecoded → blue outline
+    if (failureCode === d.u32(0) && tagKind === d.u32(2)) {
+      const blue = d.vec3f(0.18, 0.45, 0.92)
+      return d.vec4f(mul(blue, d.vec3f(0.5, 0.5, 0.5)), 0.32 + 0.68 * grid)
     }
 
-    if (failureCode === d.u32(0) && decodedTagId !== d.u32(DECODED_TAG_ID_UNKNOWN)) {
-      const rgb = stableHashToRgb01(decodedTagId)
+    // tagKind 1 = decoded
+    if (failureCode === d.u32(0) && tagKind === d.u32(1)) {
+      if (decodedTagId < d.i32(0)) {
+        // Custom tag → blue tint
+        const blue = d.vec3f(0.18, 0.45, 0.92)
+        const fill = mul(blue, d.vec3f(0.55, 0.55, 0.55))
+        return d.vec4f(fill, 0.28 + 0.72 * grid)
+      }
+      const rgb = stableHashToRgb01(d.u32(decodedTagId))
       const fill = mul(rgb, d.vec3f(0.55, 0.55, 0.55))
       return d.vec4f(fill, 0.28 + 0.72 * grid)
     }
@@ -278,6 +283,7 @@ export function createGridVizPipeline(
     }
 
     const tint = gridVizFailureTintRgb(failureCode)
+    const a = 0.2 + 0.75 * grid
     return d.vec4f(mul(tint, d.vec3f(0.32 + 0.68 * grid)), a)
   })
 

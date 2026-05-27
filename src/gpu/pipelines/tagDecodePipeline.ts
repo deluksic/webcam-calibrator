@@ -8,8 +8,6 @@ import { abs, atomicAdd, atomicMin, clamp, countOneBits, textureLoad } from 'typ
 import { profileComputePass, profileRenderPass } from '@/gpu/gpuProfiling'
 import { MAX_QUADS } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import {
-  DECODED_TAG_ID_DICT_MISS,
-  DECODED_TAG_ID_UNKNOWN,
   GridDataSchema,
   type GridVizQuadBuffer,
 } from '@/gpu/pipelines/gridVizPipeline'
@@ -77,11 +75,16 @@ const PATTERN_WHITE = 1
 const PATTERN_WEAK = -1
 const PATTERN_TIE = -2
 
-const WORST_SCORE = ((TAG_DECODE_MAX_DICT_ERROR + 1) << 20) | TAG36H11_COUNT
+const WORST_SCORE = ((TAG_DECODE_MAX_DICT_ERROR + 1) << 21) | (1 << 20) | TAG36H11_COUNT
 const WorstScoreGpu = tgpu.const(d.u32, WORST_SCORE)
 
 const CodewordPair = d.struct({ low: d.u32, high: d.u32 })
 const CodewordBuffer = d.arrayOf(CodewordPair, TAG36H11_COUNT)
+
+const MAX_CUSTOM_COUNT = 4096
+const CustomCodewordBuffer = d.arrayOf(CodewordPair, MAX_CUSTOM_COUNT)
+const CustomCountSchema = d.arrayOf(d.u32, 1)
+const FlatI32Schema = d.arrayOf(d.i32, MAX_QUADS)
 
 export const TagDecodeThresholdGpu = d.struct({
   blackBound: d.f32,
@@ -93,12 +96,14 @@ export const TagDecodeThresholdGpu = d.struct({
 export const TagDecodeThresholdSchema = d.arrayOf(TagDecodeThresholdGpu, MAX_QUADS)
 
 const QuadDecodeMetaGpu = d.struct({
-  rejectDict: d.u32,
+  /** 0=ties, 1=weaks-no-ties, 2=clean (no ties, no weaks). */
+  patternQuality: d.u32,
   weakCount: d.u32,
   weakBit0: d.u32,
   weakBit1: d.u32,
   weakBit2: d.u32,
   weakBit3: d.u32,
+  canonRot: d.u32,
 })
 
 const QuadDecodeMetaSchema = d.arrayOf(QuadDecodeMetaGpu, MAX_QUADS)
@@ -387,17 +392,51 @@ function createClassifyStage(
       }
     }
 
-    let reject = d.u32(0)
+    let quality = d.u32(2) // clean by default
     if (tieCount > d.u32(0)) {
-      reject = d.u32(1)
+      quality = d.u32(0)
+    } else if (weakCount > d.u32(0)) {
+      quality = d.u32(1)
     }
+
+    // Find canonical rotation: which rotation produces minimal 36-bit code.
+    let canonRot = d.u32(0)
+    let canonLow = d.u32(0xFFFFFFFF)
+    let canonHigh = d.u32(0xFFFFFFFF)
+    for (let r = d.u32(0); r < d.u32(4); r = r + d.u32(1)) {
+      let codeLow = d.u32(0)
+      let codeHigh = d.u32(0)
+      for (const bit of tgpu.unroll(std.range(0, MODULES_PER_QUAD))) {
+        const bitU = d.u32(bit)
+        let srcBit = d.u32(0)
+        if (r === d.u32(0)) { srcBit = RotLut0Gpu.$[bitU]! }
+        else if (r === d.u32(1)) { srcBit = RotLut1Gpu.$[bitU]! }
+        else if (r === d.u32(2)) { srcBit = RotLut2Gpu.$[bitU]! }
+        else { srcBit = RotLut3Gpu.$[bitU]! }
+        const bx = BitXGpu.$[srcBit]! - d.u32(1)
+        const by = BitYGpu.$[srcBit]! - d.u32(1)
+        const pIdx = by * d.u32(DATA_MODULES) + bx
+        const cell = layout.$.pattern[quadId]!.modules[pIdx]!
+        if (cell === d.i32(PATTERN_WHITE)) {
+          if (bitU >= d.u32(32)) { codeHigh = codeHigh | (d.u32(1) << ((bitU - d.u32(32)) & d.u32(31))) }
+          else { codeLow = codeLow | (d.u32(1) << (bitU & d.u32(31))) }
+        }
+      }
+      if (codeHigh < canonHigh || (codeHigh === canonHigh && codeLow < canonLow)) {
+        canonHigh = codeHigh
+        canonLow = codeLow
+        canonRot = r
+      }
+    }
+
     layout.$.meta[quadId] = QuadDecodeMetaGpu({
-      rejectDict: reject,
+      patternQuality: quality,
       weakCount,
       weakBit0: weakBits[0]!,
       weakBit1: weakBits[1]!,
       weakBit2: weakBits[2]!,
       weakBit3: weakBits[3]!,
+      canonRot,
     })
   })
 
@@ -416,6 +455,8 @@ function createClassifyStage(
 function createDictMatchStage(
   root: TgpuRoot,
   codewordBuffer: ReturnType<typeof root.createBuffer<typeof CodewordBuffer>>,
+  customCodewordBuffer: ReturnType<typeof root.createBuffer<typeof CustomCodewordBuffer>>,
+  customCountBuf: ReturnType<typeof root.createBuffer<typeof CustomCountSchema>>,
   patternBuf: ReturnType<typeof root.createBuffer<typeof PatternSchema>>,
   metaBuf: ReturnType<typeof root.createBuffer<typeof QuadDecodeMetaSchema>>,
   atomicBestBuf: ReturnType<typeof root.createBuffer<typeof AtomicBestSchema>>,
@@ -423,6 +464,8 @@ function createDictMatchStage(
 ) {
   const layout = tgpu.bindGroupLayout({
     codewords: { storage: CodewordBuffer, access: 'readonly' },
+    customCodewords: { storage: CustomCodewordBuffer, access: 'readonly' },
+    customCount: { storage: CustomCountSchema, access: 'readonly' },
     pattern: { storage: PatternSchema, access: 'readonly' },
     meta: { storage: QuadDecodeMetaSchema, access: 'readonly' },
     atomicBest: { storage: AtomicBestSchema, access: 'mutable' },
@@ -431,6 +474,8 @@ function createDictMatchStage(
 
   const bindGroup = root.createBindGroup(layout, {
     codewords: codewordBuffer as never,
+    customCodewords: customCodewordBuffer as never,
+    customCount: customCountBuf as never,
     pattern: patternBuf as never,
     meta: metaBuf as never,
     atomicBest: atomicBestBuf as never,
@@ -442,24 +487,27 @@ function createDictMatchStage(
     workgroupSize: [COMPUTE_WG, 1, 1],
   })((input) => {
     const gid = d.u32(input.gid.x)
-    const cwIdx = gid % d.u32(TAG36H11_COUNT)
-    const quadId = d.u32(gid / d.u32(TAG36H11_COUNT))
+    const totalPerQuad = d.u32(TAG36H11_COUNT) + layout.$.customCount[0]!
+    const cwIdx = gid % totalPerQuad
+    const quadId = d.u32(gid / totalPerQuad)
     if (quadId >= layout.$.activeQuadCount[0]!) {
       return
     }
 
     const meta = layout.$.meta[quadId]!
-    if (meta.rejectDict !== d.u32(0)) {
+    if (meta.patternQuality === d.u32(0)) {
       return
     }
 
+    const isCustom = cwIdx >= d.u32(TAG36H11_COUNT)
+    const customIdx = cwIdx - d.u32(TAG36H11_COUNT)
     const weakCount = meta.weakCount
     if (weakCount > d.u32(TAG_DECODE_MAX_WEAK_WILDCARD)) {
       return
     }
 
-    const cw = layout.$.codewords[cwIdx]!
-    
+    const rotStart = d.u32(0)
+    const rotEnd = d.u32(4)
 
     const maskCount = d.u32(1) << weakCount
     let localBest = d.u32(TAG_DECODE_MAX_DICT_ERROR + 1)
@@ -505,21 +553,16 @@ function createDictMatchStage(
         }
       }
 
-      for (const rot of tgpu.unroll(std.range(0, 4))) {
+      for (let rot = rotStart; rot < rotEnd; rot = rot + d.u32(1)) {
         let knownLow = d.u32(0)
         let knownHigh = d.u32(0)
         for (const bit of tgpu.unroll(std.range(0, MODULES_PER_QUAD))) {
           const bitU = d.u32(bit)
           let srcBit = d.u32(0)
-          if (rot === 0) {
-            srcBit = RotLut0Gpu.$[bitU]!
-          } else if (rot === 1) {
-            srcBit = RotLut1Gpu.$[bitU]!
-          } else if (rot === 2) {
-            srcBit = RotLut2Gpu.$[bitU]!
-          } else {
-            srcBit = RotLut3Gpu.$[bitU]!
-          }
+          if (rot === d.u32(0)) { srcBit = RotLut0Gpu.$[bitU]! }
+          else if (rot === d.u32(1)) { srcBit = RotLut1Gpu.$[bitU]! }
+          else if (rot === d.u32(2)) { srcBit = RotLut2Gpu.$[bitU]! }
+          else { srcBit = RotLut3Gpu.$[bitU]! }
           const bx = BitXGpu.$[srcBit]! - d.u32(1)
           const by = BitYGpu.$[srcBit]! - d.u32(1)
           const pIdx = by * d.u32(DATA_MODULES) + bx
@@ -533,20 +576,37 @@ function createDictMatchStage(
             }
           }
         }
-        const diffLow = knownLow ^ cw.low ^ wildLow
-        const diffHigh = knownHigh ^ cw.high ^ wildHigh
+        // Pick codeword: standard or custom
+        let cwLow = d.u32(0)
+        let cwHigh = d.u32(0)
+        if (isCustom) {
+          cwLow = layout.$.customCodewords[customIdx]!.low
+          cwHigh = layout.$.customCodewords[customIdx]!.high
+        } else {
+          cwLow = layout.$.codewords[cwIdx]!.low
+          cwHigh = layout.$.codewords[cwIdx]!.high
+        }
+        const diffLow = knownLow ^ cwLow ^ wildLow
+        const diffHigh = knownHigh ^ cwHigh ^ wildHigh
         const d0 = countOneBits(diffLow) + countOneBits(diffHigh)
         if (d0 < localBest) {
           localBest = d0
-          localRot = d.u32(rot)
+          localRot = rot
         } else if (d0 === localBest) {
-          localRot = d.u32(rot)
+          localRot = rot
         }
       }
     }
 
     if (localBest <= d.u32(TAG_DECODE_MAX_DICT_ERROR)) {
-      const candidate = (localBest << d.u32(20)) | (localRot << d.u32(18)) | cwIdx
+      // bit 20 = custom flag, bits 18-19 = rotation, bits 0-17 = cwIdx, bits 21+ = distance
+      let packedCwIdx = cwIdx
+      let customBit = d.u32(0)
+      if (isCustom) {
+        packedCwIdx = customIdx
+        customBit = d.u32(1) << d.u32(20)
+      }
+      const candidate = (localBest << d.u32(21)) | customBit | (localRot << d.u32(18)) | packedCwIdx
       atomicMin(layout.$.atomicBest[quadId]!, candidate)
     }
   })
@@ -554,9 +614,9 @@ function createDictMatchStage(
   const pipeline = root.createComputePipeline({ compute: kernel }).$name('tag-dict')
 
   return {
-    encodeDictMatch(pass: GPUComputePassEncoder, quadCount: number) {
+    encodeDictMatch(pass: GPUComputePassEncoder, quadCount: number, customCount: number) {
       const n = capQuadCount(quadCount)
-      const threads = n * TAG36H11_COUNT
+      const threads = n * (TAG36H11_COUNT + customCount)
       if (threads > 0) {
         pipeline
           .with(pass)
@@ -602,28 +662,37 @@ function createCanonicalizeStage(
     const c0 = H.columns[0]!
     const c1 = H.columns[1]!
     const hLen = c0.x * c0.x + c0.y * c0.y + c1.x * c1.x + c1.y * c1.y
-    if (hLen < d.f32(1e-6)) {
-      layout.$.quadData[quadId]!.decodedTagId = d.u32(DECODED_TAG_ID_UNKNOWN)
-      return
-    }
+    const quality = layout.$.meta[quadId]!.patternQuality
 
-    if (layout.$.meta[quadId]!.rejectDict !== d.u32(0)) {
-      layout.$.quadData[quadId]!.decodedTagId = d.u32(DECODED_TAG_ID_UNKNOWN)
+    if (hLen < d.f32(1e-6) || quality === d.u32(0)) {
+      layout.$.quadData[quadId]!.tagKind = d.u32(0)
+      layout.$.quadData[quadId]!.decodedTagId = d.i32(0)
       return
     }
 
     const score = layout.$.atomicBest[quadId]!
-    const dist = score >> d.u32(20)
+    const dist = score >> d.u32(21)
     const bestRot = (score >> d.u32(18)) & d.u32(3)
+    const isCustom = ((score >> d.u32(20)) & d.u32(1)) !== d.u32(0)
     const bestId = score & d.u32(0x3ffff)
 
     if (dist > d.u32(TAG_DECODE_MAX_DICT_ERROR)) {
-      layout.$.quadData[quadId]!.decodedTagId = d.u32(DECODED_TAG_ID_DICT_MISS)
-      layout.$.quadData[quadId]!.decodedRotation = d.u32(0)
+      if (quality === d.u32(2)) {
+        layout.$.quadData[quadId]!.tagKind = d.u32(2) // clean undecoded
+      } else {
+        layout.$.quadData[quadId]!.tagKind = d.u32(0) // weaks, no match -> dead
+      }
+      layout.$.quadData[quadId]!.decodedTagId = d.i32(0)
       return
     }
 
-    layout.$.quadData[quadId]!.decodedTagId = bestId
+    // Decoded
+    layout.$.quadData[quadId]!.tagKind = d.u32(1)
+    if (isCustom) {
+      layout.$.quadData[quadId]!.decodedTagId = -(d.i32(bestId) + d.i32(1))
+    } else {
+      layout.$.quadData[quadId]!.decodedTagId = d.i32(bestId)
+    }
     layout.$.quadData[quadId]!.decodedRotation = bestRot
 
     const strip = quad.screenCorners
@@ -705,6 +774,28 @@ export function createTagDecodeStage(
   const atomicBestBuf = root.createBuffer(AtomicBestSchema).$usage('storage')
   const activeQuadCountBuf = root.createBuffer(ActiveQuadCountSchema).$usage('storage')
 
+  // Custom codeword buffer — always allocated, populated by updateCustomCodewords.
+  const customCodewordBuffer = root.createBuffer(CustomCodewordBuffer).$usage('storage')
+  const customCountBuf = root.createBuffer(CustomCountSchema).$usage('storage')
+  customCountBuf.write([0])
+
+  let currentCustomCount = 0
+
+  function updateCustomCodewords(codes: bigint[]) {
+    const data: { low: number; high: number }[] = []
+    for (let i = 0; i < MAX_CUSTOM_COUNT; i++) {
+      if (i < codes.length) {
+        const code = codes[i]!
+        data.push({ low: Number(code & 0xffffffffn), high: Number((code >> 32n) & 0xffffffffn) })
+      } else {
+        data.push({ low: 0, high: 0 })
+      }
+    }
+    customCodewordBuffer.write(data)
+    customCountBuf.write([codes.length])
+    currentCustomCount = codes.length
+  }
+
   const voteClear = createModuleVoteClear(root, { moduleWhiteBuf, moduleBlackBuf })
 
   const voteStage = createModuleVoteStage(
@@ -728,7 +819,16 @@ export function createTagDecodeStage(
     metaBuf,
     activeQuadCountBuf,
   )
-  const dictStage = createDictMatchStage(root, codewordBuffer, patternBuf, metaBuf, atomicBestBuf, activeQuadCountBuf)
+  const dictStage = createDictMatchStage(
+    root,
+    codewordBuffer,
+    customCodewordBuffer,
+    customCountBuf,
+    patternBuf,
+    metaBuf,
+    atomicBestBuf,
+    activeQuadCountBuf,
+  )
   const canonicalizeStage = createCanonicalizeStage(
     root,
     deps.quadDataBuffer,
@@ -761,7 +861,7 @@ export function createTagDecodeStage(
     }
     classifyStage.encodeClassify(computePass, n)
     atomicBestClear.encodeClear(computePass)
-    dictStage.encodeDictMatch(computePass, n)
+    dictStage.encodeDictMatch(computePass, n, currentCustomCount)
     canonicalizeStage.encodeCanonicalize(computePass, n)
   }
 
@@ -774,5 +874,6 @@ export function createTagDecodeStage(
     encodeModuleVotePasses,
     encodeVotePasses,
     encodeDecode,
+    updateCustomCodewords,
   }
 }
