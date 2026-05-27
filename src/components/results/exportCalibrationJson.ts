@@ -1,11 +1,13 @@
+import { strToU8, zipSync } from 'fflate'
+
 import type { CalibrationFrameObservation } from '@/lib/calibrationTypes'
 import type { CalibrationOk } from '@/workers/calibration.worker'
 
-function floatGrayToPngBlob(
+function floatGrayToPngBytes(
   gray: Float32Array,
   width: number,
   height: number,
-): Promise<Blob> {
+): Promise<Uint8Array> {
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
@@ -21,7 +23,12 @@ function floatGrayToPngBlob(
     data[j + 3] = 255
   }
   ctx.putImageData(imageData, 0, 0)
-  return new Promise((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'))
+  return new Promise((resolve) =>
+    canvas.toBlob((b) => {
+      if (!b) { resolve(new Uint8Array(0)); return }
+      b.arrayBuffer().then((buf) => resolve(new Uint8Array(buf)))
+    }, 'image/png'),
+  )
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -33,19 +40,15 @@ function downloadBlob(blob: Blob, filename: string) {
   queueMicrotask(() => URL.revokeObjectURL(url))
 }
 
-function downloadJson(obj: unknown, filename: string) {
-  const blob = new Blob([JSON.stringify(obj, undefined, 2)], { type: 'application/json' })
-  downloadBlob(blob, filename)
-}
-
 export function downloadCalibrationOkJson(c: CalibrationOk) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  downloadJson(c, `calibration-ok-${stamp}.json`)
+  const blob = new Blob([JSON.stringify(c, undefined, 2)], { type: 'application/json' })
+  downloadBlob(blob, `calibration-ok-${stamp}.json`)
 }
 
 /**
  * Enriches the calibration result with frame image references and downloads
- * the JSON plus PNG files for each frame that has gray data.
+ * a single ZIP file containing the JSON plus a PNG for each frame with gray data.
  */
 export async function downloadCalibrationOkWithImages(
   c: CalibrationOk,
@@ -57,7 +60,8 @@ export async function downloadCalibrationOkWithImages(
   const frameImages: Record<string, string> = {}
   const observations: CalibrationOk['observations'] = []
 
-  const pngDownloads: Promise<void>[] = []
+  // Build zip entries: { filename: Uint8Array }
+  const zipEntries: Record<string, Uint8Array> = {}
 
   for (const frame of framePool) {
     if (!frame.grayData || !frame.imageWidth || !frame.imageHeight) {
@@ -84,19 +88,15 @@ export async function downloadCalibrationOkWithImages(
       })),
     })
 
-    pngDownloads.push(
-      floatGrayToPngBlob(frame.grayData, frame.imageWidth, frame.imageHeight).then(
-        (blob) => downloadBlob(blob, filename),
-      ),
+    const pngBytes = await floatGrayToPngBytes(
+      frame.grayData, frame.imageWidth, frame.imageHeight,
     )
+    zipEntries[filename] = pngBytes
   }
 
   const enriched: CalibrationOk = { ...c, frameImages, observations }
-  downloadJson(enriched, `calibration-ok-${stamp}.json`)
+  zipEntries[`calibration-ok-${stamp}.json`] = strToU8(JSON.stringify(enriched, undefined, 2))
 
-  // Download PNGs after a short delay so the browser doesn't block them
-  for (let i = 0; i < pngDownloads.length; i++) {
-    await new Promise((r) => setTimeout(r, 100))
-    await pngDownloads[i]
-  }
+  const zipBytes = zipSync(zipEntries)
+  downloadBlob(new Blob([zipBytes], { type: 'application/zip' }), `calibration-ok-${stamp}.zip`)
 }

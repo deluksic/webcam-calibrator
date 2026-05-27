@@ -16,9 +16,10 @@ def _():
 @app.cell
 def _():
     import cv2
+    import io
     import json
     import time
-    from pathlib import Path
+    import zipfile
 
     import jax
     import jax.numpy as jnp
@@ -52,8 +53,9 @@ def _():
     return (
         CANONICAL,
         Image,
-        Path,
         RenderModelParams,
+        io,
+        zipfile,
         STRIP_TO_CYCLIC_4,
         STRIP_TO_CYCLIC_5,
         SUPERSAMPLE,
@@ -78,48 +80,47 @@ def _():
 
 @app.cell
 def _(mo):
-    json_file = mo.ui.file(filetypes=[".json"], label="Calibration export JSON")
-    image_dir = mo.ui.text(
-        value=".",
-        label="Directory containing PNG images (same folder as JSON)",
-        full_width=True,
-    )
+    zip_file = mo.ui.file(filetypes=[".zip"], label="Calibration export ZIP")
     mo.vstack([
         mo.md("## Load calibration export"),
-        json_file,
-        image_dir,
-        mo.md("Upload the JSON export file and set the directory containing the frame PNGs."),
+        zip_file,
+        mo.md("Upload the `.zip` file exported from the calibration Results view."),
     ])
-    return image_dir, json_file
+    return (zip_file,)
 
 
 @app.cell
-def _(Image, Path, image_dir, json, json_file, mo, np):
-    mo.stop(not json_file.value, mo.md("Upload a JSON file to begin."))
+def _(Image, io, json, mo, np, zip_file, zipfile):
+    mo.stop(not zip_file.value, mo.md("Upload a ZIP file to begin."))
 
-    _contents = json_file.contents()
-    _data = json.loads(_contents) if isinstance(_contents, str) else json.loads(
-        _contents.decode("utf-8")
-    )
+    _contents = zip_file.contents()
+    _zip_bytes = _contents if isinstance(_contents, bytes) else _contents.encode("latin-1")
+    _zf = zipfile.ZipFile(io.BytesIO(_zip_bytes))
 
+    # Find the JSON file in the zip
+    _json_name = next((n for n in _zf.namelist() if n.endswith(".json")), None)
+    if _json_name is None:
+        mo.stop(True, mo.md("No JSON file found in ZIP."))
+
+    _data = json.loads(_zf.read(_json_name))
     if _data.get("kind") != "ok":
         mo.stop(True, mo.md(f"Not a calibration-ok export (kind={_data.get('kind')!r})."))
 
     _frame_images = _data.get("frameImages", {})
     _observations = _data.get("observations", [])
-    _image_dir = Path(image_dir.value)
 
     if not _observations:
         mo.stop(True, mo.md("Export contains no `observations` — re-export with frame images."))
 
-    # Build frame list: only frames that have both observations and an available image
+    # Build frame list from zip entries
     _frames = []
     for _obs in _observations:
         _fid = _obs["frameId"]
         _img_file = _obs.get("imageFile", "")
-        _img_path = _image_dir / _img_file if _img_file else None
-        if _img_path and _img_path.is_file():
-            _img = np.asarray(Image.open(_img_path).convert("L"), dtype=np.float32) / 255.0
+        if _img_file and _img_file in _zf.namelist():
+            _img = np.asarray(
+                Image.open(io.BytesIO(_zf.read(_img_file))).convert("L"), dtype=np.float32
+            ) / 255.0
             _h, _w = _img.shape
             _frames.append({
                 "frameId": _fid,
@@ -131,19 +132,12 @@ def _(Image, Path, image_dir, json, json_file, mo, np):
             })
 
     if not _frames:
-        mo.stop(
-            True,
-            mo.md(
-                f"No frame images found in `{_image_dir}`. "
-                "Place the PNG files in the same directory as the JSON."
-            ),
-        )
+        mo.stop(True, mo.md("No frame images found in ZIP."))
 
     export_data = _data
     frames = _frames
-    image_dir_path = _image_dir
 
-    mo.md(f"Loaded **{len(frames)}** frames with images from `{_image_dir}`.")
+    mo.md(f"Loaded **{len(frames)}** frames from `{_json_name}`.")
     return export_data, frames
 
 

@@ -20,6 +20,7 @@
     "@typegpu/noise": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-noise",
     "@typegpu/sdf": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-sdf",
     "comlink": "^4.4.2",
+    "fflate": "^0.8.3",
     "solid-js": "2.0.0-beta.7",
     "typegpu": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu",
     "wgpu-matrix": "^3.4.2"
