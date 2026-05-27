@@ -35,6 +35,8 @@ export type CalibrationOk = {
   perFrameRmsPx: [number, number][]
   imageSize: { width: number; height: number }
   cameraId: string
+  /** Canonical 36-bit codes for custom tags (negative ids), as decimal strings. */
+  customTagCodes?: string[]
   /** PNG filenames keyed by frameId string. Files are in the same directory as the JSON. */
   frameImages?: Record<string, string>
   /** Raw per-frame tag detections with image file reference. */

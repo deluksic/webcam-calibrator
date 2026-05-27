@@ -315,17 +315,23 @@ export function customTagIdFromCanonicalCode(code: bigint): number {
   return -1 - n
 }
 
-export function canonicalCodeFromCustomTagId(tagId: number): bigint | undefined {
-  if (tagId >= 0) {
+function resolveCustomCode(tagId: number, customCodes?: string[]): bigint | undefined {
+  if (tagId >= 0) return undefined
+  if (customCodes) {
+    const idx = -tagId - 1
+    if (idx >= 0 && idx < customCodes.length) {
+      return BigInt(customCodes[idx]!)
+    }
     return undefined
   }
+  // Fallback: old code-based encoding (tagId = -1 - Number(code))
   return BigInt(-tagId - 1)
 }
 
 /** 6×6 interior pattern: tag36h11 index `0..TAG36H11_COUNT-1`, or custom negative id. */
-export function patternForResolvedTagId(tagId: number): TagPattern {
+export function patternForResolvedTagId(tagId: number, customCodes?: string[]): TagPattern {
   if (tagId < 0) {
-    const code = canonicalCodeFromCustomTagId(tagId)
+    const code = resolveCustomCode(tagId, customCodes)
     if (code === undefined) {
       throw new RangeError(`invalid custom tag id ${tagId}`)
     }
@@ -334,11 +340,11 @@ export function patternForResolvedTagId(tagId: number): TagPattern {
   return codeToPattern(tag36h11Code(tagId))
 }
 
-export function displayLabelForTagId(tagId: number): string {
+export function displayLabelForTagId(tagId: number, customCodes?: string[]): string {
   if (tagId >= 0) {
     return String(tagId)
   }
-  const code = canonicalCodeFromCustomTagId(tagId)
+  const code = resolveCustomCode(tagId, customCodes)
   return code !== undefined ? canonicalCodeToLabel(code) : String(tagId)
 }
 
@@ -424,3 +430,8 @@ export function decodeTag36h11AnyRotation(
 
   return best ? { id: best.id, rotation: best.rotation } : undefined
 }
+
+
+
+
+

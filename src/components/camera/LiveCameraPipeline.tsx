@@ -53,6 +53,11 @@ export type LiveCameraPipelineProps = {
   setRequestGraySnapshot?: (fn: (callback: (grayData: Float32Array) => void) => void) => void
   /** Registers a function to update the GPU custom tag dictionary at runtime. */
   setUpdateCustomDict?: (fn: (codes: bigint[]) => void) => void
+  /** Custom tag codes to upload on pipeline creation (survives navigation). */
+  /** Custom tag codes to upload to GPU when pipeline is ready or codes change. */
+  customCodes?: string[]
+  /** When true, hide clean-undecoded (*) overlay labels. */
+  hideCleanOverlay?: boolean
   /** Extra controls (camera select, mode buttons, …). */
   toolbar?: JSX.Element
   /** Advisory 75%×75% framing guide over the **displayed** canvas (same box as tag overlays). */
@@ -159,7 +164,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     }
   })
 
-  createMemo(async () => {
+  const pip = createMemo(async () => {
     const video = videoElement()
     const size = frameSize()
     if (!video || !size) {
@@ -361,6 +366,12 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
     return pip
   })
 
+  createEffect(() => [pip(), props.customCodes] as const, ([p, codes]) => {
+    if (p && codes && codes.length > 0) {
+      p.tagDecode.updateCustomCodewords(codes.map((s) => BigInt(s)))
+    }
+  })
+
   return (
     <div class={styles.feedRow}>
       <div class={[styles.feedPanel, styles.feedPanelMain]}>
@@ -382,7 +393,7 @@ export function LiveCameraPipeline(props: LiveCameraPipelineProps) {
               </div>
             </Show>
             <Show when={props.displayMode === 'grid'}>
-              <TagIdGridOverlay quads={gridOverlayQuads()} scale={scale()} customTagOverlay={props.customTagOverlay} />
+              <TagIdGridOverlay quads={gridOverlayQuads()} scale={scale()} customTagOverlay={props.customTagOverlay} hideClean={props.hideCleanOverlay} />
             </Show>
           </div>
         </div>

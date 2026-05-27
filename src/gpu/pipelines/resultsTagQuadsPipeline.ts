@@ -42,8 +42,8 @@ function allocTagQuads(root: TgpuRoot) {
 export type TagQuadsResultsBuffer = ReturnType<typeof allocTagQuads>
 
 /** Pack the row-major 6×6 0/1 interior pattern (36 bits) into `vec2u` (lo: bits 0..31, hi: 32..35). */
-function packTagPattern(tagId: number): d.v2u {
-  const pattern = patternForResolvedTagId(tagId)
+function packTagPattern(tagId: number, customCodes?: string[]): d.v2u {
+  const pattern = patternForResolvedTagId(tagId, customCodes)
   let lo = 0
   let hi = 0
   for (let i = 0; i < 36; i++) {
@@ -90,7 +90,7 @@ export function tagQuadWritesForGpu(ok: CalibrationOk): TagQuadRow[] {
     }
     rows.push({
       corners: cornersToVec3fArray(t.corners),
-      packedPattern: packTagPattern(t.tagId),
+      packedPattern: packTagPattern(t.tagId, ok.customTagCodes),
     })
   }
   const deadCorner = d.vec3f(0, 0, -1e9)

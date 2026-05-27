@@ -63,6 +63,8 @@ export type CalibrationRunContextValue = {
   customTagOverlaySession: () => CustomTagOverlaySession
   /** Call from live detection each frame while collection may be running. */
   noteCustomTagsFromDetection: (quads: DetectedQuad[]) => void
+  customTagCodes: () => string[]
+  setCustomTagCodes: (codes: string[]) => void
 }
 
 const CalibrationRunContext = createContext<CalibrationRunContextValue>()
@@ -87,6 +89,7 @@ export function CalibrationRunProvider(props: ParentProps) {
   const [latestCalibrationMeta, writeLatestCalibrationMeta] = createSignal<CalibrationLatestMeta>()
   const [customSessionIndexByTagId, setCustomSessionIndexByTagId] = createSignal<Map<number, number>>(new Map())
   const [firstCustomTakeDone, setFirstCustomTakeDone] = createSignal(false)
+  const [customTagCodes, setCustomTagCodes] = createSignal<string[]>([])
 
   const setLatestCalibration = (v: CalibrationResult | undefined, meta?: CalibrationLatestMeta) => {
     writeLatestCalibration(v)
@@ -94,6 +97,9 @@ export function CalibrationRunProvider(props: ParentProps) {
   }
 
   const setCalib = (r: CalibrationResult | undefined) => {
+    if (r?.kind === 'ok' && customTagCodes().length > 0) {
+      r = { ...r, customTagCodes: customTagCodes() }
+    }
     setCalibInner(r)
     if (r === undefined) {
       setLatestCalibration(undefined, undefined)
@@ -277,6 +283,8 @@ export function CalibrationRunProvider(props: ParentProps) {
     startSession,
     customTagOverlaySession,
     noteCustomTagsFromDetection,
+    customTagCodes,
+    setCustomTagCodes,
   }
 
   return <CalibrationRunContext value={value}>{props.children}</CalibrationRunContext>

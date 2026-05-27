@@ -17,7 +17,7 @@ import type { Corners3 } from '@/lib/calibrationTypes'
 import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
 import { isProgressShapedError, percentile, type SnapshotFeedback } from '@/lib/calibrationViewUtils'
 import { formatFixed } from '@/lib/formatFixed'
-import { canonicalizeBinaryPatternMinCode } from '@/lib/tag36h11'
+import { patternToCode } from '@/lib/tag36h11'
 import { patternHasAnyTie } from '@/lib/tagModuleCell'
 import { learnLayoutFromFrame, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
@@ -104,9 +104,9 @@ function CalibrationView() {
       let tagId = q.decodedTagId
       // CPU-side custom tag ID assignment when dictionary was just uploaded
       if (tagId === undefined && customTagByCode && q.decodedTagKind === 'clean' && q.pattern && !patternHasAnyTie(q.pattern)) {
-        const canon = canonicalizeBinaryPatternMinCode(q.pattern)
-        if (canon) {
-          tagId = customTagByCode.get(canon.code.toString())
+        const code = patternToCode(q.pattern)
+        if (code >= 0n) {
+          tagId = customTagByCode.get(code.toString())
         }
       }
       if (typeof tagId === 'number') {
@@ -206,18 +206,6 @@ function CalibrationView() {
     }))
     setCurrentTagged(quads)
 
-    const rNow = runCtx.run()
-    if (rNow.collection === 'running' && rNow.framePool.length < 1) {
-      const gray = meta?.grayData
-      const frameSize = runCtx.videoFrameSize()
-      attemptAddPooledFrame(
-        quads,
-        'autoFirst',
-        gray && gray.length > 0 && frameSize
-          ? { data: gray, width: frameSize.width, height: frameSize.height }
-          : undefined,
-      )
-    }
   }
 
   const handleSnapshotClick = () => {
@@ -245,9 +233,9 @@ function CalibrationView() {
       if (typeof q.decodedTagId === 'number') {
         ids.add(q.decodedTagId)
       } else if (q.decodedTagKind === 'clean' && q.pattern && !patternHasAnyTie(q.pattern)) {
-        const canon = canonicalizeBinaryPatternMinCode(q.pattern)
-        if (canon) {
-          cleanCodes.add(canon.code.toString())
+        const code = patternToCode(q.pattern)
+        if (code >= 0n) {
+          cleanCodes.add(code.toString())
         }
       }
     }
@@ -454,6 +442,8 @@ function CalibrationView() {
             setUpdateCustomDict={(fn) => {
               updateCustomDict = fn
             }}
+            customCodes={runCtx.customTagCodes()}
+            hideCleanOverlay={runCtx.run().collection === 'running'}
           />
         </div>
       </Errored>
@@ -501,22 +491,33 @@ function CalibrationView() {
                   q.pattern &&
                   !patternHasAnyTie(q.pattern)
                 ) {
-                  const canon = canonicalizeBinaryPatternMinCode(q.pattern)
-                  if (canon) {
-                    const key = canon.code.toString()
+                  const code = patternToCode(q.pattern)
+                  if (code >= 0n) {
+                    const key = code.toString()
                     if (!seen.has(key)) {
                       seen.add(key)
-                      customCodes.push(canon.code)
+                      customCodes.push(code)
                     }
                   }
                 }
               }
               updateCustomDict(customCodes)
+              runCtx.setCustomTagCodes(customCodes.map((c) => c.toString()))
               customTagByCode = new Map(customCodes.map((c, i) => [c.toString(), -(i + 1)]))
             }
 
-            // Same frame as Start — do not wait for the next onQuadDetection tick.
-            attemptAddPooledFrame(tagged, 'autoFirst', undefined, customTagByCode)
+            // Same frame as Start — capture gray and save.
+            if (requestGraySnapshot) {
+              requestGraySnapshot((grayData) => {
+                attemptAddPooledFrame(tagged, 'autoFirst', {
+                  data: grayData,
+                  width: runCtx.videoFrameSize()?.width ?? 0,
+                  height: runCtx.videoFrameSize()?.height ?? 0,
+                }, customTagByCode)
+              })
+            } else {
+              attemptAddPooledFrame(tagged, 'autoFirst', undefined, customTagByCode)
+            }
           }}
         >
           {runCtx.run().collection === 'running' ? `Snapshot (${runCtx.run().stats.framesAccepted})` : 'Start'}
@@ -546,6 +547,7 @@ function CalibrationView() {
             setReproj(undefined)
             setSnapshotFeedback({ kind: 'idle' })
             updateCustomDict?.([])
+            runCtx.setCustomTagCodes([])
             runCtx.resetSession()
           }}
         >

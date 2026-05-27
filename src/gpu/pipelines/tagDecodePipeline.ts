@@ -506,8 +506,9 @@ function createDictMatchStage(
       return
     }
 
-    const rotStart = d.u32(0)
-    const rotEnd = d.u32(4)
+    // Both dictionaries are canonical (minimal) — only check canonical rotation.
+    // Custom tags must match at canonRot; standard tags always match at canonRot since
+    // codewords are preprocessed to canonical form.
 
     const maskCount = d.u32(1) << weakCount
     let localBest = d.u32(TAG_DECODE_MAX_DICT_ERROR + 1)
@@ -553,48 +554,48 @@ function createDictMatchStage(
         }
       }
 
-      for (let rot = rotStart; rot < rotEnd; rot = rot + d.u32(1)) {
-        let knownLow = d.u32(0)
-        let knownHigh = d.u32(0)
-        for (const bit of tgpu.unroll(std.range(0, MODULES_PER_QUAD))) {
-          const bitU = d.u32(bit)
-          let srcBit = d.u32(0)
-          if (rot === d.u32(0)) { srcBit = RotLut0Gpu.$[bitU]! }
-          else if (rot === d.u32(1)) { srcBit = RotLut1Gpu.$[bitU]! }
-          else if (rot === d.u32(2)) { srcBit = RotLut2Gpu.$[bitU]! }
-          else { srcBit = RotLut3Gpu.$[bitU]! }
-          const bx = BitXGpu.$[srcBit]! - d.u32(1)
-          const by = BitYGpu.$[srcBit]! - d.u32(1)
-          const pIdx = by * d.u32(DATA_MODULES) + bx
-          const cell = layout.$.pattern[quadId]!.modules[pIdx]!
-          if (cell === d.i32(PATTERN_WHITE)) {
-            const pos = d.u32(35) - bitU
-            if (pos >= d.u32(32)) {
-              knownHigh = knownHigh | (d.u32(1) << (pos - d.u32(32)))
-            } else {
-              knownLow = knownLow | (d.u32(1) << pos)
+      for (const rot of tgpu.unroll(std.range(0, 4))) {
+          let knownLow = d.u32(0)
+          let knownHigh = d.u32(0)
+          for (const bit of tgpu.unroll(std.range(0, MODULES_PER_QUAD))) {
+            const bitU = d.u32(bit)
+            let srcBit = d.u32(0)
+            if (rot === 0) { srcBit = RotLut0Gpu.$[bitU]! }
+            else if (rot === 1) { srcBit = RotLut1Gpu.$[bitU]! }
+            else if (rot === 2) { srcBit = RotLut2Gpu.$[bitU]! }
+            else { srcBit = RotLut3Gpu.$[bitU]! }
+            const bx = BitXGpu.$[srcBit]! - d.u32(1)
+            const by = BitYGpu.$[srcBit]! - d.u32(1)
+            const pIdx = by * d.u32(DATA_MODULES) + bx
+            const cell = layout.$.pattern[quadId]!.modules[pIdx]!
+            if (cell === d.i32(PATTERN_WHITE)) {
+              const pos = d.u32(35) - bitU
+              if (pos >= d.u32(32)) {
+                knownHigh = knownHigh | (d.u32(1) << (pos - d.u32(32)))
+              } else {
+                knownLow = knownLow | (d.u32(1) << pos)
+              }
             }
           }
-        }
-        // Pick codeword: standard or custom
-        let cwLow = d.u32(0)
-        let cwHigh = d.u32(0)
-        if (isCustom) {
-          cwLow = layout.$.customCodewords[customIdx]!.low
-          cwHigh = layout.$.customCodewords[customIdx]!.high
-        } else {
-          cwLow = layout.$.codewords[cwIdx]!.low
-          cwHigh = layout.$.codewords[cwIdx]!.high
-        }
-        const diffLow = knownLow ^ cwLow ^ wildLow
-        const diffHigh = knownHigh ^ cwHigh ^ wildHigh
-        const d0 = countOneBits(diffLow) + countOneBits(diffHigh)
-        if (d0 < localBest) {
-          localBest = d0
-          localRot = rot
-        } else if (d0 === localBest) {
-          localRot = rot
-        }
+          // Pick codeword: standard or custom
+          let cwLow = d.u32(0)
+          let cwHigh = d.u32(0)
+          if (isCustom) {
+            cwLow = layout.$.customCodewords[customIdx]!.low
+            cwHigh = layout.$.customCodewords[customIdx]!.high
+          } else {
+            cwLow = layout.$.codewords[cwIdx]!.low
+            cwHigh = layout.$.codewords[cwIdx]!.high
+          }
+          const diffLow = knownLow ^ cwLow ^ wildLow
+          const diffHigh = knownHigh ^ cwHigh ^ wildHigh
+          const d0 = countOneBits(diffLow) + countOneBits(diffHigh)
+          if (d0 < localBest) {
+            localBest = d0
+            localRot = d.u32(rot)
+          } else if (d0 === localBest) {
+            localRot = d.u32(rot)
+          }
       }
     }
 

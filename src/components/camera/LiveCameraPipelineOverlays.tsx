@@ -15,6 +15,7 @@ export const TagIdGridOverlay: Component<{
   quads: DetectedQuad[]
   scale: { x: number; y: number }
   customTagOverlay?: () => CustomTagOverlaySession
+  hideClean?: boolean
 }> = (props) => {
   return (
     <For each={props.quads} keyed={(q) => `${q.label}-${q.decodedTagId ?? q.vizTagId ?? '?'}`}>
@@ -29,7 +30,7 @@ export const TagIdGridOverlay: Component<{
           const q = quad()
           const id = q.decodedTagId
           if (id === undefined) {
-            if (q.decodedTagKind === 'clean') return '*'
+            if (q.decodedTagKind === 'clean' && !props.hideClean) return '*'
             return undefined
           }
           if (id < 0) {
