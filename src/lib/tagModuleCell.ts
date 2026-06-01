@@ -38,6 +38,17 @@ export function patternHasWeakOrTie(pattern: TagPattern | undefined): boolean {
   return false
 }
 
+/** True when every cell is the same confident value (all black → code 0, or all white → code 0xFFFFFFFFF). */
+export function patternIsDegenerate(pattern: TagPattern): boolean {
+  if (pattern.length !== 36) return true
+  const first = pattern[0]!
+  if (first !== TAG_MODULE_CELL.black && first !== TAG_MODULE_CELL.white) return false
+  for (let i = 1; i < 36; i++) {
+    if (pattern[i] !== first) return false
+  }
+  return true
+}
+
 /** True if every interior cell is confident black or white (no weak, no tie). */
 export function patternIsFullyBinary(pattern: TagPattern): boolean {
   for (let i = 0; i < pattern.length; i++) {

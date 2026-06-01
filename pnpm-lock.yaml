@@ -11,9 +11,9 @@ overrides:
   typescript: npm:tsover@latest
   tinyest: 0.3.1
   tinyest-for-wgsl: 0.3.2
-  typegpu: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu
-  '@typegpu/color': github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color
-  '@typegpu/geometry': github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry
+  typegpu: github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu
+  '@typegpu/color': github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-color
+  '@typegpu/geometry': github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-geometry
 
 importers:
 
@@ -29,17 +29,17 @@ importers:
         specifier: 2.0.0-beta.7
         version: 2.0.0-beta.7(@solidjs/signals@2.0.0-beta.7)(solid-js@2.0.0-beta.7)
       '@typegpu/color':
-        specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color
-        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-color(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
+        specifier: github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-color
+        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-color(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu)
       '@typegpu/geometry':
-        specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry
-        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
+        specifier: github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-geometry
+        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-geometry(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu)
       '@typegpu/noise':
-        specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-noise
-        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-noise(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
+        specifier: github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-noise
+        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-noise(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu)
       '@typegpu/sdf':
-        specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-sdf
-        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-sdf(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
+        specifier: github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-sdf
+        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-sdf(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu)
       comlink:
         specifier: ^4.4.2
         version: 4.4.2
@@ -50,8 +50,8 @@ importers:
         specifier: 2.0.0-beta.7
         version: 2.0.0-beta.7
       typegpu:
-        specifier: github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu
-        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
+        specifier: github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu
+        version: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu
       wgpu-matrix:
         specifier: ^3.4.2
         version: 3.4.2
@@ -94,7 +94,7 @@ importers:
         version: tsover@6.0.0
       unplugin-typegpu:
         specifier: ^0.11.3
-        version: 0.11.3(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)
+        version: 0.11.3(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu)
       vite:
         specifier: ^7.3.2
         version: 7.3.2(@types/node@25.6.0)(tsx@4.21.0)
@@ -892,26 +892,26 @@ packages:
     resolution: {integrity: sha512-zIcONa+hVtVSSep9UT3jZ5rizo2BsxgyDYU7WFD5eICBE7no3881HGeb/QkGfsJs6JTkY1aQhT7rIPC7e+0nnA==}
     engines: {node: '>=14', npm: '>=6', yarn: '>=1'}
 
-  '@typegpu/color@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-color':
-    resolution: {path: /packages/typegpu-color, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67}
+  '@typegpu/color@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-color':
+    resolution: {path: /packages/typegpu-color, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd}
     version: 0.11.0
     peerDependencies:
       typegpu: workspace:^
 
-  '@typegpu/geometry@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry':
-    resolution: {path: /packages/typegpu-geometry, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67}
+  '@typegpu/geometry@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-geometry':
+    resolution: {path: /packages/typegpu-geometry, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd}
     version: 0.11.0
     peerDependencies:
       typegpu: workspace:^
 
-  '@typegpu/noise@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-noise':
-    resolution: {path: /packages/typegpu-noise, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67}
+  '@typegpu/noise@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-noise':
+    resolution: {path: /packages/typegpu-noise, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd}
     version: 0.11.0
     peerDependencies:
       typegpu: workspace:^
 
-  '@typegpu/sdf@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-sdf':
-    resolution: {path: /packages/typegpu-sdf, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67}
+  '@typegpu/sdf@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-sdf':
+    resolution: {path: /packages/typegpu-sdf, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd}
     version: 0.11.1
     peerDependencies:
       typegpu: workspace:^
@@ -1648,8 +1648,8 @@ packages:
     peerDependencies:
       typescript: '>=4.8.4'
 
-  tsover-runtime@0.0.6:
-    resolution: {integrity: sha512-5h/j9l4SwMSVfTMLVC/d+dkRjgh2xj+WHkivs5hhSwqACbG3JKXxp+9jneRoT07oJRHb97b5nKafsPtZEAdQMg==}
+  tsover-runtime@0.0.7:
+    resolution: {integrity: sha512-FHHwMJzZbnP23+fU1PxXljy7j0RRRosL2r1/CRUNTqfW+l7m35JsUkM615x/cAzw4GqRdXPIl3axKMj9qzpZtQ==}
 
   tsover@6.0.0:
     resolution: {integrity: sha512-E51e1sMdrvBd2kVeNs2I3Kj7VdCivrwTmw89RYICmiWmtufI3EtywWgRAARFuVTZc3oKrkS1czNsVNLg0Zwv4A==}
@@ -1667,10 +1667,11 @@ packages:
   typed-binary@4.3.3:
     resolution: {integrity: sha512-W2hLsSzt3k/tg38gDE4Fn/QiwcoqGuUHBc2cb3mXuH7KcYxe/GM57vzW14s2/bawB4R5knGgGq8Xb57vsaJ4Sg==}
 
-  typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu:
-    resolution: {path: /packages/typegpu, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67}
-    version: 0.11.3
+  typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu:
+    resolution: {path: /packages/typegpu, tarball: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd}
+    version: 0.11.8
     engines: {node: '>=12.20.0'}
+    hasBin: true
 
   undici-types@7.19.2:
     resolution: {integrity: sha512-qYVnV5OEm2AW8cJMCpdV20CDyaN3g0AjDlOGf1OW4iaDEx8MwdtChUp4zu4H0VP3nDRF/8RKWH+IPp9uW0YGZg==}
@@ -2395,21 +2396,21 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
 
-  '@typegpu/color@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-color(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
+  '@typegpu/color@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-color(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu)':
     dependencies:
-      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
+      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu
 
-  '@typegpu/geometry@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-geometry(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
+  '@typegpu/geometry@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-geometry(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu)':
     dependencies:
-      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
+      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu
 
-  '@typegpu/noise@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-noise(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
+  '@typegpu/noise@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-noise(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu)':
     dependencies:
-      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
+      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu
 
-  '@typegpu/sdf@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu-sdf(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu)':
+  '@typegpu/sdf@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu-sdf(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu)':
     dependencies:
-      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
+      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu
 
   '@types/babel__core@7.20.5':
     dependencies:
@@ -3201,7 +3202,7 @@ snapshots:
     dependencies:
       typescript: tsover@6.0.0
 
-  tsover-runtime@0.0.6: {}
+  tsover-runtime@0.0.7: {}
 
   tsover@6.0.0:
     dependencies:
@@ -3221,17 +3222,17 @@ snapshots:
 
   typed-binary@4.3.3: {}
 
-  typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu:
+  typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu:
     dependencies:
       tinyest: 0.3.1
-      tsover-runtime: 0.0.6
+      tsover-runtime: 0.0.7
       typed-binary: 4.3.3
 
   undici-types@7.19.2: {}
 
   undici@7.25.0: {}
 
-  unplugin-typegpu@0.11.3(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu):
+  unplugin-typegpu@0.11.3(typegpu@https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu):
     dependencies:
       '@babel/parser': 7.29.2
       '@babel/traverse': 7.29.0
@@ -3243,7 +3244,7 @@ snapshots:
       picomatch: 4.0.4
       tinyest: 0.3.1
       tinyest-for-wgsl: 0.3.2
-      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/08fb40f459b4ac0735711889dd98e19b19e6ab67#path:/packages/typegpu
+      typegpu: https://codeload.github.com/software-mansion/TypeGPU/tar.gz/6644a14d01c0b8ddd101cfbb5498aa2533734ebd#path:/packages/typegpu
       unplugin: 3.0.0
     transitivePeerDependencies:
       - supports-color

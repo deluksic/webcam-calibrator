@@ -18,7 +18,7 @@ import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
 import { isProgressShapedError, percentile, type SnapshotFeedback } from '@/lib/calibrationViewUtils'
 import { formatFixed } from '@/lib/formatFixed'
 import { patternToCode } from '@/lib/tag36h11'
-import { patternHasAnyTie } from '@/lib/tagModuleCell'
+import { patternHasAnyTie, patternIsDegenerate } from '@/lib/tagModuleCell'
 import { learnLayoutFromFrame, type TargetLayout } from '@/lib/targetLayout'
 import type { Mat3, Vec3 } from '@/workers/calibration.worker'
 
@@ -103,7 +103,7 @@ function CalibrationView() {
       }
       let tagId = q.decodedTagId
       // CPU-side custom tag ID assignment when dictionary was just uploaded
-      if (tagId === undefined && customTagByCode && q.decodedTagKind === 'clean' && q.pattern && !patternHasAnyTie(q.pattern)) {
+      if (tagId === undefined && customTagByCode && q.decodedTagKind === 'clean' && q.pattern && !patternHasAnyTie(q.pattern) && !patternIsDegenerate(q.pattern)) {
         const code = patternToCode(q.pattern)
         if (code >= 0n) {
           tagId = customTagByCode.get(code.toString())
@@ -489,7 +489,8 @@ function CalibrationView() {
                   q.cornerDebug?.failureCode === 0 &&
                   q.decodedTagKind === 'clean' &&
                   q.pattern &&
-                  !patternHasAnyTie(q.pattern)
+                  !patternHasAnyTie(q.pattern) &&
+                  !patternIsDegenerate(q.pattern)
                 ) {
                   const code = patternToCode(q.pattern)
                   if (code >= 0n) {

@@ -15,14 +15,14 @@
     "@deluksic/opencv-calibration-wasm": "^0.2.5",
     "@solidjs/router": "0.17.0-next.2",
     "@solidjs/web": "2.0.0-beta.7",
-    "@typegpu/color": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color",
-    "@typegpu/geometry": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry",
-    "@typegpu/noise": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-noise",
-    "@typegpu/sdf": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-sdf",
+    "@typegpu/color": "github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-color",
+    "@typegpu/geometry": "github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-geometry",
+    "@typegpu/noise": "github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-noise",
+    "@typegpu/sdf": "github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-sdf",
     "comlink": "^4.4.2",
     "fflate": "^0.8.3",
     "solid-js": "2.0.0-beta.7",
-    "typegpu": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu",
+    "typegpu": "github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu",
     "wgpu-matrix": "^3.4.2"
   },
   "devDependencies": {
@@ -56,9 +56,9 @@
       "typescript": "npm:tsover@latest",
       "tinyest": "0.3.1",
       "tinyest-for-wgsl": "0.3.2",
-      "typegpu": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu",
-      "@typegpu/color": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color",
-      "@typegpu/geometry": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry"
+      "typegpu": "github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu",
+      "@typegpu/color": "github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-color",
+      "@typegpu/geometry": "github:software-mansion/TypeGPU#6644a14&path:/packages/typegpu-geometry"
     },
     "onlyBuiltDependencies": [
       "esbuild"

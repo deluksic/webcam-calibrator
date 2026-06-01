@@ -78,6 +78,8 @@ def build_tag_pattern(tag_id: int = 0, custom_codes: list[str] | None = None) ->
         code = int(custom_codes[idx])
     else:
         code = tag36h11_code(tag_id)
+    if code == 0 or code == (1 << 36) - 1:
+        raise ValueError(f"tag id {tag_id} decodes to degenerate pattern (all-black or all-white), skipping")
     interior = code_to_interior_pattern(code)
     grid = np.ones((TAG_GRID_SIZE, TAG_GRID_SIZE), dtype=np.float32)
     grid[0, :] = 0.0

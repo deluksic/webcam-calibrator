@@ -4,7 +4,7 @@ import {
   joinSlot,
   joins,
   lineSegmentIndices,
-  lineSegmentVariableWidth,
+  lineVariableWidth,
   LineControlPoint,
   startCapSlot,
 } from '@typegpu/geometry'
@@ -99,11 +99,9 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
       const spineLen = sqrt(max(spineLenSq, d.f32(0)))
       const rStroke = min(u.axisPolylineHalfStrokePixels, spineLen * d.f32(1 / 16))
       const A = LineControlPoint({ position: originPixelOffsetFromFramebufferCenter, radius: rStroke })
-      const B = LineControlPoint({ position: originPixelOffsetFromFramebufferCenter, radius: rStroke })
-      const C = LineControlPoint({ position: tipPixelOffsetFromFramebufferCenter, radius: rStroke })
-      const D = LineControlPoint({ position: tipPixelOffsetFromFramebufferCenter, radius: rStroke })
+      const B = LineControlPoint({ position: tipPixelOffsetFromFramebufferCenter, radius: rStroke })
 
-      const result = lineSegmentVariableWidth(vertexIndex, A, B, C, D, d.u32(AXIS_JOIN_MAX))
+      const result = lineVariableWidth(A, B, vertexIndex, d.u32(AXIS_JOIN_MAX))
 
       const measured = result.vertexPosition
       const ndcExtrudedClipXY = d.vec2f(measured.x / halfWH.x, measured.y / halfWH.y)
@@ -117,7 +115,7 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
       const t = clamp(dot(fromO, spine) / max(spineLenSq, d.f32(1e-8)), d.f32(0), d.f32(1))
       const ndcZ = ndcZ0 * (d.f32(1) - t) + ndcZ1 * t
 
-      // `lineSegmentVariableWidth`: vertex 0/1 = spine (B/C); ≥2 = extrusion + caps. Interpolation gives smooth uv.y across the stroke.
+      // `lineVariableWidth`: vertex 0/1 = spine (B/C); ≥2 = extrusion + caps. Interpolation gives smooth uv.y across the stroke.
       const uvY = select(d.f32(0), d.f32(1), vertexIndex > d.u32(1))
 
       const w = result.w

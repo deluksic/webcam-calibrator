@@ -70,6 +70,17 @@ const RotLut1Gpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...ROT_LUTS_1
 const RotLut2Gpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...ROT_LUTS_2])
 const RotLut3Gpu = tgpu.const(d.arrayOf(d.u32, MODULES_PER_QUAD), [...ROT_LUTS_3])
 
+const rotateBit = tgpu.fn([d.u32, d.u32], d.u32)((r, bitU) => {
+  'use gpu'
+  const v0 = RotLut0Gpu.$[bitU]!
+  const v1 = RotLut1Gpu.$[bitU]!
+  const v2 = RotLut2Gpu.$[bitU]!
+  const v3 = RotLut3Gpu.$[bitU]!
+  const lo = r === d.u32(0) ? v0 : v1
+  const hi = r === d.u32(2) ? v2 : v3
+  return r < d.u32(2) ? lo : hi
+})
+
 const PATTERN_BLACK = 0
 const PATTERN_WHITE = 1
 const PATTERN_WEAK = -1
@@ -358,6 +369,7 @@ function createClassifyStage(
     
     let tieCount = d.u32(0)
     let weakCount = d.u32(0)
+    let whiteCount = d.u32(0)
     const weakBits = d.arrayOf(d.u32, TAG_DECODE_MAX_WEAK_WILDCARD)()
 
     // Unroll: runtime loop here × dict `mask` loop would explode work (TDR / “hang”) when tags appear.
@@ -370,16 +382,11 @@ function createClassifyStage(
       if (thr.valid === d.u32(0) || sum < thr.minVoteTotal) {
         cell = d.i32(PATTERN_WEAK)
       } else {
-        let diff = b
-        if (b > w) {
-          diff = b - w
-        } else {
-          diff = w - b
-        }
+        let diff = d.u32(abs(d.i32(b) - d.i32(w)))
         const minDiff = max(d.u32(2), sum / d.u32(6))
         if (diff >= minDiff) {
           if (b > w) { cell = d.i32(PATTERN_BLACK) }
-          else { cell = d.i32(PATTERN_WHITE) }
+          else { cell = d.i32(PATTERN_WHITE); whiteCount = whiteCount + d.u32(1) }
         } else {
           cell = d.i32(PATTERN_TIE)
           tieCount = tieCount + d.u32(1)
@@ -398,6 +405,10 @@ function createClassifyStage(
     } else if (weakCount > d.u32(0)) {
       quality = d.u32(1)
     }
+    // Degenerate: all 36 cells are the same confident value → all-black or all-white.
+    if (tieCount === d.u32(0) && weakCount === d.u32(0) && (whiteCount === d.u32(0) || whiteCount === d.u32(MODULES_PER_QUAD))) {
+      quality = d.u32(0)
+    }
 
     // Find canonical rotation: which rotation produces minimal 36-bit code.
     let canonRot = d.u32(0)
@@ -408,11 +419,7 @@ function createClassifyStage(
       let codeHigh = d.u32(0)
       for (const bit of tgpu.unroll(std.range(0, MODULES_PER_QUAD))) {
         const bitU = d.u32(bit)
-        let srcBit = d.u32(0)
-        if (r === d.u32(0)) { srcBit = RotLut0Gpu.$[bitU]! }
-        else if (r === d.u32(1)) { srcBit = RotLut1Gpu.$[bitU]! }
-        else if (r === d.u32(2)) { srcBit = RotLut2Gpu.$[bitU]! }
-        else { srcBit = RotLut3Gpu.$[bitU]! }
+        let srcBit = rotateBit(r, bitU)
         const bx = BitXGpu.$[srcBit]! - d.u32(1)
         const by = BitYGpu.$[srcBit]! - d.u32(1)
         const pIdx = by * d.u32(DATA_MODULES) + bx
@@ -559,11 +566,7 @@ function createDictMatchStage(
           let knownHigh = d.u32(0)
           for (const bit of tgpu.unroll(std.range(0, MODULES_PER_QUAD))) {
             const bitU = d.u32(bit)
-            let srcBit = d.u32(0)
-            if (rot === 0) { srcBit = RotLut0Gpu.$[bitU]! }
-            else if (rot === 1) { srcBit = RotLut1Gpu.$[bitU]! }
-            else if (rot === 2) { srcBit = RotLut2Gpu.$[bitU]! }
-            else { srcBit = RotLut3Gpu.$[bitU]! }
+            let srcBit = rotateBit(d.u32(rot), bitU)
             const bx = BitXGpu.$[srcBit]! - d.u32(1)
             const by = BitYGpu.$[srcBit]! - d.u32(1)
             const pIdx = by * d.u32(DATA_MODULES) + bx
@@ -577,16 +580,12 @@ function createDictMatchStage(
               }
             }
           }
-          // Pick codeword: standard or custom
-          let cwLow = d.u32(0)
-          let cwHigh = d.u32(0)
-          if (isCustom) {
-            cwLow = layout.$.customCodewords[customIdx]!.low
-            cwHigh = layout.$.customCodewords[customIdx]!.high
-          } else {
-            cwLow = layout.$.codewords[cwIdx]!.low
-            cwHigh = layout.$.codewords[cwIdx]!.high
-          }
+          const customLo = layout.$.customCodewords[customIdx]!.low
+          const customHi = layout.$.customCodewords[customIdx]!.high
+          const stdLo = layout.$.codewords[cwIdx]!.low
+          const stdHi = layout.$.codewords[cwIdx]!.high
+          let cwLow = isCustom ? customLo : stdLo
+          let cwHigh = isCustom ? customHi : stdHi
           const diffLow = knownLow ^ cwLow ^ wildLow
           const diffHigh = knownHigh ^ cwHigh ^ wildHigh
           const d0 = countOneBits(diffLow) + countOneBits(diffHigh)
@@ -601,12 +600,9 @@ function createDictMatchStage(
 
     if (localBest <= d.u32(TAG_DECODE_MAX_DICT_ERROR)) {
       // bit 20 = custom flag, bits 18-19 = rotation, bits 0-17 = cwIdx, bits 21+ = distance
-      let packedCwIdx = cwIdx
-      let customBit = d.u32(0)
-      if (isCustom) {
-        packedCwIdx = customIdx
-        customBit = d.u32(1) << d.u32(20)
-      }
+      const customBitFlag = d.u32(1) << d.u32(20)
+      let packedCwIdx = isCustom ? customIdx : cwIdx
+      let customBit = isCustom ? customBitFlag : d.u32(0)
       const candidate = (localBest << d.u32(21)) | customBit | (localRot << d.u32(18)) | packedCwIdx
       atomicMin(layout.$.atomicBest[quadId]!, candidate)
     }

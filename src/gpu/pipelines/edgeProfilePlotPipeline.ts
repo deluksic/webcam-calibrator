@@ -5,7 +5,7 @@ import {
   joinSlot,
   joins,
   lineSegmentIndices,
-  lineSegmentVariableWidth,
+  lineVariableWidth,
   LineControlPoint,
   startCapSlot,
 } from '@typegpu/geometry'
@@ -100,11 +100,9 @@ export function createEdgeProfilePlotStage(root: TgpuRoot, presentationFormat: G
 
       const rStroke = select(d.f32(0.85), d.f32(-1), discardStroke === d.u32(1))
       const A = LineControlPoint({ position: p0, radius: rStroke })
-      const B = LineControlPoint({ position: p0, radius: rStroke })
-      const C = LineControlPoint({ position: p1, radius: rStroke })
-      const D = LineControlPoint({ position: p1, radius: rStroke })
+      const B = LineControlPoint({ position: p1, radius: rStroke })
 
-      const result = lineSegmentVariableWidth(vertexIndex, A, B, C, D, d.u32(PROFILE_JOIN_MAX))
+      const result = lineVariableWidth(A, B, vertexIndex, d.u32(PROFILE_JOIN_MAX))
       const w = result.w
       const pos = result.vertexPosition
 
