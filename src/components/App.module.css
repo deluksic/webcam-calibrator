@@ -105,3 +105,33 @@
   font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
+
+/* Keep the growing route list usable on narrow screens without wrapping the sticky bar. */
+@media (max-width: 720px) {
+  .nav {
+    gap: 0;
+    padding: var(--space-2);
+    overflow-x: auto;
+  }
+
+  .navBtn {
+    padding: var(--space-2);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+  }
+
+  .version {
+    display: none;
+  }
+
+  .githubLink {
+    margin-left: auto;
+    margin-right: 0;
+  }
+}
+
+@media (max-width: 460px) {
+  .githubLink {
+    display: none;
+  }
+}

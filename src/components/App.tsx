@@ -15,6 +15,9 @@ const ResultsView = lazy(() => import('@/components/results/ResultsView').then((
 const GradientProfilesView = lazy(() =>
   import('@/components/gradientProfiles/GradientProfilesView').then((m) => ({ default: m.GradientProfilesView })),
 )
+const PointLabView = lazy(() =>
+  import('@/components/pointLab/PointLabView').then((m) => ({ default: m.PointLabView })),
+)
 
 const GitHubIcon = () => (
   <svg viewBox="0 0 128 128" width="32" height="32" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -36,6 +39,7 @@ export function App() {
     const isTarget = createMemo(() => currentPath() === '/target')
     const isCalibrate = createMemo(() => currentPath() === '/calibrate')
     const isResults = createMemo(() => currentPath() === '/results')
+    const isPointLab = createMemo(() => currentPath() === '/point-lab')
     const isDebug = createMemo(() => currentPath() === '/debug')
 
     return (
@@ -59,6 +63,9 @@ export function App() {
           </A>
           <A href="/results" class={[styles.navBtn, isResults() && styles.navBtnActive]}>
             Results
+          </A>
+          <A href="/point-lab" class={[styles.navBtn, isPointLab() && styles.navBtnActive]}>
+            Point Lab
           </A>
           <A href="/debug" class={[styles.navBtn, isDebug() && styles.navBtnActive]}>
             Debug
@@ -88,6 +95,7 @@ export function App() {
               <Route path="/target" component={TargetView} />
               <Route path="/calibrate" component={CalibrationView} />
               <Route path="/results" component={ResultsView} />
+              <Route path="/point-lab" component={PointLabView} />
               <Route path="/debug" component={GradientProfilesView} />
               <Route path="/gradient-profiles" component={() => <Navigate href="/debug" />} />
             </Loading>
