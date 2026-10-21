@@ -25,7 +25,7 @@ export function shouldMergeComponents(first: MergeStats, second: MergeStats, tun
 }
 
 export const DEFAULT_MERGE_TUNING: MergeTuning = {
-  baseTolerance: 0.02,
+  baseTolerance: 0.05,
   z: 1.5,
   maxTolerance: 0.2,
 }

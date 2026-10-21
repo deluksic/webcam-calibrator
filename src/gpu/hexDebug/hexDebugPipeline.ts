@@ -1,8 +1,9 @@
 import type { TgpuRoot } from 'typegpu'
-import { d, tgpu } from 'typegpu'
+import { common, d, tgpu } from 'typegpu'
 import {
   abs,
   atomicAdd,
+  bitcastU32toF32,
   atomicCompareExchangeWeak,
   atomicLoad,
   atomicMax,
@@ -11,10 +12,13 @@ import {
   floor,
   max,
   min,
+  pow,
   round,
+  select,
   sqrt,
 } from 'typegpu/std'
 
+import { createMultiScaleDohStage } from '@/gpu/hexDebug/dohMultiScale'
 import { createCopyIngest } from '@/gpu/pipelines/copyPipeline'
 import { createGrayStage } from '@/gpu/pipelines/grayPipeline'
 import {
@@ -22,10 +26,10 @@ import {
   createPointerJumpLayouts,
   createPointerJumpStepPipeline,
 } from '@/gpu/pipelines/pointerJumpPipeline'
-import type { HexDebugComponent, HexDebugFrame, HexDebugTuning } from '@/lib/hexDebug/types'
+import type { HexDebugComponent, HexDebugFrame, HexDebugRejection, HexDebugTuning } from '@/lib/hexDebug/types'
 
 const WORKGROUP_SIZE = 64
-const MAX_COMPONENTS = 4096
+const MAX_COMPONENTS = 65536
 const ROOT_JUMP_ITERATIONS = 12
 const GRAY_SCALE = 31
 
@@ -76,6 +80,10 @@ const ComponentRow = d.struct({
   maxX: d.u32,
   minY: d.u32,
   maxY: d.u32,
+  rejection: d.u32,
+  fillRatio: d.f32,
+  ringMean: d.f32,
+  ringVariance: d.f32,
 })
 
 const DebugParams = d.struct({
@@ -88,12 +96,36 @@ const DebugParams = d.struct({
   maxTolerance: d.f32,
   minArea: d.u32,
   maxArea: d.u32,
+  minFillPercent: d.u32,
+  ringMargin: d.u32,
+  minContrast: d.f32,
+  maxRingVariance: d.f32,
+})
+
+const BoxParams = d.struct({
+  width: d.u32,
+  height: d.u32,
+  activeCount: d.u32,
+  showRejections: d.u32,
+})
+
+const RenderParams = d.struct({
+  width: d.u32,
+  height: d.u32,
+  mode: d.u32,
 })
 
 export type HexDebugPipeline = {
-  encode(enc: GPUCommandEncoder, video: HTMLVideoElement, tuning: HexDebugTuning): void
+  encode(enc: GPUCommandEncoder, video: HTMLVideoElement, tuning: HexDebugTuning, options?: { doh?: boolean }): void
   readComponents(): Promise<HexDebugFrame>
-  readLabels(): Promise<Uint32Array>
+  render(
+    enc: GPUCommandEncoder,
+    view: GPUTextureView,
+    mode: 'gray' | 'components' | 'doh' | 'boxes' | 'nms',
+    activeCount: number,
+    showRejections: boolean,
+  ): void
+  setNmsThreshold(threshold: number): void
   destroy(): void
 }
 
@@ -101,6 +133,16 @@ function toComponent(row: d.Infer<typeof ComponentRow>): HexDebugComponent {
   const area = Math.max(1, row.count)
   const meanGray = row.sumGray / (area * GRAY_SCALE)
   const secondMoment = row.sumGraySq / (area * GRAY_SCALE * GRAY_SCALE)
+  const rejection: HexDebugRejection =
+    row.rejection === 1
+      ? 'fill'
+      : row.rejection === 2
+        ? 'ring'
+        : row.rejection === 3
+          ? 'contrast'
+          : row.rejection === 4
+            ? 'noRing'
+            : 'accepted'
   return {
     label: row.label,
     area,
@@ -109,6 +151,10 @@ function toComponent(row: d.Infer<typeof ComponentRow>): HexDebugComponent {
     bbox: { minX: row.minX, maxX: row.maxX, minY: row.minY, maxY: row.maxY },
     centroid: { x: row.sumX / area, y: row.sumY / area },
     color: meanGray < 0.5 ? 0 : 1,
+    fillRatio: row.fillRatio,
+    ringMean: row.ringMean,
+    ringVariance: row.ringVariance,
+    rejection,
   }
 }
 
@@ -117,13 +163,17 @@ export function createHexDebugPipeline(
   width: number,
   height: number,
   initialTuning: HexDebugTuning,
+  presentationFormat: GPUTextureFormat,
 ): HexDebugPipeline {
   const cols = width
   const rows = height
   const blockCount = width * height
   const paramsBuffer = root.createBuffer(DebugParams).$usage('uniform')
   const ingest = createCopyIngest(root, width, height)
-  const gray = createGrayStage(root, width, height, ingest.grayTex.createView(d.texture2d(d.f32)))
+  const gray = createGrayStage(root, width, height, ingest.grayTex.createView(d.texture2d(d.f32)), { linearize: true })
+  const dohStage = createMultiScaleDohStage(root, width, height, gray.buffer)
+  const dohResponseBuffer = dohStage.responseBuffer
+  const dohMaxBuffer = dohStage.maxBuffer
 
   const blockStatsBuffer = root.createBuffer(d.arrayOf(BlockStats, blockCount)).$usage('storage')
   const componentStatsBuffer = root.createBuffer(d.arrayOf(ComponentStatsAtomic, blockCount)).$usage('storage')
@@ -133,6 +183,9 @@ export function createHexDebugPipeline(
   const rootsB = root.createBuffer(d.arrayOf(d.u32, blockCount)).$usage('storage')
   const componentCounter = root.createBuffer(d.atomic(d.u32)).$usage('storage')
   const componentRowsBuffer = root.createBuffer(d.arrayOf(ComponentRow, MAX_COMPONENTS)).$usage('storage')
+  const boxMaskBuffer = root.createBuffer(d.arrayOf(d.u32, blockCount)).$usage('storage')
+  const boxParamsBuffer = root.createBuffer(BoxParams).$usage('uniform')
+  const renderParamsBuffer = root.createBuffer(RenderParams).$usage('uniform')
 
   let currentTuning = { ...initialTuning }
   let lastIterations = initialTuning.iterations
@@ -147,6 +200,10 @@ export function createHexDebugPipeline(
       maxTolerance: currentTuning.maxTolerance,
       minArea: currentTuning.minArea,
       maxArea: currentTuning.maxArea,
+      minFillPercent: currentTuning.minFillPercent,
+      ringMargin: currentTuning.ringMargin,
+      minContrast: currentTuning.minContrast,
+      maxRingVariance: currentTuning.maxRingVariance,
     })
   }
   writeParams()
@@ -406,6 +463,7 @@ export function createHexDebugPipeline(
       params: { uniform: DebugParams },
       components: { storage: d.arrayOf(ComponentStatsReadonly, blockCount), access: 'readonly' },
       roots: { storage: d.arrayOf(d.u32, blockCount), access: 'readonly' },
+      grayBuffer: { storage: d.arrayOf(d.f32, blockCount), access: 'readonly' },
       counter: { storage: d.atomic(d.u32), access: 'mutable' },
       rows: { storage: d.arrayOf(ComponentRow, MAX_COMPONENTS), access: 'mutable' },
     })
@@ -429,6 +487,86 @@ export function createHexDebugPipeline(
         if (c.count < p.minArea || c.count > p.maxArea) {
           return
         }
+
+        const bboxWidth = c.maxX - c.minX + d.u32(1)
+        const bboxHeight = c.maxY - c.minY + d.u32(1)
+        const fillRatio = d.f32(c.count) / d.f32(max(bboxWidth * bboxHeight, d.u32(1)))
+        let rejection = d.u32(0)
+        let ringMean = d.f32(0)
+        let ringVariance = d.f32(0)
+
+        if (fillRatio * d.f32(100) < d.f32(p.minFillPercent)) {
+          rejection = d.u32(1)
+        } else {
+          let ringCount = d.u32(0)
+          let ringSum = d.u32(0)
+          let ringSumSq = d.u32(0)
+          const margin = p.ringMargin
+          const left = c.minX > margin ? c.minX - margin : d.u32(0)
+          const right = min(p.width - d.u32(1), c.maxX + margin)
+          const top = c.minY > margin ? c.minY - margin : d.u32(0)
+          const bottom = min(p.height - d.u32(1), c.maxY + margin)
+
+          for (let x = left; x <= right; x = x + d.u32(1)) {
+            const topIdx = top * p.width + x
+            if (compactLayout.$.roots[topIdx] !== blockId) {
+              const q = min(
+                d.u32(127),
+                max(d.u32(0), d.u32(round(compactLayout.$.grayBuffer[topIdx]! * d.f32(GRAY_SCALE)))),
+              )
+              ringCount = ringCount + d.u32(1)
+              ringSum = ringSum + q
+              ringSumSq = ringSumSq + q * q
+            }
+            const bottomIdx = bottom * p.width + x
+            if (compactLayout.$.roots[bottomIdx] !== blockId) {
+              const q = min(
+                d.u32(127),
+                max(d.u32(0), d.u32(round(compactLayout.$.grayBuffer[bottomIdx]! * d.f32(GRAY_SCALE)))),
+              )
+              ringCount = ringCount + d.u32(1)
+              ringSum = ringSum + q
+              ringSumSq = ringSumSq + q * q
+            }
+          }
+          for (let y = top + d.u32(1); y < bottom; y = y + d.u32(1)) {
+            const leftIdx = y * p.width + left
+            if (compactLayout.$.roots[leftIdx] !== blockId) {
+              const q = min(
+                d.u32(127),
+                max(d.u32(0), d.u32(round(compactLayout.$.grayBuffer[leftIdx]! * d.f32(GRAY_SCALE)))),
+              )
+              ringCount = ringCount + d.u32(1)
+              ringSum = ringSum + q
+              ringSumSq = ringSumSq + q * q
+            }
+            const rightIdx = y * p.width + right
+            if (compactLayout.$.roots[rightIdx] !== blockId) {
+              const q = min(
+                d.u32(127),
+                max(d.u32(0), d.u32(round(compactLayout.$.grayBuffer[rightIdx]! * d.f32(GRAY_SCALE)))),
+              )
+              ringCount = ringCount + d.u32(1)
+              ringSum = ringSum + q
+              ringSumSq = ringSumSq + q * q
+            }
+          }
+
+          if (ringCount === d.u32(0)) {
+            rejection = d.u32(4)
+          } else {
+            ringMean = d.f32(ringSum) / (d.f32(ringCount) * d.f32(GRAY_SCALE))
+            const ringSecondMoment = d.f32(ringSumSq) / (d.f32(ringCount) * d.f32(GRAY_SCALE * GRAY_SCALE))
+            ringVariance = max(d.f32(0), ringSecondMoment - ringMean * ringMean)
+            const componentMean = d.f32(c.sumGray) / (d.f32(c.count) * d.f32(GRAY_SCALE))
+            if (ringVariance > p.maxRingVariance) {
+              rejection = d.u32(2)
+            } else if (abs(componentMean - ringMean) < p.minContrast) {
+              rejection = d.u32(3)
+            }
+          }
+        }
+
         const index = atomicAdd(compactLayout.$.counter, d.u32(1))
         if (index >= d.u32(MAX_COMPONENTS)) {
           return
@@ -444,6 +582,10 @@ export function createHexDebugPipeline(
           maxX: c.maxX,
           minY: c.minY,
           maxY: c.maxY,
+          rejection,
+          fillRatio,
+          ringMean,
+          ringVariance,
         })
       }),
     })
@@ -452,8 +594,181 @@ export function createHexDebugPipeline(
     params: paramsBuffer,
     components: componentStatsBuffer,
     roots: rootsA,
+    grayBuffer: gray.buffer,
     counter: componentCounter,
     rows: componentRowsBuffer,
+  })
+
+  const boxClearLayout = tgpu
+    .bindGroupLayout({ mask: { storage: d.arrayOf(d.u32, blockCount), access: 'mutable' } })
+    .$name('hex-debug-box-clear')
+  const boxClearPipeline = root
+    .createComputePipeline({
+      compute: tgpu.computeFn({
+        in: { gid: d.builtin.globalInvocationId },
+        workgroupSize: [WORKGROUP_SIZE, 1, 1],
+      })((input) => {
+        'use gpu'
+        const index = d.u32(input.gid.x)
+        if (index < d.u32(blockCount)) {
+          boxClearLayout.$.mask[index] = d.u32(0)
+        }
+      }),
+    })
+    .$name('hex-debug-box-clear')
+  const boxDrawLayout = tgpu
+    .bindGroupLayout({
+      params: { uniform: BoxParams },
+      rows: { storage: d.arrayOf(ComponentRow, MAX_COMPONENTS), access: 'readonly' },
+      mask: { storage: d.arrayOf(d.u32, blockCount), access: 'mutable' },
+    })
+    .$name('hex-debug-box-draw')
+  const boxDrawPipeline = root
+    .createComputePipeline({
+      compute: tgpu.computeFn({
+        in: { gid: d.builtin.globalInvocationId },
+        workgroupSize: [WORKGROUP_SIZE, 1, 1],
+      })((input) => {
+        'use gpu'
+        const index = d.u32(input.gid.x)
+        const p = boxDrawLayout.$.params
+        if (index >= p.activeCount || index >= d.u32(MAX_COMPONENTS)) {
+          return
+        }
+        const row = boxDrawLayout.$.rows[index]!
+        if (row.rejection !== d.u32(0) && p.showRejections === d.u32(0)) {
+          return
+        }
+        const code = select(d.u32(1), row.rejection + d.u32(1), row.rejection !== d.u32(0))
+        const left = row.minX
+        const right = row.maxX
+        const top = row.minY
+        const bottom = row.maxY
+        if (row.rejection !== d.u32(0)) {
+          for (let y = top; y <= bottom; y = y + d.u32(1)) {
+            for (let x = left; x <= right; x = x + d.u32(1)) {
+              if (x < p.width && y < p.height) {
+                boxDrawLayout.$.mask[y * p.width + x] = code
+              }
+            }
+          }
+        } else {
+          for (let x = left; x <= right; x = x + d.u32(1)) {
+            if (x < p.width) {
+              boxDrawLayout.$.mask[top * p.width + x] = code
+              boxDrawLayout.$.mask[bottom * p.width + x] = code
+            }
+          }
+          for (let y = top + d.u32(1); y < bottom; y = y + d.u32(1)) {
+            if (y < p.height) {
+              boxDrawLayout.$.mask[y * p.width + left] = code
+              boxDrawLayout.$.mask[y * p.width + right] = code
+            }
+          }
+        }
+      }),
+    })
+    .$name('hex-debug-box-draw')
+  const boxClearBindGroup = root.createBindGroup(boxClearLayout, { mask: boxMaskBuffer })
+  const boxDrawBindGroup = root.createBindGroup(boxDrawLayout, {
+    params: boxParamsBuffer,
+    rows: componentRowsBuffer,
+    mask: boxMaskBuffer,
+  })
+
+  const renderLayout = tgpu
+    .bindGroupLayout({
+      params: { uniform: RenderParams },
+      grayBuffer: { storage: d.arrayOf(d.f32, blockCount), access: 'readonly' },
+      labels: { storage: d.arrayOf(d.u32, blockCount), access: 'readonly' },
+      doh: { storage: d.arrayOf(d.f32, blockCount), access: 'readonly' },
+      dohMax: { storage: d.u32, access: 'readonly' },
+      candidateMask: { storage: d.arrayOf(d.u32, blockCount), access: 'readonly' },
+      boxMask: { storage: d.arrayOf(d.u32, blockCount), access: 'readonly' },
+    })
+    .$name('hex-debug-present')
+  const linearToSrgb = (value: number): number => {
+    'use gpu'
+    return select(
+      value * d.f32(12.92),
+      d.f32(1.055) * pow(max(value, d.f32(0)), d.f32(1 / 2.4)) - d.f32(0.055),
+      value > d.f32(0.0031308),
+    )
+  }
+
+  const renderFragment = tgpu.fragmentFn({
+    in: { position: d.builtin.position },
+    out: d.vec4f,
+  })((input) => {
+    'use gpu'
+    const p = renderLayout.$.params
+    const x = d.u32(input.position.x)
+    const y = d.u32(input.position.y)
+    if (x >= p.width || y >= p.height) {
+      return d.vec4f(0, 0, 0, 1)
+    }
+    const index = y * p.width + x
+    if (p.mode === d.u32(0)) {
+      const grayValue = linearToSrgb(renderLayout.$.grayBuffer[index]!)
+      return d.vec4f(grayValue, grayValue, grayValue, d.f32(1))
+    }
+    if (p.mode === d.u32(1)) {
+      const label = renderLayout.$.labels[index]!
+      const hash = (label * d.u32(2654435761)) & d.u32(255)
+      const color = d.vec3f(
+        d.f32(hash & d.u32(127)) / d.f32(127),
+        d.f32((hash >>> d.u32(2)) & d.u32(127)) / d.f32(127),
+        d.f32((hash >>> d.u32(4)) & d.u32(127)) / d.f32(127),
+      )
+      return d.vec4f(color, d.f32(1))
+    }
+    if (p.mode === d.u32(2) || p.mode === d.u32(4)) {
+      if (p.mode === d.u32(4) && renderLayout.$.candidateMask[index]! !== d.u32(0)) {
+        return d.vec4f(d.f32(0.13), d.f32(0.95), d.f32(0.45), d.f32(1))
+      }
+      const response = renderLayout.$.doh[index]!
+      const maxAbs = max(bitcastU32toF32(renderLayout.$.dohMax), d.f32(0.000001))
+      const signed = max(d.f32(-1), min(d.f32(1), response / maxAbs))
+      const magnitude = sqrt(abs(signed))
+      if (signed >= d.f32(0)) {
+        return d.vec4f(magnitude, d.f32(0.667) * magnitude * magnitude, d.f32(0.157) * (d.f32(1) - magnitude), d.f32(1))
+      }
+      return d.vec4f(d.f32(0.078) * (d.f32(1) - magnitude), d.f32(0.275) * magnitude, magnitude, d.f32(1))
+    }
+    const grayValue = linearToSrgb(renderLayout.$.grayBuffer[index]!)
+    const mask = renderLayout.$.boxMask[index]!
+    if (mask === d.u32(1)) {
+      return d.vec4f(d.f32(0.13), d.f32(0.8), d.f32(0.35), d.f32(1))
+    }
+    if (mask === d.u32(2)) {
+      return d.vec4f(d.f32(0.98), d.f32(0.45), d.f32(0.08), d.f32(1))
+    }
+    if (mask === d.u32(3)) {
+      return d.vec4f(d.f32(0.94), d.f32(0.27), d.f32(0.27), d.f32(1))
+    }
+    if (mask === d.u32(4)) {
+      return d.vec4f(d.f32(0.23), d.f32(0.51), d.f32(0.96), d.f32(1))
+    }
+    if (mask === d.u32(5)) {
+      return d.vec4f(d.f32(0.92), d.f32(0.7), d.f32(0.03), d.f32(1))
+    }
+    return d.vec4f(grayValue, grayValue, grayValue, d.f32(1))
+  })
+  const renderPipeline = root
+    .createRenderPipeline({
+      vertex: common.fullScreenTriangle,
+      fragment: renderFragment,
+      targets: { format: presentationFormat },
+    })
+    .$name('hex-debug-present')
+  const renderBindGroup = root.createBindGroup(renderLayout, {
+    params: renderParamsBuffer,
+    grayBuffer: gray.buffer,
+    labels: rootsA,
+    doh: dohResponseBuffer,
+    dohMax: dohMaxBuffer,
+    candidateMask: dohStage.candidateMaskBuffer,
+    boxMask: boxMaskBuffer,
   })
 
   const jumpLayouts = createPointerJumpLayouts()
@@ -508,7 +823,12 @@ export function createHexDebugPipeline(
     }
   }
 
-  const encode = (enc: GPUCommandEncoder, video: HTMLVideoElement, tuning: HexDebugTuning): void => {
+  const encode = (
+    enc: GPUCommandEncoder,
+    video: HTMLVideoElement,
+    tuning: HexDebugTuning,
+    options?: { doh?: boolean },
+  ): void => {
     currentTuning = { ...tuning }
     lastIterations = tuning.iterations
     writeParams()
@@ -523,11 +843,42 @@ export function createHexDebugPipeline(
     }
     resolveRoots(enc)
     dispatch(enc, compactPipeline, compactBindGroup, blockCount, 'hex-debug-compact')
+    if (options?.doh) {
+      dohStage.encode(enc)
+    }
   }
 
-  const readLabels = async (): Promise<Uint32Array> => {
-    const values = await rootsA.read()
-    return new Uint32Array(Array.isArray(values) ? values : [])
+  const setNmsThreshold = (threshold: number): void => {
+    dohStage.setNmsThreshold(threshold)
+  }
+
+  const render = (
+    enc: GPUCommandEncoder,
+    view: GPUTextureView,
+    mode: 'gray' | 'components' | 'doh' | 'boxes' | 'nms',
+    activeCount: number,
+    showRejections: boolean,
+  ): void => {
+    const modeCode = mode === 'gray' ? 0 : mode === 'components' ? 1 : mode === 'doh' ? 2 : mode === 'nms' ? 4 : 3
+    renderParamsBuffer.write({ width, height, mode: modeCode })
+    if (mode === 'boxes') {
+      boxParamsBuffer.write({
+        width,
+        height,
+        activeCount: Math.min(Math.max(0, activeCount), MAX_COMPONENTS),
+        showRejections: showRejections ? 1 : 0,
+      })
+      dispatch(enc, boxClearPipeline, boxClearBindGroup, blockCount, 'hex-debug-box-clear')
+      const activeWg = Math.ceil(Math.max(1, Math.min(activeCount, MAX_COMPONENTS)) / WORKGROUP_SIZE)
+      const boxPass = enc.beginComputePass({ label: 'hex-debug-box-draw' })
+      boxDrawPipeline.with(boxPass).with(boxDrawBindGroup).dispatchWorkgroups(activeWg)
+      boxPass.end()
+    }
+    const pass = enc.beginRenderPass({
+      colorAttachments: [{ view, clearValue: [0, 0, 0, 1], loadOp: 'clear', storeOp: 'store' }],
+    })
+    renderPipeline.with(pass).with(renderBindGroup).draw(3)
+    pass.end()
   }
 
   const readComponents = async (): Promise<HexDebugFrame> => {
@@ -549,7 +900,8 @@ export function createHexDebugPipeline(
   return {
     encode,
     readComponents,
-    readLabels,
+    render,
+    setNmsThreshold,
     destroy() {
       blockStatsBuffer.destroy()
       componentStatsBuffer.destroy()
@@ -559,6 +911,10 @@ export function createHexDebugPipeline(
       rootsB.destroy()
       componentCounter.destroy()
       componentRowsBuffer.destroy()
+      dohStage.destroy()
+      boxMaskBuffer.destroy()
+      boxParamsBuffer.destroy()
+      renderParamsBuffer.destroy()
       paramsBuffer.destroy()
       gray.buffer.destroy()
       ingest.grayTex.destroy()

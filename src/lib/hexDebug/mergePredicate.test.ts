@@ -17,7 +17,7 @@ describe('shouldMergeComponents', () => {
     expect(
       shouldMergeComponents(
         { mean: 0.5, variance: 0, area: 10 },
-        { mean: 0.55, variance: 0.02, area: 10 },
+        { mean: 0.06, variance: 0.02, area: 10 },
         DEFAULT_MERGE_TUNING,
       ),
     ).toBe(false)

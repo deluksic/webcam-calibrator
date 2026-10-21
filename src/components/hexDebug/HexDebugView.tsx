@@ -11,12 +11,18 @@ import { createFrameLoop } from '@/utils/createFrameLoop'
 
 import styles from '@/components/hexDebug/HexDebugView.module.css'
 
+const PRESENTATION_FORMAT = globalThis.navigator.gpu?.getPreferredCanvasFormat() ?? 'bgra8unorm'
+
 const DEFAULT_TUNING = {
-  baseTolerance: 0.02,
+  baseTolerance: 0.05,
   z: 1.5,
   maxTolerance: 0.2,
   minArea: 1,
   maxArea: 100,
+  minFillPercent: 60,
+  minContrast: 0.15,
+  maxRingVariance: 0.01,
+  ringMargin: 4,
   iterations: 12,
 } as const
 
@@ -38,8 +44,8 @@ export const HexDebugView: Component = () => {
   const [error, setError] = createSignal<string>()
   const [videoSize, setVideoSize] = createSignal<{ width: number; height: number }>()
   const [components, setComponents] = createSignal<HexDebugComponent[]>([])
-  const [labels, setLabels] = createSignal<Uint32Array>()
-  const [viewMode, setViewMode] = createSignal<'gray' | 'components' | 'boxes'>('gray')
+  const [canvasContext, setCanvasContext] = createSignal<ReturnType<TgpuRoot['configureContext']>>()
+  const [viewMode, setViewMode] = createSignal<'gray' | 'components' | 'boxes' | 'doh' | 'nms'>('gray')
   const [processingMs, setProcessingMs] = createSignal(0)
   const [fps, setFps] = createSignal(0)
   const [paused, setPaused] = createSignal(false)
@@ -49,10 +55,17 @@ export const HexDebugView: Component = () => {
   const [maxTolerance, setMaxTolerance] = createSignal<number>(DEFAULT_TUNING.maxTolerance)
   const [minArea, setMinArea] = createSignal<number>(DEFAULT_TUNING.minArea)
   const [maxArea, setMaxArea] = createSignal<number>(DEFAULT_TUNING.maxArea)
+  const [minFillPercent, setMinFillPercent] = createSignal<number>(DEFAULT_TUNING.minFillPercent)
+  const [minContrast, setMinContrast] = createSignal<number>(DEFAULT_TUNING.minContrast)
+  const [maxRingVariance, setMaxRingVariance] = createSignal<number>(DEFAULT_TUNING.maxRingVariance)
+  const [ringMargin, setRingMargin] = createSignal<number>(DEFAULT_TUNING.ringMargin)
+  const [showRejections, setShowRejections] = createSignal(false)
+  const [nmsThreshold, setNmsThreshold] = createSignal(0.08)
   const [expected, setExpected] = createSignal(476)
 
   let disposed = false
   let processing = false
+  let metricsPending = false
   let lastFrameAt = 0
 
   const tuning = createMemo<HexDebugTuning>(() => ({
@@ -61,6 +74,10 @@ export const HexDebugView: Component = () => {
     maxTolerance: maxTolerance(),
     minArea: minArea(),
     maxArea: maxArea(),
+    minFillPercent: minFillPercent(),
+    minContrast: minContrast(),
+    maxRingVariance: maxRingVariance(),
+    ringMargin: ringMargin(),
     iterations: iterations(),
   }))
 
@@ -122,7 +139,13 @@ export const HexDebugView: Component = () => {
       if (!gpuRoot || !size || size.width < 8 || size.height < 8) {
         return
       }
-      const nextPipeline = createHexDebugPipeline(gpuRoot, size.width, size.height, untrack(tuning))
+      const nextPipeline = createHexDebugPipeline(
+        gpuRoot,
+        size.width,
+        size.height,
+        untrack(tuning),
+        PRESENTATION_FORMAT,
+      )
       setPipeline(nextPipeline)
       return () => {
         nextPipeline.destroy()
@@ -130,96 +153,69 @@ export const HexDebugView: Component = () => {
     },
   )
 
-  const labelColor = (label: number): [number, number, number] => {
-    let hash = (label * 2654435761) >>> 0
-    hash ^= hash >>> 16
-    hash = Math.imul(hash, 2246822507) >>> 0
-    hash ^= hash >>> 13
-    return [48 + (hash & 127), 48 + ((hash >>> 8) & 127), 48 + ((hash >>> 16) & 127)]
-  }
+  createEffect(
+    () => ({
+      activePipeline: pipeline(),
+      threshold: nmsThreshold(),
+    }),
+    ({ activePipeline, threshold }) => {
+      activePipeline?.setNmsThreshold(threshold)
+    },
+  )
 
-  const drawLabelMap = (ctx: CanvasRenderingContext2D, labelMap: Uint32Array, width: number, height: number): void => {
-    const image = ctx.createImageData(width, height)
-    const pixels = image.data
-    for (let index = 0; index < width * height; index += 1) {
-      const [red, green, blue] = labelColor(labelMap[index] ?? 0)
-      const offset = index * 4
-      pixels[offset] = red
-      pixels[offset + 1] = green
-      pixels[offset + 2] = blue
-      pixels[offset + 3] = 255
-    }
-    ctx.putImageData(image, 0, 0)
-  }
-
-  const drawGrayVideo = (
-    ctx: CanvasRenderingContext2D,
-    video: HTMLVideoElement,
-    width: number,
-    height: number,
-  ): void => {
-    ctx.save()
-    ctx.filter = 'grayscale(1)'
-    ctx.drawImage(video, 0, 0, width, height)
-    ctx.restore()
-  }
-
-  const drawBoxes = (ctx: CanvasRenderingContext2D, list: readonly HexDebugComponent[]): void => {
-    for (const component of list) {
-      ctx.strokeStyle = component.color === 0 ? '#f97316' : '#22d3ee'
-      ctx.lineWidth = 1.5
-      ctx.strokeRect(
-        component.bbox.minX,
-        component.bbox.minY,
-        component.bbox.maxX - component.bbox.minX + 1,
-        component.bbox.maxY - component.bbox.minY + 1,
-      )
-    }
-  }
+  createEffect(
+    () => ({
+      gpuRoot: root(),
+      canvas: canvasElement(),
+    }),
+    ({ gpuRoot, canvas }) => {
+      if (!gpuRoot || !canvas) {
+        return
+      }
+      const context = gpuRoot.configureContext({ canvas, alphaMode: 'opaque', format: PRESENTATION_FORMAT })
+      setCanvasContext(context)
+      return () => {
+        setCanvasContext(undefined)
+      }
+    },
+  )
 
   const processFrame = (video: HTMLVideoElement, size: { width: number; height: number }): void => {
     const canvas = canvasElement()
     const gpuRoot = root()
     const currentPipeline = pipeline()
-    if (!canvas || !gpuRoot || !currentPipeline) {
+    const context = canvasContext()
+    if (!canvas || !gpuRoot || !currentPipeline || !context) {
       return
     }
     if (canvas.width !== size.width || canvas.height !== size.height) {
       canvas.width = size.width
       canvas.height = size.height
     }
-    const ctx = canvas.getContext('2d')
-    if (!ctx) {
-      return
-    }
-    const mode = viewMode()
-    if (mode === 'components') {
-      const currentLabels = labels()
-      if (currentLabels && currentLabels.length === size.width * size.height) {
-        drawLabelMap(ctx, currentLabels, size.width, size.height)
-      } else {
-        drawGrayVideo(ctx, video, canvas.width, canvas.height)
-      }
-    } else {
-      drawGrayVideo(ctx, video, canvas.width, canvas.height)
-      if (mode === 'boxes') {
-        drawBoxes(ctx, components())
-      }
-    }
     if (paused() || processing) {
       return
     }
     processing = true
     const start = Date.now()
-    const wantsLabels = viewMode() === 'components'
-    const enc = gpuRoot.device.createCommandEncoder({ label: 'hex-debug-frame' })
-    currentPipeline.encode(enc, video, tuning())
-    gpuRoot.device.queue.submit([enc.finish()])
-    void Promise.all([
-      currentPipeline.readComponents(),
-      wantsLabels ? currentPipeline.readLabels() : Promise.resolve(undefined),
-    ])
-      .then(([frame, labelMap]) => {
+    const mode = viewMode()
+    try {
+      const enc = gpuRoot.device.createCommandEncoder({ label: 'hex-debug-frame' })
+      currentPipeline.encode(enc, video, tuning(), { doh: mode === 'doh' || mode === 'nms' })
+      currentPipeline.render(enc, context.getCurrentTexture().createView(), mode, components().length, showRejections())
+      gpuRoot.device.queue.submit([enc.finish()])
+    } catch (cause: unknown) {
+      processing = false
+      setError(cause instanceof Error ? cause.message : String(cause))
+      return
+    }
+    processing = false
+    if (metricsPending) {
+      return
+    }
+    metricsPending = true
+    void currentPipeline
+      .readComponents()
+      .then((frame) => {
         if (disposed || pipeline() !== currentPipeline) {
           return
         }
@@ -231,17 +227,6 @@ export const HexDebugView: Component = () => {
         lastFrameAt = now
         setProcessingMs(now - start)
         setComponents(frame.components)
-        if (labelMap) {
-          setLabels(labelMap)
-          if (viewMode() === 'components') {
-            drawLabelMap(ctx, labelMap, size.width, size.height)
-          }
-        } else if (viewMode() === 'boxes') {
-          drawGrayVideo(ctx, video, canvas.width, canvas.height)
-          drawBoxes(ctx, frame.components)
-        } else if (viewMode() === 'gray') {
-          drawGrayVideo(ctx, video, canvas.width, canvas.height)
-        }
       })
       .catch((cause: unknown) => {
         if (!disposed) {
@@ -249,7 +234,7 @@ export const HexDebugView: Component = () => {
         }
       })
       .finally(() => {
-        processing = false
+        metricsPending = false
       })
   }
 
@@ -275,10 +260,11 @@ export const HexDebugView: Component = () => {
     },
   )
 
-  const darkCount = createMemo(() => components().filter((component) => component.color === 0).length)
-  const lightCount = createMemo(() => components().filter((component) => component.color === 1).length)
-  const medianArea = createMemo(() => median(components().map((component) => component.area)))
-  const detectedRatio = createMemo(() => (expected() > 0 ? components().length / expected() : 0))
+  const acceptedComponents = createMemo(() => components().filter((component) => component.rejection === 'accepted'))
+  const darkCount = createMemo(() => acceptedComponents().filter((component) => component.color === 0).length)
+  const lightCount = createMemo(() => acceptedComponents().filter((component) => component.color === 1).length)
+  const medianArea = createMemo(() => median(acceptedComponents().map((component) => component.area)))
+  const detectedRatio = createMemo(() => (expected() > 0 ? acceptedComponents().length / expected() : 0))
 
   return (
     <div class={styles.root}>
@@ -322,6 +308,20 @@ export const HexDebugView: Component = () => {
               onClick={() => setViewMode('boxes')}
             >
               Boxes
+            </button>
+            <button
+              type="button"
+              class={viewMode() === 'doh' ? styles.activeButton : styles.button}
+              onClick={() => setViewMode('doh')}
+            >
+              DoH
+            </button>
+            <button
+              type="button"
+              class={viewMode() === 'nms' ? styles.activeButton : styles.button}
+              onClick={() => setViewMode('nms')}
+            >
+              NMS
             </button>
           </div>
         </div>
@@ -411,6 +411,99 @@ export const HexDebugView: Component = () => {
         </label>
 
         <label class={styles.field}>
+          <span class={styles.label}>Minimum fill: {minFillPercent()}%</span>
+          <input
+            class={styles.range}
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={minFillPercent()}
+            onInput={(event) => setMinFillPercent(Number(event.currentTarget.value))}
+          />
+        </label>
+
+        <label class={styles.field}>
+          <span class={styles.label}>Ring margin: {ringMargin()} px</span>
+          <input
+            class={styles.range}
+            type="range"
+            min="1"
+            max="10"
+            step="1"
+            value={ringMargin()}
+            onInput={(event) => setRingMargin(Number(event.currentTarget.value))}
+          />
+        </label>
+
+        <label class={styles.field}>
+          <span class={styles.label}>Minimum contrast: {minContrast().toFixed(3)}</span>
+          <input
+            class={styles.range}
+            type="range"
+            min="0"
+            max="0.5"
+            step="0.005"
+            value={minContrast()}
+            onInput={(event) => setMinContrast(Number(event.currentTarget.value))}
+          />
+        </label>
+
+        <label class={styles.field}>
+          <span class={styles.label}>Max ring variance: {maxRingVariance().toFixed(3)}</span>
+          <input
+            class={styles.range}
+            type="range"
+            min="0"
+            max="0.2"
+            step="0.001"
+            value={maxRingVariance()}
+            onInput={(event) => setMaxRingVariance(Number(event.currentTarget.value))}
+          />
+        </label>
+
+        <label class={styles.field}>
+          <span class={styles.label}>NMS threshold: {(nmsThreshold() * 100).toFixed(1)}% max</span>
+          <input
+            class={styles.range}
+            type="range"
+            min="0.01"
+            max="0.5"
+            step="0.005"
+            value={nmsThreshold()}
+            onInput={(event) => setNmsThreshold(Number(event.currentTarget.value))}
+          />
+        </label>
+
+        <label class={styles.toggle}>
+          <input
+            type="checkbox"
+            checked={showRejections()}
+            onChange={(event) => setShowRejections(event.currentTarget.checked)}
+          />
+          Show rejections
+        </label>
+
+        <div class={styles.legend}>
+          <span class={styles.label}>Rejection colors</span>
+          <div>
+            <i style={{ background: '#22c55e' }} /> accepted
+          </div>
+          <div>
+            <i style={{ background: '#f97316' }} /> fill / too thin
+          </div>
+          <div>
+            <i style={{ background: '#ef4444' }} /> ring not uniform
+          </div>
+          <div>
+            <i style={{ background: '#3b82f6' }} /> low contrast
+          </div>
+          <div>
+            <i style={{ background: '#eab308' }} /> no ring
+          </div>
+        </div>
+
+        <label class={styles.field}>
           <span class={styles.label}>Expected markers</span>
           <input
             class={styles.numberInput}
@@ -433,8 +526,10 @@ export const HexDebugView: Component = () => {
             <dd>{videoSize() ? `${videoSize()!.width} × ${videoSize()!.height}` : '—'}</dd>
           </div>
           <div>
-            <dt>components</dt>
-            <dd>{components().length}</dd>
+            <dt>accepted / candidates</dt>
+            <dd>
+              {acceptedComponents().length} / {components().length}
+            </dd>
           </div>
           <div>
             <dt>dark / light</dt>

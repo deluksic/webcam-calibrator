@@ -2,10 +2,12 @@
 import type { ExtractBindGroupInputFromLayout, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 
-export const grayTexToBufferLayout = tgpu.bindGroupLayout({
-  grayTex: { texture: d.texture2d(d.f32), access: 'readonly' },
-  grayBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
-}).$name('gray-bgl')
+export const grayTexToBufferLayout = tgpu
+  .bindGroupLayout({
+    grayTex: { texture: d.texture2d(d.f32), access: 'readonly' },
+    grayBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
+  })
+  .$name('gray-bgl')
 
 export type GrayTexToBufferBindResources = ExtractBindGroupInputFromLayout<typeof grayTexToBufferLayout.entries>
 
@@ -20,9 +22,13 @@ export function createGrayStage(
   width: number,
   height: number,
   grayTex: GrayTexToBufferBindResources['grayTex'],
+  options?: { linearize?: boolean },
 ) {
-  const buffer = root.createBuffer(d.arrayOf(d.f32, width * height)).$name('gray-buffer').$usage('storage')
-  const { pipeline, bindGroup } = createGrayPipeline(root, width, height, { grayTex, grayBuffer: buffer })
+  const buffer = root
+    .createBuffer(d.arrayOf(d.f32, width * height))
+    .$name('gray-buffer')
+    .$usage('storage')
+  const { pipeline, bindGroup } = createGrayPipeline(root, width, height, { grayTex, grayBuffer: buffer }, options)
   const wgX = ceil(width / FULL_FRAME_WG)
   const wgY = ceil(height / FULL_FRAME_WG)
   const encodeCompute = (pass: GPUComputePassEncoder) => {
@@ -36,7 +42,20 @@ export function createGrayPipeline(
   width: number,
   height: number,
   resources: GrayTexToBufferBindResources,
+  options?: { linearize?: boolean },
 ) {
+  const linearize = options?.linearize ?? false
+  const srgbToLinear = tgpu.fn(
+    [d.f32],
+    d.f32,
+  )((value) => {
+    'use gpu'
+    return std.select(
+      value / d.f32(12.92),
+      std.pow((value + d.f32(0.055)) / d.f32(1.055), d.f32(2.4)),
+      value > d.f32(0.04045),
+    )
+  })
   const grayKernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
     workgroupSize: [FULL_FRAME_WG, FULL_FRAME_WG, 1],
@@ -47,7 +66,11 @@ export function createGrayPipeline(
     }
 
     const color = std.textureLoad(grayTexToBufferLayout.$.grayTex, input.gid.xy, 0)
-    const gray = color.g
+    const gray = linearize
+      ? d.f32(0.2126) * srgbToLinear(color.r) +
+        d.f32(0.7152) * srgbToLinear(color.g) +
+        d.f32(0.0722) * srgbToLinear(color.b)
+      : color.g
 
     const idx = input.gid.y * width + input.gid.x
     grayTexToBufferLayout.$.grayBuffer[idx] = gray
