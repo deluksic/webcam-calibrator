@@ -90,6 +90,41 @@ describe('identity fingerprints', () => {
     expect(evaluation.summary.safeFail).toBe(4)
   })
 
+  it('evaluates graphs whose point ids differ from array positions', () => {
+    const graph = buildProximityGraph(
+      [
+        { x: 0, y: 0, index: 10 },
+        { x: 10, y: 0, index: 11 },
+        { x: 20, y: 0, index: 12 },
+        { x: 30, y: 0, index: 13 },
+        { x: 40, y: 0, index: 14 },
+      ],
+      { pointsPerEdge: 5 },
+    )
+    const colors = Array<0 | 1>(15).fill(0)
+    colors[12] = 1
+    colors[14] = 1
+    const index = createIdentityIndex(graph, colors, 3)
+    const evaluation = evaluateIdentity(graph, graph, index, colors, 3)
+    expect(evaluation.summary.correct).toBe(5)
+    expect(evaluation.summary.accuracy).toBe(1)
+  })
+
+  it('uses original point ids when observed points are filtered', () => {
+    const graph = buildProximityGraph(
+      points([
+        [0, 0],
+        [10, 0],
+        [20, 0],
+      ]),
+      { pointsPerEdge: 3 },
+    )
+    const colors = [0, 1, 0] as const
+    const fingerprint = computeFingerprint(graph, colors, 1, 1)
+    expect(fingerprint.index).toBe(1)
+    expect(fingerprint.color).toBe(1)
+  })
+
   it('marks chain endpoints and includes endpoint bits in the fingerprint', () => {
     const graph = buildProximityGraph(pathPoints(), PATH_TUNING)
     const colors = [0, 0, 1, 0, 1] as const
@@ -104,9 +139,9 @@ describe('identity fingerprints', () => {
     const fingerprint = computeFingerprint(graph, colors, 1, 2)
     expect(fingerprint.rings).toHaveLength(2)
     expect(fingerprint.rings[0]!.size).toBe(2)
-    expect(fingerprint.rings[0]!.chains).toBe('11')
+    expect(fingerprint.rings[0]!.partition).toBe('00')
     expect(fingerprint.rings[1]!.size).toBe(1)
     expect(fingerprint.key).toContain('|2:')
-    expect(fingerprint.key).toContain(':11')
+    expect(fingerprint.key).toContain(':00')
   })
 })

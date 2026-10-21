@@ -1,5 +1,5 @@
 // Reprojection error overlay: instanced circles + instanced line-list, one shared storage buffer.
-import type { ColorAttachment, TgpuRoot } from 'typegpu'
+import type { ColorAttachment, StorageFlag, TgpuBuffer, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { clamp, fwidth, length, max, mul, select, sub } from 'typegpu/std'
 
@@ -35,7 +35,7 @@ export function createReprojectionOverlayLayouts() {
 
 export function createReprojectionOverlayOriginalPipeline(
   root: TgpuRoot,
-  reprojOverlayLayout: ReturnType<typeof tgpu.bindGroupLayout>,
+  reprojOverlayLayout: ReturnType<typeof createReprojectionOverlayLayouts>['reprojOverlayLayout'],
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
@@ -99,7 +99,7 @@ export function createReprojectionOverlayOriginalPipeline(
 
 export function createReprojectionOverlayTargetPipeline(
   root: TgpuRoot,
-  reprojOverlayLayout: ReturnType<typeof tgpu.bindGroupLayout>,
+  reprojOverlayLayout: ReturnType<typeof createReprojectionOverlayLayouts>['reprojOverlayLayout'],
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
@@ -167,7 +167,7 @@ export function createReprojectionOverlayTargetPipeline(
 
 export function createReprojectionOverlayLinesPipeline(
   root: TgpuRoot,
-  reprojOverlayLayout: ReturnType<typeof tgpu.bindGroupLayout>,
+  reprojOverlayLayout: ReturnType<typeof createReprojectionOverlayLayouts>['reprojOverlayLayout'],
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
@@ -223,13 +223,13 @@ export function createReprojectionOverlayStage(
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
-  options?: { sampleCount?: number; reprojBuffer?: ReturnType<typeof root.createBuffer>; drawState?: { instanceCount: number } },
+  options?: { sampleCount?: number; reprojBuffer?: TgpuBuffer<typeof ReprojOverlaySchema> & StorageFlag; drawState?: { instanceCount: number } },
 ) {
   const reprojOverlayBuffer = options?.reprojBuffer ?? root.createBuffer(ReprojOverlaySchema).$name('reproj-overlay-pairs').$usage('storage')
   const reprojOverlayDrawState = options?.drawState ?? { instanceCount: 0 }
   const { reprojOverlayLayout } = createReprojectionOverlayLayouts()
   const reprojOverlayBindGroup = root.createBindGroup(reprojOverlayLayout, {
-    pairs: reprojOverlayBuffer,
+    pairs: reprojOverlayBuffer.as('readonly'),
   })
   const reprojOriginalPipeline = createReprojectionOverlayOriginalPipeline(
     root,

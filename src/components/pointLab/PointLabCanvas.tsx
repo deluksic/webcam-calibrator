@@ -15,6 +15,8 @@ import styles from '@/components/pointLab/PointLabView.module.css'
 
 type PointLabCanvasProps = {
   projected: readonly PatternPoint[]
+  /** Keeps the viewport anchored to the full field while points are cropped. */
+  framePoints?: readonly PatternPoint[]
   colors: readonly BinaryColor[]
   graph: ProximityGraph
   evaluation: IdentityEvaluation
@@ -194,7 +196,7 @@ export const PointLabCanvas: Component<PointLabCanvasProps> = (props) => {
       return
     }
 
-    const bounds = projectionBounds(props.projected)
+    const bounds = projectionBounds(props.framePoints ?? props.projected)
     if (bounds === undefined) {
       lastTransform = undefined
       return
@@ -233,6 +235,10 @@ export const PointLabCanvas: Component<PointLabCanvasProps> = (props) => {
     for (const point of screenPoints) {
       screenByIndex.set(point.index, point)
     }
+    const screenAtPosition = (position: number): ScreenPoint | undefined => {
+      const id = props.graph.points[position]?.index
+      return id === undefined ? undefined : screenByIndex.get(id)
+    }
     lastTransform = { points: screenPoints }
 
     context.save()
@@ -249,8 +255,8 @@ export const PointLabCanvas: Component<PointLabCanvasProps> = (props) => {
       context.lineWidth = 1.1
       context.beginPath()
       for (const [a, b] of visibleEdges) {
-        const start = screenByIndex.get(a)
-        const end = screenByIndex.get(b)
+        const start = screenAtPosition(a)
+        const end = screenAtPosition(b)
         if (start === undefined || end === undefined) {
           continue
         }
@@ -266,11 +272,13 @@ export const PointLabCanvas: Component<PointLabCanvasProps> = (props) => {
       context.lineWidth = 1.5
       context.beginPath()
       for (const [a, b] of visibleEdges) {
-        if (a !== selectedIndex && b !== selectedIndex) {
+        const firstId = props.graph.points[a]?.index
+        const secondId = props.graph.points[b]?.index
+        if (firstId !== selectedIndex && secondId !== selectedIndex) {
           continue
         }
-        const start = screenByIndex.get(a)
-        const end = screenByIndex.get(b)
+        const start = screenAtPosition(a)
+        const end = screenAtPosition(b)
         if (start === undefined || end === undefined) {
           continue
         }
@@ -283,8 +291,8 @@ export const PointLabCanvas: Component<PointLabCanvasProps> = (props) => {
     if (props.showGraph && visibleEdgeCount > 0 && visibleEdgeCount < totalEdges) {
       const latest = visibleEdges[visibleEdgeCount - 1]
       if (latest !== undefined) {
-        const start = screenByIndex.get(latest[0])
-        const end = screenByIndex.get(latest[1])
+        const start = screenAtPosition(latest[0])
+        const end = screenAtPosition(latest[1])
         if (start !== undefined && end !== undefined) {
           context.beginPath()
           context.moveTo(start.x, start.y)

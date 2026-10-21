@@ -1,5 +1,5 @@
 // Per labelId×edgeId (4 slots): accumulate moments → TLS fit → extent → trimmed endpoints.
-import type { TgpuRoot } from 'typegpu'
+import type { StorageFlag, TgpuBuffer, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { atomicAdd, atomicMin, atomicMax, atomicStore, abs, length, max } from 'typegpu/std'
 
@@ -15,7 +15,6 @@ import {
   MAX_EDGES_PER_LABEL,
 } from '@/gpu/lineFitThresholds'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
-import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
 import { LabelOrientClusterReadonly, type LabelOrientClusterBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { EdgeLineEntry, EDGE_MIN_SPAN_PX } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { lineSegmentEndpoints, lineDirDot, tlsNormalFromMoments } from '@/gpu/shaders/linePca'
@@ -110,7 +109,7 @@ export function createLabelLineFitStage(
   width: number,
   height: number,
   maxLabels: number,
-  filteredBuffer: EdgeFilterBindResources['filteredBuffer'],
+  filteredBuffer: TgpuBuffer<d.WgslArray<d.Vec2f>> & StorageFlag,
   compactLabels: CompactLabelMapBuffer,
   labelClusters: LabelOrientClusterBuffer,
 ) {
@@ -135,7 +134,7 @@ export function createLabelLineFitStage(
     labelLineOut,
   })
   const accumBindGroup = root.createBindGroup(layouts.accumLayout, {
-    edgeBuffer: filteredBuffer,
+    edgeBuffer: filteredBuffer.as('readonly'),
     compactLabels,
     labelClusters,
     labelLineReduce,
@@ -148,7 +147,7 @@ export function createLabelLineFitStage(
     labelLineOut,
   })
   const extentBindGroup = root.createBindGroup(layouts.extentLayout, {
-    edgeBuffer: filteredBuffer,
+    edgeBuffer: filteredBuffer.as('readonly'),
     compactLabels,
     labelClusters,
     labelLineOut,
@@ -159,7 +158,7 @@ export function createLabelLineFitStage(
     labelInlierStats,
   })
   const refineAccumBindGroup = root.createBindGroup(layouts.refineAccumLayout, {
-    edgeBuffer: filteredBuffer,
+    edgeBuffer: filteredBuffer.as('readonly'),
     compactLabels,
     labelClusters,
     labelLineOut,

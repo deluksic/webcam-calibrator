@@ -1,5 +1,5 @@
 // Per-pixel line-fit failure stage for debugging assign / sample / TLS / quad drops.
-import type { ColorAttachment, TgpuRoot } from 'typegpu'
+import type { ColorAttachment, StorageFlag, TgpuBuffer, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { common } from 'typegpu'
 import { abs, clamp, floor, length } from 'typegpu/std'
@@ -13,7 +13,6 @@ import {
   ORIENT_ASSIGN_MAX_BIN_DIST,
 } from '@/gpu/lineFitThresholds'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
-import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
 import type { LabelOrientClusterBuffer } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { LabelOrientClusterReadonly } from '@/gpu/pipelines/edgeHistogramClusterPipeline'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
@@ -97,7 +96,7 @@ export function createLineFitDebugStage(
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
-  filteredBuffer: EdgeFilterBindResources['filteredBuffer'],
+  filteredBuffer: TgpuBuffer<d.WgslArray<d.Vec2f>> & StorageFlag,
   compactLabels: CompactLabelMapBuffer,
   labelClusters: LabelOrientClusterBuffer,
   labelLineReduce: LabelLineReduceBuffer,
@@ -120,7 +119,7 @@ export function createLineFitDebugStage(
 
   const accumBindGroup = root.createBindGroup(layouts.accumLayout, {
     frame: frameUniform,
-    edgeBuffer: filteredBuffer,
+    edgeBuffer: filteredBuffer.as('readonly'),
     compactLabels,
     labelClusters,
     labelLineReduce,

@@ -77,11 +77,12 @@ export type GraphStats = {
   components: number
   chainEdges: number
   junctionEdges: number
+  repairEdges: number
   rejections: GraphRejections
   localScaleMedian: number
 }
 
-export type EdgeKind = 'chain' | 'junction'
+export type EdgeKind = 'chain' | 'junction' | 'repair'
 
 export type ProximityGraph = {
   points: readonly PatternPoint[]
@@ -98,8 +99,8 @@ export type RingDescriptor = {
   size: number
   /** Ring colors in angular order, canonically rotated to the smallest string. */
   colors: string
-  /** Same-chain membership bits, aligned with the canonical color rotation. */
-  chains: string
+  /** First-appearance chain-partition labels, aligned with the color rotation. */
+  partition: string
   /** Chain-endpoint bits, aligned with the canonical color rotation. */
   endpoints: string
 }

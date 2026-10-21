@@ -58,7 +58,7 @@ export function createHostQuadReadbackStage(root: TgpuRoot, quadDataBuffer: Grid
   const pipeline = createHostQuadPackPipeline(root, layouts.layout)
 
   const bindGroup = root.createBindGroup(layouts.layout, {
-    quadData: quadDataBuffer,
+    quadData: quadDataBuffer.as('readonly'),
     hostOut: hostQuadReadbackBuffer,
   })
 

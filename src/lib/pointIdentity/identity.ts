@@ -21,30 +21,58 @@ function colorAt(colors: readonly BinaryColor[], index: number): BinaryColor {
  */
 function canonicalRingFeatures(
   colors: string,
-  chains: string,
+  chainIds: readonly number[],
   endpoints: string,
-): { colors: string; chains: string; endpoints: string } {
+  rootChain: number,
+): { colors: string; partition: string; endpoints: string } {
   if (colors.length <= 1) {
-    return { colors, chains, endpoints }
+    const label = rootChain >= 0 && chainIds[0] === rootChain ? 0 : 0
+    return { colors, partition: String(label), endpoints }
   }
-  let bestColors = colors
-  let bestChains = chains
-  let bestEndpoints = endpoints
-  for (let shift = 1; shift < colors.length; shift += 1) {
+
+  let bestColors = ''
+  let bestPartition = ''
+  let bestEndpoints = ''
+  let hasBest = false
+
+  for (let shift = 0; shift < colors.length; shift += 1) {
     const candidateColors = colors.slice(shift) + colors.slice(0, shift)
-    const candidateChains = chains.slice(shift) + chains.slice(0, shift)
     const candidateEndpoints = endpoints.slice(shift) + endpoints.slice(0, shift)
+    const rotatedChains = [...chainIds.slice(shift), ...chainIds.slice(0, shift)]
+    const labels = new Map<number, number>()
+    let nextLabel = 1
+    if (rootChain >= 0) {
+      labels.set(rootChain, 0)
+    } else {
+      nextLabel = 0
+    }
+    const partitionLabels: number[] = []
+    for (const chainId of rotatedChains) {
+      let label = labels.get(chainId)
+      if (label === undefined) {
+        label = nextLabel
+        nextLabel += 1
+        labels.set(chainId, label)
+      }
+      partitionLabels.push(label)
+    }
+    const candidatePartition = partitionLabels.map((label) => label.toString(36)).join('')
+
     if (
+      !hasBest ||
       candidateColors < bestColors ||
       (candidateColors === bestColors &&
-        (candidateChains < bestChains || (candidateChains === bestChains && candidateEndpoints < bestEndpoints)))
+        (candidatePartition < bestPartition ||
+          (candidatePartition === bestPartition && candidateEndpoints < bestEndpoints)))
     ) {
       bestColors = candidateColors
-      bestChains = candidateChains
+      bestPartition = candidatePartition
       bestEndpoints = candidateEndpoints
+      hasBest = true
     }
   }
-  return { colors: bestColors, chains: bestChains, endpoints: bestEndpoints }
+
+  return { colors: bestColors, partition: bestPartition, endpoints: bestEndpoints }
 }
 
 export function canonicalRing(colors: string): string {
@@ -109,16 +137,14 @@ export function computeFingerprint(
       return a - b
     })
 
-    const raw = ordered.map((node) => String(colorAt(colors, node))).join('')
-    const rawChains = ordered
-      .map((node) => (rootChain >= 0 && (chainIds[node] ?? -1) === rootChain ? '1' : '0'))
-      .join('')
+    const raw = ordered.map((node) => String(colorAt(colors, graph.points[node]!.index))).join('')
+    const rawChains = ordered.map((node) => chainIds[node] ?? -1)
     const rawEndpoints = ordered.map((node) => String(endpointFlags[node] ?? 0)).join('')
-    const canonical = canonicalRingFeatures(raw, rawChains, rawEndpoints)
+    const canonical = canonicalRingFeatures(raw, rawChains, rawEndpoints, rootChain)
     rings.push({
       size: ordered.length,
       colors: canonical.colors,
-      chains: canonical.chains,
+      partition: canonical.partition,
       endpoints: canonical.endpoints,
     })
     for (const node of ordered) {
@@ -127,13 +153,13 @@ export function computeFingerprint(
     frontier = ordered
   }
 
-  const rootColor = colorAt(colors, rootIndex)
+  const rootColor = colorAt(colors, root.index)
   let key = `${rootColor}:${rootEndpoint ? 1 : 0}`
   for (const ring of rings) {
-    key += `|${ring.size}:${ring.colors}:${ring.chains}:${ring.endpoints}`
+    key += `|${ring.size}:${ring.colors}:${ring.partition}:${ring.endpoints}`
   }
 
-  return { index: rootIndex, color: rootColor, endpoint: rootEndpoint, rings, key }
+  return { index: root.index, color: rootColor, endpoint: rootEndpoint, rings, key }
 }
 
 export function createIdentityIndex(
@@ -146,8 +172,8 @@ export function createIdentityIndex(
   const chainIds = chainIdsForGraph(graph)
   const endpointFlags = chainEndpointFlagsForGraph(graph)
 
-  for (const point of graph.points) {
-    const fingerprint = computeFingerprint(graph, colors, point.index, depth, chainIds, endpointFlags)
+  for (let rootIndex = 0; rootIndex < graph.points.length; rootIndex += 1) {
+    const fingerprint = computeFingerprint(graph, colors, rootIndex, depth, chainIds, endpointFlags)
     fingerprints.push(fingerprint)
     const existing = byKey.get(fingerprint.key)
     if (existing === undefined) {
@@ -197,7 +223,9 @@ function classify(fingerprint: PointFingerprint, designIndex: IdentityIndex): Ma
 function edgeSet(graph: ProximityGraph): Set<string> {
   const keys = new Set<string>()
   for (const [a, b] of graph.edges) {
-    keys.add(a < b ? `${a}:${b}` : `${b}:${a}`)
+    const first = graph.points[a]!.index
+    const second = graph.points[b]!.index
+    keys.add(first < second ? `${first}:${second}` : `${second}:${first}`)
   }
   return keys
 }
@@ -219,10 +247,17 @@ function edgeJaccard(design: ProximityGraph, observed: ProximityGraph): number {
 }
 
 function degreeChanges(design: ProximityGraph, observed: ProximityGraph): number {
+  const designDegrees = new Map<number, number>()
+  for (let position = 0; position < design.points.length; position += 1) {
+    designDegrees.set(design.points[position]!.index, design.neighbors[position]!.length)
+  }
+  const observedDegrees = new Map<number, number>()
+  for (let position = 0; position < observed.points.length; position += 1) {
+    observedDegrees.set(observed.points[position]!.index, observed.neighbors[position]!.length)
+  }
   let changed = 0
-  const total = Math.min(design.neighbors.length, observed.neighbors.length)
-  for (let index = 0; index < total; index += 1) {
-    if (design.neighbors[index]!.length !== observed.neighbors[index]!.length) {
+  for (const [id, degree] of designDegrees) {
+    if (observedDegrees.get(id) !== degree) {
       changed += 1
     }
   }
@@ -238,8 +273,8 @@ export function evaluateIdentity(
 ): IdentityEvaluation {
   const observedChainIds = chainIdsForGraph(observedGraph)
   const observedEndpoints = chainEndpointFlagsForGraph(observedGraph)
-  const observedFingerprints = observedGraph.points.map((point) =>
-    computeFingerprint(observedGraph, colors, point.index, depth, observedChainIds, observedEndpoints),
+  const observedFingerprints = observedGraph.points.map((_, rootIndex) =>
+    computeFingerprint(observedGraph, colors, rootIndex, depth, observedChainIds, observedEndpoints),
   )
 
   const perPoint: PointEvaluation[] = observedFingerprints.map((fingerprint) => ({

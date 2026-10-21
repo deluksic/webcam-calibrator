@@ -5,6 +5,7 @@ import { PointLabCanvas } from '@/components/pointLab/PointLabCanvas'
 import { extractChainRuns, summarizeChainRuns } from '@/lib/pointIdentity/chainRuns'
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
 import { createIdentityIndex, evaluateIdentity } from '@/lib/pointIdentity/identity'
+import { applyObservationMask, DEFAULT_OBSERVATION_MASK } from '@/lib/pointIdentity/observation'
 import { DEFAULT_VIEW, outOfPlaneTiltDeg, projectPattern } from '@/lib/pointIdentity/projection'
 import { buildProximityGraph } from '@/lib/pointIdentity/proximityGraph'
 import { randomBinaryColors } from '@/lib/pointIdentity/random'
@@ -15,7 +16,7 @@ import styles from '@/components/pointLab/PointLabView.module.css'
 const DEFAULTS = {
   columns: 8,
   pointsPerEdge: 4,
-  depth: 6,
+  depth: 5,
   cameraDistance: 2200,
 } as const
 
@@ -68,12 +69,13 @@ function outcomeToneClass(outcome: MatchOutcome): string {
   }
 }
 
-function formatRing(ring: { size: number; colors: string; chains: string; endpoints: string }): string {
-  return `${ring.size} pt${ring.size === 1 ? '' : 's'} · ${ring.colors} · c:${ring.chains} · e:${ring.endpoints}`
+function formatRing(ring: { size: number; colors: string; partition: string; endpoints: string }): string {
+  return `${ring.size} pt${ring.size === 1 ? '' : 's'} · ${ring.colors} · p:${ring.partition} · e:${ring.endpoints}`
 }
 
-function designDegree(graph: ProximityGraph, index: number): number {
-  return graph.neighbors[index]?.length ?? 0
+function degreeById(graph: ProximityGraph, id: number): number {
+  const position = graph.points.findIndex((point) => point.index === id)
+  return position < 0 ? 0 : (graph.neighbors[position]?.length ?? 0)
 }
 
 export function PointLabView() {
@@ -87,6 +89,12 @@ export function PointLabView() {
   const [sphericalDistortion, setSphericalDistortion] = createSignal(0)
 
   const [depth, setDepth] = createSignal(DEFAULTS.depth)
+  const [dropoutPercent, setDropoutPercent] = createSignal(DEFAULT_OBSERVATION_MASK.dropoutPercent)
+  const [dropoutSeed, setDropoutSeed] = createSignal(DEFAULT_OBSERVATION_MASK.dropoutSeed)
+  const [cropLeft, setCropLeft] = createSignal(DEFAULT_OBSERVATION_MASK.cropLeft)
+  const [cropRight, setCropRight] = createSignal(DEFAULT_OBSERVATION_MASK.cropRight)
+  const [cropTop, setCropTop] = createSignal(DEFAULT_OBSERVATION_MASK.cropTop)
+  const [cropBottom, setCropBottom] = createSignal(DEFAULT_OBSERVATION_MASK.cropBottom)
 
   const [showGraph, setShowGraph] = createSignal(true)
   const [zoomToCursor, setZoomToCursor] = createSignal(true)
@@ -116,12 +124,22 @@ export function PointLabView() {
   }))
 
   const projected = createMemo(() => projectPattern(pattern().points, pose()))
+  const observedPoints = createMemo(() =>
+    applyObservationMask(projected(), {
+      cropLeft: cropLeft(),
+      cropRight: cropRight(),
+      cropTop: cropTop(),
+      cropBottom: cropBottom(),
+      dropoutPercent: dropoutPercent(),
+      dropoutSeed: dropoutSeed(),
+    }),
+  )
 
   const tuning = createMemo<GraphTuning>(() => ({ pointsPerEdge: pointsPerEdge() }))
 
   const designGraph = createMemo(() => buildProximityGraph(pattern().points, tuning()))
   const designIndex = createMemo(() => createIdentityIndex(designGraph(), colors(), depth()))
-  const observedGraph = createMemo(() => buildProximityGraph(projected(), tuning()))
+  const observedGraph = createMemo(() => buildProximityGraph(observedPoints(), tuning()))
   const evaluation = createMemo(() =>
     evaluateIdentity(designGraph(), observedGraph(), designIndex(), colors(), depth()),
   )
@@ -149,7 +167,12 @@ export function PointLabView() {
     }
     const count = visibleEdgeCount()
     const edge = count === 0 ? undefined : observedGraph().edges[count - 1]
-    return edge === undefined ? 'no edges shown' : `latest #${edge[0]}–#${edge[1]}`
+    if (edge === undefined) {
+      return 'no edges shown'
+    }
+    const first = observedGraph().points[edge[0]]?.index
+    const second = observedGraph().points[edge[1]]?.index
+    return first === undefined || second === undefined ? 'no edges shown' : `latest #${first}–#${second}`
   }
 
   const scrubEdges = (value: number): void => {
@@ -159,7 +182,7 @@ export function PointLabView() {
   const summary = createMemo(() => evaluation().summary)
   const tilt = createMemo(() => outOfPlaneTiltDeg(pose()))
   const uniquePercent = createMemo(() => {
-    const total = summary().total
+    const total = designIndex().fingerprints.length
     return total === 0 ? 0 : summary().designUniquePoints / total
   })
 
@@ -177,8 +200,8 @@ export function PointLabView() {
       item,
       color: colors()[index] ?? 0,
       designFingerprint: fingerprint,
-      designDegree: designDegree(designGraph(), index),
-      observedDegree: designDegree(observedGraph(), index),
+      designDegree: degreeById(designGraph(), index),
+      observedDegree: degreeById(observedGraph(), index),
     }
   })
 
@@ -195,6 +218,10 @@ export function PointLabView() {
 
   const reshuffleColors = (): void => {
     setColorSeed((seed) => seed + 1)
+  }
+
+  const resampleDropouts = (): void => {
+    setDropoutSeed((seed) => seed + 1)
   }
 
   const resetView = (): void => {
@@ -344,7 +371,8 @@ export function PointLabView() {
 
           <div class={styles.canvasShell}>
             <PointLabCanvas
-              projected={projected()}
+              projected={observedPoints()}
+              framePoints={projected()}
               colors={colors()}
               graph={observedGraph()}
               evaluation={evaluation()}
@@ -472,6 +500,81 @@ export function PointLabView() {
 
           <section class={styles.panel}>
             <div class={styles.panelHead}>
+              <h2 class={styles.panelTitle}>Observation</h2>
+              <button type="button" class={styles.textButton} onClick={resampleDropouts}>
+                Resample
+              </button>
+            </div>
+            <ControlSlider
+              id="lab-dropout"
+              label="Dropout"
+              value={dropoutPercent()}
+              min={0}
+              max={100}
+              step={1}
+              format={(value) => `${value.toFixed(0)}%`}
+              onInput={setDropoutPercent}
+            />
+            <ControlSlider
+              id="lab-crop-left"
+              label="Crop left"
+              value={cropLeft()}
+              min={0}
+              max={50}
+              step={1}
+              format={(value) => `${value.toFixed(0)}%`}
+              onInput={setCropLeft}
+            />
+            <ControlSlider
+              id="lab-crop-right"
+              label="Crop right"
+              value={cropRight()}
+              min={0}
+              max={50}
+              step={1}
+              format={(value) => `${value.toFixed(0)}%`}
+              onInput={setCropRight}
+            />
+            <ControlSlider
+              id="lab-crop-top"
+              label="Crop top"
+              value={cropTop()}
+              min={0}
+              max={50}
+              step={1}
+              format={(value) => `${value.toFixed(0)}%`}
+              onInput={setCropTop}
+            />
+            <ControlSlider
+              id="lab-crop-bottom"
+              label="Crop bottom"
+              value={cropBottom()}
+              min={0}
+              max={50}
+              step={1}
+              format={(value) => `${value.toFixed(0)}%`}
+              onInput={setCropBottom}
+            />
+            <dl class={styles.inlineStats}>
+              <div>
+                <dt>detected</dt>
+                <dd>
+                  {observedPoints().length} / {pattern().points.length}
+                </dd>
+              </div>
+              <div>
+                <dt>dropout seed</dt>
+                <dd>{dropoutSeed()}</dd>
+              </div>
+            </dl>
+            <p class={styles.panelNote}>
+              Crop margins are relative to the projected point bounds. Points are removed before graph construction;
+              design identity and colors remain unchanged.
+            </p>
+          </section>
+
+          <section class={styles.panel}>
+            <div class={styles.panelHead}>
               <h2 class={styles.panelTitle}>Lattice</h2>
               <span class={styles.seedLabel}>{pattern().stats.cells} cells</span>
             </div>
@@ -543,6 +646,10 @@ export function PointLabView() {
               <div>
                 <dt>junction</dt>
                 <dd>{observedGraph().stats.junctionEdges}</dd>
+              </div>
+              <div>
+                <dt>repair</dt>
+                <dd>{observedGraph().stats.repairEdges}</dd>
               </div>
               <div>
                 <dt>isolated</dt>

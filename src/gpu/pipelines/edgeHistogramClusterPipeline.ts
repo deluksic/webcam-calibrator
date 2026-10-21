@@ -1,5 +1,5 @@
 // Per compact labelId: 64-bin oriented histogram → 4 peaks → per-pixel edgeId.
-import type { TgpuRoot } from 'typegpu'
+import type { StorageFlag, TgpuBuffer, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { atomicAdd, atomicLoad, atomicStore, length, select } from 'typegpu/std'
 
@@ -13,7 +13,6 @@ import {
   ORIENT_PEAK_MIN_COUNT,
 } from '@/gpu/lineFitThresholds'
 import type { CompactLabelMapBuffer } from '@/gpu/pipelines/compactLabelPipeline'
-import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
 import { EdgeLineEntry } from '@/gpu/pipelines/edgeLineFitPipeline'
 import { createLabelLineFitStage } from '@/gpu/pipelines/labelLineFitPipeline'
 import { LabelQuadRejectCode } from '@/gpu/labelQuadReject'
@@ -466,7 +465,7 @@ export function createEdgeHistogramClusterStage(
   width: number,
   height: number,
   maxComponents: number,
-  filteredBuffer: EdgeFilterBindResources['filteredBuffer'],
+  filteredBuffer: TgpuBuffer<d.WgslArray<d.Vec2f>> & StorageFlag,
   compactLabelBuffer: CompactLabelMapBuffer,
 ) {
   const area = width * height
@@ -506,7 +505,7 @@ export function createEdgeHistogramClusterStage(
     quadCount,
   })
   const histAccumBindGroup = root.createBindGroup(layouts.histAccumLayout, {
-    edgeBuffer: filteredBuffer,
+    edgeBuffer: filteredBuffer.as('readonly'),
     compactLabels: compactLabelBuffer,
     labelClusters,
   })
@@ -526,7 +525,7 @@ export function createEdgeHistogramClusterStage(
     quadLabelBuffer,
   })
   const assignEdgesBindGroup = root.createBindGroup(layouts.assignEdgesLayout, {
-    edgeBuffer: filteredBuffer,
+    edgeBuffer: filteredBuffer.as('readonly'),
     compactLabels: compactLabelBuffer,
     labelClusters,
     labelToQuadId,

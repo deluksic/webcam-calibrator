@@ -97,7 +97,7 @@ export function createCompactLabelLayouts() {
 
 export function createCanonicalResetPipeline(
   root: TgpuRoot,
-  resetLayout: ReturnType<typeof tgpu.bindGroupLayout>,
+  resetLayout: ReturnType<typeof createCompactLabelLayouts>['resetLayout'],
   area: number,
 ) {
   const kernel = tgpu.computeFn({
@@ -109,7 +109,7 @@ export function createCanonicalResetPipeline(
     if (slot >= d.u32(area)) {
       return
     }
-    atomicStore(resetLayout.$.canonicalRoot[slot], d.u32(COMPONENT_LABEL_INVALID))
+    atomicStore(resetLayout.$.canonicalRoot[slot]!, d.u32(COMPONENT_LABEL_INVALID))
     if (slot === d.u32(0)) {
       atomicStore(resetLayout.$.compactCounter, d.u32(0))
     }
@@ -119,7 +119,7 @@ export function createCanonicalResetPipeline(
 
 export function createCanonicalClaimPipeline(
   root: TgpuRoot,
-  claimLayout: ReturnType<typeof tgpu.bindGroupLayout>,
+  claimLayout: ReturnType<typeof createCompactLabelLayouts>['claimLayout'],
   width: number,
   height: number,
   maxComponents: number,
@@ -159,14 +159,14 @@ export function createCanonicalClaimPipeline(
     if (compactId >= d.u32(maxComponents)) {
       return
     }
-    atomicStore(claimLayout.$.canonicalRoot[label], compactId)
+    atomicStore(claimLayout.$.canonicalRoot[label]!, compactId)
   })
   return root.createComputePipeline({ compute: kernel })
 }
 
 export function createRemapLabelPipeline(
   root: TgpuRoot,
-  remapLayout: ReturnType<typeof tgpu.bindGroupLayout>,
+  remapLayout: ReturnType<typeof createCompactLabelLayouts>['remapLayout'],
   width: number,
   height: number,
 ) {
@@ -184,13 +184,13 @@ export function createRemapLabelPipeline(
     }
 
     const idx = d.u32(y * w + x)
-    const label = remapLayout.$.labelBuffer[idx]
+    const label = remapLayout.$.labelBuffer[idx]!
     if (label === d.u32(COMPONENT_LABEL_INVALID)) {
       remapLayout.$.compactLabelBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID)
       return
     }
 
-    const compactId = atomicLoad(remapLayout.$.canonicalRoot[label])
+    const compactId = atomicLoad(remapLayout.$.canonicalRoot[label]!)
     remapLayout.$.compactLabelBuffer[idx] = compactId
   })
   return root.createComputePipeline({ compute: kernel })

@@ -7,6 +7,13 @@ html {
   scrollbar-gutter: stable;
 }
 
+#root {
+  height: 100dvh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
 html,
 body {
   background-color: var(--color-bg-primary);

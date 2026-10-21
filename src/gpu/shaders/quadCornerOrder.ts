@@ -168,7 +168,7 @@ export const solveQuadCornersAndHomography = tgpu.fn(
   'use gpu'
   // Reject staircase quads: two lines with nearly-parallel normals and
   // overlapping midpoints are duplicate edges from the same stair step.
-  const pairs = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]]
+  const pairs = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]] as const
   for (const pair of pairs) {
     const ni = lines[pair[0]]!
     const nj = lines[pair[1]]!

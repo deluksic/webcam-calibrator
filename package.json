@@ -9,19 +9,20 @@
     "fmt": "oxfmt",
     "lint": "oxlint",
     "test": "vitest run",
-    "test:subpixel": "vitest run src/tests/subpixel"
+    "test:subpixel": "vitest run src/tests/subpixel",
+    "stress:identity": "tsx scripts/pointIdentityStress.ts"
   },
   "dependencies": {
     "@deluksic/opencv-calibration-wasm": "^0.2.5",
     "@solidjs/router": "0.17.0-next.2",
     "@solidjs/web": "2.0.0-beta.7",
-    "@typegpu/color": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color",
-    "@typegpu/geometry": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry",
-    "@typegpu/noise": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-noise",
-    "@typegpu/sdf": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-sdf",
+    "@typegpu/color": "^0.12.1",
+    "@typegpu/geometry": "github:software-mansion/TypeGPU#3f6f9c5ea43d4a37f31cbcf6f8dc8d50fbd87859&path:/packages/typegpu-geometry",
+    "@typegpu/noise": "^0.12.1",
+    "@typegpu/sdf": "^0.12.2",
     "comlink": "^4.4.2",
     "solid-js": "2.0.0-beta.7",
-    "typegpu": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu",
+    "typegpu": "^0.12.8",
     "wgpu-matrix": "^3.4.2"
   },
   "devDependencies": {
@@ -29,7 +30,7 @@
     "@types/node": "^25.6.0",
     "@webgpu/types": "^0.1.69",
     "babel-preset-solid": "2.0.0-beta.7",
-    "eslint-plugin-typegpu": "^0.11.1",
+    "eslint-plugin-typegpu": "^0.12.1",
     "jsdom": "^29.0.2",
     "oxfmt": "^0.47.0",
     "oxlint": "^1.62.0",
@@ -37,11 +38,12 @@
     "tsover": "npm:tsover@latest",
     "tsx": "^4.21.0",
     "typescript": "npm:tsover@latest",
-    "unplugin-typegpu": "^0.11.3",
+    "unplugin-typegpu": "^0.12.6",
     "vite": "^7.3.2",
     "vite-plugin-solid": "^3.0.0-next.4",
     "vitest": "^4.1.5"
   },
+  "packageManager": "pnpm@9.12.3+sha512.cce0f9de9c5a7c95bef944169cc5dfe8741abfb145078c0d508b868056848a87c81e626246cb60967cbd7fd29a6c062ef73ff840d96b3c86c40ac92cf4a813ee",
   "pnpm": {
     "peerDependencyRules": {
       "allowAny": [
@@ -52,16 +54,10 @@
       "@solidjs/web": "2.0.0-beta.7",
       "solid-js": "2.0.0-beta.7",
       "babel-preset-solid": "2.0.0-beta.7",
-      "typescript": "npm:tsover@latest",
-      "tinyest": "0.3.1",
-      "tinyest-for-wgsl": "0.3.2",
-      "typegpu": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu",
-      "@typegpu/color": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-color",
-      "@typegpu/geometry": "github:software-mansion/TypeGPU#08fb40f459b4ac0735711889dd98e19b19e6ab67&path:/packages/typegpu-geometry"
+      "typescript": "npm:tsover@latest"
     },
     "onlyBuiltDependencies": [
       "esbuild"
     ]
-  },
-  "packageManager": "pnpm@9.12.3+sha512.cce0f9de9c5a7c95bef944169cc5dfe8741abfb145078c0d508b868056848a87c81e626246cb60967cbd7fd29a6c062ef73ff840d96b3c86c40ac92cf4a813ee"
+  }
 }

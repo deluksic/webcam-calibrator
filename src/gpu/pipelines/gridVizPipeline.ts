@@ -1,5 +1,5 @@
 // Grid viz: homography clip + w for perspective-correct UV; degenerate H uses screenCorners (affine fallback).
-import type { ColorAttachment, TgpuRoot } from 'typegpu'
+import type { ColorAttachment, StorageFlag, TgpuBuffer, TgpuRoot } from 'typegpu'
 import { tgpu, d } from 'typegpu'
 import { abs, atomicLoad, floor, fract, length, min, max, dpdx, dpdy, mul } from 'typegpu/std'
 
@@ -140,7 +140,7 @@ const gridVizFailureTintRgb = tgpu.fn([d.u32], d.vec3f)((failureCode) => {
 
 export function createGridVizPipeline(
   root: TgpuRoot,
-  gridVizLayout: ReturnType<typeof tgpu.bindGroupLayout>,
+  gridVizLayout: ReturnType<typeof createGridVizLayouts>['gridVizLayout'],
   width: number,
   height: number,
   presentationFormat: GPUTextureFormat,
@@ -301,8 +301,8 @@ export function createGridVizStage(
   presentationFormat: GPUTextureFormat,
   options?: {
     sampleCount?: number
-    quadCornersBuffer?: ReturnType<typeof root.createBuffer>
-    drawIndirectBuf?: ReturnType<typeof root.createBuffer>
+    quadCornersBuffer?: TgpuBuffer<typeof GridDataSchema> & StorageFlag
+    drawIndirectBuf?: TgpuBuffer<typeof GridDrawIndirectParams> & StorageFlag
   },
 ) {
   const quadCornersBuffer = options?.quadCornersBuffer ?? root.createBuffer(GridDataSchema).$name('grid-quad-data').$usage('storage')
@@ -319,7 +319,7 @@ export function createGridVizStage(
   gridVizHideNonDecodedBuffer.write(0)
   const gridVizPipeline = createGridVizPipeline(root, gridVizLayout, width, height, presentationFormat, options)
   const gridVizBindGroup = root.createBindGroup(gridVizLayout, {
-    quads: quadCornersBuffer,
+    quads: quadCornersBuffer.as('readonly'),
     failInterrogate: gridVizDebugModeBuffer,
     hideNonDecoded: gridVizHideNonDecodedBuffer,
   })
@@ -385,7 +385,7 @@ export function createSelectedQuadPatternStage(
     in: { uv: d.vec2f },
     out: d.vec4f,
   })(({ uv }) => {
-    const cell = d.vec2i(floor(uv * d.f32(8)))
+    const cell = d.vec2i(floor(mul(uv, d.f32(8))))
     const onBorder = cell.x <= d.i32(0) || cell.x >= d.i32(7) || cell.y <= d.i32(0) || cell.y >= d.i32(7)
     if (onBorder) {
       return d.vec4f(0, 0, 0, 1)
@@ -467,7 +467,7 @@ export function createSelectedQuadPatternStage(
   }).$name('selected-quad-pattern').withIndexBuffer(indexBuf)
 
   const bindGroup = root.createBindGroup(SelectedQuadPatternLayout, {
-    quads: quadCornersBuffer,
+    quads: quadCornersBuffer.as('readonly'),
     pattern: patternBuf as never,
     moduleWhite: moduleWhiteBuf as never,
     moduleBlack: moduleBlackBuf as never,

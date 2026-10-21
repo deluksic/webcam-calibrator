@@ -18,6 +18,8 @@ const MAX_CORNER_DISTANCE = 2
 const MIN_LINE_SIN = 0.2
 const LINE_TRIANGLE_MIN_QUALITY = 0.02
 const MAX_DEGREE = 3
+const REPAIR_REACH_FACTOR = 2.2
+const REPAIR_MAX_PER_POINT = 2
 
 type ChainLine = {
   chainIndex: number
@@ -103,6 +105,7 @@ function emptyGraph(points: readonly PatternPoint[]): ProximityGraph {
     components: 0,
     chainEdges: 0,
     junctionEdges: 0,
+    repairEdges: 0,
     rejections: { degree: 0, crossing: 0 },
     localScaleMedian: 0,
   }
@@ -187,6 +190,31 @@ function countComponents(adjacency: ReadonlyArray<readonly number[]>): number {
   return components
 }
 
+function computeNeighborhoods(points: readonly PatternPoint[]): {
+  neighborLists: number[][]
+  localScales: number[]
+} {
+  const neighborLists: number[][] = []
+  const localScales: number[] = []
+  for (let i = 0; i < points.length; i += 1) {
+    const origin = points[i]!
+    const sorted: Array<{ index: number; length: number }> = []
+    for (let j = 0; j < points.length; j += 1) {
+      if (j !== i) {
+        sorted.push({ index: j, length: distance(origin, points[j]!) })
+      }
+    }
+    sorted.sort((first, second) =>
+      Math.abs(first.length - second.length) < 1e-6 ? first.index - second.index : first.length - second.length,
+    )
+    neighborLists.push(sorted.slice(0, Math.min(NEIGHBOR_SAMPLE, sorted.length)).map((item) => item.index))
+    localScales.push(
+      Math.max(median(sorted.slice(0, Math.min(LOCAL_SCALE_SAMPLE, sorted.length)).map((item) => item.length)), 1e-6),
+    )
+  }
+  return { neighborLists, localScales }
+}
+
 /**
  * Build a deterministic proximity graph from detected point positions.
  *
@@ -200,24 +228,7 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
     return emptyGraph(points)
   }
 
-  const neighborLists: number[][] = []
-  const localScales: number[] = []
-  for (let i = 0; i < count; i += 1) {
-    const origin = points[i]!
-    const sorted: Array<{ index: number; length: number }> = []
-    for (let j = 0; j < count; j += 1) {
-      if (j !== i) {
-        sorted.push({ index: j, length: distance(origin, points[j]!) })
-      }
-    }
-    sorted.sort((first, second) =>
-      Math.abs(first.length - second.length) < 1e-6 ? first.index - second.index : first.length - second.length,
-    )
-    neighborLists.push(sorted.slice(0, Math.min(NEIGHBOR_SAMPLE, sorted.length)).map((item) => item.index))
-    localScales.push(
-      Math.max(median(sorted.slice(0, Math.min(LOCAL_SCALE_SAMPLE, sorted.length)).map((item) => item.length)), 1e-6),
-    )
-  }
+  const { neighborLists, localScales } = computeNeighborhoods(points)
 
   const chainCandidates = findChainCandidates(points, neighborLists, localScales, tuning.pointsPerEdge)
   const selected: ChainCandidate[] = []
@@ -239,46 +250,93 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
   const rejections: GraphRejections = { degree: 0, crossing: 0 }
   let chainEdges = 0
   let junctionEdges = 0
+  let repairEdges = 0
 
-  const addEdge = (a: number, b: number, isChain: boolean): void => {
+  const addEdge = (a: number, b: number, kind: EdgeKind): void => {
     adjacency[a]!.push(b)
     adjacency[b]!.push(a)
     accepted.push(a < b ? [a, b] : [b, a])
-    edgeKinds.push(isChain ? 'chain' : 'junction')
+    edgeKinds.push(kind)
     acceptedKeys.add(pairKey(a, b))
-    if (isChain) {
+    if (kind === 'chain') {
       chainEdges += 1
-    } else {
+    } else if (kind === 'junction') {
       junctionEdges += 1
+    } else {
+      repairEdges += 1
+    }
+  }
+
+  const admitChains = (chains: readonly ChainCandidate[]): void => {
+    for (const chain of chains) {
+      const pairs: Array<readonly [number, number]> = []
+      let valid = true
+      for (let index = 1; index < chain.pointIndices.length; index += 1) {
+        const a = chain.pointIndices[index - 1]!
+        const b = chain.pointIndices[index]!
+        if (adjacency[a]!.length >= MAX_DEGREE || adjacency[b]!.length >= MAX_DEGREE) {
+          rejections.degree += 1
+          valid = false
+          break
+        }
+        if (acceptedKeys.has(pairKey(a, b)) || crossesAccepted(points, accepted, a, b)) {
+          rejections.crossing += 1
+          valid = false
+          break
+        }
+        pairs.push([a, b])
+      }
+      if (!valid) {
+        continue
+      }
+      for (const [a, b] of pairs) {
+        addEdge(a, b, 'chain')
+      }
+      admittedChains.push(chain)
     }
   }
 
   const admittedChains: ChainCandidate[] = []
-  for (const chain of selected) {
-    const pairs: Array<readonly [number, number]> = []
-    let valid = true
-    for (let index = 1; index < chain.pointIndices.length; index += 1) {
-      const a = chain.pointIndices[index - 1]!
-      const b = chain.pointIndices[index]!
-      if (adjacency[a]!.length >= MAX_DEGREE || adjacency[b]!.length >= MAX_DEGREE) {
-        rejections.degree += 1
-        valid = false
-        break
+  admitChains(selected)
+  let candidateCount = chainCandidates.length
+
+  // A dropped point can leave a 3-point side fragment with no complete
+  // N-point window. Admit those fragments as chains, then let normal junction
+  // closure reconnect them to the rest of the mesh.
+  if (tuning.pointsPerEdge >= 4) {
+    const remainingPositions: number[] = []
+    for (let position = 0; position < count; position += 1) {
+      if (adjacency[position]!.length === 0) {
+        remainingPositions.push(position)
       }
-      if (acceptedKeys.has(pairKey(a, b)) || crossesAccepted(points, accepted, a, b)) {
-        rejections.crossing += 1
-        valid = false
-        break
+    }
+    if (remainingPositions.length >= 3) {
+      const remainingPoints = remainingPositions.map((position) => points[position]!)
+      const remainingNeighborhood = computeNeighborhoods(remainingPoints)
+      const shortCandidates = findChainCandidates(
+        remainingPoints,
+        remainingNeighborhood.neighborLists,
+        remainingNeighborhood.localScales,
+        3,
+      )
+      candidateCount += shortCandidates.length
+      const mappedCandidates: ChainCandidate[] = shortCandidates.map((candidate) => ({
+        ...candidate,
+        pointIndices: candidate.pointIndices.map((position) => remainingPositions[position]!),
+      }))
+      const shortUsed = new Set<number>()
+      const shortSelected: ChainCandidate[] = []
+      for (const candidate of mappedCandidates) {
+        if (candidate.pointIndices.some((pointIndex) => shortUsed.has(pointIndex))) {
+          continue
+        }
+        shortSelected.push(candidate)
+        for (const pointIndex of candidate.pointIndices) {
+          shortUsed.add(pointIndex)
+        }
       }
-      pairs.push([a, b])
+      admitChains(shortSelected)
     }
-    if (!valid) {
-      continue
-    }
-    for (const [a, b] of pairs) {
-      addEdge(a, b, true)
-    }
-    admittedChains.push(chain)
   }
 
   const chainSpacings = admittedChains.map((chain) => {
@@ -488,7 +546,7 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
       continue
     }
     for (const [a, b] of pairs) {
-      addEdge(a, b, false)
+      addEdge(a, b, 'junction')
     }
   }
 
@@ -549,20 +607,86 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
         rejections.crossing += 1
         continue
       }
-      addEdge(a, b, false)
+      addEdge(a, b, 'junction')
     }
+  }
+
+  // A dropout or crop can leave completely disconnected fragments. Repair
+  // only those isolated points, and cap each repaired fragment at one design
+  // side so repair edges never extend an existing chain.
+  const repairEligible = adjacency.map((list) => list.length === 0)
+  const repairParent = Array.from({ length: count }, (_, index) => index)
+  const repairSize = Array.from({ length: count }, () => 1)
+  const findRepairRoot = (node: number): number => {
+    let root = node
+    while (repairParent[root] !== root) {
+      root = repairParent[root]!
+    }
+    let current = node
+    while (repairParent[current] !== current) {
+      const next = repairParent[current]!
+      repairParent[current] = root
+      current = next
+    }
+    return root
+  }
+  const repairCandidates: Array<{ a: number; b: number; length: number }> = []
+  for (let a = 0; a < count; a += 1) {
+    if (!repairEligible[a]) {
+      continue
+    }
+    for (let b = a + 1; b < count; b += 1) {
+      if (!repairEligible[b]) {
+        continue
+      }
+      const length = distance(points[a]!, points[b]!)
+      if (length <= Math.min(localScales[a]!, localScales[b]!) * REPAIR_REACH_FACTOR) {
+        repairCandidates.push({ a, b, length })
+      }
+    }
+  }
+  repairCandidates.sort((first, second) =>
+    first.length !== second.length ? first.length - second.length : first.a - second.a || first.b - second.b,
+  )
+  const repairCount = new Uint8Array(count)
+  for (const candidate of repairCandidates) {
+    const { a, b } = candidate
+    if (repairCount[a]! >= REPAIR_MAX_PER_POINT || repairCount[b]! >= REPAIR_MAX_PER_POINT) {
+      continue
+    }
+    if (adjacency[a]!.length >= MAX_DEGREE || adjacency[b]!.length >= MAX_DEGREE) {
+      continue
+    }
+    if (acceptedKeys.has(pairKey(a, b))) {
+      continue
+    }
+    const rootA = findRepairRoot(a)
+    const rootB = findRepairRoot(b)
+    if (rootA === rootB || repairSize[rootA]! + repairSize[rootB]! > tuning.pointsPerEdge) {
+      continue
+    }
+    if (crossesAccepted(points, accepted, a, b)) {
+      rejections.crossing += 1
+      continue
+    }
+    addEdge(a, b, 'repair')
+    repairCount[a]! += 1
+    repairCount[b]! += 1
+    repairParent[rootB] = rootA
+    repairSize[rootA]! += repairSize[rootB]!
   }
 
   const edges = accepted
   const stats: GraphStats = {
     inputPoints: count,
-    candidates: chainCandidates.length,
+    candidates: candidateCount,
     edges: edges.length,
     meanDegree: count === 0 ? 0 : (2 * edges.length) / count,
     isolated: adjacency.filter((list) => list.length === 0).length,
     components: countComponents(adjacency),
     chainEdges,
     junctionEdges,
+    repairEdges,
     rejections,
     localScaleMedian: median(localScales),
   }

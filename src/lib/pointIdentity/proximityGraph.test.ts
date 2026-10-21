@@ -60,6 +60,50 @@ describe('buildProximityGraph', () => {
     }
   })
 
+  it('recovers a 3-point chain when one chain endpoint is dropped', () => {
+    const pattern = generateHexPattern({ columns: 8, pointsPerEdge: 4 })
+    const full = buildProximityGraph(pattern.points, { pointsPerEdge: 4 })
+    const firstRun = extractChainRuns(full)[0]!
+    const chainDegree = new Map<number, number>()
+    for (let edgeIndex = 0; edgeIndex < full.edges.length; edgeIndex += 1) {
+      if (full.edgeKinds[edgeIndex] !== 'chain') {
+        continue
+      }
+      const [a, b] = full.edges[edgeIndex]!
+      chainDegree.set(a, (chainDegree.get(a) ?? 0) + 1)
+      chainDegree.set(b, (chainDegree.get(b) ?? 0) + 1)
+    }
+    const endpoint = firstRun.pointIndices.find((pointIndex) => chainDegree.get(pointIndex) === 1)
+    expect(endpoint).toBeDefined()
+
+    const dropped = pattern.points.filter((point) => point.index !== endpoint)
+    const graph = buildProximityGraph(dropped, { pointsPerEdge: 4 })
+    const runs = extractChainRuns(graph)
+    expect(runs.some((run) => run.length === 3)).toBe(true)
+  })
+
+  it('repairs isolated points without attaching them to existing chains', () => {
+    const graph = buildProximityGraph(
+      points([
+        [0, 0],
+        [10, 0],
+        [20, 0],
+        [30, 0],
+        [15, 8],
+        [25, 8],
+      ]),
+      { pointsPerEdge: 4 },
+    )
+    expect(graph.edges).toContainEqual([4, 5])
+    for (const [a, b] of graph.edges) {
+      if (a >= 4 || b >= 4) {
+        expect(a).toBeGreaterThanOrEqual(4)
+        expect(b).toBeGreaterThanOrEqual(4)
+      }
+    }
+    expect(graph.stats.repairEdges).toBe(1)
+  })
+
   it('is deterministic', () => {
     const pattern = generateHexPattern({ columns: 8, pointsPerEdge: 4 })
     const first = buildProximityGraph(pattern.points, { pointsPerEdge: 4 })

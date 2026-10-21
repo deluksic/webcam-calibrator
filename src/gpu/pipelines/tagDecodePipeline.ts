@@ -287,7 +287,7 @@ function createModuleVoteStage(
     .$name('tag-module-votes')
 
   const bindGroup = root.createBindGroup(layout, {
-    quads: quadDataBuffer,
+    quads: quadDataBuffer.as('readonly'),
     grayTex: grayTexView as never,
     thresholds: thresholdBuf as never,
     moduleWhite: moduleWhiteBuf as never,
@@ -582,7 +582,7 @@ function createCanonicalizeStage(
   })
 
   const bindGroup = root.createBindGroup(layout, {
-    quadData: quadDataBuffer,
+    quadData: quadDataBuffer.as('mutable'),
     atomicBest: atomicBestBuf as never,
     meta: metaBuf as never,
     activeQuadCount: activeQuadCountBuf as never,

@@ -15,9 +15,9 @@ const ResultsView = lazy(() => import('@/components/results/ResultsView').then((
 const GradientProfilesView = lazy(() =>
   import('@/components/gradientProfiles/GradientProfilesView').then((m) => ({ default: m.GradientProfilesView })),
 )
-const PointLabView = lazy(() =>
-  import('@/components/pointLab/PointLabView').then((m) => ({ default: m.PointLabView })),
-)
+const PointLabView = lazy(() => import('@/components/pointLab/PointLabView').then((m) => ({ default: m.PointLabView })))
+const HexTargetView = lazy(() => import('@/components/HexTargetView').then((m) => ({ default: m.HexTargetView })))
+const HexDebugView = lazy(() => import('@/components/hexDebug/HexDebugView').then((m) => ({ default: m.HexDebugView })))
 
 const GitHubIcon = () => (
   <svg viewBox="0 0 128 128" width="32" height="32" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -40,6 +40,8 @@ export function App() {
     const isCalibrate = createMemo(() => currentPath() === '/calibrate')
     const isResults = createMemo(() => currentPath() === '/results')
     const isPointLab = createMemo(() => currentPath() === '/point-lab')
+    const isHexTarget = createMemo(() => currentPath() === '/hex-target')
+    const isHexDebug = createMemo(() => currentPath() === '/hex-debug')
     const isDebug = createMemo(() => currentPath() === '/debug')
 
     return (
@@ -66,6 +68,12 @@ export function App() {
           </A>
           <A href="/point-lab" class={[styles.navBtn, isPointLab() && styles.navBtnActive]}>
             Point Lab
+          </A>
+          <A href="/hex-target" class={[styles.navBtn, isHexTarget() && styles.navBtnActive]}>
+            Hex Target
+          </A>
+          <A href="/hex-debug" class={[styles.navBtn, isHexDebug() && styles.navBtnActive]}>
+            Hex Debug
           </A>
           <A href="/debug" class={[styles.navBtn, isDebug() && styles.navBtnActive]}>
             Debug
@@ -96,6 +104,8 @@ export function App() {
               <Route path="/calibrate" component={CalibrationView} />
               <Route path="/results" component={ResultsView} />
               <Route path="/point-lab" component={PointLabView} />
+              <Route path="/hex-target" component={HexTargetView} />
+              <Route path="/hex-debug" component={HexDebugView} />
               <Route path="/debug" component={GradientProfilesView} />
               <Route path="/gradient-profiles" component={() => <Navigate href="/debug" />} />
             </Loading>

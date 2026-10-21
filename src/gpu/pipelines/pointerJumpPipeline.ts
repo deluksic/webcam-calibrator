@@ -3,12 +3,11 @@
 //
 // Gradient compatibility: neighbors with strongly opposing gradient directions (dot(g_i, g_j) < cosThreshold)
 // are NOT connected — this prevents corners from spanning across edge discontinuities.
-import type { TgpuRoot } from 'typegpu'
+import type { StorageFlag, TgpuBuffer, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { atomicLoad, atomicMin, atomicStore, length } from 'typegpu/std'
 
 import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
-import type { EdgeFilterBindResources } from '@/gpu/pipelines/edgeFilterPipeline'
 
 /**
  * Pointer-doubling passes: L'[i]=L[L[i]] after init (see shaders below).
@@ -55,7 +54,7 @@ export function createPointerJumpLayouts() {
 
 export function createPointerJumpInitPipeline(
   root: TgpuRoot,
-  initLayout: ReturnType<typeof tgpu.bindGroupLayout>,
+  initLayout: ReturnType<typeof createPointerJumpLayouts>['initLayout'],
   width: number,
   height: number,
 ) {
@@ -73,7 +72,7 @@ export function createPointerJumpInitPipeline(
     }
 
     const idx = d.u32(y * w + x)
-    const ei = initLayout.$.edgeBuffer[idx]
+    const ei = initLayout.$.edgeBuffer[idx]!
     const em = length(ei)
     // Only initialize labels for EDGE pixels (non-zero edges)
     if (em <= d.f32(0)) {
@@ -87,7 +86,7 @@ export function createPointerJumpInitPipeline(
         const ny = y + dy
         if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
           const nIdx = d.u32(ny * w + nx)
-          const ej = initLayout.$.edgeBuffer[nIdx]
+          const ej = initLayout.$.edgeBuffer[nIdx]!
           const ejm = length(ej)
           if (ejm > d.f32(0) && nIdx < best) {
             best = nIdx
@@ -103,7 +102,7 @@ export function createPointerJumpInitPipeline(
 
 export function createPointerJumpStepPipeline(
   root: TgpuRoot,
-  stepLayout: ReturnType<typeof tgpu.bindGroupLayout>,
+  stepLayout: ReturnType<typeof createPointerJumpLayouts>['stepLayout'],
   width: number,
   height: number,
 ) {
@@ -122,12 +121,12 @@ export function createPointerJumpStepPipeline(
 
     const idx = d.u32(y * w + x)
     const wh = d.u32(w) * d.u32(h)
-    const p = stepLayout.$.readBuffer[idx]
+    const p = stepLayout.$.readBuffer[idx]!
     if (p === d.u32(COMPONENT_LABEL_INVALID) || p >= wh) {
       stepLayout.$.writeBuffer[idx] = d.u32(COMPONENT_LABEL_INVALID)
       return
     }
-    stepLayout.$.writeBuffer[idx] = stepLayout.$.readBuffer[p]
+    stepLayout.$.writeBuffer[idx] = stepLayout.$.readBuffer[p]!
   })
 
   return root.createComputePipeline({ compute: kernel })
@@ -249,7 +248,7 @@ export function createPointerJumpLabeling(
   root: TgpuRoot,
   width: number,
   height: number,
-  filteredBuffer: EdgeFilterBindResources['filteredBuffer'],
+  filteredBuffer: TgpuBuffer<d.WgslArray<d.Vec2f>> & StorageFlag,
 ) {
   const area = width * height
   const pointerJumpBuffer0 = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
