@@ -57,6 +57,7 @@ export function createPointerJumpInitPipeline(
   initLayout: ReturnType<typeof createPointerJumpLayouts>['initLayout'],
   width: number,
   height: number,
+  fourConnected = false,
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
@@ -82,14 +83,16 @@ export function createPointerJumpInitPipeline(
     let best = idx
     for (const dy of tgpu.unroll(std.range(-1, 2))) {
       for (const dx of tgpu.unroll(std.range(-1, 2))) {
-        const nx = x + dx
-        const ny = y + dy
-        if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
-          const nIdx = d.u32(ny * w + nx)
-          const ej = initLayout.$.edgeBuffer[nIdx]!
-          const ejm = length(ej)
-          if (ejm > d.f32(0) && nIdx < best) {
-            best = nIdx
+        if (!fourConnected || dx === 0 || dy === 0) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
+            const nIdx = d.u32(ny * w + nx)
+            const ej = initLayout.$.edgeBuffer[nIdx]!
+            const ejm = length(ej)
+            if (ejm > d.f32(0) && nIdx < best) {
+              best = nIdx
+            }
           }
         }
       }
@@ -164,6 +167,7 @@ export function createPointerJumpParentTightenPipeline(
   parentTightenLayout: ReturnType<typeof createPointerJumpLayouts>['parentTightenLayout'],
   width: number,
   height: number,
+  fourConnected = false,
 ) {
   const kernel = tgpu.computeFn({
     in: { gid: d.builtin.globalInvocationId },
@@ -193,15 +197,17 @@ export function createPointerJumpParentTightenPipeline(
     let cand = d.u32(COMPONENT_LABEL_INVALID)
     for (const dy of tgpu.unroll(std.range(-1, 2))) {
       for (const dx of tgpu.unroll(std.range(-1, 2))) {
-        const nx = x + dx
-        const ny = y + dy
-        if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
-          const nIdx = d.u32(ny * w + nx)
-          const ej = parentTightenLayout.$.edgeBuffer[nIdx]!
-          if (length(ej) > d.f32(0)) {
-            const lj = parentTightenLayout.$.labelRead[nIdx]!
-            if (lj !== d.u32(COMPONENT_LABEL_INVALID)) {
-              cand = std.min(cand, lj)
+        if (!fourConnected || dx === 0 || dy === 0) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx >= d.i32(0) && nx < w && ny >= d.i32(0) && ny < h) {
+            const nIdx = d.u32(ny * w + nx)
+            const ej = parentTightenLayout.$.edgeBuffer[nIdx]!
+            if (length(ej) > d.f32(0)) {
+              const lj = parentTightenLayout.$.labelRead[nIdx]!
+              if (lj !== d.u32(COMPONENT_LABEL_INVALID)) {
+                cand = std.min(cand, lj)
+              }
             }
           }
         }
@@ -249,6 +255,8 @@ export function createPointerJumpLabeling(
   width: number,
   height: number,
   filteredBuffer: TgpuBuffer<d.WgslArray<d.Vec2f>> & StorageFlag,
+  iterations = POINTER_JUMP_ITERATIONS,
+  fourConnected = false,
 ) {
   const area = width * height
   const pointerJumpBuffer0 = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
@@ -262,7 +270,13 @@ export function createPointerJumpLabeling(
     parentTightenLayout: pointerJumpParentTightenLayout,
     atomicToLabelsLayout: pointerJumpAtomicToLabelsLayout,
   } = createPointerJumpLayouts()
-  const pointerJumpInitPipeline = createPointerJumpInitPipeline(root, pointerJumpInitLayout, width, height)
+  const pointerJumpInitPipeline = createPointerJumpInitPipeline(
+    root,
+    pointerJumpInitLayout,
+    width,
+    height,
+    fourConnected,
+  )
   const pointerJumpStepPipeline = createPointerJumpStepPipeline(root, pointerJumpStepLayout, width, height)
   const pointerJumpLabelsToAtomicPipeline = createPointerJumpLabelsToAtomicPipeline(
     root,
@@ -275,6 +289,7 @@ export function createPointerJumpLabeling(
     pointerJumpParentTightenLayout,
     width,
     height,
+    fourConnected,
   )
   const pointerJumpAtomicToLabelsPipeline = createPointerJumpAtomicToLabelsPipeline(
     root,
@@ -335,7 +350,7 @@ export function createPointerJumpLabeling(
   const encodeCompute = (pass: GPUComputePassEncoder) => {
     pointerJumpInitPipeline.with(pass).with(pointerJumpInitBindGroup).dispatchWorkgroups(wgX, wgY)
     let pj = 0
-    for (let s = 0; s < POINTER_JUMP_ITERATIONS; s++) {
+    for (let s = 0; s < iterations; s++) {
       pointerJumpStepPipeline.with(pass).with(pointerJumpPingPongBindGroups[pj]!).dispatchWorkgroups(wgX, wgY)
       pj ^= 1
       pointerJumpLabelsToAtomicPipeline

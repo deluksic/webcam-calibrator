@@ -18,6 +18,7 @@ const GradientProfilesView = lazy(() =>
 const PointLabView = lazy(() => import('@/components/pointLab/PointLabView').then((m) => ({ default: m.PointLabView })))
 const HexTargetView = lazy(() => import('@/components/HexTargetView').then((m) => ({ default: m.HexTargetView })))
 const HexDebugView = lazy(() => import('@/components/hexDebug/HexDebugView').then((m) => ({ default: m.HexDebugView })))
+const RoiLabView = lazy(() => import('@/components/roiLab/RoiLabView').then((m) => ({ default: m.RoiLabView })))
 
 const GitHubIcon = () => (
   <svg viewBox="0 0 128 128" width="32" height="32" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -42,6 +43,7 @@ export function App() {
     const isPointLab = createMemo(() => currentPath() === '/point-lab')
     const isHexTarget = createMemo(() => currentPath() === '/hex-target')
     const isHexDebug = createMemo(() => currentPath() === '/hex-debug')
+    const isRoiLab = createMemo(() => currentPath() === '/roi-lab')
     const isDebug = createMemo(() => currentPath() === '/debug')
 
     return (
@@ -75,6 +77,9 @@ export function App() {
           <A href="/hex-debug" class={[styles.navBtn, isHexDebug() && styles.navBtnActive]}>
             Hex Debug
           </A>
+          <A href="/roi-lab" class={[styles.navBtn, isRoiLab() && styles.navBtnActive]}>
+            ROI Lab
+          </A>
           <A href="/debug" class={[styles.navBtn, isDebug() && styles.navBtnActive]}>
             Debug
           </A>
@@ -106,6 +111,7 @@ export function App() {
               <Route path="/point-lab" component={PointLabView} />
               <Route path="/hex-target" component={HexTargetView} />
               <Route path="/hex-debug" component={HexDebugView} />
+              <Route path="/roi-lab" component={RoiLabView} />
               <Route path="/debug" component={GradientProfilesView} />
               <Route path="/gradient-profiles" component={() => <Navigate href="/debug" />} />
             </Loading>

@@ -61,7 +61,7 @@ export const HexDebugView: Component = () => {
   const [ringMargin, setRingMargin] = createSignal<number>(DEFAULT_TUNING.ringMargin)
   const [showRejections, setShowRejections] = createSignal(false)
   const [nmsThreshold, setNmsThreshold] = createSignal(0.08)
-  const [expected, setExpected] = createSignal(476)
+  const [expected, setExpected] = createSignal(420)
 
   let disposed = false
   let processing = false

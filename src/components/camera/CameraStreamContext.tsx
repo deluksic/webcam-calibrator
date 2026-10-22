@@ -8,11 +8,11 @@ import {
   acquireVideoStream,
   listVideoInputDevices,
   primeCameraPermission,
-  RESOLUTION_LADDER,
   stopCameraStream,
 } from './cameraStreamAcquire'
 
 const { navigator } = globalThis
+const QUERY = new URLSearchParams(globalThis.location.search)
 
 export type CameraStreamContextValue = {
   /** Sorted videoinput devices (async memo — `await devices()` in `<Show>`). */
@@ -47,7 +47,9 @@ export function CameraStreamProvider(props: ParentProps) {
   const [registeredCameraUsers, setRegisteredCameraUsers] = createSignal(new Set<symbol>(), { equals: false })
   const cameraIsNeeded = createMemo(() => registeredCameraUsers().size > 0)
   const cameraIsNeededLatch = createMemo<boolean>((prev) => prev || cameraIsNeeded())
-  const [selectedResolution, setSelectedResolution] = createSignal<Resolution>('low')
+  const [selectedResolution, setSelectedResolution] = createSignal<Resolution>(
+    QUERY.get('resolution') === 'medium' ? 'medium' : 'low',
+  )
 
   const [devices, setDevices] = createSignal<MediaDeviceInfo[]>(async () => {
     if (!cameraIsNeededLatch()) {
@@ -66,30 +68,38 @@ export function CameraStreamProvider(props: ParentProps) {
     return devices_[0]?.deviceId
   })
 
-  const deviceIdAndStream = createMemo<{ deviceId: string; stream: MediaStream } | undefined>(async (prev) => {
+  const deviceIdAndStream = createMemo<
+    { deviceId: string; resolution: Resolution; stream: MediaStream } | undefined
+  >(async (prev) => {
     const id = selectedCameraDeviceId()
+    const resolution = selectedResolution()
     if (!id || !cameraIsNeeded()) {
       return undefined
     }
-    if (prev?.deviceId === id) {
+    if (prev?.deviceId === id && prev.resolution === resolution) {
       return prev
     }
     // Many mobile browsers only allow one active camera: release before a new getUserMedia.
     if (prev?.stream) {
       stopCameraStream(prev.stream)
     }
-    const stream = await acquireVideoStream(id, untrack(selectedResolution))
-    return { deviceId: id, stream }
+    const stream = await acquireVideoStream(id, resolution)
+    return { deviceId: id, resolution, stream }
   })
 
   createEffect(deviceIdAndStream, (pair) => {
     if (!pair) {
       return
     }
-    const { deviceId, stream } = pair
+    const { deviceId, resolution, stream } = pair
     return () => {
       untrack(() => {
-        if (stream && (!latest(cameraIsNeeded) || latest(selectedCameraDeviceId) !== deviceId)) {
+        if (
+          stream &&
+          (!latest(cameraIsNeeded) ||
+            latest(selectedCameraDeviceId) !== deviceId ||
+            latest(selectedResolution) !== resolution)
+        ) {
           stopCameraStream(stream)
         }
       })
@@ -97,14 +107,6 @@ export function CameraStreamProvider(props: ParentProps) {
   })
 
   const stream = () => deviceIdAndStream()?.stream
-
-  createEffect(
-    () => ({ stream: latest(stream), resolution: selectedResolution() }),
-    ({ stream, resolution }) => {
-      const res = RESOLUTION_LADDER[resolution]
-      stream?.getVideoTracks()[0]?.applyConstraints({ width: res.width, height: res.height })
-    },
-  )
 
   async function onDeviceChange() {
     setDevices(await navigator.mediaDevices.enumerateDevices())

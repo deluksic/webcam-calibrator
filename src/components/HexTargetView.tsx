@@ -16,7 +16,7 @@ import styles from '@/components/HexTargetView.module.css'
 const { navigator } = globalThis
 
 const DEFAULTS = {
-  columns: 8,
+  columns: 7,
   pointsPerEdge: 4,
   markerScale: 0.45,
   colorSeed: 1,
@@ -63,8 +63,8 @@ export const HexTargetView: Component = () => {
     if (!stage || stage.widthPX < 16 || stage.heightPX < 16) {
       return FALLBACK_RESOLUTION
     }
-    const widthPX = Math.max(16, Math.min(stage.widthPX, Math.floor(stage.heightPX * TARGET_ASPECT)))
-    const heightPX = Math.max(12, Math.floor(widthPX / TARGET_ASPECT))
+    const widthPX = Math.max(640, Math.min(stage.widthPX, Math.floor(stage.heightPX * TARGET_ASPECT)))
+    const heightPX = Math.max(480, Math.floor(widthPX / TARGET_ASPECT))
     return { width: widthPX, height: heightPX }
   })
   const layout = createMemo(() =>
@@ -215,8 +215,9 @@ export const HexTargetView: Component = () => {
       <aside class={styles.controls}>
         <h1 class={styles.title}>Hex Target</h1>
         <p class={styles.note}>
-          A gray screen with isolated black and white squares. The target runs at the maximum 4:3 resolution that fits
-          the available stage. CSS only centers it; it is never stretched or resampled.
+          A gray screen with isolated black and white squares. The target runs at least 640×480, then uses the
+          maximum 4:3 resolution that fits the available stage. CSS only centers it; it is never stretched or
+          resampled.
         </p>
 
         <label class={styles.field}>

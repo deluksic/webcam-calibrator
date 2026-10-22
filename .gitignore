@@ -14,3 +14,10 @@ Thumbs.db
 # Editor
 *.swp
 *.swo
+
+# Local datasets and captured images (keep out of git)
+python/notebooks/natural_images/
+python/notebooks/real_positives/
+python/notebooks/blob_lab_data/
+public/ort/
+*.onnx
