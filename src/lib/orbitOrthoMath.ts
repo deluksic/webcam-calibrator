@@ -1,7 +1,7 @@
 import type { Mat4Arg, Vec3Arg } from 'wgpu-matrix'
 import { mat4, vec3 } from 'wgpu-matrix'
 
-import type { Point3 } from '@/lib/calibrationTypes'
+import type { Point3 } from '@/lib/geometry'
 
 /**
  * Reused mats/vecs for wgpu-matrix outputs so we do not allocate 16-float arrays (and a few vec3s)

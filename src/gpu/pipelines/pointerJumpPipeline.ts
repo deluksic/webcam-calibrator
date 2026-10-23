@@ -7,7 +7,8 @@ import type { StorageFlag, TgpuBuffer, TgpuRoot } from 'typegpu'
 import { tgpu, d, std } from 'typegpu'
 import { atomicLoad, atomicMin, atomicStore, length } from 'typegpu/std'
 
-import { COMPONENT_LABEL_INVALID } from '@/gpu/detectedQuad'
+/** Compact-label sentinel — shared with the ROI component stage. */
+export const COMPONENT_LABEL_INVALID = 0xffff_ffff
 
 /**
  * Pointer-doubling passes: L'[i]=L[L[i]] after init (see shaders below).

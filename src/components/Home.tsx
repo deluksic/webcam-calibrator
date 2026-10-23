@@ -12,8 +12,8 @@ export function Home() {
     <div class={styles.root}>
       <h1 class={styles.title}>Camera Calibration</h1>
       <p class={styles.description}>
-        Calibrate cameras for AR and robotics using a static AprilTag board. Use one device for the target and another
-        for the camera, or the same machine for both.
+        Calibrate cameras for AR and robotics using a static hex target of black and white markers. Use one device for
+        the target and another for the camera, or the same machine for both.
       </p>
 
       <Show when={hideIntro()}>
@@ -58,7 +58,7 @@ export function Home() {
       <div class={styles.bigActions}>
         <A href="/target" class={styles.bigAction}>
           <span class={styles.bigActionTitle}>Show the target</span>
-          <span class={styles.bigActionDesc}>Separate screen or projector—the tag grid the camera will see.</span>
+          <span class={styles.bigActionDesc}>Separate screen or projector—the marker field the camera will see.</span>
         </A>
         <A href="/calibrate" class={styles.bigAction}>
           <span class={styles.bigActionTitle}>Use the camera</span>

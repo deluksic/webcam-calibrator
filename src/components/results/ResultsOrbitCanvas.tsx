@@ -6,7 +6,7 @@ import type { ResultsCalibrationScene } from '@/components/results/resultsCalibr
 import { writeAxisPassUniform } from '@/gpu/pipelines/resultsAxesPipeline'
 import { writeResultsCameraTransform } from '@/gpu/pipelines/resultsCameraTransform'
 import { MAX_RESULTS_MARKER_POINTS, writeMarkerPassUniform } from '@/gpu/pipelines/resultsMarkerPipeline'
-import { calibrationDefinedCornerCount } from '@/gpu/pipelines/resultsSceneCpu'
+import { calibrationPointCount } from '@/gpu/pipelines/resultsSceneCpu'
 import {
   createResultsOrbitCanvasPipeline,
   type ResultsOrbitCanvasPipeline,
@@ -67,7 +67,6 @@ export const ResultsOrbitCanvas: Component<ResultsOrbitCanvasProps> = (props) =>
   }
 
   let lastCentersUploadedFor: ResultsCalibrationScene | undefined
-  let lastTagQuadsUploadedFor: ResultsCalibrationScene | undefined
 
   createEffect(
     () => ({
@@ -103,8 +102,7 @@ export const ResultsOrbitCanvas: Component<ResultsOrbitCanvasProps> = (props) =>
           return
         }
 
-        const pointCount = Math.min(calibrationDefinedCornerCount(scene.ok), MAX_RESULTS_MARKER_POINTS)
-        const tagCount = scene.tagQuadDrawCount
+        const pointCount = Math.min(calibrationPointCount(scene.ok), MAX_RESULTS_MARKER_POINTS)
 
         if (lastCentersUploadedFor !== scene) {
           try {
@@ -112,15 +110,6 @@ export const ResultsOrbitCanvas: Component<ResultsOrbitCanvasProps> = (props) =>
             lastCentersUploadedFor = scene
           } catch (e) {
             console.warn('[ResultsOrbitCanvas] center upload failed', e)
-          }
-        }
-
-        if (lastTagQuadsUploadedFor !== scene) {
-          try {
-            p.tagQuadsBuf.write(scene.tagQuadWrites)
-            lastTagQuadsUploadedFor = scene
-          } catch (e) {
-            console.warn('[ResultsOrbitCanvas] tag quad upload failed', e)
           }
         }
 
@@ -136,11 +125,10 @@ export const ResultsOrbitCanvas: Component<ResultsOrbitCanvasProps> = (props) =>
         writeMarkerPassUniform(p.markerUniform, pointCount)
         writeAxisPassUniform(p.axisUniform)
 
-        p.encodeScene(pointCount, tagCount)
+        p.encodeScene(pointCount)
       }
 
       lastCentersUploadedFor = undefined
-      lastTagQuadsUploadedFor = undefined
 
       const pipeline = createResultsOrbitCanvasPipeline(root, el, format)
       setPip(pipeline)

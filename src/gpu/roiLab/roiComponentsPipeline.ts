@@ -372,12 +372,12 @@ export function createRoiComponentsStage(
     }
     const label = labelColorLayout.$.labels[index]!
     let hash = label * d.u32(2654435761)
-    hash ^= hash >> d.u32(16)
+    hash ^= hash >>> d.u32(16)
     hash *= d.u32(2246822519)
-    hash ^= hash >> d.u32(13)
+    hash ^= hash >>> d.u32(13)
     const red = d.f32(hash & d.u32(255)) / d.f32(255)
-    const green = d.f32((hash >> d.u32(8)) & d.u32(255)) / d.f32(255)
-    const blue = d.f32((hash >> d.u32(16)) & d.u32(255)) / d.f32(255)
+    const green = d.f32((hash >>> d.u32(8)) & d.u32(255)) / d.f32(255)
+    const blue = d.f32((hash >>> d.u32(16)) & d.u32(255)) / d.f32(255)
     std.textureStore(
       labelColorLayout.$.labelTexture,
       d.vec2u(px, py),

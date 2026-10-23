@@ -1,26 +1,23 @@
 import type { Component } from 'solid-js'
 import { Show, createMemo, createSignal, createTrackedEffect, onCleanup } from 'solid-js'
+import qrcode from 'qrcode-generator'
 import type { TgpuRoot } from 'typegpu'
 
 import { createHexTargetRenderer, type HexTargetRenderer } from '@/gpu/hexTargetRenderer'
 import { initGPU } from '@/gpu/init'
 import { buildHexTargetLayout } from '@/lib/hexBlobTarget'
-import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
-import { createIdentityIndex } from '@/lib/pointIdentity/identity'
-import { buildProximityGraph } from '@/lib/pointIdentity/proximityGraph'
-import { randomBinaryColors } from '@/lib/pointIdentity/random'
+import {
+  buildCalibrationUrl,
+  normalizeHexTargetConfig,
+  readHexTargetConfigFromLocation,
+  type HexTargetConfig,
+} from '@/lib/hexTarget/config'
+import { createHexTargetDesign } from '@/lib/hexTarget/target'
 import { createElementSize } from '@/utils/createElementSize'
 
 import styles from '@/components/HexTargetView.module.css'
 
 const { navigator } = globalThis
-
-const DEFAULTS = {
-  columns: 7,
-  pointsPerEdge: 4,
-  markerScale: 0.45,
-  colorSeed: 1,
-} as const
 
 const TARGET_ASPECT = 4 / 3
 const FALLBACK_RESOLUTION = { width: 1280, height: 960 }
@@ -30,20 +27,19 @@ function percent(value: number): string {
 }
 
 export const HexTargetView: Component = () => {
+  const [config, setConfig] = createSignal<HexTargetConfig>(readHexTargetConfigFromLocation())
   const [canvasElement, setCanvasElement] = createSignal<HTMLCanvasElement>()
   const [stageElement, setStageElement] = createSignal<HTMLDivElement>()
   const [root, setRoot] = createSignal<TgpuRoot>()
   const [renderer, setRenderer] = createSignal<HexTargetRenderer>()
-  const [columns, setColumns] = createSignal<number>(DEFAULTS.columns)
-  const [pointsPerEdge, setPointsPerEdge] = createSignal<number>(DEFAULTS.pointsPerEdge)
-  const [markerScale, setMarkerScale] = createSignal<number>(DEFAULTS.markerScale)
-  const [colorSeed, setColorSeed] = createSignal<number>(DEFAULTS.colorSeed)
-  const [depth, setDepth] = createSignal(5)
-  const [topologyColumns, setTopologyColumns] = createSignal<number>(DEFAULTS.columns)
-  const [topologyPointsPerEdge, setTopologyPointsPerEdge] = createSignal<number>(DEFAULTS.pointsPerEdge)
   const [error, setError] = createSignal<string>()
   const [pixelRatio, setPixelRatio] = createSignal(window.devicePixelRatio || 1)
 
+  const patchConfig = (patch: Partial<HexTargetConfig>): void => {
+    setConfig((current) => normalizeHexTargetConfig({ ...current, ...patch }))
+  }
+
+  const model = createMemo(() => createHexTargetDesign(config()))
   const stageSize = createElementSize(stageElement)
   const availableStage = createMemo(() => {
     const size = stageSize()
@@ -58,53 +54,60 @@ export const HexTargetView: Component = () => {
       heightPX: Math.abs(size.heightPX - expectedHeight) > 1 ? Math.round(expectedHeight) : size.heightPX,
     }
   })
-  const resolution = createMemo(() => {
+  const autoResolution = createMemo(() => {
     const stage = availableStage()
     if (!stage || stage.widthPX < 16 || stage.heightPX < 16) {
       return FALLBACK_RESOLUTION
     }
-    const widthPX = Math.max(640, Math.min(stage.widthPX, Math.floor(stage.heightPX * TARGET_ASPECT)))
-    const heightPX = Math.max(480, Math.floor(widthPX / TARGET_ASPECT))
+    const widthPX = Math.max(1, Math.min(stage.widthPX, Math.floor(stage.heightPX * TARGET_ASPECT)))
+    const heightPX = Math.max(1, Math.floor(widthPX / TARGET_ASPECT))
     return { width: widthPX, height: heightPX }
+  })
+  const resolution = createMemo(() => {
+    const current = config()
+    if (!current.widthPx || !current.heightPx) {
+      return autoResolution()
+    }
+    const stage = availableStage()
+    if (!stage || stage.widthPX < 16 || stage.heightPX < 16) {
+      return { width: current.widthPx, height: current.heightPx }
+    }
+    // Never scale the target: clamp the requested pixel size to the physical
+    // display area while preserving the requested aspect ratio.
+    const scale = Math.min(1, stage.widthPX / current.widthPx, stage.heightPX / current.heightPx)
+    return {
+      width: Math.max(1, Math.floor(current.widthPx * scale)),
+      height: Math.max(1, Math.floor(current.heightPx * scale)),
+    }
   })
   const layout = createMemo(() =>
     buildHexTargetLayout({
       widthPx: resolution().width,
       heightPx: resolution().height,
-      columns: columns(),
-      pointsPerEdge: pointsPerEdge(),
-      markerScale: markerScale(),
-      colorSeed: colorSeed(),
+      columns: config().columns,
+      rows: config().rows,
+      pointsPerEdge: config().pointsPerEdge,
+      markerScale: config().markerScale,
+      colorSeed: config().colorSeed,
     }),
   )
-
-  // Topology depends only on the lattice, not on resolution, marker scale, or
-  // color seed. Debounce slider changes so dragging does not rebuild it on
-  // every intermediate column/points value.
-  createTrackedEffect(() => {
-    const nextColumns = columns()
-    const nextPointsPerEdge = pointsPerEdge()
-    const timer = setTimeout(() => {
-      setTopologyColumns(nextColumns)
-      setTopologyPointsPerEdge(nextPointsPerEdge)
-    }, 180)
-    return () => clearTimeout(timer)
-  })
-  const designPattern = createMemo(() =>
-    generateHexPattern({ columns: topologyColumns(), pointsPerEdge: topologyPointsPerEdge() }),
-  )
-  const designColors = createMemo(() => randomBinaryColors(designPattern().points.length, colorSeed()))
-  const designGraph = createMemo(() =>
-    buildProximityGraph(designPattern().points, { pointsPerEdge: topologyPointsPerEdge() }),
-  )
-  const fingerprintIndex = createMemo(() => createIdentityIndex(designGraph(), designColors(), depth()))
   const uniqueness = createMemo(() => {
-    const index = fingerprintIndex()
+    const depth = Math.min(config().identityDepth, model().indexesByDepth.length)
+    const index = model().indexesByDepth[Math.max(0, depth - 1)]!
     const total = index.fingerprints.length
     return {
       uniquePercent: total === 0 ? 0 : (total - index.collidingPointCount) / total,
       colliding: index.collidingPointCount,
     }
+  })
+  const calibrationUrl = createMemo(() =>
+    buildCalibrationUrl(config(), { widthPx: resolution().width, heightPx: resolution().height }),
+  )
+  const qrDataUrl = createMemo(() => {
+    const qr = qrcode(0, 'M')
+    qr.addData(calibrationUrl())
+    qr.make()
+    return qr.createDataURL(4, 8)
   })
 
   let disposed = false
@@ -153,10 +156,6 @@ export const HexTargetView: Component = () => {
     targetRenderer.render()
   })
 
-  const shuffleColors = (): void => {
-    setColorSeed((seed) => seed + 1)
-  }
-
   const enterFullscreen = (): void => {
     const stage = stageElement()
     if (!stage) {
@@ -173,26 +172,30 @@ export const HexTargetView: Component = () => {
   }))
   const accuracyStatus = createMemo(() => {
     const nextLayout = layout()
-    return `${nextLayout.widthPx} × ${nextLayout.heightPx} target px · spacing ${nextLayout.spacingPx} · side ${nextLayout.sidePx}`
+    const current = config()
+    const clamped =
+      current.widthPx !== undefined &&
+      current.heightPx !== undefined &&
+      (current.widthPx !== nextLayout.widthPx || current.heightPx !== nextLayout.heightPx)
+    return `${current.columns} × ${current.rows} cells · ${nextLayout.widthPx} × ${nextLayout.heightPx} device px${clamped ? ' (clamped to display)' : ''} · spacing ${nextLayout.spacingPx} · side ${nextLayout.sidePx}`
   })
 
   const downloadDefinition = (): void => {
     const nextLayout = layout()
+    const current = config()
     const payload = {
       version: 1,
+      kind: 'hex-target',
+      parameters: { ...current, widthPx: nextLayout.widthPx, heightPx: nextLayout.heightPx },
       resolution: { widthPx: nextLayout.widthPx, heightPx: nextLayout.heightPx },
       padding: { xPx: nextLayout.paddingXPx, yPx: nextLayout.paddingYPx },
-      columns: nextLayout.columns,
-      pointsPerEdge: nextLayout.pointsPerEdge,
-      markerScale: markerScale(),
-      colorSeed: colorSeed(),
       quads: nextLayout.quads,
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `hex-target-${nextLayout.widthPx}x${nextLayout.heightPx}-seed${colorSeed()}.json`
+    anchor.download = `hex-target-${current.columns}x${current.rows}-${nextLayout.widthPx}x${nextLayout.heightPx}.json`
     anchor.click()
     URL.revokeObjectURL(url)
   }
@@ -215,85 +218,143 @@ export const HexTargetView: Component = () => {
       <aside class={styles.controls}>
         <h1 class={styles.title}>Hex Target</h1>
         <p class={styles.note}>
-          A gray screen with isolated black and white squares. The target runs at least 640×480, then uses the
-          maximum 4:3 resolution that fits the available stage. CSS only centers it; it is never stretched or
-          resampled.
+          Edit the target, then scan the QR code with the camera device. Every setting—including the target
+          resolution—is encoded in the link so the calibration page rebuilds exactly this target.
         </p>
 
-        <label class={styles.field}>
-          <span class={styles.label}>Columns: {columns()}</span>
-          <input
-            class={styles.range}
-            type="range"
-            min="4"
-            max="16"
-            step="1"
-            value={columns()}
-            onInput={(event) => setColumns(Number(event.currentTarget.value))}
-          />
-        </label>
-
-        <label class={styles.field}>
-          <span class={styles.label}>Points per edge: {pointsPerEdge()}</span>
-          <input
-            class={styles.range}
-            type="range"
-            min="4"
-            max="6"
-            step="1"
-            value={pointsPerEdge()}
-            onInput={(event) => setPointsPerEdge(Number(event.currentTarget.value))}
-          />
-        </label>
-
-        <label class={styles.field}>
-          <span class={styles.label}>Marker scale: {markerScale().toFixed(2)}</span>
-          <input
-            class={styles.range}
-            type="range"
-            min="0.25"
-            max="0.65"
-            step="0.01"
-            value={markerScale()}
-            onInput={(event) => setMarkerScale(Number(event.currentTarget.value))}
-          />
-        </label>
-
-        <label class={styles.field}>
-          <span class={styles.label}>Hop depth: {depth()}</span>
-          <input
-            class={styles.range}
-            type="range"
-            min="1"
-            max="6"
-            step="1"
-            value={depth()}
-            onInput={(event) => setDepth(Number(event.currentTarget.value))}
-          />
-        </label>
-
-        <div class={styles.seedRow}>
-          <span class={styles.label}>Color seed: {colorSeed()}</span>
-          <button type="button" class={styles.button} onClick={shuffleColors}>
-            Shuffle colors
-          </button>
+        <div class={styles.qrSection}>
+          <span class={styles.label}>Open Calibrate on your phone</span>
+          <a class={styles.qrLink} href={calibrationUrl()}>
+            <img class={styles.qr} src={qrDataUrl()} alt="QR code linking to this target configuration on Calibrate" />
+          </a>
+          <a class={styles.qrUrl} href={calibrationUrl()}>
+            {calibrationUrl()}
+          </a>
         </div>
 
         <button type="button" class={styles.primaryButton} onClick={enterFullscreen}>
           Fullscreen target
         </button>
-        <button type="button" class={styles.button} onClick={downloadDefinition}>
-          Download target JSON
-        </button>
+
+        <div class={styles.field}>
+          <span class={styles.label}>Target layout</span>
+          <div class={styles.row}>
+            <label class={styles.fieldLabel}>
+              Columns
+              <input
+                class={styles.numberInput}
+                type="number"
+                min="2"
+                max="24"
+                value={config().columns}
+                onChange={(event) => patchConfig({ columns: Number(event.currentTarget.value) })}
+              />
+            </label>
+            <label class={styles.fieldLabel}>
+              Rows
+              <input
+                class={styles.numberInput}
+                type="number"
+                min="2"
+                max="24"
+                value={config().rows}
+                onChange={(event) => patchConfig({ rows: Number(event.currentTarget.value) })}
+              />
+            </label>
+          </div>
+        </div>
+
+        <label class={styles.field}>
+          <span class={styles.label}>Points per cell edge</span>
+          <input
+            class={styles.numberInput}
+            type="number"
+            min="1"
+            max="8"
+            step="1"
+            value={config().pointsPerEdge}
+            onChange={(event) => patchConfig({ pointsPerEdge: Number(event.currentTarget.value) })}
+          />
+        </label>
+
+        <label class={styles.field}>
+          <span class={styles.label}>Marker scale</span>
+          <input
+            class={styles.numberInput}
+            type="number"
+            min="0.2"
+            max="0.7"
+            step="0.01"
+            value={config().markerScale}
+            onChange={(event) => patchConfig({ markerScale: Number(event.currentTarget.value) })}
+          />
+        </label>
+
+        <label class={styles.field}>
+          <span class={styles.label}>Color seed</span>
+          <input
+            class={styles.numberInput}
+            type="number"
+            min="0"
+            max="999999"
+            value={config().colorSeed}
+            onChange={(event) => patchConfig({ colorSeed: Number(event.currentTarget.value) })}
+          />
+        </label>
+
+        <div class={styles.field}>
+          <span class={styles.label}>Target resolution</span>
+          <div class={styles.row}>
+            <label class={styles.fieldLabel}>
+              Width
+              <input
+                class={styles.numberInput}
+                type="number"
+                min="320"
+                max="8192"
+                value={resolution().width}
+                onChange={(event) =>
+                  patchConfig({
+                    widthPx: Number(event.currentTarget.value),
+                    heightPx: resolution().height,
+                  })
+                }
+              />
+            </label>
+            <label class={styles.fieldLabel}>
+              Height
+              <input
+                class={styles.numberInput}
+                type="number"
+                min="240"
+                max="8192"
+                value={resolution().height}
+                onChange={(event) =>
+                  patchConfig({
+                    widthPx: resolution().width,
+                    heightPx: Number(event.currentTarget.value),
+                  })
+                }
+              />
+            </label>
+          </div>
+          <button type="button" class={styles.button} onClick={() => patchConfig({ widthPx: undefined, heightPx: undefined })}>
+            Use window-fit resolution
+          </button>
+        </div>
 
         <p class={styles.status}>{accuracyStatus()}</p>
         <p class={styles.status}>
           {layout().quads.length} markers · {percent(uniqueness().uniquePercent)} unique fingerprints ·{' '}
-          {uniqueness().colliding} colliding points · depth {depth()}
+          {uniqueness().colliding} colliding points · depth {config().identityDepth}
         </p>
         <Show when={error()}>
           <p class={styles.error}>GPU unavailable: {error()}</p>
         </Show>
+
+        <button type="button" class={styles.button} onClick={downloadDefinition}>
+          Download target JSON
+        </button>
 
         <p class={styles.footnote}>
           The canvas backing store is the selected target resolution, centered at 1:1 device pixels. Use 100% page zoom

@@ -128,7 +128,6 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
         uv: d.vec2f(t, uvY),
       }
     })
-    .$uses({ camera: resultsCameraBindLayout, axis: axisBindLayout })
 
   const frag = tgpu.fragmentFn({
     in: {

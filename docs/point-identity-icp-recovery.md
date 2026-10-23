@@ -1,7 +1,9 @@
 # Local Hop-Graph Point Identity Recovery
 
-Status: active in Point Lab and ROI Lab. ROI Lab runs the same matcher behind
-the “Local homography recovery” toggle.
+Status: active in Point Lab, ROI Lab, and the production Calibrate path. ROI Lab
+runs the same matcher behind the “Local homography recovery” toggle; Calibrate
+always enables recovery and filters accepted points before they reach the
+calibration frame pool.
 
 ## Problem
 
@@ -157,8 +159,10 @@ metrics. They are diagnostic, not silently converted to safe failures.
   color-patch or residual validation if needed.
 - **ROI Lab cost:** local recovery runs in the per-frame identity callback; the
   mask/input/labels views can use the recovery toggle if the extra cost matters.
-- **No calibration export:** recovered and predicted-missing points are lab
-  diagnostics only.
+- **Calibration gates:** production calibration accepts hash-resolved points and
+  recovered points that are not geometry conflicts and stay inside the design
+  distance gate. Predicted-missing points are lab diagnostics only, and a frame
+  that assigns the same design id twice is rejected.
 
 ## Commands
 

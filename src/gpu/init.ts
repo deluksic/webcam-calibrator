@@ -30,6 +30,8 @@ export type SharedOnnxGpu = {
 }
 
 let sharedOnnxGpuPromise: Promise<SharedOnnxGpu> | undefined
+let originalGpuRequestAdapter: GPU['requestAdapter'] | undefined
+let originalAdapterRequestDevice: GPUAdapter['requestDevice'] | undefined
 
 /**
  * Creates one WebGPU device and shares it with ONNX Runtime Web's WebGPU EP.
@@ -62,6 +64,8 @@ async function createSharedGPUForOnnx(): Promise<SharedOnnxGpu> {
   }
   const device = await adapter.requestDevice()
   const gpu = navigator.gpu
+  originalGpuRequestAdapter ??= gpu.requestAdapter.bind(gpu)
+  originalAdapterRequestDevice ??= adapter.requestDevice.bind(adapter)
   // ORT WebGPU EP does not yet accept an existing device. Returning the same
   // adapter/device makes its GPU tensors share our queue and buffers.
   const gpuWithOverride = gpu as unknown as {
@@ -72,6 +76,19 @@ async function createSharedGPUForOnnx(): Promise<SharedOnnxGpu> {
   }
   gpuWithOverride.requestAdapter = async () => adapter
   adapterWithOverride.requestDevice = async () => device
+
+  // If the device is lost, drop the cached root and restore the factories so a
+  // later pipeline attempt can create a fresh device instead of reusing a dead
+  // one forever.
+  void device.lost.then(() => {
+    sharedOnnxGpuPromise = undefined
+    if (originalGpuRequestAdapter) {
+      gpuWithOverride.requestAdapter = originalGpuRequestAdapter
+    }
+    if (originalAdapterRequestDevice) {
+      adapterWithOverride.requestDevice = originalAdapterRequestDevice
+    }
+  })
 
   const root = tgpu.initFromDevice({ device })
   // Keep the overrides for the lifetime of the page. ORT creates its session

@@ -1,6 +1,6 @@
-# Hex Blob Detection — Deferred Plan
+# Hex Blob Detection
 
-This document records the detection plan for the hex square target. Only the target renderer is implemented at present.
+This document records the original detection plan for the hex square target. The production path is now implemented with an ONNX ROI mask, histogram segmentation, connected components, and point-identity matching; see [`architecture.md`](architecture.md).
 
 ## Goal
 
@@ -11,9 +11,9 @@ The marks are rendered as squares because that is easy to display cleanly. The d
 ## Target assumptions
 
 - One square per sampled honeycomb cell-edge point, matching the Point Lab pattern.
-- Four points per cell side by default (configurable).
+- Four points per cell side (fixed in production; configurable in ROI Lab).
 - Flat-top hexagonal cells.
-- Marker side is roughly 45% of the nearest marker spacing.
+- Marker side is 40% of the nearest marker spacing in production.
 - Every marker has a known gray padding ring.
 - Background is neutral gray.
 - Markers are pure black or pure white.
@@ -261,20 +261,16 @@ recovery behind its “Local homography recovery” toggle. This is documented i
 [`point-identity-icp-recovery.md`](point-identity-icp-recovery.md). It does not
 change the blob detection pipeline above.
 
-## Implementation phases
+## Implementation status
 
-1. CPU reference detector and synthetic tests.
-2. GPU threshold, connected components, moments, and context ring.
-3. Compact readback and GPU/CPU parity tests.
-4. Lattice fit and outlier tests.
-5. Temporal tracking.
-6. Live `/blob-lab` view and tuning.
-7. Optional identity/calibration integration using lattice IDs and colors.
+The production path uses the implemented ONNX mask + histogram + component
+pipeline. Identity/calibration integration is complete: resolved and safe
+recovered markers become object/image point correspondences for the calibration
+worker. Temporal tracking and printed targets remain future work.
 
 ## Out of scope
 
 - Square/quad detection.
 - AprilTag dictionary or tag decode reuse.
-- Calibration worker integration.
 - Single-bit square identity.
 - Printed targets.

@@ -20,12 +20,15 @@ export type PatternGuide = {
 export type HexPatternSpec = {
   /** Number of hexagonal cells across. */
   columns: number
+  /** Number of hexagonal cell rows. Defaults to the count that best fills the design height. */
+  rows?: number
   /** Points sampled on each cell edge, at half-step offsets. */
   pointsPerEdge: number
 }
 
 export type PatternStats = {
   cells: number
+  rows: number
   candidateEdges: number
   sampledEdges: number
   rawPoints: number

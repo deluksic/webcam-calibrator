@@ -9,7 +9,7 @@ import { ResultsOrbitCanvas } from '@/components/results/ResultsOrbitCanvas'
 import { downloadCalibrationOkWithImages } from '@/components/results/exportCalibrationJson'
 import { buildResultsCalibrationScene } from '@/components/results/resultsCalibrationScene'
 import { initGPU } from '@/gpu/init'
-import { calibrationDefinedCornerCount } from '@/gpu/pipelines/resultsSceneCpu'
+import { calibrationPointCount } from '@/gpu/pipelines/resultsSceneCpu'
 import type { TgpuRoot } from 'typegpu'
 
 import type { CalibrationOk } from '@/workers/calibration.worker'
@@ -88,7 +88,7 @@ export function ResultsView() {
     if (!c || c.kind !== 'ok') {
       return ''
     }
-    return `RMS ${c.rmsPx.toFixed(3)} px • ${c.extrinsics.length} views • ${calibrationDefinedCornerCount(c)} points`
+    return `RMS ${c.rmsPx.toFixed(3)} px • ${c.extrinsics.length} views • ${calibrationPointCount(c)} points`
   })
 
   const hasOkDisplay = createMemo(() => displayCalibration()?.kind === 'ok')
@@ -201,7 +201,7 @@ export function ResultsView() {
           <Show when={!hasOkDisplay()}>
             <p class={styles.hint}>
               When calibration data is available (from <strong>Calibrate</strong> or a saved entry below), this view
-              shows refined tag corners and axes. Nothing is wrong yet if you are still setting up—run Calibrate, or
+              shows the refined target points and axes. Nothing is wrong yet if you are still setting up—run Calibrate, or
               pick a saved calibration.
             </p>
           </Show>

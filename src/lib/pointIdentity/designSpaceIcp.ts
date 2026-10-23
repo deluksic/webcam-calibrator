@@ -2,7 +2,7 @@
  * Legacy global design-space ICP. The active Point Lab path uses hop-radius
  * per-ambiguous-point local registration in `localIcpRefiner.ts`.
  */
-import { invertMat3RowMajor } from '@/lib/aprilTagRaycast'
+import { invertMat3RowMajor } from '@/lib/geometry'
 import { applyHomography, type Mat3 } from '@/lib/geometry'
 import type { Anchor } from '@/lib/pointIdentity/anchors'
 import { computeDesignLatticeMetrics, createDesignGrid, createDesignPositionMap } from '@/lib/pointIdentity/designGrid'

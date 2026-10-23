@@ -205,7 +205,7 @@ const overlayFragment = ({ uv }: { uv: d.v2f }) => {
     srcUv,
     d.f32(0),
   )
-  if (overlayAccess.$.mode === d.u32(3)) {
+  if (overlayAccess.$.mode === d.u32(3) || overlayAccess.$.mode === d.u32(9)) {
     return video
   }
   const mask = std.textureSampleLevel(
@@ -267,7 +267,7 @@ export type RoiLabPipeline = {
     frameId: number
   }>
   resize: (width: number, height: number) => void
-  setViewMode: (mode: 1 | 2 | 3 | 4 | 6 | 7 | 8) => void
+  setViewMode: (mode: 1 | 2 | 3 | 4 | 6 | 7 | 8 | 9) => void
   setViewport: (zoom: number, panX: number, panY: number) => void
   setPaused: (paused: boolean) => void
   dumpStats: () => Promise<{
@@ -537,7 +537,7 @@ export async function createRoiLabPipeline(
     overlayPipeline.with(pass).with(overlayBindGroup).draw(3)
     if (overlayMode === 6) {
       componentCircleStage.encode(pass)
-    } else if (overlayMode === 8) {
+    } else if (overlayMode === 8 || overlayMode === 9) {
       graphStage.encode(pass)
     }
     pass.end()
@@ -769,6 +769,10 @@ export async function createRoiLabPipeline(
     const identityMs = performance.now() - identityStart
     renderScene()
 
+    // Let the queued readbacks and final render finish before a caller can
+    // destroy this pipeline during a resolution/stream change.
+    await device.queue.onSubmittedWorkDone()
+
     // Histogram work is queued after the overlay; only its CPU analysis is
     // asynchronous, and it feeds the next frame's thresholds.
     if (frameSerial % ROI_HISTOGRAM_FRAME_INTERVAL === 0) {
@@ -827,6 +831,9 @@ export async function createRoiLabPipeline(
       }
     },
     destroy() {
+      if (destroyed) {
+        return
+      }
       destroyed = true
       context.unconfigure()
       void session.release().finally(freeSessionSlot)

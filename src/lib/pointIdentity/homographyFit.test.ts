@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { invertMat3RowMajor } from '@/lib/aprilTagRaycast'
+import { invertMat3RowMajor } from '@/lib/geometry'
 import { applyHomography, type Mat3 } from '@/lib/geometry'
 import {
   designResiduals,

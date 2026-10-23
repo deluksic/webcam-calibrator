@@ -1,4 +1,4 @@
-import { invertMat3RowMajor } from '@/lib/aprilTagRaycast'
+import { invertMat3RowMajor } from '@/lib/geometry'
 import { applyHomography, type Mat3 } from '@/lib/geometry'
 import { collectAnchors, type Anchor } from '@/lib/pointIdentity/anchors'
 import type { IcpPair } from '@/lib/pointIdentity/designSpaceIcp'

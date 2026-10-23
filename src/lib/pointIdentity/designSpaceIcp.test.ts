@@ -4,7 +4,6 @@ import { applyHomography, type Mat3 } from '@/lib/geometry'
 import type { Anchor } from '@/lib/pointIdentity/anchors'
 import { runDesignSpaceIcp, type IcpOptions } from '@/lib/pointIdentity/designSpaceIcp'
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
-import { buildProximityGraph } from '@/lib/pointIdentity/proximityGraph'
 import { randomBinaryColors } from '@/lib/pointIdentity/random'
 import type { BinaryColor, PatternPoint, Vec2 } from '@/lib/pointIdentity/types'
 

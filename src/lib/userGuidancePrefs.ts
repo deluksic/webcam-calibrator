@@ -7,7 +7,7 @@ export type UserGuidancePrefs = {
   hideTargetTips?: boolean
 }
 
-export const USER_GUIDANCE_PREFS_VERSION = 1
+export const USER_GUIDANCE_PREFS_VERSION = 2
 
 function readRaw(): unknown {
   if (typeof globalThis.localStorage === 'undefined') {

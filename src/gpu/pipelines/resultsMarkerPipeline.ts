@@ -5,7 +5,6 @@ import { length, mix, mul, smoothstep } from 'typegpu/std'
 
 import { resultsCameraBindLayout, type ResultsCameraBindGroup } from '@/gpu/pipelines/resultsCameraTransform'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
-import { cornersToVec3fArray } from '@/gpu/pipelines/resultsSceneCpu'
 import type { CalibrationOk } from '@/workers/calibration.worker'
 
 /** Triangulation subdiv for `circle()`; see `circleVertexCount`. */
@@ -67,14 +66,11 @@ export function writeMarkerPassUniform(buf: MarkerPassUniformGpuBuffer, pointCou
 
 export function markerCenterWritesForGpu(ok: CalibrationOk): MarkerCenterRow[] {
   const rows: MarkerCenterRow[] = []
-  outer: for (const t of ok.updatedTargets) {
-    const cs = cornersToVec3fArray(t.corners)
-    for (const c of cs) {
-      if (rows.length >= MAX_RESULTS_MARKER_POINTS) {
-        break outer
-      }
-      rows.push(MarkerCenter({ positionBoardUnits: c }))
+  for (const point of ok.updatedTargetPoints) {
+    if (rows.length >= MAX_RESULTS_MARKER_POINTS) {
+      break
     }
+    rows.push(MarkerCenter({ positionBoardUnits: d.vec3f(point.x, point.y, point.z) }))
   }
   const dead = MarkerCenter({
     positionBoardUnits: d.vec3f(0, 0, -1e9),
@@ -126,7 +122,6 @@ export function createMarkerResultsStage(root: TgpuRoot, presentationFormat: GPU
         diskUnit: unit,
       }
     })
-    .$uses({ camera: resultsCameraBindLayout, markers: markersBindLayout })
 
   const frag = tgpu.fragmentFn({
     in: { diskUnit: d.vec2f },

@@ -1,20 +1,20 @@
 .root {
   flex: 1;
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   justify-content: center;
   padding: var(--space-8);
   min-height: 0;
+  overflow-y: auto;
 }
 
 .panel {
-  flex: 1;
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
   max-width: 1120px;
   width: 100%;
-  min-height: 0;
 }
 
 .resultsCanvasRow {
@@ -22,7 +22,7 @@
   grid-template-columns: 1fr;
   gap: var(--space-5);
   width: 100%;
-  min-height: 0;
+  flex-shrink: 0;
 }
 
 @media (min-width: 720px) {
@@ -38,6 +38,7 @@
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
+  flex-shrink: 0;
 }
 
 .distortionScaleLabel {
@@ -47,7 +48,6 @@
 
 .canvasViewport {
   width: 100%;
-  max-height: min(52vh, 480px);
   aspect-ratio: 16 / 10;
   flex-shrink: 0;
   position: relative;

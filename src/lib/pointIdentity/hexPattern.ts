@@ -68,10 +68,9 @@ function removeNearDuplicates(points: readonly Vec2[]): Vec2[] {
   return kept
 }
 
-function buildCells(columns: number, radius: number): Cell[] {
+function buildCells(columns: number, rows: number, radius: number): Cell[] {
   const columnPitch = COLUMN_PITCH * radius
   const rowPitch = ROW_PITCH * radius
-  const rows = Math.max(2, Math.round((DESIGN_HEIGHT - 2 * radius) / rowPitch))
   const cells: Cell[] = []
 
   for (let column = 0; column < columns; column += 1) {
@@ -113,8 +112,14 @@ function buildCellEdges(cells: readonly Cell[], radius: number): Edge[] {
 export function generateHexPattern(spec: HexPatternSpec): HexPattern {
   const columns = Math.max(2, Math.round(spec.columns))
   const pointsPerEdge = Math.max(1, Math.round(spec.pointsPerEdge))
-  const radius = DESIGN_WIDTH / (COLUMN_PITCH * (columns - 1) + 2)
-  const cells = buildCells(columns, radius)
+  const widthRadius = DESIGN_WIDTH / (COLUMN_PITCH * (columns - 1) + 2)
+  const requestedRows =
+    spec.rows === undefined ? undefined : Math.max(2, Math.round(spec.rows))
+  const rows =
+    requestedRows ?? Math.max(2, Math.round((DESIGN_HEIGHT - 2 * widthRadius) / (ROW_PITCH * widthRadius)))
+  const heightRadius = DESIGN_HEIGHT / (ROW_PITCH * (rows - 1) + ROW_PITCH / 2 + 2)
+  const radius = requestedRows === undefined ? widthRadius : Math.min(widthRadius, heightRadius)
+  const cells = buildCells(columns, rows, radius)
   const candidateEdges = buildCellEdges(cells, radius)
 
   const guides: PatternGuide[] = []
@@ -177,6 +182,7 @@ export function generateHexPattern(spec: HexPatternSpec): HexPattern {
 
   const stats: PatternStats = {
     cells: cells.length,
+    rows,
     candidateEdges: candidateEdges.length,
     sampledEdges: guides.length,
     rawPoints: rawPoints.length,

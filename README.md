@@ -1,6 +1,6 @@
 # Webcam Calibrator
 
-In-browser camera calibration against **AprilTag36h11** targets. Detection and the live pipeline run on the **WebGPU** stack in your browser; there is no server.
+In-browser camera calibration against a **hex target** of black and white markers. Marker detection, identity matching, and the live pipeline run on the **WebGPU** stack in your browser; there is no server.
 
 [Webcam Calibrator](https://deluksic.github.io/webcam-calibrator)
 
@@ -9,11 +9,13 @@ In-browser camera calibration against **AprilTag36h11** targets. Detection and t
 ## What you can do
 
 - **Home** — Quick orientation and entry points.
-- **Target** — Generate a printable or full-screen tag sheet.
-- **Calibrate** — Point the camera at the target, collect frames, and run calibration. You get a live overlay on the video and session stats; **Reset** clears the current run and shared “latest” result.
-- **Results** — After a good solve, explore the board in a simple 3D view and **export** camera parameters (intrinsics, distortion, poses) as JSON.
-- **Debug** — GPU pipeline tuning (display modes, histograms, edge profiles, quad grid + tag decode, undistort preview).
+- **Target** — Show the fixed full-screen hex target on a display device or second screen.
+- **Calibrate** — Point the camera at the target, collect frames, and run calibration. Identified markers are overlaid live; **Reset** clears the current run and shared “latest” result.
+- **Results** — After a good solve, explore the refined target points in a simple 3D view and **export** a self-describing hex calibration JSON (intrinsics, distortion, poses, target markers, per-frame observations, and frame images).
+- **Point Lab / ROI Lab** — Diagnostics for the hex pattern, blob detector, and identity recovery.
 
-For how it works under the hood, see [`docs/architecture.md`](docs/architecture.md) and [`docs/plan.md`](docs/plan.md). The hex-target identity ICP recovery experiment is documented in [`docs/point-identity-icp-recovery.md`](docs/point-identity-icp-recovery.md).
+The target is editable on the Target page (columns, rows, points per cell edge, marker scale, color seed, and resolution). The sidebar renders a QR code for a Calibrate link containing the full target configuration, so opening that link on the camera device reproduces the exact same target.
+
+For how it works under the hood, see [`docs/architecture.md`](docs/architecture.md) and [`docs/plan.md`](docs/plan.md). The identity ICP recovery algorithm is documented in [`docs/point-identity-icp-recovery.md`](docs/point-identity-icp-recovery.md).
 
 **Dev:** Solid.js, Vite — `pnpm dev`, `pnpm build`, `pnpm test`.

@@ -2,46 +2,44 @@ import { initCalibrator } from '@deluksic/opencv-calibration-wasm'
 import CALIBRATE_WASM_PATH from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
 import * as Comlink from 'comlink'
 
+import { buildCalibrationInput } from '@/lib/calibrationInput'
+import type { CalibrationFrameObservation, TargetObjectPoint } from '@/lib/calibrationTypes'
 import { calibratorInitOptions } from '@/lib/calibratorWasmInit'
-import type { CalibrationFrameObservation, Corners3, ObjectTag } from '@/lib/calibrationTypes'
+import type { HexTargetConfig } from '@/lib/hexTarget/config'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
-import type { Point } from '@/lib/geometry'
-import {
-  OBJECT_POINT_ROW_KEY_STRIDE,
-  objectPointRowKey,
-  unpackObjectPointRowKey,
-} from '@/lib/objectPointRowKey'
+import { rvecToMatrix, type Mat3, type Vec3 } from '@/lib/poseMath'
+
+export type { Mat3, Vec3 } from '@/lib/poseMath'
 
 export interface CalibWorkerApi {
   solveCalibration(
-    objectTags: ObjectTag[],
+    targetPoints: TargetObjectPoint[],
     frames: CalibrationFrameObservation[],
     imageSize: { width: number; height: number },
     cameraId: string,
   ): Promise<CalibrationResult>
 }
 
-export type Mat3 = [number, number, number, number, number, number, number, number, number]
-export type Vec3 = { x: number; y: number; z: number }
-
 export type CalibrationOk = {
   kind: 'ok'
   K: CameraIntrinsics
   distortion: RationalDistortion8
   extrinsics: { frameId: number; R: Mat3; t: Vec3 }[]
-  /** Refined tags that appear in every solve view (subset of input `objectTags`). */
-  updatedTargets: ObjectTag[]
+  /** Refined target points that appear in every solve view. */
+  updatedTargetPoints: TargetObjectPoint[]
   rmsPx: number
   perFrameRmsPx: [number, number][]
   imageSize: { width: number; height: number }
   cameraId: string
+  /** Target parameters used by this solve (attached by the session context). */
+  targetConfig?: HexTargetConfig
   /** PNG filenames keyed by frameId string. Files are in the same directory as the JSON. */
   frameImages?: Record<string, string>
-  /** Raw per-frame tag detections with image file reference. */
+  /** Per-frame identified target points with image file reference. */
   observations?: {
     frameId: number
     imageFile: string
-    tags: { tagId: number; corners: [Point, Point, Point, Point] }[]
+    points: { designId: number; x: number; y: number }[]
   }[]
 }
 
@@ -52,46 +50,6 @@ export type CalibrationErr = {
 }
 
 export type CalibrationResult = CalibrationOk | CalibrationErr
-
-/** Tags that appear with all four corners in every frame (the intersection in `buildWasmInput`). */
-function tagIdsFullySharedAcrossViews(sharedObjectPointRowKeysSorted: number[]): Set<number> {
-  const cornerCountByTag = new Map<number, number>()
-  for (const rowKey of sharedObjectPointRowKeysSorted) {
-    const { tagId } = unpackObjectPointRowKey(rowKey)
-    cornerCountByTag.set(tagId, (cornerCountByTag.get(tagId) ?? 0) + 1)
-  }
-  const out = new Set<number>()
-  for (const [tagId, n] of cornerCountByTag) {
-    if (n === OBJECT_POINT_ROW_KEY_STRIDE) {
-      out.add(tagId)
-    }
-  }
-  return out
-}
-
-function rvecToMatrix(rvec: [number, number, number]): Mat3 {
-  const theta = Math.hypot(rvec[0], rvec[1], rvec[2])
-  if (theta < 1e-12) {
-    return [1, 0, 0, 0, 1, 0, 0, 0, 1]
-  }
-  const ux = rvec[0] / theta
-  const uy = rvec[1] / theta
-  const uz = rvec[2] / theta
-  const c = Math.cos(theta)
-  const s = Math.sin(theta)
-  const t = 1 - c
-  return [
-    t * ux * ux + c,
-    t * ux * uy - s * uz,
-    t * ux * uz + s * uy,
-    t * ux * uy + s * uz,
-    t * uy * uy + c,
-    t * uy * uz - s * ux,
-    t * ux * uz - s * uy,
-    t * uy * uz + s * uy,
-    t * uz * uz + c,
-  ]
-}
 
 function cameraIntrinsicsFromMatrix(
   cm: [[number, number, number], [number, number, number], [number, number, number]],
@@ -112,107 +70,21 @@ function padDistortion(coeffs: number[]): RationalDistortion8 {
   ]
 }
 
-function buildWasmInput(
-  objectTags: ObjectTag[],
-  frames: CalibrationFrameObservation[],
-):
-  | {
-      objectPoints: [number, number, number][][]
-      imagePoints: [number, number][][]
-      frameIds: number[]
-      sharedObjectPointRowKeysSorted: number[]
-    }
-  | { error: string }
-  | undefined {
-  const layoutByTagId = new Map(objectTags.map((t) => [t.tagId, t.corners] as const))
-
-  type FrameCorners = Map<number /* objectPointRowKey */, Point /* imagePoint */>
-  const validFrames = frames
-    .map((frame) => {
-      const corners: FrameCorners = new Map()
-      for (const ft of frame.tags) {
-        const layoutCorners = layoutByTagId.get(ft.tagId)
-        if (!layoutCorners) {
-          continue
-        }
-        for (let cornerId = 0; cornerId < 4; cornerId++) {
-          const rowKey = objectPointRowKey(ft.tagId, cornerId)
-          corners.set(rowKey, ft.corners[cornerId]!)
-        }
-      }
-      if (corners.size >= 6) {
-        return { frameId: frame.frameId, corners }
-      }
-      return undefined
-    })
-    .filter((f) => f !== undefined)
-
-  if (validFrames.length < 3) {
-    return { error: `need >=3 valid frames (have ${validFrames.length})` }
-  }
-
-  // `calibrateCameraRO` requires identical object-point templates per view.
-  let sharedObjectPointRowKeysSorted = [...validFrames[0]!.corners.keys()]
-  for (let i = 1; i < validFrames.length; i++) {
-    const rowKeys = validFrames[i]!.corners
-    sharedObjectPointRowKeysSorted = sharedObjectPointRowKeysSorted.filter((k) => rowKeys.has(k))
-  }
-
-  // Map key order follows the first frame's tag iteration order. The solver
-  // needs the same row order in every view's object/image point lists; numeric row keys sort correctly.
-  sharedObjectPointRowKeysSorted.sort((a, b) => a - b)
-
-  if (sharedObjectPointRowKeysSorted.length < 6) {
-    return { error: `need >=6 shared corners across all views (have ${sharedObjectPointRowKeysSorted.length})` }
-  }
-
-  const objectTemplate: [number, number, number][] = sharedObjectPointRowKeysSorted.map((rowKey) => {
-    const { tagId, cornerId } = unpackObjectPointRowKey(rowKey)
-    const plane = layoutByTagId.get(tagId)![cornerId]!
-    return [plane.x, plane.y, plane.z]
-  })
-
-  const objectPoints: [number, number, number][][] = validFrames.map(() => objectTemplate)
-
-  const imagePoints: [number, number][][] = validFrames.map((frame) =>
-    sharedObjectPointRowKeysSorted.map((k) => {
-      const pt = frame.corners.get(k)!
-      return [pt.x, pt.y]
-    }),
-  )
-
-  const frameIds = validFrames.map((frame) => frame.frameId)
-
-  return { objectPoints, imagePoints, frameIds, sharedObjectPointRowKeysSorted }
-}
-
 const api: CalibWorkerApi = {
   async solveCalibration(
-    objectTags: ObjectTag[],
+    targetPoints: TargetObjectPoint[],
     frames: CalibrationFrameObservation[],
     imageSize: { width: number; height: number },
     cameraId: string,
   ): Promise<CalibrationResult> {
     try {
-      const wasmInput = buildWasmInput(objectTags, frames)
-      if (!wasmInput) {
-        return { kind: 'error', reason: 'too-few-views', details: 'input builder returned undefined' }
+      const built = buildCalibrationInput(targetPoints, frames)
+      if (built.kind === 'error') {
+        return { kind: 'error', reason: 'too-few-views', details: built.details }
       }
-      if ('error' in wasmInput) {
-        return { kind: 'error', reason: 'too-few-views', details: wasmInput.error }
-      }
-      if (wasmInput.objectPoints.length < 3) {
-        return {
-          kind: 'error',
-          reason: 'too-few-views',
-          details: `need >=3 solve views (have ${wasmInput.objectPoints.length})`,
-        }
-      }
-
-      const { objectPoints, imagePoints, frameIds, sharedObjectPointRowKeysSorted } = wasmInput
+      const { objectPoints, imagePoints, frameIds, sharedDesignIds } = built.input
 
       const calibrator = await initCalibrator(calibratorInitOptions(CALIBRATE_WASM_PATH))
-
       const wasmResult = calibrator.calibrateCameraRO({
         objectPoints,
         imagePoints,
@@ -222,25 +94,19 @@ const api: CalibWorkerApi = {
       const K = cameraIntrinsicsFromMatrix(wasmResult.cameraMatrix)
       const distortion = padDistortion(wasmResult.distortionCoefficients)
 
-      const refinedObjectPoints = wasmResult.newObjPoints
-      const updatedTargetsMap = new Map<number, Corners3>(objectTags.map((t) => [t.tagId, [...t.corners]]))
-      for (let i = 0; i < sharedObjectPointRowKeysSorted.length; ++i) {
-        const { tagId, cornerId } = unpackObjectPointRowKey(sharedObjectPointRowKeysSorted[i]!)
-        const [x, y, z] = refinedObjectPoints[i]!
-        const corners = updatedTargetsMap.get(tagId)
-        if (corners) {
-          corners[cornerId] = { x, y, z }
-        }
-      }
-      const tagsUsedInSolve = tagIdsFullySharedAcrossViews(sharedObjectPointRowKeysSorted)
-      const updatedTargets = [...updatedTargetsMap.entries()]
-        .filter(([tagId]) => tagsUsedInSolve.has(tagId))
-        .sort((a, b) => a[0] - b[0])
-        .map(([tagId, corners]): ObjectTag => ({ tagId, corners }))
-
+      const refined = wasmResult.newObjPoints
+      const refinedComplete = refined.length >= sharedDesignIds.length
+      const updatedTargetPoints: TargetObjectPoint[] = sharedDesignIds.map((designId, index) => {
+        const point = refinedComplete ? refined[index]! : objectPoints[0]![index]!
+        return { designId, x: point[0], y: point[1], z: point[2] }
+      })
+      const refinedObjectPoints: [number, number, number][] = updatedTargetPoints.map((point) => [
+        point.x,
+        point.y,
+        point.z,
+      ])
       const refinedObjPointsAligned = imagePoints.map(() => refinedObjectPoints)
 
-      // Compute per-frame RMS via projectPoints
       const projected = calibrator.projectPoints({
         objectPoints: refinedObjPointsAligned,
         rvecs: wasmResult.rvecs,
@@ -250,30 +116,34 @@ const api: CalibWorkerApi = {
       })
 
       const perFrameRmsPx: [number, number][] = []
-      let allSq: number[] = []
-      for (let view = 0; view < frameIds.length; view++) {
+      const allSq: number[] = []
+      for (let view = 0; view < frameIds.length; view += 1) {
         const proj = projected.projectedImagePoints[view]!
-        let sq: number[] = []
-        for (let p = 0; p < proj.length; p++) {
-          const dx = proj[p]![0]! - imagePoints[view]![p]![0]!
-          const dy = proj[p]![1]! - imagePoints[view]![p]![1]!
+        const sq: number[] = []
+        for (let pointIndex = 0; pointIndex < proj.length; pointIndex += 1) {
+          const dx = proj[pointIndex]![0]! - imagePoints[view]![pointIndex]![0]!
+          const dy = proj[pointIndex]![1]! - imagePoints[view]![pointIndex]![1]!
           sq.push(dx * dx + dy * dy)
         }
         if (sq.length > 0) {
-          perFrameRmsPx.push([frameIds[view]!, Math.sqrt(sq.reduce((a, b) => a + b, 0) / sq.length)])
+          perFrameRmsPx.push([
+            frameIds[view]!,
+            Math.sqrt(sq.reduce((sum, value) => sum + value, 0) / sq.length),
+          ])
           allSq.push(...sq)
         }
       }
-      const rmsPx = allSq.length > 0 ? Math.sqrt(allSq.reduce((a, b) => a + b, 0) / allSq.length) : 0
+      const rmsPx =
+        allSq.length > 0
+          ? Math.sqrt(allSq.reduce((sum, value) => sum + value, 0) / allSq.length)
+          : 0
 
-      // Convert extrinsics
       const extrinsics: { frameId: number; R: Mat3; t: Vec3 }[] = []
-      for (let i = 0; i < wasmResult.rvecs.length; i++) {
-        const rvec = wasmResult.rvecs[i]!
-        const tvec = wasmResult.tvecs[i]!
-        const frameId = frameIds[i] ?? i
+      for (let index = 0; index < wasmResult.rvecs.length; index += 1) {
+        const rvec = wasmResult.rvecs[index]!
+        const tvec = wasmResult.tvecs[index]!
         extrinsics.push({
-          frameId,
+          frameId: frameIds[index] ?? index,
           R: rvecToMatrix(rvec),
           t: { x: tvec[0]!, y: tvec[1]!, z: tvec[2]! },
         })
@@ -284,7 +154,7 @@ const api: CalibWorkerApi = {
         K,
         distortion,
         extrinsics,
-        updatedTargets,
+        updatedTargetPoints,
         rmsPx,
         perFrameRmsPx,
         imageSize,

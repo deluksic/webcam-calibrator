@@ -1,6 +1,7 @@
 import type { CalibRun } from '@/components/calibration/CalibrationRunContext'
 import { DEFAULT_CALIBRATION_TOP_K } from '@/lib/calibrationTopK'
 import { formatFixed } from '@/lib/formatFixed'
+import type { HexReprojectionResult } from '@/lib/hexReprojection'
 
 import styles from '@/components/CalibrationView.module.css'
 
@@ -18,17 +19,10 @@ export type CalibMetricsRow =
 export type CalibrationAdvancedMetricsProps = {
   run: CalibRun
   validSolveCount: number
-  uniqueTagCount: number
-  layoutSize: number | undefined
+  uniqueTargetPointCount: number
+  matchedPointCount: number
   calibBlock: CalibMetricsRow
-  reproj:
-    | {
-        rms: number
-        tagCount: number
-        tiltDeg: number
-        dist: number
-      }
-    | undefined
+  reproj: HexReprojectionResult | undefined
 }
 
 export function CalibrationAdvancedMetrics(props: CalibrationAdvancedMetricsProps) {
@@ -38,7 +32,8 @@ export function CalibrationAdvancedMetrics(props: CalibrationAdvancedMetricsProp
       <div class={styles.stats}>
         <div>
           Solver-ready (Results): {props.validSolveCount} / 4 · Pool {props.run.framePool.length} /{' '}
-          {DEFAULT_CALIBRATION_TOP_K} · Layout {props.layoutSize ?? '—'} tags · {props.uniqueTagCount} IDs in pool
+          {DEFAULT_CALIBRATION_TOP_K} · {props.uniqueTargetPointCount} target points in pool ·{' '}
+          {props.matchedPointCount} identified now
         </div>
         <div>
           Stream: {props.run.stats.framesProcessed} frames · {props.run.stats.framesAccepted} snapshots ·{' '}
@@ -57,8 +52,8 @@ export function CalibrationAdvancedMetrics(props: CalibrationAdvancedMetricsProp
         ) : null}
         <div class={styles.statsSection}>Live reprojection</div>
         <div>
-          RMS {props.reproj ? formatFixed(props.reproj.rms, 3) : '—'} px · tags{' '}
-          {props.reproj ? props.reproj.tagCount : '—'} · ‖t‖ {props.reproj ? formatFixed(props.reproj.dist, 3) : '—'} ·
+          RMS {props.reproj ? formatFixed(props.reproj.rms, 3) : '—'} px · points{' '}
+          {props.reproj ? props.reproj.pointCount : '—'} · ‖t‖ {props.reproj ? formatFixed(props.reproj.dist, 3) : '—'} ·
           tilt {props.reproj ? formatFixed(props.reproj.tiltDeg, 1) : '—'}°
         </div>
       </div>

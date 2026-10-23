@@ -1,4 +1,4 @@
-import { invertMat3RowMajor } from '@/lib/aprilTagRaycast'
+import { invertMat3RowMajor } from '@/lib/geometry'
 import { applyHomography, type Mat3 } from '@/lib/geometry'
 import { createRandom } from '@/lib/pointIdentity/random'
 import type { Vec2 } from '@/lib/pointIdentity/types'

@@ -1,6 +1,6 @@
 import * as Comlink from 'comlink'
 
-import type { CalibrationFrameObservation, ObjectTag } from '@/lib/calibrationTypes'
+import type { CalibrationFrameObservation, TargetObjectPoint } from '@/lib/calibrationTypes'
 
 import type { CalibWorkerApi, CalibrationResult, CalibrationOk, CalibrationErr } from './calibration.worker'
 
@@ -21,7 +21,7 @@ export { getWorker }
 
 export interface CalibApi {
   solveCalibration(
-    objectTags: ObjectTag[],
+    targetPoints: TargetObjectPoint[],
     frames: CalibrationFrameObservation[],
     imageSize: { width: number; height: number },
     cameraId: string,
@@ -30,12 +30,12 @@ export interface CalibApi {
 
 export const calibApi: CalibApi = {
   async solveCalibration(
-    objectTags: ObjectTag[],
+    targetPoints: TargetObjectPoint[],
     frames: CalibrationFrameObservation[],
     imageSize: { width: number; height: number },
     cameraId: string,
   ): Promise<CalibrationResult> {
     const w = getWorker()
-    return w.solveCalibration(objectTags, frames, imageSize, cameraId)
+    return w.solveCalibration(targetPoints, frames, imageSize, cameraId)
   },
 }

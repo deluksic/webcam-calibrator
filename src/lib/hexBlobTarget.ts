@@ -6,6 +6,8 @@ export type HexTargetSpec = {
   widthPx: number
   heightPx: number
   columns: number
+  /** Optional explicit cell-row count; omitted keeps the automatic fill. */
+  rows?: number
   pointsPerEdge: number
   markerScale: number
   colorSeed: number
@@ -29,6 +31,7 @@ export type HexTargetLayout = {
   paddingXPx: number
   paddingYPx: number
   columns: number
+  rows: number
   pointsPerEdge: number
   spacingPx: number
   sidePx: number
@@ -41,7 +44,7 @@ export type HexTargetLayout = {
 
 const MIN_PADDING_PX = 8
 const DEFAULT_PADDING_FRACTION = 0.1
-const DEFAULT_MARKER_SCALE = 0.45
+const DEFAULT_MARKER_SCALE = 0.4
 const MIN_GAP_FRACTION = 0.06
 
 function clamp(value: number, min: number, max: number): number {
@@ -71,6 +74,7 @@ export function buildHexTargetLayout(spec: HexTargetSpec): HexTargetLayout {
     paddingXPx,
     paddingYPx,
     columns,
+    rows: 0,
     pointsPerEdge,
     spacingPx: 0,
     sidePx: 0,
@@ -82,7 +86,7 @@ export function buildHexTargetLayout(spec: HexTargetSpec): HexTargetLayout {
     return base
   }
 
-  const pattern = generateHexPattern({ columns, pointsPerEdge })
+  const pattern = generateHexPattern({ columns, rows: spec.rows, pointsPerEdge })
   if (pattern.points.length === 0) {
     return base
   }
@@ -154,6 +158,7 @@ export function buildHexTargetLayout(spec: HexTargetSpec): HexTargetLayout {
 
   return {
     ...base,
+    rows: pattern.stats.rows,
     spacingPx: Math.round(medianNearest),
     sidePx,
     quads,

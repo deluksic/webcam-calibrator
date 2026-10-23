@@ -49,7 +49,7 @@ const MIN_ZOOM = 1
 const MAX_ZOOM = 12
 const WHEEL_SENSITIVITY = 0.0018
 const IDENTITY_DEFAULTS = {
-  columns: Math.min(14, Math.max(2, Number(QUERY.get('columns')) || 7)),
+  columns: Math.min(14, Math.max(2, Number(QUERY.get('columns')) || 8)),
   pointsPerEdge: Math.min(6, Math.max(1, Number(QUERY.get('points')) || 4)),
   colorSeed: Math.max(0, Math.round(Number(QUERY.get('seed')) || 1)),
   depth: Math.min(
@@ -788,7 +788,7 @@ export const RoiLabView: Component = () => {
                 max="14"
                 value={identityColumns()}
                 onChange={(event) => {
-                  setIdentityColumns(Math.min(14, Math.max(2, Math.round(Number(event.currentTarget.value) || 7))))
+                  setIdentityColumns(Math.min(14, Math.max(2, Math.round(Number(event.currentTarget.value) || 8))))
                 }}
               />
             </label>

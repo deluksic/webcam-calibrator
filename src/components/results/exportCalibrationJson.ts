@@ -1,11 +1,10 @@
 import type { CalibrationFrameObservation } from '@/lib/calibrationTypes'
+import { DEFAULT_TARGET_CONFIG } from '@/lib/hexTarget/config'
+import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
+import { randomBinaryColors } from '@/lib/pointIdentity/random'
 import type { CalibrationOk } from '@/workers/calibration.worker'
 
-function floatGrayToPngBlob(
-  gray: Float32Array,
-  width: number,
-  height: number,
-): Promise<Blob> {
+function floatGrayToPngBlob(gray: Float32Array, width: number, height: number): Promise<Blob> {
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
@@ -38,14 +37,55 @@ function downloadJson(obj: unknown, filename: string) {
   downloadBlob(blob, filename)
 }
 
+function hexExport(
+  calibration: CalibrationOk,
+  observations: CalibrationOk['observations'] = [],
+  frameImages: Record<string, string> = {},
+) {
+  const config = calibration.targetConfig ?? DEFAULT_TARGET_CONFIG
+  const pattern = generateHexPattern({
+    columns: config.columns,
+    rows: config.rows,
+    pointsPerEdge: config.pointsPerEdge,
+  })
+  const colors = randomBinaryColors(pattern.points.length, config.colorSeed)
+  const { updatedTargetPoints, targetConfig: _targetConfig, ...rest } = calibration
+  void _targetConfig
+  return {
+    schemaVersion: 2,
+    ...rest,
+    target: {
+      kind: 'hex',
+      columns: config.columns,
+      rows: config.rows,
+      pointsPerEdge: config.pointsPerEdge,
+      colorSeed: config.colorSeed,
+      markerScale: config.markerScale,
+      identityDepth: config.identityDepth,
+      widthPx: config.widthPx ?? calibration.imageSize.width,
+      heightPx: config.heightPx ?? calibration.imageSize.height,
+      objectUnits: 'median-design-spacing',
+      colors,
+      markers: updatedTargetPoints.map((point) => ({
+        designId: point.designId,
+        x: point.x,
+        y: point.y,
+        z: point.z,
+      })),
+    },
+    frameImages,
+    observations,
+  }
+}
+
 export function downloadCalibrationOkJson(c: CalibrationOk) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  downloadJson(c, `calibration-ok-${stamp}.json`)
+  downloadJson(hexExport(c), `calibration-ok-${stamp}.json`)
 }
 
 /**
- * Enriches the calibration result with frame image references and downloads
- * the JSON plus PNG files for each frame that has gray data.
+ * Enriches the calibration result with target metadata, frame image references,
+ * and per-frame point observations; downloads JSON plus one PNG per frame.
  */
 export async function downloadCalibrationOkWithImages(
   c: CalibrationOk,
@@ -55,48 +95,33 @@ export async function downloadCalibrationOkWithImages(
   const imageFilePrefix = (frameId: number) => `frame_${frameId}.png`
 
   const frameImages: Record<string, string> = {}
-  const observations: CalibrationOk['observations'] = []
-
+  const observations: NonNullable<CalibrationOk['observations']> = []
   const pngDownloads: Promise<void>[] = []
 
   for (const frame of framePool) {
+    const points = frame.points.map((point) => ({
+      designId: point.designId,
+      x: point.x,
+      y: point.y,
+    }))
     if (!frame.grayData || !frame.imageWidth || !frame.imageHeight) {
-      observations.push({
-        frameId: frame.frameId,
-        imageFile: '',
-        tags: frame.tags.map((t) => ({
-          tagId: t.tagId,
-          corners: [t.corners[0], t.corners[1], t.corners[2], t.corners[3]],
-        })),
-      })
+      observations.push({ frameId: frame.frameId, imageFile: '', points })
       continue
     }
-
     const filename = imageFilePrefix(frame.frameId)
     frameImages[String(frame.frameId)] = filename
-
-    observations.push({
-      frameId: frame.frameId,
-      imageFile: filename,
-      tags: frame.tags.map((t) => ({
-        tagId: t.tagId,
-        corners: [t.corners[0], t.corners[1], t.corners[2], t.corners[3]],
-      })),
-    })
-
+    observations.push({ frameId: frame.frameId, imageFile: filename, points })
     pngDownloads.push(
-      floatGrayToPngBlob(frame.grayData, frame.imageWidth, frame.imageHeight).then(
-        (blob) => downloadBlob(blob, filename),
+      floatGrayToPngBlob(frame.grayData, frame.imageWidth, frame.imageHeight).then((blob) =>
+        downloadBlob(blob, filename),
       ),
     )
   }
 
-  const enriched: CalibrationOk = { ...c, frameImages, observations }
-  downloadJson(enriched, `calibration-ok-${stamp}.json`)
+  downloadJson(hexExport(c, observations, frameImages), `calibration-ok-${stamp}.json`)
 
-  // Download PNGs after a short delay so the browser doesn't block them
   for (let i = 0; i < pngDownloads.length; i++) {
-    await new Promise((r) => setTimeout(r, 100))
+    await new Promise((resolve) => setTimeout(resolve, 100))
     await pngDownloads[i]
   }
 }

@@ -2,46 +2,32 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
 import type { CalibrationFrameObservation } from '@/lib/calibrationTypes'
-import type { Corners } from '@/lib/geometry'
 
-function frame(frameId: number, tagScores: { tagId: number; score: number }[]): CalibrationFrameObservation {
-  const tags = tagScores.map(({ tagId, score }) => ({
-    tagId,
-    corners: [
-      { x: 0, y: 0, score },
-      { x: 0, y: 0, score },
-      { x: 0, y: 0, score },
-      { x: 0, y: 0, score },
-    ] satisfies Corners,
-  }))
+function frame(frameId: number, scores: number[]): CalibrationFrameObservation {
   return {
     frameId,
-    tags,
+    points: scores.map((score, index) => ({ designId: index, x: index, y: index, score })),
   }
 }
 
 describe('mergeCalibrationFramesTopK', () => {
-  it('evicts lowest aggregate score when over K', () => {
+  it('evicts the lowest aggregate score when over K', () => {
     const k = 3
-    const a = mergeCalibrationFramesTopK(
+    const first = mergeCalibrationFramesTopK(
       [],
-      [
-        frame(1, [{ tagId: 1, score: 0.5 }]),
-        frame(1, [{ tagId: 2, score: 0.9 }]),
-        frame(1, [{ tagId: 3, score: 0.7 }]),
-      ],
+      [frame(1, [0.5]), frame(2, [0.9]), frame(3, [0.7])],
       k,
     )
-    expect(a.next.length).toBe(3)
-    const b = mergeCalibrationFramesTopK(a.next, [frame(2, [{ tagId: 4, score: 0.2 }])], k)
-    expect(b.evicted).toBe(1)
-    expect(b.next.length).toBe(3)
-    const tagIds = b.next.flatMap((f) => f.tags.map((t) => t.tagId))
-    expect(tagIds).not.toContain(4)
-    expect(tagIds).toContain(1)
+    expect(first.next).toHaveLength(3)
+    const second = mergeCalibrationFramesTopK(first.next, [frame(4, [0.2])], k)
+    expect(second.evicted).toBe(1)
+    expect(second.next).toHaveLength(3)
+    const frameIds = second.next.map((item) => item.frameId)
+    expect(frameIds).not.toContain(4)
+    expect(frameIds).toContain(1)
   })
 
-  it('respects DEFAULT_CALIBRATION_TOP_K export', () => {
+  it('respects the exported default cap', () => {
     expect(DEFAULT_CALIBRATION_TOP_K).toBeGreaterThan(1000)
   })
 })

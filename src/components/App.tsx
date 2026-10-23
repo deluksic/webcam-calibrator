@@ -1,20 +1,16 @@
-import { A, HashRouter, Navigate, Route, type RouteSectionProps, useCurrentMatches } from '@solidjs/router'
+import { A, HashRouter, Route, type RouteSectionProps, useCurrentMatches } from '@solidjs/router'
 import { Loading, Show, createMemo, lazy } from 'solid-js'
 
 import { CalibrationLibraryProvider } from '@/components/calibration/CalibrationLibraryContext'
 import { CalibrationRunProvider, useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
 import { CameraStreamProvider } from '@/components/camera/CameraStreamContext'
 import { Home } from '@/components/Home'
-import { TargetView } from '@/components/TargetView'
 import { VERSION } from '@/version'
 
 import styles from '@/components/App.module.css'
 
 const CalibrationView = lazy(() => import('@/components/CalibrationView').then((m) => ({ default: m.CalibrationView })))
 const ResultsView = lazy(() => import('@/components/results/ResultsView').then((m) => ({ default: m.ResultsView })))
-const GradientProfilesView = lazy(() =>
-  import('@/components/gradientProfiles/GradientProfilesView').then((m) => ({ default: m.GradientProfilesView })),
-)
 const PointLabView = lazy(() => import('@/components/pointLab/PointLabView').then((m) => ({ default: m.PointLabView })))
 const HexTargetView = lazy(() => import('@/components/HexTargetView').then((m) => ({ default: m.HexTargetView })))
 const RoiLabView = lazy(() => import('@/components/roiLab/RoiLabView').then((m) => ({ default: m.RoiLabView })))
@@ -40,9 +36,7 @@ export function App() {
     const isCalibrate = createMemo(() => currentPath() === '/calibrate')
     const isResults = createMemo(() => currentPath() === '/results')
     const isPointLab = createMemo(() => currentPath() === '/point-lab')
-    const isHexTarget = createMemo(() => currentPath() === '/hex-target')
     const isRoiLab = createMemo(() => currentPath() === '/roi-lab')
-    const isDebug = createMemo(() => currentPath() === '/debug')
 
     return (
       <>
@@ -69,14 +63,8 @@ export function App() {
           <A href="/point-lab" class={[styles.navBtn, isPointLab() && styles.navBtnActive]}>
             Point Lab
           </A>
-          <A href="/hex-target" class={[styles.navBtn, isHexTarget() && styles.navBtnActive]}>
-            Hex Target
-          </A>
           <A href="/roi-lab" class={[styles.navBtn, isRoiLab() && styles.navBtnActive]}>
             ROI Lab
-          </A>
-          <A href="/debug" class={[styles.navBtn, isDebug() && styles.navBtnActive]}>
-            Debug
           </A>
           <span class={styles.version}>{VERSION}</span>
           <a
@@ -100,14 +88,11 @@ export function App() {
           <HashRouter root={Layout}>
             <Loading fallback={<div class={styles.routeLoading}>Loading…</div>}>
               <Route path="/" component={Home} />
-              <Route path="/target" component={TargetView} />
+              <Route path="/target" component={HexTargetView} />
               <Route path="/calibrate" component={CalibrationView} />
               <Route path="/results" component={ResultsView} />
               <Route path="/point-lab" component={PointLabView} />
-              <Route path="/hex-target" component={HexTargetView} />
               <Route path="/roi-lab" component={RoiLabView} />
-              <Route path="/debug" component={GradientProfilesView} />
-              <Route path="/gradient-profiles" component={() => <Navigate href="/debug" />} />
             </Loading>
           </HashRouter>
         </CalibrationLibraryProvider>

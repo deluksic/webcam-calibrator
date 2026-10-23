@@ -5,8 +5,6 @@ import type { AxisPassUniformGpuBuffer } from '@/gpu/pipelines/resultsAxesPipeli
 import { createMarkerResultsStage } from '@/gpu/pipelines/resultsMarkerPipeline'
 import type { MarkerPassUniformGpuBuffer, MarkersCentersBuffer } from '@/gpu/pipelines/resultsMarkerPipeline'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
-import { createTagQuadsResultsStage } from '@/gpu/pipelines/resultsTagQuadsPipeline'
-import type { TagQuadsResultsBuffer } from '@/gpu/pipelines/resultsTagQuadsPipeline'
 import {
   allocResultsCameraUniform,
   resultsCameraBindLayout,
@@ -25,15 +23,14 @@ export interface ResultsOrbitCanvasPipeline {
   markerUniform: MarkerPassUniformGpuBuffer
   axisUniform: AxisPassUniformGpuBuffer
   centersBuf: MarkersCentersBuffer
-  tagQuadsBuf: TagQuadsResultsBuffer
   resize: (width: number, height: number) => void
   clearAttachments: () => void
-  encodeScene: (markerInstances: number, tagCount: number) => void
+  encodeScene: (markerInstances: number) => void
   destroyTargets: () => void
 }
 
 /**
- * Results 3D orbit canvas: shared camera bind group + marker / tag / axis stages.
+ * Results 3D orbit canvas: shared camera bind group + marker / axis stages.
  */
 export function createResultsOrbitCanvasPipeline(
   root: TgpuRoot,
@@ -52,7 +49,6 @@ export function createResultsOrbitCanvasPipeline(
 
   const markerStage = createMarkerResultsStage(root, format)
   const axesStage = createAxesResultsStage(root, format)
-  const tagStage = createTagQuadsResultsStage(root, format)
 
   let msaaColorTex: GPUTexture | undefined
   let depthTex: GPUTexture | undefined
@@ -104,7 +100,7 @@ export function createResultsOrbitCanvasPipeline(
     root.device.queue.submit([enc.finish()])
   }
 
-  function encodeScene(markerInstances: number, tagCount: number) {
+  function encodeScene(markerInstances: number) {
     if (!msaaColorTex || !depthTex) {
       return
     }
@@ -130,7 +126,6 @@ export function createResultsOrbitCanvasPipeline(
     })
 
     axesStage.encodeToPass(pass, cameraBg)
-    tagStage.encodeToPass(pass, cameraBg, tagCount)
     markerStage.encodeToPass(pass, cameraBg, markerInstances)
 
     pass.end()
@@ -152,7 +147,6 @@ export function createResultsOrbitCanvasPipeline(
     markerUniform: markerStage.markerUniform,
     axisUniform: axesStage.axisUniform,
     centersBuf: markerStage.centersBuf,
-    tagQuadsBuf: tagStage.tagQuadsBuf,
     resize,
     clearAttachments,
     encodeScene,
