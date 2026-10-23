@@ -1,4 +1,4 @@
-import type { SampledFlag, TgpuRoot, TgpuTexture } from 'typegpu'
+import type { SampledFlag, TgpuSampler, TgpuRoot, TgpuTexture } from 'typegpu'
 import { d, std, tgpu } from 'typegpu'
 import { atomicAdd, atomicLoad, atomicMax, atomicStore, clamp, intdiv, max, min, sqrt } from 'typegpu/std'
 
@@ -9,13 +9,16 @@ import { RoiCircleInstance, RoiCircleSchema, RoiDrawIndirect } from '@/gpu/roiLa
 const COMPONENT_LABEL_INVALID = 0xffff_ffff
 const POINTER_JUMP_STEPS = 6
 const MIN_COMPONENT_AREA = 4
-const MAX_COMPONENTS = 4096
+// Fixed compact-component cap. The default target has ~476 markers; 2048
+// leaves headroom while keeping the NMS loops and fixed readback small.
+const MAX_COMPONENTS = 2048
 const SUPPRESSED_BIT = 0x8000_0000
 
 const componentParams = d.struct({
   blackCut: d.u32,
   whiteCut: d.u32,
   valid: d.u32,
+  residualGain: d.f32,
 })
 
 const NmsStats = d.struct({
@@ -33,6 +36,8 @@ const ComponentStats = d.struct({
 const rawLayout = tgpu.bindGroupLayout({
   cameraTexture: { texture: d.texture2d() },
   maskTexture: { texture: d.texture2d() },
+  backgroundTexture: { texture: d.texture2d() },
+  sampler: { sampler: 'filtering' },
   raw: { storage: d.arrayOf(d.u32), access: 'mutable' },
   params: { uniform: componentParams },
 })
@@ -117,9 +122,16 @@ export type RoiComponentPoint = {
   color: 0 | 1
 }
 
+export type RoiComponentReadback = {
+  points: RoiComponentPoint[]
+  count: number
+  bytesCopied: number
+  truncated: boolean
+}
+
 export type RoiComponentsStage = {
   encodeComponents: () => void
-  readComponents: () => Promise<RoiComponentPoint[]>
+  readComponents: () => Promise<RoiComponentReadback>
   setThresholds: (blackCut: number, whiteCut: number, valid: boolean) => void
   destroy: () => void
   circleBuffer: ReturnType<TgpuRoot['createBuffer']>
@@ -133,6 +145,8 @@ export function createRoiComponentsStage(
   frameHeight: number,
   cameraTexture: TgpuTexture & SampledFlag,
   maskTexture: TgpuTexture & SampledFlag,
+  backgroundTexture: TgpuTexture & SampledFlag,
+  sampler: TgpuSampler,
 ): RoiComponentsStage {
   const area = frameWidth * frameHeight
   const rawBuffer = root.createBuffer(d.arrayOf(d.u32, area)).$usage('storage')
@@ -172,6 +186,7 @@ export function createRoiComponentsStage(
     blackCut: 0,
     whiteCut: 256,
     valid: 0,
+    residualGain: 1,
   })
 
   const rawPipeline = root.createGuardedComputePipeline((x: number, y: number) => {
@@ -193,8 +208,22 @@ export function createRoiComponentsStage(
       return
     }
     const color = std.textureLoad(rawLayout.$.cameraTexture, d.vec2u(px, py), d.i32(0))
+    const uv = (d.vec2f(px, py) + d.vec2f(0.5, 0.5)).div(
+      d.vec2f(d.f32(frameWidth), d.f32(frameHeight)),
+    )
+    const background = std.textureSampleLevel(
+      rawLayout.$.backgroundTexture,
+      rawLayout.$.sampler,
+      uv,
+      d.f32(0),
+    ).r
     const luma = std.dot(color.rgb, d.vec3f(0.299, 0.587, 0.114))
-    const bin = d.u32(std.clamp(luma, d.f32(0), d.f32(1)) * d.f32(255) + d.f32(0.5))
+    const flattened = std.clamp(
+      d.f32(0.5) + (luma - background) * params.residualGain,
+      d.f32(0),
+      d.f32(1),
+    )
+    const bin = d.u32(flattened * d.f32(255) + d.f32(0.5))
     if (bin < params.blackCut) {
       rawLayout.$.raw[index] = d.u32(1)
     } else if (bin >= params.whiteCut) {
@@ -513,6 +542,8 @@ export function createRoiComponentsStage(
   const rawBindGroup = root.createBindGroup(rawLayout, {
     cameraTexture,
     maskTexture,
+    backgroundTexture,
+    sampler,
     raw: rawBuffer,
     params: paramsBuffer,
   })
@@ -585,10 +616,11 @@ export function createRoiComponentsStage(
     labelTexture,
     async readComponents() {
       if (componentReadbackBusy) {
-        return []
+        return { points: [], count: 0, bytesCopied: 0, truncated: false }
       }
       componentReadbackBusy = true
       try {
+        const bytesCopied = 4 + MAX_COMPONENTS * 16
         const encoder = root.device.createCommandEncoder({ label: 'roi-component-readback' })
         encoder.copyBufferToBuffer(root.unwrap(filteredCountBuffer), 0, componentReadbackBuffer, 0, 4)
         encoder.copyBufferToBuffer(
@@ -599,9 +631,11 @@ export function createRoiComponentsStage(
           MAX_COMPONENTS * 16,
         )
         root.device.queue.submit([encoder.finish()])
-        await componentReadbackBuffer.mapAsync(GPUMapMode.READ)
-        const view = new DataView(componentReadbackBuffer.getMappedRange())
-        const count = Math.min(view.getUint32(0, true), MAX_COMPONENTS)
+        await componentReadbackBuffer.mapAsync(GPUMapMode.READ, 0, bytesCopied)
+        const view = new DataView(componentReadbackBuffer.getMappedRange(0, bytesCopied))
+        const rawCount = view.getUint32(0, true)
+        const count = Math.min(rawCount, MAX_COMPONENTS)
+        const truncated = rawCount > MAX_COMPONENTS
         const points: RoiComponentPoint[] = []
         for (let index = 0; index < count; index += 1) {
           const offset = 4 + index * 16
@@ -612,7 +646,7 @@ export function createRoiComponentsStage(
             color: polarity === 0 ? 0 : 1,
           })
         }
-        return points
+        return { points, count, bytesCopied, truncated }
       } finally {
         if (componentReadbackBuffer.mapState === 'mapped') {
           componentReadbackBuffer.unmap()
@@ -625,6 +659,7 @@ export function createRoiComponentsStage(
         blackCut,
         whiteCut,
         valid: valid ? 1 : 0,
+        residualGain: 1,
       })
     },
     encodeComponents() {

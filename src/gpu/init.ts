@@ -62,7 +62,11 @@ async function createSharedGPUForOnnx(): Promise<SharedOnnxGpu> {
   if (!adapter) {
     throw new Error('No WebGPU adapter available.')
   }
-  const device = await adapter.requestDevice()
+  const requiredFeatures: GPUFeatureName[] = []
+  if (adapter.features.has('timestamp-query')) {
+    requiredFeatures.push('timestamp-query')
+  }
+  const device = await adapter.requestDevice({ requiredFeatures })
   const gpu = navigator.gpu
   originalGpuRequestAdapter ??= gpu.requestAdapter.bind(gpu)
   originalAdapterRequestDevice ??= adapter.requestDevice.bind(adapter)

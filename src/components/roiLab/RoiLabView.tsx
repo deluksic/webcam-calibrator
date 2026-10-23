@@ -11,6 +11,7 @@ import {
   createRoiLabPipeline,
   type RoiHistogramUpdate,
   type RoiLabPipeline,
+  type RoiStepTimings,
 } from '@/gpu/roiLab/roiLabPipeline'
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
 import { computeFingerprints, createIdentityIndexesByDepth } from '@/lib/pointIdentity/identity'
@@ -199,6 +200,7 @@ export const RoiLabView: Component = () => {
   const [identityRecovery, setIdentityRecovery] = createSignal(true)
   const [identityMetrics, setIdentityMetrics] = createSignal<IdentityMetrics>()
   const [identityPerf, setIdentityPerf] = createSignal<IdentityPerf>()
+  const [stepTimings, setStepTimings] = createSignal<RoiStepTimings>()
   const [seedScanRange, setSeedScanRange] = createSignal(512)
   const [seedScan, setSeedScan] = createSignal<{
     scanning: boolean
@@ -612,6 +614,7 @@ export const RoiLabView: Component = () => {
                     identityMs: timings.identityMs,
                     frameId: timings.frameId,
                   })
+                  setStepTimings(timings.steps)
                 })
                 .catch((cause: unknown) => {
                   if (!cancelled && !disposed) {
@@ -1012,6 +1015,71 @@ export const RoiLabView: Component = () => {
           <dd>256 × height</dd>
           <dt>ONNX</dt>
           <dd>297 KiB</dd>
+          <Show when={stepTimings()}>
+            {(timings) => (
+              <>
+                <dt>Stats readback</dt>
+                <dd>
+                  {timings().imageStatsMs.toFixed(2)} ms · age {timings().statsAgeFrames}
+                  {timings().statsRefreshed ? ' · refreshed' : ''}
+                </dd>
+                <dt>Preprocess</dt>
+                <dd>{timings().preprocessMs.toFixed(2)} ms</dd>
+                <dt>Queue wait</dt>
+                <dd>{timings().queueWaitMs.toFixed(2)} ms</dd>
+                <dt>Camera copy</dt>
+                <dd>{timings().cameraCopyMs.toFixed(2)} ms</dd>
+                <dt>Mask</dt>
+                <dd>{timings().maskMs.toFixed(2)} ms</dd>
+                <dt>Background</dt>
+                <dd>{timings().backgroundMs.toFixed(2)} ms</dd>
+                <dt>Components</dt>
+                <dd>{timings().componentsEncodeMs.toFixed(2)} ms</dd>
+                <dt>Debug input</dt>
+                <dd>{timings().debugInputMs.toFixed(2)} ms</dd>
+                <dt>Readback</dt>
+                <dd>
+                  {timings().readbackMs.toFixed(2)} ms · {timings().readbackComponents} components ·{' '}
+                  {(timings().readbackBytes / 1024).toFixed(1)} KiB
+                  {timings().readbackTruncated ? ' · truncated at cap' : ''}
+                </dd>
+                <dt>Identity</dt>
+                <dd>{timings().identityMs.toFixed(2)} ms</dd>
+                <dt>Render</dt>
+                <dd>{timings().renderMs.toFixed(2)} ms</dd>
+                <dt>Inference run</dt>
+                <dd>{timings().inferenceRunMs.toFixed(2)} ms</dd>
+                <dt>Inference drain</dt>
+                <dd>{timings().inferenceDrainMs.toFixed(2)} ms</dd>
+                <dt>Frame drain</dt>
+                <dd>{timings().frameDrainMs.toFixed(2)} ms</dd>
+                <dt>Histogram submit</dt>
+                <dd>{timings().histogramMs.toFixed(2)} ms</dd>
+                <dt>Accounted / total</dt>
+                <dd>
+                  {timings().accountedMs.toFixed(2)} / {timings().totalMs.toFixed(2)} ms
+                </dd>
+                <dt>Overhead</dt>
+                <dd>{timings().overheadMs.toFixed(2)} ms</dd>
+                <dt>GPU preprocess</dt>
+                <dd>{timings().gpuMs.preprocess?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU copy</dt>
+                <dd>{timings().gpuMs.cameraCopy?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU mask</dt>
+                <dd>{timings().gpuMs.mask?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU bg blur</dt>
+                <dd>
+                  {(
+                    (timings().gpuMs.backgroundWeight ?? 0) +
+                    (timings().gpuMs.backgroundHorizontal ?? 0) +
+                    (timings().gpuMs.backgroundVertical ?? 0) +
+                    (timings().gpuMs.backgroundTexture ?? 0)
+                  ).toFixed(2)}{' '}
+                  ms
+                </dd>
+              </>
+            )}
+          </Show>
           <dt>Inference</dt>
           <dd>{inferenceMs().toFixed(2)} ms</dd>
           <dt>Total</dt>

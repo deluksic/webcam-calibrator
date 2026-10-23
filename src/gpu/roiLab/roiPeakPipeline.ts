@@ -17,7 +17,7 @@ export const ROI_PEAK_MAX_CANDIDATES = 4096
 export const ROI_PEAK_MIN_RESPONSE = 0.004
 export const ROI_PEAK_BLUR_RADIUS = 4
 export const ROI_PEAK_GAP_FRACTION = 0.07
-export const ROI_PEAK_MAX_CIRCLES = 4096
+export const ROI_PEAK_MAX_CIRCLES = 2048
 
 export const ROI_REJECT_LOW_RESPONSE = 1
 export const ROI_REJECT_FIT = 2

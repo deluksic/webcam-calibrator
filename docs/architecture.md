@@ -32,6 +32,7 @@ The target is configured on the Target page: columns, rows, points per cell edge
 - [`target.ts`](../src/lib/hexTarget/target.ts) — pattern/color generation from a config, proximity graph, depth indexes, and normalized object points.
 - [`hexBlobTarget.ts`](../src/lib/hexBlobTarget.ts) — display layout: integer pixel squares, padding, resolution-independent design points.
 - [`match.ts`](../src/lib/hexTarget/match.ts) — observed graph + hash match + local-ICP recovery. Returns matched identities, observed edges, and counts.
+- [`roiBackgroundPipeline.ts`](../src/gpu/roiLab/roiBackgroundPipeline.ts) — mask-aware low-frequency illumination estimate from the ONNX downsample.
 - [`calibrationPoints.ts`](../src/lib/hexTarget/calibrationPoints.ts) — accepts resolved markers and safe recovered markers; rejects duplicate design IDs for the frame.
 
 Object coordinates are the design-space marker centers divided by the median lattice spacing, with `z = 0`. Calibration is therefore scale-free; extrinsics are in “design-spacing” units. The export names this unit explicitly.

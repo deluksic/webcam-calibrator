@@ -4,7 +4,12 @@ import { Show, createEffect, createMemo, createSignal, createTrackedEffect } fro
 import { CalibrateFocusOverlay } from '@/components/calibration/CalibrateFocusOverlay'
 import type { RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
 import type { RoiComponentPoint } from '@/gpu/roiLab/roiComponentsPipeline'
-import { ROI_MODEL_WIDTH, createRoiLabPipeline, type RoiLabPipeline } from '@/gpu/roiLab/roiLabPipeline'
+import {
+  ROI_MODEL_WIDTH,
+  createRoiLabPipeline,
+  type RoiLabPipeline,
+  type RoiStepTimings,
+} from '@/gpu/roiLab/roiLabPipeline'
 import { initSharedGPUForOnnx } from '@/gpu/init'
 import type { CalibrationFrameObservation, CalibrationPointObservation } from '@/lib/calibrationTypes'
 import { toCalibrationFramePoints } from '@/lib/hexTarget/calibrationPoints'
@@ -39,6 +44,7 @@ export type HexCameraPipelineProps = {
   setRequestSnapshot?: (request: ((callback: SnapshotCallback) => void) | undefined) => void
   reprojection?: HexReprojectionResult
   showFocusOverlay?: boolean
+  onTimings?: (timings: RoiStepTimings) => void
 }
 
 function captureGray(
@@ -261,7 +267,8 @@ export const HexCameraPipeline: Component<HexCameraPipelineProps> = (props) => {
             busy = true
             inFlight = pipeline
               .processFrame(video)
-              .then(() => {
+              .then((timings) => {
+                props.onTimings?.(timings.steps)
                 deviceLossRetries = 0
                 return undefined
               })

@@ -1,7 +1,8 @@
 /**
  * Threshold selection for the ROI-lab blob segmentation.
  *
- * The ROI mask covers the gray target, so the masked luma histogram is
+ * The ROI mask covers the gray target. The pipeline first removes the
+ * low-frequency illumination field, so the masked flattened-luma histogram is
  * dominated by one background peak roughly in the middle of the range.
  *
  *   1. Find that peak.
@@ -19,7 +20,7 @@ export const ROI_HISTOGRAM_BINS = 256
 export type RoiHistogramAnalysis = {
   /** True when at least one usable black/white cut was found. */
   valid: boolean
-  /** Bin index (0..255) of the dominant masked luma, i.e. the target gray. */
+  /** Bin index (0..255) of the dominant masked flattened luma, i.e. the target gray. */
   backgroundBin: number
   /** Bins below this value are black blobs. `0` disables the black class. */
   blackCut: number
@@ -94,7 +95,7 @@ function meanBin(counts: ArrayLike<number>, start: number, endExclusive: number)
 }
 
 /**
- * Analyze a masked luma histogram and return black/white bins for the shader.
+ * Analyze a masked flattened-luma histogram and return black/white bins for the shader.
  *
  * A cut of `0` (black) or `256` (white) means that class is disabled, so an
  * invalid split does not paint half the gray target as blobs.

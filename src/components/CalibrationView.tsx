@@ -16,6 +16,7 @@ import { formatFixed } from '@/lib/formatFixed'
 import { hexTargetConfigFromSearchParams, TARGET_MIN_CAPTURE_POINTS } from '@/lib/hexTarget/config'
 import type { HexTargetMatch } from '@/lib/hexTarget/match'
 import { buildHexReprojection, type HexReprojectionResult } from '@/lib/hexReprojection'
+import type { RoiStepTimings } from '@/gpu/roiLab/roiLabPipeline'
 
 import styles from '@/components/CalibrationView.module.css'
 
@@ -34,6 +35,7 @@ function CalibrationView() {
   const [searchParams] = useSearchParams<Record<string, string>>()
   const [snapshotFeedback, setSnapshotFeedback] = createSignal<SnapshotFeedback>({ kind: 'idle' })
   const [reproj, setReproj] = createSignal<HexReprojectionResult>()
+  const [pipelineTimings, setPipelineTimings] = createSignal<RoiStepTimings>()
   const [currentMatch, setCurrentMatch] = createSignal<HexTargetMatch>()
   const [currentPoints, setCurrentPoints] = createSignal<CalibrationPointObservation[]>([])
   const [requestSnapshotFn, setRequestSnapshotFn] = createSignal<
@@ -312,6 +314,7 @@ function CalibrationView() {
             targetModel={runCtx.targetModel()}
             reprojection={reproj()}
             showFocusOverlay={runCtx.run().framePool.length < 1}
+            onTimings={setPipelineTimings}
           />
         </div>
       </Errored>
@@ -395,6 +398,7 @@ function CalibrationView() {
         matchedPointCount={currentMatchedCount()}
         calibBlock={calibBlock()}
         reproj={reproj()}
+        timings={pipelineTimings()}
       />
     </div>
   )

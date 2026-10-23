@@ -263,7 +263,7 @@ change the blob detection pipeline above.
 
 ## Implementation status
 
-The production path uses the implemented ONNX mask + histogram + component
+The production path uses the implemented ONNX mask + illumination flattening + histogram + component
 pipeline. Identity/calibration integration is complete: resolved and safe
 recovered markers become object/image point correspondences for the calibration
 worker. Temporal tracking and printed targets remain future work.
