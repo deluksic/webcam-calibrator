@@ -453,7 +453,10 @@ export async function createRoiLabPipeline(
     'inference',
     'mask',
     'background',
-    'components',
+    'componentsMorphology',
+    'componentsLabeling',
+    'componentsStats',
+    'componentsNms',
     'cameraCopy',
     'render',
     'histogram',
@@ -689,7 +692,10 @@ export async function createRoiLabPipeline(
   const preprocessBracket = createGpuBracket('preprocess')
   const inferenceBracket = createGpuBracket('inference')
   const backgroundBracket = createGpuBracket('background')
-  const componentsBracket = createGpuBracket('components')
+  const morphologyBracket = createGpuBracket('componentsMorphology')
+  const labelingBracket = createGpuBracket('componentsLabeling')
+  const statsBracket = createGpuBracket('componentsStats')
+  const nmsBracket = createGpuBracket('componentsNms')
   const renderBracket = createGpuBracket('render')
   const imageStatsSamplePipeline = root.createGuardedComputePipeline(sampleImageLuma)
   const imageStatsReducePipeline = root.createGuardedComputePipeline(reduceImageStats)
@@ -1132,9 +1138,18 @@ export async function createRoiLabPipeline(
     frameSerial++
     const frameId = frameSequence++
     const componentsStart = performance.now()
-    componentsBracket.begin()
-    slot.componentsStage.encodeComponents()
-    componentsBracket.end()
+    morphologyBracket.begin()
+    slot.componentsStage.encodeMorphology()
+    morphologyBracket.end()
+    labelingBracket.begin()
+    slot.componentsStage.encodeLabeling()
+    labelingBracket.end()
+    statsBracket.begin()
+    slot.componentsStage.encodeStats()
+    statsBracket.end()
+    nmsBracket.begin()
+    slot.componentsStage.encodeNms()
+    nmsBracket.end()
     const componentsEncodeMs = performance.now() - componentsStart
 
     const readbackStart = performance.now()
@@ -1263,6 +1278,9 @@ export async function createRoiLabPipeline(
     setViewMode(mode) {
       overlayMode = mode
       writeOverlayParams()
+      for (const slot of slots) {
+        slot.componentsStage.setLabelView(mode === 7)
+      }
       // Re-render the cached frame so view switches still work while paused.
       redrawLastFrame()
     },

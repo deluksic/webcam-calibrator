@@ -3,6 +3,7 @@ import { d, std, tgpu } from 'typegpu'
 import { atomicAdd, atomicLoad, atomicMax, atomicStore, clamp, intdiv, max, min, sqrt } from 'typegpu/std'
 
 import { createPointerJumpLabeling } from '@/gpu/pipelines/pointerJumpPipeline'
+import { createTileLabeling } from '@/gpu/roiLab/tileLabeling'
 import { ROI_CIRCLE_VERTEX_COUNT } from '@/gpu/roiLab/roiCircleConstants'
 import { RoiCircleInstance, RoiCircleSchema, RoiDrawIndirect } from '@/gpu/roiLab/roiPeakPipeline'
 
@@ -130,7 +131,11 @@ export type RoiComponentReadback = {
 }
 
 export type RoiComponentsStage = {
-  encodeComponents: () => void
+  encodeMorphology: () => void
+  encodeLabeling: () => void
+  encodeStats: () => void
+  encodeNms: () => void
+  setLabelView: (enabled: boolean) => void
   readComponents: () => Promise<RoiComponentReadback>
   setThresholds: (blackCut: number, whiteCut: number, valid: boolean) => void
   destroy: () => void
@@ -173,15 +178,14 @@ export function createRoiComponentsStage(
       format: 'rgba8unorm',
     })
     .$usage('sampled', 'storage')
-  const drawIndirectBuffer = root
-    .createBuffer(RoiDrawIndirect)
-    .$usage('storage', 'indirect')
+  const drawIndirectBuffer = root.createBuffer(RoiDrawIndirect).$usage('storage', 'indirect')
   drawIndirectBuffer.write({
     vertexCount: ROI_CIRCLE_VERTEX_COUNT,
     instanceCount: 0,
     firstVertex: 0,
     firstInstance: 0,
   })
+  let labelViewEnabled = false
   const paramsBuffer = root.createUniform(componentParams, {
     blackCut: 0,
     whiteCut: 256,
@@ -208,21 +212,10 @@ export function createRoiComponentsStage(
       return
     }
     const color = std.textureLoad(rawLayout.$.cameraTexture, d.vec2u(px, py), d.i32(0))
-    const uv = (d.vec2f(px, py) + d.vec2f(0.5, 0.5)).div(
-      d.vec2f(d.f32(frameWidth), d.f32(frameHeight)),
-    )
-    const background = std.textureSampleLevel(
-      rawLayout.$.backgroundTexture,
-      rawLayout.$.sampler,
-      uv,
-      d.f32(0),
-    ).r
+    const uv = (d.vec2f(px, py) + d.vec2f(0.5, 0.5)).div(d.vec2f(d.f32(frameWidth), d.f32(frameHeight)))
+    const background = std.textureSampleLevel(rawLayout.$.backgroundTexture, rawLayout.$.sampler, uv, d.f32(0)).r
     const luma = std.dot(color.rgb, d.vec3f(0.299, 0.587, 0.114))
-    const flattened = std.clamp(
-      d.f32(0.5) + (luma - background) * params.residualGain,
-      d.f32(0),
-      d.f32(1),
-    )
+    const flattened = std.clamp(d.f32(0.5) + (luma - background) * params.residualGain, d.f32(0), d.f32(1))
     const bin = d.u32(flattened * d.f32(255) + d.f32(0.5))
     if (bin < params.blackCut) {
       rawLayout.$.raw[index] = d.u32(1)
@@ -325,10 +318,7 @@ export function createRoiComponentsStage(
       atomicStore(statsResetLayout.$.componentCount, d.u32(0))
       atomicStore(statsResetLayout.$.filteredCount, d.u32(0))
     }
-    if (
-      statsResetLayout.$.colors[index]! === d.u32(0) ||
-      statsResetLayout.$.labels[index]! !== index
-    ) {
+    if (statsResetLayout.$.colors[index]! === d.u32(0) || statsResetLayout.$.labels[index]! !== index) {
       return
     }
     atomicStore(statsResetLayout.$.stats[index]!.count, d.u32(0))
@@ -410,12 +400,7 @@ export function createRoiComponentsStage(
     std.textureStore(
       labelColorLayout.$.labelTexture,
       d.vec2u(px, py),
-      d.vec4f(
-        d.f32(0.2) + red * d.f32(0.8),
-        d.f32(0.2) + green * d.f32(0.8),
-        d.f32(0.2) + blue * d.f32(0.8),
-        d.f32(1),
-      ),
+      d.vec4f(d.f32(0.2) + red * d.f32(0.8), d.f32(0.2) + green * d.f32(0.8), d.f32(0.2) + blue * d.f32(0.8), d.f32(1)),
     )
   })
 
@@ -531,13 +516,27 @@ export function createRoiComponentsStage(
 
   const publishPipeline = root.createGuardedComputePipeline(() => {
     'use gpu'
-    publishLayout.$.drawIndirect.instanceCount = min(
-      atomicLoad(publishLayout.$.componentCount),
-      d.u32(MAX_COMPONENTS),
-    )
+    publishLayout.$.drawIndirect.instanceCount = min(atomicLoad(publishLayout.$.componentCount), d.u32(MAX_COMPONENTS))
   })
 
-  const pointerJump = createPointerJumpLabeling(root, frameWidth, frameHeight, edgeBuffer, POINTER_JUMP_STEPS, true)
+  const pointerJump = createPointerJumpLabeling(
+    root,
+    frameWidth,
+    frameHeight,
+    edgeBuffer,
+    POINTER_JUMP_STEPS,
+    true,
+  )
+  // Tile labeling is three dispatches (tile roots, border merge, resolve)
+  // instead of init + POINTER_JUMP_STEPS. The pointer-jump path stays wired up
+  // behind this switch so it can be compared or fallen back to on device.
+  const LABELING_MODE: 'tile' | 'pointerJump' = 'tile'
+  const tileLabeling =
+    LABELING_MODE === 'tile'
+      ? createTileLabeling(root, frameWidth, frameHeight, edgeBuffer)
+      : undefined
+  const labelBuffer =
+    tileLabeling === undefined ? pointerJump.pointerJumpBuffer0 : tileLabeling.labels
 
   const rawBindGroup = root.createBindGroup(rawLayout, {
     cameraTexture,
@@ -561,7 +560,7 @@ export function createRoiComponentsStage(
     edges: edgeBuffer,
   })
   const statsResetBindGroup = root.createBindGroup(statsResetLayout, {
-    labels: pointerJump.pointerJumpBuffer0,
+    labels: labelBuffer,
     colors: colorBuffer,
     stats: statsBuffer,
     componentCount: componentCountBuffer,
@@ -569,19 +568,19 @@ export function createRoiComponentsStage(
   })
   const accumulateBindGroup = root.createBindGroup(accumulateLayout, {
     colors: colorBuffer,
-    labels: pointerJump.pointerJumpBuffer0,
+    labels: labelBuffer,
     stats: statsBuffer,
   })
   const finalizeBindGroup = root.createBindGroup(finalizeLayout, {
     colors: colorBuffer,
-    labels: pointerJump.pointerJumpBuffer0,
+    labels: labelBuffer,
     stats: statsBuffer,
     circles: circleBuffer,
     componentCount: componentCountBuffer,
   })
   const labelColorBindGroup = root.createBindGroup(labelColorLayout, {
     colors: colorBuffer,
-    labels: pointerJump.pointerJumpBuffer0,
+    labels: labelBuffer,
     labelTexture,
   })
   const nmsNearestBindGroup = root.createBindGroup(nmsNearestLayout, {
@@ -662,22 +661,37 @@ export function createRoiComponentsStage(
         residualGain: 1,
       })
     },
-    encodeComponents() {
+    setLabelView(enabled) {
+      labelViewEnabled = enabled
+    },
+    encodeMorphology() {
       rawPipeline.with(rawBindGroup).dispatchThreads(frameWidth, frameHeight)
       erodePipeline.with(erodeBindGroup).dispatchThreads(frameWidth, frameHeight)
       dilatePipeline.with(dilateBindGroup).dispatchThreads(frameWidth, frameHeight)
       guardPipeline.with(guardBindGroup).dispatchThreads(frameWidth, frameHeight)
-
+    },
+    encodeLabeling() {
       const encoder = root.device.createCommandEncoder({ label: 'roi-component-ccl' })
       const pass = encoder.beginComputePass({ label: 'roi-component-ccl' })
-      pointerJump.encodeCompute(pass)
+      if (tileLabeling !== undefined) {
+        tileLabeling.encodeCompute(pass)
+      } else {
+        pointerJump.encodeCompute(pass)
+      }
       pass.end()
       root.device.queue.submit([encoder.finish()])
-
+    },
+    encodeStats() {
       statsResetPipeline.with(statsResetBindGroup).dispatchThreads(frameWidth, frameHeight)
       accumulatePipeline.with(accumulateBindGroup).dispatchThreads(frameWidth, frameHeight)
-      labelColorPipeline.with(labelColorBindGroup).dispatchThreads(frameWidth, frameHeight)
+      // Only the "Labels" overlay samples this texture; writing a full frame
+      // for every other mode is pure bandwidth.
+      if (labelViewEnabled) {
+        labelColorPipeline.with(labelColorBindGroup).dispatchThreads(frameWidth, frameHeight)
+      }
       finalizePipeline.with(finalizeBindGroup).dispatchThreads(frameWidth, frameHeight)
+    },
+    encodeNms() {
       nmsNearestPipeline.with(nmsNearestBindGroup).dispatchThreads(MAX_COMPONENTS)
       nmsStatsPipeline.with(nmsStatsBindGroup).dispatchThreads()
       nmsSuppressPipeline.with(nmsSuppressBindGroup).dispatchThreads(MAX_COMPONENTS)
@@ -699,6 +713,7 @@ export function createRoiComponentsStage(
       labelTexture.destroy()
       drawIndirectBuffer.destroy()
       componentReadbackBuffer.destroy()
+      tileLabeling?.destroy()
       pointerJump.pointerJumpBuffer0.destroy()
       pointerJump.pointerJumpBuffer1.destroy()
       pointerJump.pointerJumpAtomicBuffer.destroy()

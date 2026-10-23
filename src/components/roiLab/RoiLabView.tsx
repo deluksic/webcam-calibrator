@@ -1042,8 +1042,14 @@ export const RoiLabView: Component = () => {
                 <dd>{timings().gpuMs.mask?.toFixed(2) ?? '—'} ms</dd>
                 <dt>GPU background</dt>
                 <dd>{timings().gpuMs.background?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU components</dt>
-                <dd>{timings().gpuMs.components?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU morphology</dt>
+                <dd>{timings().gpuMs.componentsMorphology?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU labeling</dt>
+                <dd>{timings().gpuMs.componentsLabeling?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU comp stats</dt>
+                <dd>{timings().gpuMs.componentsStats?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU comp nms</dt>
+                <dd>{timings().gpuMs.componentsNms?.toFixed(2) ?? '—'} ms</dd>
                 <dt>GPU copy</dt>
                 <dd>{timings().gpuMs.cameraCopy?.toFixed(2) ?? '—'} ms</dd>
                 <dt>GPU render</dt>
