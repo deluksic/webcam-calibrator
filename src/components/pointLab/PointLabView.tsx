@@ -8,7 +8,7 @@ import { createIdentityIndex, evaluateIdentity } from '@/lib/pointIdentity/ident
 import { applyObservationMask, DEFAULT_OBSERVATION_MASK } from '@/lib/pointIdentity/observation'
 import { DEFAULT_VIEW, outOfPlaneTiltDeg, projectPattern } from '@/lib/pointIdentity/projection'
 import { buildProximityGraph } from '@/lib/pointIdentity/proximityGraph'
-import { randomBinaryColors } from '@/lib/pointIdentity/random'
+import { createRandom, randomBinaryColors } from '@/lib/pointIdentity/random'
 import type { GraphTuning, MatchOutcome, ProximityGraph, ViewPose } from '@/lib/pointIdentity/types'
 
 import styles from '@/components/pointLab/PointLabView.module.css'
@@ -16,9 +16,10 @@ import styles from '@/components/pointLab/PointLabView.module.css'
 const DEFAULTS = {
   columns: 8,
   pointsPerEdge: 4,
-  depth: 5,
+  depth: 6,
   cameraDistance: 2200,
 } as const
+const MAX_IDENTITY_DEPTH = 12
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`
@@ -91,6 +92,7 @@ export function PointLabView() {
   const [depth, setDepth] = createSignal(DEFAULTS.depth)
   const [dropoutPercent, setDropoutPercent] = createSignal(DEFAULT_OBSERVATION_MASK.dropoutPercent)
   const [dropoutSeed, setDropoutSeed] = createSignal(DEFAULT_OBSERVATION_MASK.dropoutSeed)
+  const [jitterPercent, setJitterPercent] = createSignal(0)
   const [cropLeft, setCropLeft] = createSignal(DEFAULT_OBSERVATION_MASK.cropLeft)
   const [cropRight, setCropRight] = createSignal(DEFAULT_OBSERVATION_MASK.cropRight)
   const [cropTop, setCropTop] = createSignal(DEFAULT_OBSERVATION_MASK.cropTop)
@@ -124,20 +126,29 @@ export function PointLabView() {
   }))
 
   const projected = createMemo(() => projectPattern(pattern().points, pose()))
-  const observedPoints = createMemo(() =>
-    applyObservationMask(projected(), {
+  const tuning = createMemo<GraphTuning>(() => ({ pointsPerEdge: pointsPerEdge() }))
+  const designGraph = createMemo(() => buildProximityGraph(pattern().points, tuning()))
+  const observedPoints = createMemo(() => {
+    const masked = applyObservationMask(projected(), {
       cropLeft: cropLeft(),
       cropRight: cropRight(),
       cropTop: cropTop(),
       cropBottom: cropBottom(),
       dropoutPercent: dropoutPercent(),
       dropoutSeed: dropoutSeed(),
-    }),
-  )
-
-  const tuning = createMemo<GraphTuning>(() => ({ pointsPerEdge: pointsPerEdge() }))
-
-  const designGraph = createMemo(() => buildProximityGraph(pattern().points, tuning()))
+    })
+    const jitter = jitterPercent()
+    if (jitter <= 0) {
+      return masked
+    }
+    const spacing = Math.max(designGraph().stats.localScaleMedian, 1e-6)
+    const random = createRandom((dropoutSeed() + 0x51ed270b) >>> 0)
+    return masked.map((point) => ({
+      ...point,
+      x: point.x + (random() * 2 - 1) * spacing * (jitter / 100),
+      y: point.y + (random() * 2 - 1) * spacing * (jitter / 100),
+    }))
+  })
   const designIndex = createMemo(() => createIdentityIndex(designGraph(), colors(), depth()))
   const observedGraph = createMemo(() => buildProximityGraph(observedPoints(), tuning()))
   const evaluation = createMemo(() =>
@@ -516,6 +527,16 @@ export function PointLabView() {
               onInput={setDropoutPercent}
             />
             <ControlSlider
+              id="lab-jitter"
+              label="Position jitter"
+              value={jitterPercent()}
+              min={0}
+              max={5}
+              step={0.25}
+              format={(value) => `${value.toFixed(2)}%`}
+              onInput={setJitterPercent}
+            />
+            <ControlSlider
               id="lab-crop-left"
               label="Crop left"
               value={cropLeft()}
@@ -566,10 +587,15 @@ export function PointLabView() {
                 <dt>dropout seed</dt>
                 <dd>{dropoutSeed()}</dd>
               </div>
+              <div>
+                <dt>jitter</dt>
+                <dd>{jitterPercent().toFixed(2)}%</dd>
+              </div>
             </dl>
             <p class={styles.panelNote}>
               Crop margins are relative to the projected point bounds. Points are removed before graph construction;
-              design identity and colors remain unchanged.
+              jitter is a fraction of median spacing, applied after masking. Design identity and colors remain
+              unchanged.
             </p>
           </section>
 
@@ -646,10 +672,6 @@ export function PointLabView() {
               <div>
                 <dt>junction</dt>
                 <dd>{observedGraph().stats.junctionEdges}</dd>
-              </div>
-              <div>
-                <dt>repair</dt>
-                <dd>{observedGraph().stats.repairEdges}</dd>
               </div>
               <div>
                 <dt>isolated</dt>
@@ -748,7 +770,7 @@ export function PointLabView() {
               label="Fingerprint depth"
               value={depth()}
               min={1}
-              max={6}
+              max={MAX_IDENTITY_DEPTH}
               step={1}
               format={(value) => `${value.toFixed(0)} hops`}
               onInput={setDepth}

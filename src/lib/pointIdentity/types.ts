@@ -77,12 +77,11 @@ export type GraphStats = {
   components: number
   chainEdges: number
   junctionEdges: number
-  repairEdges: number
   rejections: GraphRejections
   localScaleMedian: number
 }
 
-export type EdgeKind = 'chain' | 'junction' | 'repair'
+export type EdgeKind = 'chain' | 'junction'
 
 export type ProximityGraph = {
   points: readonly PatternPoint[]

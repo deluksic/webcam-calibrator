@@ -1,23 +1,20 @@
 import type { Component } from 'solid-js'
 import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 
-import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
+import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
+import { initSharedGPUForOnnx } from '@/gpu/init'
+import type { RoiComponentPoint } from '@/gpu/roiLab/roiComponentsPipeline'
+import type { RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
 import {
   ROI_MODEL_WIDTH,
   createRoiLabPipeline,
   type RoiHistogramUpdate,
   type RoiLabPipeline,
 } from '@/gpu/roiLab/roiLabPipeline'
-import type { RoiComponentPoint } from '@/gpu/roiLab/roiComponentsPipeline'
-import type { RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
-import { initSharedGPUForOnnx } from '@/gpu/init'
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
 import { createIdentityIndex } from '@/lib/pointIdentity/identity'
-import {
-  createColorIdentityIndex,
-  matchObservedIdentity,
-} from '@/lib/pointIdentity/match'
+import { createColorIdentityIndex, matchObservedIdentity } from '@/lib/pointIdentity/match'
 import { buildProximityGraph } from '@/lib/pointIdentity/proximityGraph'
 import { randomBinaryColors } from '@/lib/pointIdentity/random'
 import { ROI_HISTOGRAM_BINS } from '@/lib/roiHistogram'
@@ -28,8 +25,7 @@ import styles from '@/components/roiLab/RoiLabView.module.css'
 const { performance } = globalThis
 const QUERY = new URLSearchParams(globalThis.location.search)
 const MODEL_URL = `${import.meta.env.BASE_URL}models/roi_tiny_no_concat.onnx`
-const DEMO_IMAGE_URL =
-  QUERY.get('image') ?? `${import.meta.env.BASE_URL}demo/roi_target.png`
+const DEMO_IMAGE_URL = QUERY.get('image') ?? `${import.meta.env.BASE_URL}demo/roi_target.png`
 const DEMO_MODE = QUERY.has('demo')
 const [DEMO_WIDTH, DEMO_HEIGHT] = (() => {
   const [width, height] = (QUERY.get('demoSize') ?? '640x480').split('x').map(Number)
@@ -39,12 +35,13 @@ const [DEMO_WIDTH, DEMO_HEIGHT] = (() => {
 const MIN_ZOOM = 1
 const MAX_ZOOM = 12
 const WHEEL_SENSITIVITY = 0.0018
+const MAX_IDENTITY_DEPTH = 12
 
 const IDENTITY_DEFAULTS = {
   columns: Math.min(14, Math.max(2, Number(QUERY.get('columns')) || 7)),
   pointsPerEdge: Math.min(6, Math.max(1, Number(QUERY.get('points')) || 4)),
   colorSeed: Math.max(0, Math.round(Number(QUERY.get('seed')) || 1)),
-  depth: Math.min(7, Math.max(1, Number(QUERY.get('depth')) || 5)),
+  depth: Math.min(MAX_IDENTITY_DEPTH, Math.max(1, Number(QUERY.get('depth')) || 6)),
 } as const
 
 type RoiViewMode = 'blobs' | 'components' | 'labels' | 'identity' | 'mask' | 'input' | 'camera'
@@ -187,7 +184,12 @@ export const RoiLabView: Component = () => {
   const [identityMetrics, setIdentityMetrics] = createSignal<IdentityMetrics>()
   const [identityPerf, setIdentityPerf] = createSignal<IdentityPerf>()
   const [seedScanRange, setSeedScanRange] = createSignal(512)
-  const [seedScan, setSeedScan] = createSignal<{ scanning: boolean; progress: number; bestSeed?: number; bestResolved?: number }>()
+  const [seedScan, setSeedScan] = createSignal<{
+    scanning: boolean
+    progress: number
+    bestSeed?: number
+    bestResolved?: number
+  }>()
   let lastObservedPoints: readonly RoiComponentPoint[] = []
 
   let disposed = false
@@ -221,13 +223,9 @@ export const RoiLabView: Component = () => {
     const observedGraph = buildProximityGraph(observedPoints, {
       pointsPerEdge: design.pointsPerEdge,
     })
-    const matched = matchObservedIdentity(
-      design.index,
-      observedGraph,
-      observedColors,
-      identityDepth(),
-      { looseByKey: design.looseIndex },
-    )
+    const matched = matchObservedIdentity(design.index, observedGraph, observedColors, identityDepth(), {
+      looseByKey: design.looseIndex,
+    })
     setIdentityMetrics({
       total: matched.summary.total,
       resolved: matched.summary.resolved,
@@ -458,10 +456,7 @@ export const RoiLabView: Component = () => {
       // give encoder 27 rows but 24 upsampled rows). Round up so scale-factor
       // Resize stays exact without reintroducing dynamic-size Concat nodes.
       const rawModelHeight = Math.round((ROI_MODEL_WIDTH * size.height) / size.width)
-      const modelHeight = Math.min(
-        224,
-        Math.max(96, Math.ceil(rawModelHeight / 16) * 16),
-      )
+      const modelHeight = Math.min(224, Math.max(96, Math.ceil(rawModelHeight / 16) * 16))
       setError(undefined)
       setReady(false)
       setPhase('starting')
@@ -568,7 +563,6 @@ export const RoiLabView: Component = () => {
     },
   )
 
-
   const zoomAt = (factor: number, anchorX: number, anchorY: number): void => {
     const current = zoom()
     const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current * factor))
@@ -628,21 +622,11 @@ export const RoiLabView: Component = () => {
         <video ref={setVideoElement} class={styles.videoSource} muted playsinline />
         <canvas ref={setCanvasElement} class={styles.canvas} onWheel={handleWheel} />
         <div class={styles.zoomHud}>
-          <button
-            type="button"
-            class={styles.zoomButton}
-            aria-label="Zoom out"
-            onClick={() => zoomFromCenter(1 / 1.5)}
-          >
+          <button type="button" class={styles.zoomButton} aria-label="Zoom out" onClick={() => zoomFromCenter(1 / 1.5)}>
             −
           </button>
           <span class={styles.zoomValue}>{zoom().toFixed(1)}×</span>
-          <button
-            type="button"
-            class={styles.zoomButton}
-            aria-label="Zoom in"
-            onClick={() => zoomFromCenter(1.5)}
-          >
+          <button type="button" class={styles.zoomButton} aria-label="Zoom in" onClick={() => zoomFromCenter(1.5)}>
             +
           </button>
           <button type="button" class={styles.zoomReset} onClick={resetViewport}>
@@ -652,18 +636,16 @@ export const RoiLabView: Component = () => {
         <Show when={paused()}>
           <div class={styles.pausedBadge}>Paused</div>
         </Show>
-        <Show when={error()}>
-          {(message) => <div class={styles.overlayError}>{message()}</div>}
-        </Show>
+        <Show when={error()}>{(message) => <div class={styles.overlayError}>{message()}</div>}</Show>
       </div>
       <aside class={styles.controls}>
         <h1 class={styles.title}>ROI Lab</h1>
         <p class={styles.note}>
-          Histogram-driven blob segmentation inside the target mask. The tiny U-Net is a
-          74.0k-parameter ONNX model at 256 px wide, with the height following the camera aspect.
-          A full-resolution raw-luma histogram inside the mask picks black/gray/white cuts.
-          The component path applies a color-aware 2×2 opening, pointer-jump connected-component labeling, centroid extraction, and close-centroid NMS.
-          Labels shows one random color per component; Centroids shows their centers; Identity shows the observed graph and stable design-ID colors.
+          Histogram-driven blob segmentation inside the target mask. The tiny U-Net is a 74.0k-parameter ONNX model at
+          256 px wide, with the height following the camera aspect. A full-resolution raw-luma histogram inside the mask
+          picks black/gray/white cuts. The component path applies a color-aware 2×2 opening, pointer-jump
+          connected-component labeling, centroid extraction, and close-centroid NMS. Labels shows one random color per
+          component; Centroids shows their centers; Identity shows the observed graph and stable design-ID colors.
         </p>
         <Show when={DEMO_MODE}>
           <p class={styles.note}>
@@ -690,10 +672,7 @@ export const RoiLabView: Component = () => {
             {VIEW_OPTIONS.map((option) => (
               <button
                 type="button"
-                class={[
-                  styles.viewButton,
-                  viewMode() === option.mode && styles.viewButtonActive,
-                ]}
+                class={[styles.viewButton, viewMode() === option.mode && styles.viewButtonActive]}
                 aria-pressed={viewMode() === option.mode ? 'true' : 'false'}
                 title={option.hint}
                 onClick={() => {
@@ -755,10 +734,12 @@ export const RoiLabView: Component = () => {
               <input
                 type="number"
                 min="1"
-                max="7"
+                max={MAX_IDENTITY_DEPTH}
                 value={identityDepth()}
                 onChange={(event) => {
-                  setIdentityDepth(Math.min(7, Math.max(1, Math.round(Number(event.currentTarget.value) || 5))))
+                  setIdentityDepth(
+                    Math.min(MAX_IDENTITY_DEPTH, Math.max(1, Math.round(Number(event.currentTarget.value) || 6))),
+                  )
                 }}
               />
             </label>
@@ -804,19 +785,49 @@ export const RoiLabView: Component = () => {
           >
             {(metrics) => (
               <dl class={styles.identityStats}>
-                <div><dt>frame</dt><dd>{metrics().frameId}</dd></div>
-                <div><dt>points</dt><dd>{metrics().total}</dd></div>
-                <div><dt>edges</dt><dd>{metrics().edges}</dd></div>
-                <div><dt>components</dt><dd>{metrics().components}</dd></div>
-                <div><dt>resolved</dt><dd>{metrics().resolved}</dd></div>
-                <div><dt>ambiguous</dt><dd>{metrics().ambiguous}</dd></div>
-                <div><dt>unresolved</dt><dd>{metrics().unresolved}</dd></div>
-                <div><dt>conflicts</dt><dd>{metrics().conflicts}</dd></div>
+                <div>
+                  <dt>frame</dt>
+                  <dd>{metrics().frameId}</dd>
+                </div>
+                <div>
+                  <dt>points</dt>
+                  <dd>{metrics().total}</dd>
+                </div>
+                <div>
+                  <dt>edges</dt>
+                  <dd>{metrics().edges}</dd>
+                </div>
+                <div>
+                  <dt>components</dt>
+                  <dd>{metrics().components}</dd>
+                </div>
+                <div>
+                  <dt>resolved</dt>
+                  <dd>{metrics().resolved}</dd>
+                </div>
+                <div>
+                  <dt>ambiguous</dt>
+                  <dd>{metrics().ambiguous}</dd>
+                </div>
+                <div>
+                  <dt>unresolved</dt>
+                  <dd>{metrics().unresolved}</dd>
+                </div>
+                <div>
+                  <dt>conflicts</dt>
+                  <dd>{metrics().conflicts}</dd>
+                </div>
                 <Show when={identityPerf()}>
                   {(perf) => (
                     <>
-                      <div><dt>readback</dt><dd>{perf().readbackMs.toFixed(1)} ms</dd></div>
-                      <div><dt>identity</dt><dd>{perf().identityMs.toFixed(1)} ms</dd></div>
+                      <div>
+                        <dt>readback</dt>
+                        <dd>{perf().readbackMs.toFixed(1)} ms</dd>
+                      </div>
+                      <div>
+                        <dt>identity</dt>
+                        <dd>{perf().identityMs.toFixed(1)} ms</dd>
+                      </div>
                     </>
                   )}
                 </Show>
@@ -829,18 +840,11 @@ export const RoiLabView: Component = () => {
             <span>Masked luma histogram</span>
             <Show when={histogramData()}>
               {(update) => (
-                <span class={styles.histogramCount}>
-                  {update().analysis.maskedPixels.toLocaleString()} px
-                </span>
+                <span class={styles.histogramCount}>{update().analysis.maskedPixels.toLocaleString()} px</span>
               )}
             </Show>
           </div>
-          <canvas
-            ref={setHistogramCanvasElement}
-            class={styles.histogramCanvas}
-            width={300}
-            height={110}
-          />
+          <canvas ref={setHistogramCanvasElement} class={styles.histogramCanvas} width={300} height={110} />
           <Show
             when={histogramData()}
             fallback={<p class={styles.histogramHint}>Waiting for the first histogram sample…</p>}
@@ -850,13 +854,11 @@ export const RoiLabView: Component = () => {
                 <div class={styles.histogramLegend}>
                   <span>
                     <i class={[styles.swatch, styles.swatchBlack]} />
-                    {formatPercent(update().analysis.blackPixels, update().analysis.maskedPixels)}{' '}
-                    black
+                    {formatPercent(update().analysis.blackPixels, update().analysis.maskedPixels)} black
                   </span>
                   <span>
                     <i class={[styles.swatch, styles.swatchWhite]} />
-                    {formatPercent(update().analysis.whitePixels, update().analysis.maskedPixels)}{' '}
-                    white
+                    {formatPercent(update().analysis.whitePixels, update().analysis.maskedPixels)} white
                   </span>
                   <span class={styles.histogramCuts}>
                     {update().analysis.valid
@@ -893,9 +895,7 @@ export const RoiLabView: Component = () => {
                     `output min ${stats.output.min.toFixed(3)}  mean ${stats.output.mean.toFixed(3)}  max ${stats.output.max.toFixed(3)}`,
                 ),
               )
-              .catch((cause: unknown) =>
-                setBufferStats(cause instanceof Error ? cause.message : String(cause)),
-              )
+              .catch((cause: unknown) => setBufferStats(cause instanceof Error ? cause.message : String(cause)))
           }}
         >
           Read input/output buffers
@@ -917,20 +917,12 @@ export const RoiLabView: Component = () => {
           <dt>Process FPS</dt>
           <dd>{fps().toFixed(0)}</dd>
           <dt>Status</dt>
-          <dd>
-            {error()
-              ? `error: ${phase()}`
-              : paused()
-                ? 'paused'
-                : ready()
-                  ? 'running'
-                  : phase()}
-          </dd>
+          <dd>{error() ? `error: ${phase()}` : paused() ? 'paused' : ready() ? 'running' : phase()}</dd>
         </dl>
         <p class={styles.status}>
-          The 74.0k-parameter GPU-compatible model runs on ONNX Runtime WebGPU using shared
-          GPU buffers for input and output. Input is 256 px wide with dynamic height
-          (e.g. 256×192 for 4:3, 256×144 for 16:9), so the full camera frame is kept.
+          The 74.0k-parameter GPU-compatible model runs on ONNX Runtime WebGPU using shared GPU buffers for input and
+          output. Input is 256 px wide with dynamic height (e.g. 256×192 for 4:3, 256×144 for 16:9), so the full camera
+          frame is kept.
         </p>
       </aside>
     </div>

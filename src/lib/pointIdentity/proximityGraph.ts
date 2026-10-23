@@ -11,15 +11,17 @@ import type {
 
 const NEIGHBOR_SAMPLE = 12
 const LOCAL_SCALE_SAMPLE = 6
+const MAX_FRAGMENT_GAP_FACTOR = 1.7
 
 const NEAR_CHAIN_FACTOR = 2.5
-const MAX_CONCURRENCE_RESIDUAL = 0.15
+/** Noisy chain lines rarely meet at an exact point; allow a quarter-spacing miss. */
+const MAX_CONCURRENCE_RESIDUAL = 0.25
 const MAX_CORNER_DISTANCE = 2
+/** A corner edge longer than this bridges past its local cell at high noise. */
+const MAX_JUNCTION_EDGE_FACTOR = 1.4
 const MIN_LINE_SIN = 0.2
 const LINE_TRIANGLE_MIN_QUALITY = 0.02
 const MAX_DEGREE = 3
-const REPAIR_REACH_FACTOR = 2.2
-const REPAIR_MAX_PER_POINT = 2
 
 type ChainLine = {
   chainIndex: number
@@ -105,7 +107,6 @@ function emptyGraph(points: readonly PatternPoint[]): ProximityGraph {
     components: 0,
     chainEdges: 0,
     junctionEdges: 0,
-    repairEdges: 0,
     rejections: { degree: 0, crossing: 0 },
     localScaleMedian: 0,
   }
@@ -215,10 +216,101 @@ function computeNeighborhoods(points: readonly PatternPoint[]): {
   return { neighborLists, localScales }
 }
 
+const MAX_COVERAGE_REPAIR_ROUNDS = 16
+const COVERAGE_SCORE_EPSILON = 1e-9
+
+function candidateKey(candidate: ChainCandidate): string {
+  return [...candidate.pointIndices].sort((first, second) => first - second).join(':')
+}
+
+/**
+ * Covers as many points as possible with non-overlapping chains. A globally
+ * best-scoring window can block several correct chains, so selection first
+ * respects coverage and only then prefers lower geometric scores. The greedy
+ * seed is repaired by swapping one selected chain for every unselected chain
+ * that becomes available.
+ */
+function selectChainsByCoverage(candidates: readonly ChainCandidate[], pointCount: number): ChainCandidate[] {
+  if (candidates.length === 0) {
+    return []
+  }
+
+  const order = candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .sort((first, second) => {
+      if (Math.abs(first.candidate.score - second.candidate.score) > COVERAGE_SCORE_EPSILON) {
+        return first.candidate.score - second.candidate.score
+      }
+      return candidateKey(first.candidate).localeCompare(candidateKey(second.candidate))
+    })
+    .map((item) => item.index)
+
+  const used = new Uint8Array(pointCount)
+  const buildSelection = (excluded: number): { indices: number[]; coverage: number; score: number } => {
+    used.fill(0)
+    const indices: number[] = []
+    let coverage = 0
+    let score = 0
+    for (const candidateIndex of order) {
+      if (candidateIndex === excluded) {
+        continue
+      }
+      const candidate = candidates[candidateIndex]!
+      let available = true
+      for (const pointIndex of candidate.pointIndices) {
+        if (used[pointIndex] === 1) {
+          available = false
+          break
+        }
+      }
+      if (!available) {
+        continue
+      }
+      for (const pointIndex of candidate.pointIndices) {
+        used[pointIndex] = 1
+        coverage += 1
+      }
+      indices.push(candidateIndex)
+      score += candidate.score
+    }
+    return { indices, coverage, score }
+  }
+
+  let selection = buildSelection(-1)
+  let improved = true
+  let round = 0
+  while (improved && round < MAX_COVERAGE_REPAIR_ROUNDS) {
+    improved = false
+    round += 1
+    for (const removed of selection.indices) {
+      const trial = buildSelection(removed)
+      const betterCoverage = trial.coverage > selection.coverage
+      const betterTieBreak =
+        trial.coverage === selection.coverage && trial.score < selection.score - COVERAGE_SCORE_EPSILON
+      if (betterCoverage || betterTieBreak) {
+        selection = trial
+        improved = true
+        break
+      }
+    }
+  }
+
+  return selection.indices
+    .sort((first, second) => {
+      if (Math.abs(candidates[first]!.score - candidates[second]!.score) > COVERAGE_SCORE_EPSILON) {
+        return candidates[first]!.score - candidates[second]!.score
+      }
+      return candidateKey(candidates[first]!).localeCompare(candidateKey(candidates[second]!))
+    })
+    .map((index) => candidates[index]!)
+}
+
 /**
  * Build a deterministic proximity graph from detected point positions.
  *
- * Chains are extracted as exact N-point collinear runs. Junction closure then
+ * Chains are extracted as N-point collinear runs with per-window PCA
+ * validation. Selection covers as many points as possible with non-overlapping
+ * chains before preferring lower geometric scores. Junction closure then
  * intersects chain lines at virtual cell corners: three-chain corners become
  * triangles, and two-chain boundary corners become single edges.
  */
@@ -231,17 +323,7 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
   const { neighborLists, localScales } = computeNeighborhoods(points)
 
   const chainCandidates = findChainCandidates(points, neighborLists, localScales, tuning.pointsPerEdge)
-  const selected: ChainCandidate[] = []
-  const usedPoints = new Set<number>()
-  for (const candidate of chainCandidates) {
-    if (candidate.pointIndices.some((pointIndex) => usedPoints.has(pointIndex))) {
-      continue
-    }
-    selected.push(candidate)
-    for (const pointIndex of candidate.pointIndices) {
-      usedPoints.add(pointIndex)
-    }
-  }
+  const selected = selectChainsByCoverage(chainCandidates, count)
 
   const adjacency: number[][] = Array.from({ length: count }, () => [])
   const accepted: Array<readonly [number, number]> = []
@@ -250,7 +332,6 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
   const rejections: GraphRejections = { degree: 0, crossing: 0 }
   let chainEdges = 0
   let junctionEdges = 0
-  let repairEdges = 0
 
   const addEdge = (a: number, b: number, kind: EdgeKind): void => {
     adjacency[a]!.push(b)
@@ -260,10 +341,8 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
     acceptedKeys.add(pairKey(a, b))
     if (kind === 'chain') {
       chainEdges += 1
-    } else if (kind === 'junction') {
-      junctionEdges += 1
     } else {
-      repairEdges += 1
+      junctionEdges += 1
     }
   }
 
@@ -320,10 +399,23 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
         3,
       )
       candidateCount += shortCandidates.length
-      const mappedCandidates: ChainCandidate[] = shortCandidates.map((candidate) => ({
-        ...candidate,
-        pointIndices: candidate.pointIndices.map((position) => remainingPositions[position]!),
-      }))
+      const globalScale = median(localScales)
+      const maxFragmentGap = globalScale * MAX_FRAGMENT_GAP_FACTOR
+      const mappedCandidates: ChainCandidate[] = shortCandidates
+        .filter((candidate) => {
+          for (let index = 1; index < candidate.pointIndices.length; index += 1) {
+            const first = remainingPoints[candidate.pointIndices[index - 1]!]!
+            const second = remainingPoints[candidate.pointIndices[index]!]!
+            if (distance(first, second) > maxFragmentGap) {
+              return false
+            }
+          }
+          return true
+        })
+        .map((candidate) => ({
+          ...candidate,
+          pointIndices: candidate.pointIndices.map((position) => remainingPositions[position]!),
+        }))
       const shortUsed = new Set<number>()
       const shortSelected: ChainCandidate[] = []
       for (const candidate of mappedCandidates) {
@@ -541,6 +633,13 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
     if (pairs.some(([a, b]) => acceptedKeys.has(pairKey(a, b)))) {
       continue
     }
+    const [firstChainIndex, secondChainIndex, thirdChainIndex] = triangle.chainIndices
+    const triangleSpacing =
+      (chainSpacings[firstChainIndex]! + chainSpacings[secondChainIndex]! + chainSpacings[thirdChainIndex]!) / 3
+    const maxJunctionLength = triangleSpacing * MAX_JUNCTION_EDGE_FACTOR
+    if (pairs.some(([a, b]) => distance(points[a]!, points[b]!) > maxJunctionLength)) {
+      continue
+    }
     if (pairs.some(([a, b]) => crossesAccepted(points, accepted, a, b))) {
       rejections.crossing += 1
       continue
@@ -596,6 +695,9 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
       }
       const a = firstEndpoint.point
       const b = secondEndpoint.point
+      if (distance(points[a]!, points[b]!) > averageSpacing * MAX_JUNCTION_EDGE_FACTOR) {
+        continue
+      }
       if (adjacency[a]!.length >= MAX_DEGREE || adjacency[b]!.length >= MAX_DEGREE) {
         rejections.degree += 1
         continue
@@ -611,71 +713,6 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
     }
   }
 
-  // A dropout or crop can leave completely disconnected fragments. Repair
-  // only those isolated points, and cap each repaired fragment at one design
-  // side so repair edges never extend an existing chain.
-  const repairEligible = adjacency.map((list) => list.length === 0)
-  const repairParent = Array.from({ length: count }, (_, index) => index)
-  const repairSize = Array.from({ length: count }, () => 1)
-  const findRepairRoot = (node: number): number => {
-    let root = node
-    while (repairParent[root] !== root) {
-      root = repairParent[root]!
-    }
-    let current = node
-    while (repairParent[current] !== current) {
-      const next = repairParent[current]!
-      repairParent[current] = root
-      current = next
-    }
-    return root
-  }
-  const repairCandidates: Array<{ a: number; b: number; length: number }> = []
-  for (let a = 0; a < count; a += 1) {
-    if (!repairEligible[a]) {
-      continue
-    }
-    for (let b = a + 1; b < count; b += 1) {
-      if (!repairEligible[b]) {
-        continue
-      }
-      const length = distance(points[a]!, points[b]!)
-      if (length <= Math.min(localScales[a]!, localScales[b]!) * REPAIR_REACH_FACTOR) {
-        repairCandidates.push({ a, b, length })
-      }
-    }
-  }
-  repairCandidates.sort((first, second) =>
-    first.length !== second.length ? first.length - second.length : first.a - second.a || first.b - second.b,
-  )
-  const repairCount = new Uint8Array(count)
-  for (const candidate of repairCandidates) {
-    const { a, b } = candidate
-    if (repairCount[a]! >= REPAIR_MAX_PER_POINT || repairCount[b]! >= REPAIR_MAX_PER_POINT) {
-      continue
-    }
-    if (adjacency[a]!.length >= MAX_DEGREE || adjacency[b]!.length >= MAX_DEGREE) {
-      continue
-    }
-    if (acceptedKeys.has(pairKey(a, b))) {
-      continue
-    }
-    const rootA = findRepairRoot(a)
-    const rootB = findRepairRoot(b)
-    if (rootA === rootB || repairSize[rootA]! + repairSize[rootB]! > tuning.pointsPerEdge) {
-      continue
-    }
-    if (crossesAccepted(points, accepted, a, b)) {
-      rejections.crossing += 1
-      continue
-    }
-    addEdge(a, b, 'repair')
-    repairCount[a]! += 1
-    repairCount[b]! += 1
-    repairParent[rootB] = rootA
-    repairSize[rootA]! += repairSize[rootB]!
-  }
-
   const edges = accepted
   const stats: GraphStats = {
     inputPoints: count,
@@ -686,7 +723,6 @@ export function buildProximityGraph(points: readonly PatternPoint[], tuning: Gra
     components: countComponents(adjacency),
     chainEdges,
     junctionEdges,
-    repairEdges,
     rejections,
     localScaleMedian: median(localScales),
   }

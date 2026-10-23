@@ -24,7 +24,6 @@ function makeGraph(
     components: 1,
     chainEdges: 0,
     junctionEdges: 0,
-    repairEdges: 0,
     rejections,
     localScaleMedian: 1,
   }
