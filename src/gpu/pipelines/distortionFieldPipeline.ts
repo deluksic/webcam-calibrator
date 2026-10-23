@@ -1,9 +1,9 @@
 import { oklabToRgb } from '@typegpu/color'
+import { sdBox2d } from '@typegpu/sdf'
 import type { ColorAttachment, TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import { common, std } from 'typegpu'
 import { abs, clamp, dot, exp, fwidth, length, max, min, mix, mul, pow, round, select, sub } from 'typegpu/std'
-import { sdBox2d } from '@typegpu/sdf'
 
 import { PinholeIntrinsicsGpu, RationalDistortion8Gpu } from '@/gpu/schemas/cameraGpuUniforms'
 import { forwardDistortNormalized } from '@/gpu/shaders/forwardRationalDistortion'
@@ -23,9 +23,11 @@ const DistortionUniformStruct = d.struct({
   viewport: DistortionViewportGpu,
 })
 
-const distortionLayout = tgpu.bindGroupLayout({
-  dist: { uniform: DistortionUniformStruct },
-}).$name('distortion-field-bgl')
+const distortionLayout = tgpu
+  .bindGroupLayout({
+    dist: { uniform: DistortionUniformStruct },
+  })
+  .$name('distortion-field-bgl')
 
 function allocDistortionUniform(root: TgpuRoot) {
   return root.createBuffer(DistortionUniformStruct).$usage('uniform')
@@ -237,5 +239,11 @@ export function createDistortionFieldStage(
     pipeline.with(enc).withColorAttachment(colorAttachment).with(bindGroup).draw(3)
   }
 
-  return { uniform, encodeToCanvas }
+  return {
+    uniform,
+    encodeToCanvas,
+    destroy() {
+      uniform.destroy()
+    },
+  }
 }

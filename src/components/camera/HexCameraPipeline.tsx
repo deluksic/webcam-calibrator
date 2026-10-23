@@ -167,8 +167,14 @@ export const HexCameraPipeline: Component<HexCameraPipelineProps> = (props) => {
   )
 
   createEffect(
-    () => ({ video: videoElement(), canvas: canvasElement(), size: frameSize(), retry: retryNonce() }),
-    ({ video, canvas, size }) => {
+    () => ({
+      video: videoElement(),
+      canvas: canvasElement(),
+      overlay: overlayElement(),
+      size: frameSize(),
+      retry: retryNonce(),
+    }),
+    ({ video, canvas, overlay, size }) => {
       if (!video || !canvas || !size || size.width < 8 || size.height < 8) {
         return
       }
@@ -180,7 +186,6 @@ export const HexCameraPipeline: Component<HexCameraPipelineProps> = (props) => {
 
       canvas.width = size.width
       canvas.height = size.height
-      const overlay = overlayElement()
       if (overlay) {
         overlay.width = size.width
         overlay.height = size.height

@@ -942,18 +942,16 @@ export async function createRoiLabPipeline(
     const { statsMs } = preprocessFrame(video)
     const preprocessMs = performance.now() - preprocessStart
 
-    // CPU preprocessing is followed by a queue write; wait for it before ORT
-    // reads the same GPUBuffer, then wait before sampling the mask.
-    const queueWaitStart = performance.now()
-    await device.queue.onSubmittedWorkDone()
-    const queueWaitMs = performance.now() - queueWaitStart
+    // No queue flushes around inference: ORT shares this device and queue, so
+    // our prepare dispatch (writing `inputBuffer`) and our mask dispatch
+    // (reading `outputBuffer`) are already ordered around ORT's work. The CPU
+    // never reads either buffer here, so nothing needs a completion signal.
     const inferenceStart = performance.now()
     await session.run({ input: inputGpuTensor }, { mask: outputGpuTensor })
     const inferenceRunMs = performance.now() - inferenceStart
-    const inferenceDrainStart = performance.now()
-    await device.queue.onSubmittedWorkDone()
-    const inferenceDrainMs = performance.now() - inferenceDrainStart
-    const inferenceMs = inferenceRunMs + inferenceDrainMs
+    const queueWaitMs = 0
+    const inferenceDrainMs = 0
+    const inferenceMs = inferenceRunMs
 
     // Copy the current frame into the persistent camera texture. The overlay
     // samples that copy instead of the short-lived external texture, so a

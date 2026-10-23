@@ -2,14 +2,14 @@ import type { TgpuRoot } from 'typegpu'
 
 import { createAxesResultsStage } from '@/gpu/pipelines/resultsAxesPipeline'
 import type { AxisPassUniformGpuBuffer } from '@/gpu/pipelines/resultsAxesPipeline'
-import { createMarkerResultsStage } from '@/gpu/pipelines/resultsMarkerPipeline'
-import type { MarkerPassUniformGpuBuffer, MarkersCentersBuffer } from '@/gpu/pipelines/resultsMarkerPipeline'
-import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import {
   allocResultsCameraUniform,
   resultsCameraBindLayout,
   type ResultsCameraUniformGpuBuffer,
 } from '@/gpu/pipelines/resultsCameraTransform'
+import { createMarkerResultsStage } from '@/gpu/pipelines/resultsMarkerPipeline'
+import type { MarkerPassUniformGpuBuffer, MarkersCentersBuffer } from '@/gpu/pipelines/resultsMarkerPipeline'
+import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 
 function destroyGpuTexture(tex: GPUTexture | undefined) {
   tex?.destroy()
@@ -137,6 +137,13 @@ export function createResultsOrbitCanvasPipeline(
     destroyGpuTexture(depthTex)
     msaaColorTex = undefined
     depthTex = undefined
+    // Every stage owns buffers/uniforms on the shared root. Release them and
+    // the canvas context so route changes do not accumulate GPU resources or
+    // leave a stale swap chain behind.
+    markerStage.destroy()
+    axesStage.destroy()
+    cameraUniform.destroy()
+    context.unconfigure()
   }
 
   return {

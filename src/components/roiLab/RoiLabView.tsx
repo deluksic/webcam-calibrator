@@ -351,21 +351,23 @@ export const RoiLabView: Component = () => {
     },
   )
 
-  createEffect(cam.stream, (stream) => {
-    const video = videoElement()
-    if (DEMO_MODE || !video || !stream) {
-      return
-    }
-    video.srcObject = stream
-    void video.play().catch((cause: unknown) => {
-      if (!disposed) {
-        setError(cause instanceof Error ? cause.message : String(cause))
+  createEffect(
+    () => ({ stream: cam.stream(), video: videoElement() }),
+    ({ stream, video }) => {
+      if (DEMO_MODE || !video || !stream) {
+        return
       }
-    })
-    return () => {
-      video.srcObject = null
-    }
-  })
+      video.srcObject = stream
+      void video.play().catch((cause: unknown) => {
+        if (!disposed) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
+      })
+      return () => {
+        video.srcObject = null
+      }
+    },
+  )
 
   createEffect(videoElement, (video) => {
     if (!video) {

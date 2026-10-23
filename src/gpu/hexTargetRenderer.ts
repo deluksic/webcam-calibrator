@@ -160,6 +160,9 @@ export function createHexTargetRenderer(
     setLayout,
     render,
     destroy() {
+      // Release the swap chain as well as the buffers. Without this, a canvas
+      // that is detached and later reconfigured can keep a stale context.
+      context.unconfigure()
       uniformBuffer.destroy()
       quadBuffer.destroy()
     },

@@ -1,26 +1,21 @@
-// TypeGPU initialization — singleton GPU root
+// TypeGPU initialization — one shared device/root for every WebGPU page
 import type { TgpuRoot } from 'typegpu'
 import { tgpu } from 'typegpu'
 
 const { navigator } = globalThis
 
-let rootPromise: Promise<TgpuRoot> | undefined = undefined
-
+/**
+ * Root used by Target and Results.
+ *
+ * This deliberately reuses the ONNX/capture device instead of calling
+ * `tgpu.init()` a second time. Two independent devices meant a cached root
+ * could outlive or disagree with the device the capture pages were using, and
+ * navigating between those pages could leave a canvas configured against a
+ * stale device. One root also matches TypeGPU's intended app-wide usage.
+ */
 export async function initGPU(): Promise<TgpuRoot> {
-  if (rootPromise) {
-    return rootPromise
-  }
-
-  if (!navigator.gpu) {
-    throw new Error('WebGPU is not supported.')
-  }
-
-  rootPromise = tgpu.init({
-    device: {
-      optionalFeatures: ['timestamp-query'],
-    },
-  })
-  return rootPromise
+  const shared = await initSharedGPUForOnnx()
+  return shared.root
 }
 
 export type SharedOnnxGpu = {

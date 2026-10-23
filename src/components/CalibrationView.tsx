@@ -1,5 +1,5 @@
 import { A, useSearchParams } from '@solidjs/router'
-import { Errored, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
+import { Errored, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
 
 import { CalibrateGuidancePanel, type GuidanceBand } from '@/components/calibration/CalibrateGuidancePanel'
 import { CalibrationAdvancedMetrics, type CalibMetricsRow } from '@/components/calibration/CalibrationAdvancedMetrics'
@@ -54,7 +54,11 @@ function CalibrationView() {
       return params.toString()
     },
     (query) => {
-      runCtx.setTargetConfig(hexTargetConfigFromSearchParams(new URLSearchParams(query)))
+      // The setter compares against the current config; that read is a side
+      // effect of this query change, not a dependency of the effect.
+      untrack(() => {
+        runCtx.setTargetConfig(hexTargetConfigFromSearchParams(new URLSearchParams(query)))
+      })
     },
   )
 

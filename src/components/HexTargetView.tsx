@@ -111,17 +111,43 @@ export const HexTargetView: Component = () => {
   })
 
   let disposed = false
-  void initGPU()
-    .then((gpuRoot) => {
-      if (!disposed) {
+  let gpuRetries = 0
+  const startGPU = (): void => {
+    void initGPU()
+      .then((gpuRoot) => {
+        if (disposed) {
+          return
+        }
         setRoot(gpuRoot)
-      }
-    })
-    .catch((cause: unknown) => {
-      if (!disposed) {
+        // A lost device makes every subsequent getCurrentTexture/render a
+        // no-op, which looks exactly like "the target did not render". Drop the
+        // renderer and reinitialize on a fresh shared device.
+        void gpuRoot.device.lost.then((info) => {
+          if (disposed) {
+            return
+          }
+          setError(`GPU device lost (${info.reason}); reinitializing…`)
+          setRenderer(undefined)
+          setRoot(undefined)
+          if (gpuRetries < 3) {
+            gpuRetries += 1
+            // The shared-GPU cache clears its own lost-device handler first.
+            setTimeout(startGPU, 0)
+          }
+        })
+      })
+      .catch((cause: unknown) => {
+        if (disposed) {
+          return
+        }
         setError(cause instanceof Error ? cause.message : String(cause))
-      }
-    })
+        if (gpuRetries < 3) {
+          gpuRetries += 1
+          setTimeout(startGPU, 300)
+        }
+      })
+  }
+  startGPU()
   const updatePixelRatio = (): void => {
     setPixelRatio(window.devicePixelRatio || 1)
   }
@@ -137,8 +163,15 @@ export const HexTargetView: Component = () => {
     if (!gpuRoot || !canvas) {
       return
     }
-    const format = navigator.gpu.getPreferredCanvasFormat()
-    const targetRenderer = createHexTargetRenderer(gpuRoot, canvas, format)
+    let targetRenderer: HexTargetRenderer
+    try {
+      const format = navigator.gpu.getPreferredCanvasFormat()
+      targetRenderer = createHexTargetRenderer(gpuRoot, canvas, format)
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      return
+    }
+    setError(undefined)
     setRenderer(targetRenderer)
     return () => {
       targetRenderer.destroy()
@@ -151,9 +184,19 @@ export const HexTargetView: Component = () => {
     if (!targetRenderer) {
       return
     }
-    targetRenderer.resize(nextLayout.widthPx, nextLayout.heightPx)
-    targetRenderer.setLayout(nextLayout)
-    targetRenderer.render()
+    const draw = (): void => {
+      targetRenderer.resize(nextLayout.widthPx, nextLayout.heightPx)
+      targetRenderer.setLayout(nextLayout)
+      targetRenderer.render()
+      // Only a successful draw clears the retry budget; a device that is lost
+      // again before the next paint should still hit the cap.
+      gpuRetries = 0
+    }
+    draw()
+    // The first frame can land before the browser has composited the freshly
+    // mounted canvas after a route change. Draw once more after layout.
+    const frame = requestAnimationFrame(draw)
+    return () => cancelAnimationFrame(frame)
   })
 
   const enterFullscreen = (): void => {

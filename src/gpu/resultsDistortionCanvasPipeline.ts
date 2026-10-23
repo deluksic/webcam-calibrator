@@ -49,6 +49,9 @@ export function createResultsDistortionCanvasPipeline(
     format,
     distortionUniform: stage.uniform,
     encodeDistortionFrame,
-    destroyTargets: () => {},
+    destroyTargets: () => {
+      stage.destroy()
+      context.unconfigure()
+    },
   }
 }

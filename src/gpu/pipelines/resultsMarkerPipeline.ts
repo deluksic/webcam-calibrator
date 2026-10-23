@@ -88,40 +88,39 @@ export function createMarkerResultsStage(root: TgpuRoot, presentationFormat: GPU
   const markersBg = root.createBindGroup(markersBindLayout, { markers: markerUniform, centers: centersBuf })
 
   const diskVerts = circleVertexCount(MARKER_DISK_SUBDIV)
-  const vert = tgpu
-    .vertexFn({
-      in: {
-        vertexIndex: d.builtin.vertexIndex,
-        instanceIndex: d.builtin.instanceIndex,
-      },
-      out: {
-        clipPos: d.builtin.position,
-        /** Unit disk offset (circle perimeter verts); `length` after interpolation ≈ 0 at center, 1 at rim — same as axis `uv.y` for outline. */
-        diskUnit: d.vec2f,
-      },
-    })(({ vertexIndex, instanceIndex }) => {
-      'use gpu'
-      const cam = resultsCameraBindLayout.$.transform
-      const m = markersBindLayout.$.markers
-      const row = markersBindLayout.$.centers[instanceIndex]!
-      const pc = row.positionBoardUnits
-      const centerClip = mul(cam.clipHomogeneousMatrixFromBoard, d.vec4f(pc.x, -pc.y, -pc.z, d.f32(1)))
-      const unit = circle(vertexIndex)
-      const half = cam.viewportHalfSizePixels
-      const rPx = m.markerDiskRadiusPixels
-      const dNdcX = (unit.x * rPx) / half.x
-      const dNdcY = (unit.y * rPx) / half.y
-      const w = centerClip.w
-      return {
-        clipPos: d.vec4f(
-          centerClip.x + dNdcX * w,
-          centerClip.y + dNdcY * w,
-          centerClip.z - d.f32(RESULTS_MARKER_DEPTH_BIAS_NDC) * w,
-          centerClip.w,
-        ),
-        diskUnit: unit,
-      }
-    })
+  const vert = tgpu.vertexFn({
+    in: {
+      vertexIndex: d.builtin.vertexIndex,
+      instanceIndex: d.builtin.instanceIndex,
+    },
+    out: {
+      clipPos: d.builtin.position,
+      /** Unit disk offset (circle perimeter verts); `length` after interpolation ≈ 0 at center, 1 at rim — same as axis `uv.y` for outline. */
+      diskUnit: d.vec2f,
+    },
+  })(({ vertexIndex, instanceIndex }) => {
+    'use gpu'
+    const cam = resultsCameraBindLayout.$.transform
+    const m = markersBindLayout.$.markers
+    const row = markersBindLayout.$.centers[instanceIndex]!
+    const pc = row.positionBoardUnits
+    const centerClip = mul(cam.clipHomogeneousMatrixFromBoard, d.vec4f(pc.x, -pc.y, -pc.z, d.f32(1)))
+    const unit = circle(vertexIndex)
+    const half = cam.viewportHalfSizePixels
+    const rPx = m.markerDiskRadiusPixels
+    const dNdcX = (unit.x * rPx) / half.x
+    const dNdcY = (unit.y * rPx) / half.y
+    const w = centerClip.w
+    return {
+      clipPos: d.vec4f(
+        centerClip.x + dNdcX * w,
+        centerClip.y + dNdcY * w,
+        centerClip.z - d.f32(RESULTS_MARKER_DEPTH_BIAS_NDC) * w,
+        centerClip.w,
+      ),
+      diskUnit: unit,
+    }
+  })
 
   const frag = tgpu.fragmentFn({
     in: { diskUnit: d.vec2f },
@@ -157,5 +156,13 @@ export function createMarkerResultsStage(root: TgpuRoot, presentationFormat: GPU
   const encodeToPass = (pass: GPURenderPassEncoder, cameraBg: ResultsCameraBindGroup, markerInstances: number) => {
     pipeline.with(pass).with(cameraBg).with(markersBg).draw(diskVerts, Math.max(markerInstances, 0))
   }
-  return { markerUniform, centersBuf, encodeToPass }
+  return {
+    markerUniform,
+    centersBuf,
+    encodeToPass,
+    destroy() {
+      markerUniform.destroy()
+      centersBuf.destroy()
+    },
+  }
 }

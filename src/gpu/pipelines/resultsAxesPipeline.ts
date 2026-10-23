@@ -60,74 +60,73 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
   const axisUniform = allocAxisPassUniform(root)
   const axisBg = root.createBindGroup(axisBindLayout, { axis: axisUniform })
 
-  const vert = tgpu
-    .vertexFn({
-      in: {
-        instanceIndex: d.builtin.instanceIndex,
-        vertexIndex: d.builtin.vertexIndex,
-      },
-      out: {
-        clipPos: d.builtin.position,
-        instanceIndexFlat: d.interpolate('flat', d.u32),
-        position: d.vec2f,
-        uv: d.vec2f,
-      },
-    })(({ vertexIndex, instanceIndex }) => {
-      'use gpu'
-      const cam = resultsCameraBindLayout.$.transform
-      const u = axisBindLayout.$.axis
-      const M = cam.clipHomogeneousMatrixFromBoard
-      const reach = u.worldAxisReachDistanceBoardUnits
-      const o = u.axisOriginBoard
-      const ex = d.vec4f(o.x + reach, o.y, o.z, 1)
-      const ey = d.vec4f(o.x, o.y + reach, o.z, 1)
-      const ez = d.vec4f(o.x, o.y, o.z + reach, 1)
-      const tipBoard = select(select(ex, ey, instanceIndex === d.u32(1)), ez, instanceIndex === d.u32(2))
+  const vert = tgpu.vertexFn({
+    in: {
+      instanceIndex: d.builtin.instanceIndex,
+      vertexIndex: d.builtin.vertexIndex,
+    },
+    out: {
+      clipPos: d.builtin.position,
+      instanceIndexFlat: d.interpolate('flat', d.u32),
+      position: d.vec2f,
+      uv: d.vec2f,
+    },
+  })(({ vertexIndex, instanceIndex }) => {
+    'use gpu'
+    const cam = resultsCameraBindLayout.$.transform
+    const u = axisBindLayout.$.axis
+    const M = cam.clipHomogeneousMatrixFromBoard
+    const reach = u.worldAxisReachDistanceBoardUnits
+    const o = u.axisOriginBoard
+    const ex = d.vec4f(o.x + reach, o.y, o.z, 1)
+    const ey = d.vec4f(o.x, o.y + reach, o.z, 1)
+    const ez = d.vec4f(o.x, o.y, o.z + reach, 1)
+    const tipBoard = select(select(ex, ey, instanceIndex === d.u32(1)), ez, instanceIndex === d.u32(2))
 
-      const clipOrigin = mul(M, d.vec4f(o.x, o.y, o.z, 1))
-      const clipTip = mul(M, tipBoard)
-      const invWo = d.f32(1) / clipOrigin.w
-      const invWt = d.f32(1) / clipTip.w
-      const ndcOrigin = clipOrigin.xy * invWo
-      const ndcTip = clipTip.xy * invWt
-      const halfWH = cam.viewportHalfSizePixels
-      const originPixelOffsetFromFramebufferCenter = d.vec2f(ndcOrigin.x * halfWH.x, ndcOrigin.y * halfWH.y)
-      const tipPixelOffsetFromFramebufferCenter = d.vec2f(ndcTip.x * halfWH.x, ndcTip.y * halfWH.y)
+    const clipOrigin = mul(M, d.vec4f(o.x, o.y, o.z, 1))
+    const clipTip = mul(M, tipBoard)
+    const invWo = d.f32(1) / clipOrigin.w
+    const invWt = d.f32(1) / clipTip.w
+    const ndcOrigin = clipOrigin.xy * invWo
+    const ndcTip = clipTip.xy * invWt
+    const halfWH = cam.viewportHalfSizePixels
+    const originPixelOffsetFromFramebufferCenter = d.vec2f(ndcOrigin.x * halfWH.x, ndcOrigin.y * halfWH.y)
+    const tipPixelOffsetFromFramebufferCenter = d.vec2f(ndcTip.x * halfWH.x, ndcTip.y * halfWH.y)
 
-      const spine = tipPixelOffsetFromFramebufferCenter - originPixelOffsetFromFramebufferCenter
-      const spineLenSq = dot(spine, spine)
-      const spineLen = sqrt(max(spineLenSq, d.f32(0)))
-      const rStroke = min(u.axisPolylineHalfStrokePixels, spineLen * d.f32(1 / 16))
-      const A = LineControlPoint({ position: originPixelOffsetFromFramebufferCenter, radius: rStroke })
-      const C = LineControlPoint({ position: tipPixelOffsetFromFramebufferCenter, radius: rStroke })
+    const spine = tipPixelOffsetFromFramebufferCenter - originPixelOffsetFromFramebufferCenter
+    const spineLenSq = dot(spine, spine)
+    const spineLen = sqrt(max(spineLenSq, d.f32(0)))
+    const rStroke = min(u.axisPolylineHalfStrokePixels, spineLen * d.f32(1 / 16))
+    const A = LineControlPoint({ position: originPixelOffsetFromFramebufferCenter, radius: rStroke })
+    const C = LineControlPoint({ position: tipPixelOffsetFromFramebufferCenter, radius: rStroke })
 
-      const result = lineVariableWidth(A, C, vertexIndex, d.u32(AXIS_JOIN_MAX))
+    const result = lineVariableWidth(A, C, vertexIndex, d.u32(AXIS_JOIN_MAX))
 
-      const measured = result.vertexPosition
-      const ndcExtrudedClipXY = d.vec2f(measured.x / halfWH.x, measured.y / halfWH.y)
+    const measured = result.vertexPosition
+    const ndcExtrudedClipXY = d.vec2f(measured.x / halfWH.x, measured.y / halfWH.y)
 
-      const ndcZ0 = clipOrigin.z * invWo
-      const ndcZ1 = clipTip.z * invWt
-      const fromO = d.vec2f(
-        measured.x - originPixelOffsetFromFramebufferCenter.x,
-        measured.y - originPixelOffsetFromFramebufferCenter.y,
-      )
-      const t = clamp(dot(fromO, spine) / max(spineLenSq, d.f32(1e-8)), d.f32(0), d.f32(1))
-      const ndcZ = ndcZ0 * (d.f32(1) - t) + ndcZ1 * t
+    const ndcZ0 = clipOrigin.z * invWo
+    const ndcZ1 = clipTip.z * invWt
+    const fromO = d.vec2f(
+      measured.x - originPixelOffsetFromFramebufferCenter.x,
+      measured.y - originPixelOffsetFromFramebufferCenter.y,
+    )
+    const t = clamp(dot(fromO, spine) / max(spineLenSq, d.f32(1e-8)), d.f32(0), d.f32(1))
+    const ndcZ = ndcZ0 * (d.f32(1) - t) + ndcZ1 * t
 
-      // `lineVariableWidth`: vertex 0/1 = spine (B/C); ≥2 = extrusion + caps. Interpolation gives smooth uv.y across the stroke.
-      const uvY = select(d.f32(0), d.f32(1), vertexIndex > d.u32(1))
+    // `lineVariableWidth`: vertex 0/1 = spine (B/C); ≥2 = extrusion + caps. Interpolation gives smooth uv.y across the stroke.
+    const uvY = select(d.f32(0), d.f32(1), vertexIndex > d.u32(1))
 
-      const w = result.w
-      const clipPos = d.vec4f(ndcExtrudedClipXY.x * w, ndcExtrudedClipXY.y * w, ndcZ * w, w)
+    const w = result.w
+    const clipPos = d.vec4f(ndcExtrudedClipXY.x * w, ndcExtrudedClipXY.y * w, ndcZ * w, w)
 
-      return {
-        clipPos,
-        instanceIndexFlat: instanceIndex,
-        position: ndcExtrudedClipXY,
-        uv: d.vec2f(t, uvY),
-      }
-    })
+    return {
+      clipPos,
+      instanceIndexFlat: instanceIndex,
+      position: ndcExtrudedClipXY,
+      uv: d.vec2f(t, uvY),
+    }
+  })
 
   const frag = tgpu.fragmentFn({
     in: {
@@ -151,6 +150,8 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
     return d.vec4f(rgb, 1)
   })
 
+  const indexBuffer = root.createBuffer(arrayOf(u16, axisTriangleIndexU16.length), axisTriangleIndexU16).$usage('index')
+
   const pipeline = root
     .with(joinSlot, joins.round)
     .with(startCapSlot, caps.round)
@@ -171,11 +172,18 @@ export function createAxesResultsStage(root: TgpuRoot, presentationFormat: GPUTe
       },
       multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
     })
-    .withIndexBuffer(root.createBuffer(arrayOf(u16, axisTriangleIndexU16.length), axisTriangleIndexU16).$usage('index'))
+    .withIndexBuffer(indexBuffer)
 
   const axisIndexCount = axisTriangleIndexU16.length
   const encodeToPass = (pass: GPURenderPassEncoder, cameraBg: ResultsCameraBindGroup) => {
     pipeline.with(pass).with(cameraBg).with(axisBg).drawIndexed(axisIndexCount, 3)
   }
-  return { axisUniform, encodeToPass }
+  return {
+    axisUniform,
+    encodeToPass,
+    destroy() {
+      axisUniform.destroy()
+      indexBuffer.destroy()
+    },
+  }
 }
