@@ -14,99 +14,13 @@ function colorAt(colors: readonly BinaryColor[], index: number): BinaryColor {
   return colors[index] ?? 0
 }
 
+const BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz'
+
 /**
  * Rotate a ring color string so that repeated/reversed traversal starts compare
  * equal. Only rotations are considered: a perspective view cannot mirror the
  * angular order of a neighborhood.
  */
-const BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz'
-
-function canonicalRingFeatures(
-  colors: string,
-  chainIds: Int32Array,
-  chainCount: number,
-  endpoints: string,
-  rootChain: number,
-): { colors: string; partition: string; endpoints: string } {
-  if (chainCount <= 1) {
-    return { colors, partition: '0', endpoints }
-  }
-
-  let colorsUniform = true
-  for (let index = 1; index < chainCount; index += 1) {
-    if (colors[index] !== colors[0]) {
-      colorsUniform = false
-      break
-    }
-  }
-  let endpointsUniform = true
-  for (let index = 1; index < chainCount; index += 1) {
-    if (endpoints[index] !== endpoints[0]) {
-      endpointsUniform = false
-      break
-    }
-  }
-
-  let bestColors = ''
-  let bestPartition = ''
-  let bestEndpoints = ''
-  let hasBest = false
-  // Reused across shifts. No Map and no per-shift arrays.
-  const distinctChains: number[] = []
-  const distinctLabels: number[] = []
-
-  for (let shift = 0; shift < chainCount; shift += 1) {
-    const candidateColors = colorsUniform
-      ? colors
-      : colors.slice(shift) + colors.slice(0, shift)
-    const candidateEndpoints = endpointsUniform
-      ? endpoints
-      : endpoints.slice(shift) + endpoints.slice(0, shift)
-
-    distinctChains.length = 0
-    distinctLabels.length = 0
-    let nextLabel = rootChain >= 0 ? 1 : 0
-    let candidatePartition = ''
-
-    for (let index = 0; index < chainCount; index += 1) {
-      const chainId = chainIds[(shift + index) % chainCount] ?? -1
-      let label = -1
-      if (rootChain >= 0 && chainId === rootChain) {
-        label = 0
-      } else {
-        for (let known = 0; known < distinctChains.length; known += 1) {
-          if (distinctChains[known] === chainId) {
-            label = distinctLabels[known]!
-            break
-          }
-        }
-        if (label < 0) {
-          label = nextLabel
-          nextLabel += 1
-          distinctChains.push(chainId)
-          distinctLabels.push(label)
-        }
-      }
-      candidatePartition += BASE36[label]
-    }
-
-    if (
-      !hasBest ||
-      candidateColors < bestColors ||
-      (candidateColors === bestColors &&
-        (candidatePartition < bestPartition ||
-          (candidatePartition === bestPartition && candidateEndpoints < bestEndpoints)))
-    ) {
-      bestColors = candidateColors
-      bestPartition = candidatePartition
-      bestEndpoints = candidateEndpoints
-      hasBest = true
-    }
-  }
-
-  return { colors: bestColors, partition: bestPartition, endpoints: bestEndpoints }
-}
-
 export function canonicalRing(colors: string): string {
   if (colors.length <= 1) {
     return colors
@@ -119,6 +33,419 @@ export function canonicalRing(colors: string): string {
     }
   }
   return best
+}
+
+/** Rings wider than a 32-bit word fall back to the element-wise path. */
+const MAX_PACKED_RING = 32
+
+type FingerprintScratch = {
+  /** atan2 of each point, so the ring sort never recomputes it per comparison. */
+  angle: Float64Array
+  visited: Uint8Array
+  ringColors: Uint8Array
+  ringEndpoints: Uint8Array
+  ringChains: Int32Array
+  partition: Uint8Array
+  bestPartition: Uint8Array
+  distinctChains: Int32Array
+  distinctLabels: Int32Array
+}
+
+function createFingerprintScratch(pointCount: number): FingerprintScratch {
+  const points = Math.max(1, pointCount)
+  const ring = Math.max(8, Math.min(points, 64))
+  return {
+    angle: new Float64Array(points),
+    visited: new Uint8Array(points),
+    ringColors: new Uint8Array(ring),
+    ringEndpoints: new Uint8Array(ring),
+    ringChains: new Int32Array(ring),
+    partition: new Uint8Array(ring),
+    bestPartition: new Uint8Array(ring),
+    distinctChains: new Int32Array(ring),
+    distinctLabels: new Int32Array(ring),
+  }
+}
+
+function growRing(scratch: FingerprintScratch, size: number): void {
+  if (scratch.ringColors.length >= size) {
+    return
+  }
+  const capacity = Math.max(size, scratch.ringColors.length * 2)
+  const colors = new Uint8Array(capacity)
+  colors.set(scratch.ringColors)
+  scratch.ringColors = colors
+  const endpoints = new Uint8Array(capacity)
+  endpoints.set(scratch.ringEndpoints)
+  scratch.ringEndpoints = endpoints
+  const chains = new Int32Array(capacity)
+  chains.set(scratch.ringChains)
+  scratch.ringChains = chains
+  const partition = new Uint8Array(capacity)
+  partition.set(scratch.partition)
+  scratch.partition = partition
+  const bestPartition = new Uint8Array(capacity)
+  bestPartition.set(scratch.bestPartition)
+  scratch.bestPartition = bestPartition
+  const distinctChains = new Int32Array(capacity)
+  distinctChains.set(scratch.distinctChains)
+  scratch.distinctChains = distinctChains
+  const distinctLabels = new Int32Array(capacity)
+  distinctLabels.set(scratch.distinctLabels)
+  scratch.distinctLabels = distinctLabels
+}
+
+function bitsToBinary(bits: number, count: number): string {
+  return bits.toString(2).padStart(count, '0')
+}
+
+/**
+ * Same algorithm without packing, for rings wider than one word. Compares
+ * rotations element-wise: O(n²) per ring, which only matters for rings that
+ * never occur in practice (the measured maximum is 18 on the default target).
+ */
+function canonicalRingWide(
+  scratch: FingerprintScratch,
+  count: number,
+  rootChain: number,
+): RingDescriptor {
+  const ringColors = scratch.ringColors
+  const ringEndpoints = scratch.ringEndpoints
+  const ringChains = scratch.ringChains
+  const partition = scratch.partition
+  const bestPartition = scratch.bestPartition
+  const distinctChains = scratch.distinctChains
+  const distinctLabels = scratch.distinctLabels
+
+  // Pass 1: the smallest colour rotation.
+  let bestStart = 0
+  for (let shift = 1; shift < count; shift += 1) {
+    for (let index = 0; index < count; index += 1) {
+      const candidate = ringColors[(shift + index) % count]!
+      const current = ringColors[(bestStart + index) % count]!
+      if (candidate !== current) {
+        if (candidate < current) {
+          bestStart = shift
+        }
+        break
+      }
+    }
+  }
+
+  // Pass 2: among the color ties, smallest partition, then smallest endpoints.
+  let bestShift = bestStart
+  let hasBest = false
+  for (let shift = 0; shift < count; shift += 1) {
+    let sameColor = true
+    for (let index = 0; index < count; index += 1) {
+      if (ringColors[(shift + index) % count] !== ringColors[(bestStart + index) % count]) {
+        sameColor = false
+        break
+      }
+    }
+    if (!sameColor) {
+      continue
+    }
+
+    let nextLabel = rootChain >= 0 ? 1 : 0
+    let distinct = 0
+    for (let index = 0; index < count; index += 1) {
+      const chainId = ringChains[(shift + index) % count]!
+      let label = -1
+      if (rootChain >= 0 && chainId === rootChain) {
+        label = 0
+      } else {
+        for (let known = 0; known < distinct; known += 1) {
+          if (distinctChains[known] === chainId) {
+            label = distinctLabels[known]!
+            break
+          }
+        }
+        if (label < 0) {
+          label = nextLabel
+          nextLabel += 1
+          distinctChains[distinct] = chainId
+          distinctLabels[distinct] = label
+          distinct += 1
+        }
+      }
+      partition[index] = label
+    }
+
+    let take = !hasBest
+    if (!take) {
+      let order = 0
+      for (let index = 0; index < count; index += 1) {
+        const candidate = partition[index]!
+        const current = bestPartition[index]!
+        if (candidate !== current) {
+          order = candidate < current ? -1 : 1
+          break
+        }
+      }
+      if (order < 0) {
+        take = true
+      } else if (order === 0) {
+        for (let index = 0; index < count; index += 1) {
+          const candidate = ringEndpoints[(shift + index) % count]!
+          const current = ringEndpoints[(bestShift + index) % count]!
+          if (candidate !== current) {
+            take = candidate < current
+            break
+          }
+        }
+      }
+    }
+    if (!take) {
+      continue
+    }
+    hasBest = true
+    bestShift = shift
+    bestPartition.set(partition.subarray(0, count))
+  }
+
+  let colorText = ''
+  for (let index = 0; index < count; index += 1) {
+    colorText += ringColors[(bestStart + index) % count] === 1 ? '1' : '0'
+  }
+  let endpointText = ''
+  for (let index = 0; index < count; index += 1) {
+    endpointText += ringEndpoints[(bestShift + index) % count] === 1 ? '1' : '0'
+  }
+  let partitionText = ''
+  for (let index = 0; index < count; index += 1) {
+    partitionText += BASE36[bestPartition[index]!]
+  }
+  return {
+    size: count,
+    colors: colorText,
+    partition: partitionText,
+    endpoints: endpointText,
+  }
+}
+
+/**
+ * Canonical (rotation-invariant) form of one BFS ring.
+ *
+ * The previous implementation rebuilt three strings for every rotation and
+ * compared them lexicographically. Here:
+ *
+ * - colors and endpoint flags are packed MSB-first into 32-bit words, so a
+ *   rotation is one shift pair and the ordering is a single integer compare;
+ * - only rotations that reach the minimal color word are considered at all
+ *   (colors outrank the partition, so the rest can never win);
+ * - chain labels are written into a scratch buffer and compared element-wise,
+ *   which is the one part that cannot be packed — a ring of `n` points needs
+ *   `n * log2(n)` bits of label data, and the first-appearance relabeling is
+ *   inherently sequential.
+ *
+ * Only the winning rotation is materialised into strings, for the key and UI.
+ */
+function canonicalRingFromArrays(
+  scratch: FingerprintScratch,
+  count: number,
+  rootChain: number,
+): RingDescriptor {
+  const ringColors = scratch.ringColors
+  const ringEndpoints = scratch.ringEndpoints
+  const ringChains = scratch.ringChains
+
+  if (count <= 1) {
+    return {
+      size: count,
+      colors: count === 0 ? '' : ringColors[0] === 1 ? '1' : '0',
+      partition: '0',
+      endpoints: count === 0 ? '' : ringEndpoints[0] === 1 ? '1' : '0',
+    }
+  }
+  if (count > MAX_PACKED_RING) {
+    return canonicalRingWide(scratch, count, rootChain)
+  }
+
+  let colorBits = 0
+  let endpointBits = 0
+  for (let index = 0; index < count; index += 1) {
+    colorBits = (colorBits << 1) | (ringColors[index] === 1 ? 1 : 0)
+    endpointBits = (endpointBits << 1) | (ringEndpoints[index] === 1 ? 1 : 0)
+  }
+  colorBits >>>= 0
+  endpointBits >>>= 0
+  const mask = count >= 32 ? 0xffffffff : (1 << count) - 1
+  const rotate = (bits: number, shift: number): number =>
+    shift === 0 ? bits : (((bits << shift) | (bits >>> (count - shift))) & mask) >>> 0
+
+  // Pass 1: the smallest colour ring. Rotations above it cannot win.
+  let bestColorBits = 0xffffffff
+  for (let shift = 0; shift < count; shift += 1) {
+    const value = rotate(colorBits, shift)
+    if (value < bestColorBits) {
+      bestColorBits = value
+    }
+  }
+
+  const partition = scratch.partition
+  const bestPartition = scratch.bestPartition
+  const distinctChains = scratch.distinctChains
+  const distinctLabels = scratch.distinctLabels
+
+  // Pass 2: among the color ties, smallest partition, then smallest endpoints.
+  let bestEndpoints = 0
+  let hasBest = false
+  for (let shift = 0; shift < count; shift += 1) {
+    if (rotate(colorBits, shift) !== bestColorBits) {
+      continue
+    }
+
+    let nextLabel = rootChain >= 0 ? 1 : 0
+    let distinct = 0
+    for (let index = 0; index < count; index += 1) {
+      const chainId = ringChains[(shift + index) % count]!
+      let label = -1
+      if (rootChain >= 0 && chainId === rootChain) {
+        label = 0
+      } else {
+        for (let known = 0; known < distinct; known += 1) {
+          if (distinctChains[known] === chainId) {
+            label = distinctLabels[known]!
+            break
+          }
+        }
+        if (label < 0) {
+          label = nextLabel
+          nextLabel += 1
+          distinctChains[distinct] = chainId
+          distinctLabels[distinct] = label
+          distinct += 1
+        }
+      }
+      partition[index] = label
+    }
+
+    const candidateEndpoints = rotate(endpointBits, shift)
+    let take = !hasBest
+    if (!take) {
+      let order = 0
+      for (let index = 0; index < count; index += 1) {
+        const candidate = partition[index]!
+        const current = bestPartition[index]!
+        if (candidate !== current) {
+          order = candidate < current ? -1 : 1
+          break
+        }
+      }
+      take = order < 0 || (order === 0 && candidateEndpoints < bestEndpoints)
+    }
+    if (!take) {
+      continue
+    }
+    hasBest = true
+    bestEndpoints = candidateEndpoints
+    bestPartition.set(partition.subarray(0, count))
+  }
+
+  let partitionText = ''
+  for (let index = 0; index < count; index += 1) {
+    partitionText += BASE36[bestPartition[index]!]
+  }
+  return {
+    size: count,
+    colors: bitsToBinary(bestColorBits, count),
+    partition: partitionText,
+    endpoints: bitsToBinary(bestEndpoints, count),
+  }
+}
+
+/**
+ * Canonicalise one ring from angular-order arrays. Exposed for tests; the
+ * pipeline uses the scratch variant to avoid per-ring allocation.
+ */
+export function canonicalRingDescriptor(
+  ringColors: Uint8Array,
+  ringEndpoints: Uint8Array,
+  ringChains: Int32Array,
+  count: number,
+  rootChain: number,
+): RingDescriptor {
+  const scratch = createFingerprintScratch(Math.max(8, count))
+  growRing(scratch, count)
+  scratch.ringColors.set(ringColors.subarray(0, count))
+  scratch.ringEndpoints.set(ringEndpoints.subarray(0, count))
+  scratch.ringChains.set(ringChains.subarray(0, count))
+  return canonicalRingFromArrays(scratch, count, rootChain)
+}
+
+function computeFingerprintInto(
+  scratch: FingerprintScratch,
+  graph: ProximityGraph,
+  colors: readonly BinaryColor[],
+  rootIndex: number,
+  depth: number,
+  chainIds: Int32Array,
+  endpointFlags: Uint8Array,
+): PointFingerprint {
+  const root = graph.points[rootIndex]
+  if (root === undefined) {
+    return { index: rootIndex, color: 0, endpoint: false, rings: [], key: '0' }
+  }
+  const rootChain = chainIds[rootIndex] ?? -1
+  const rootEndpoint = (endpointFlags[rootIndex] ?? 0) === 1
+
+  const visited = scratch.visited
+  const angle = scratch.angle
+  visited.fill(0)
+  visited[rootIndex] = 1
+  let frontier: number[] = [rootIndex]
+  const rings: RingDescriptor[] = []
+
+  for (let level = 0; level < depth; level += 1) {
+    const next: number[] = []
+    for (const node of frontier) {
+      for (const neighbor of graph.neighbors[node]!) {
+        if (visited[neighbor] === 0) {
+          visited[neighbor] = 1
+          next.push(neighbor)
+        }
+      }
+    }
+    if (next.length === 0) {
+      break
+    }
+
+    // One atan2 per ring point instead of one per sort comparison.
+    for (const node of next) {
+      const point = graph.points[node]!
+      angle[node] = Math.atan2(point.y - root.y, point.x - root.x)
+    }
+    next.sort((a, b) => {
+      const angleA = angle[a]!
+      const angleB = angle[b]!
+      if (angleA !== angleB) {
+        return angleA - angleB
+      }
+      return a - b
+    })
+
+    growRing(scratch, next.length)
+    const ringColors = scratch.ringColors
+    const ringEndpoints = scratch.ringEndpoints
+    const ringChains = scratch.ringChains
+    for (let index = 0; index < next.length; index += 1) {
+      const node = next[index]!
+      ringColors[index] = colorAt(colors, graph.points[node]!.index)
+      ringChains[index] = chainIds[node] ?? -1
+      ringEndpoints[index] = (endpointFlags[node] ?? 0) === 1 ? 1 : 0
+    }
+    rings.push(canonicalRingFromArrays(scratch, next.length, rootChain))
+    frontier = next
+  }
+
+  const rootColor = colorAt(colors, root.index)
+  let key = fingerprintRootKey(rootColor, rootEndpoint)
+  for (const ring of rings) {
+    key += `|${fingerprintRingKey(ring)}`
+  }
+
+  return { index: root.index, color: rootColor, endpoint: rootEndpoint, rings, key }
 }
 
 /**
@@ -134,79 +461,15 @@ export function computeFingerprint(
   chainIds: Int32Array = chainIdsForGraph(graph),
   endpointFlags: Uint8Array = chainEndpointFlagsForGraph(graph),
 ): PointFingerprint {
-  const root = graph.points[rootIndex]
-  if (root === undefined) {
-    return { index: rootIndex, color: 0, endpoint: false, rings: [], key: '0' }
-  }
-  const rootChain = chainIds[rootIndex] ?? -1
-  const rootEndpoint = (endpointFlags[rootIndex] ?? 0) === 1
-
-  const seen = new Set<number>([rootIndex])
-  let frontier: number[] = [rootIndex]
-  const rings: RingDescriptor[] = []
-  let rawChains = new Int32Array(0)
-
-  for (let level = 0; level < depth; level += 1) {
-    const next = new Set<number>()
-    for (const node of frontier) {
-      for (const neighbor of graph.neighbors[node]!) {
-        if (!seen.has(neighbor)) {
-          next.add(neighbor)
-        }
-      }
-    }
-    if (next.size === 0) {
-      break
-    }
-
-    const ordered = [...next].sort((a, b) => {
-      const pointA = graph.points[a]!
-      const pointB = graph.points[b]!
-      const angleA = Math.atan2(pointA.y - root.y, pointA.x - root.x)
-      const angleB = Math.atan2(pointB.y - root.y, pointB.x - root.x)
-      if (angleA !== angleB) {
-        return angleA - angleB
-      }
-      return a - b
-    })
-
-    if (rawChains.length < ordered.length) {
-      rawChains = new Int32Array(ordered.length)
-    }
-    let raw = ''
-    let rawEndpoints = ''
-    for (let index = 0; index < ordered.length; index += 1) {
-      const node = ordered[index]!
-      raw += colorAt(colors, graph.points[node]!.index) === 1 ? '1' : '0'
-      rawChains[index] = chainIds[node] ?? -1
-      rawEndpoints += (endpointFlags[node] ?? 0) === 1 ? '1' : '0'
-    }
-    const canonical = canonicalRingFeatures(
-      raw,
-      rawChains,
-      ordered.length,
-      rawEndpoints,
-      rootChain,
-    )
-    rings.push({
-      size: ordered.length,
-      colors: canonical.colors,
-      partition: canonical.partition,
-      endpoints: canonical.endpoints,
-    })
-    for (const node of ordered) {
-      seen.add(node)
-    }
-    frontier = ordered
-  }
-
-  const rootColor = colorAt(colors, root.index)
-  let key = fingerprintRootKey(rootColor, rootEndpoint)
-  for (const ring of rings) {
-    key += `|${fingerprintRingKey(ring)}`
-  }
-
-  return { index: root.index, color: rootColor, endpoint: rootEndpoint, rings, key }
+  return computeFingerprintInto(
+    createFingerprintScratch(graph.points.length),
+    graph,
+    colors,
+    rootIndex,
+    depth,
+    chainIds,
+    endpointFlags,
+  )
 }
 
 export function fingerprintRootKey(color: BinaryColor, endpoint: boolean): string {
@@ -241,10 +504,12 @@ export function computeFingerprints(
 ): PointFingerprint[] {
   const chainIds = chainIdsForGraph(graph)
   const endpointFlags = chainEndpointFlagsForGraph(graph)
+  // One scratch for the whole pass: the ring buffers are reused per root.
+  const scratch = createFingerprintScratch(graph.points.length)
   const fingerprints: PointFingerprint[] = []
   for (let rootIndex = 0; rootIndex < graph.points.length; rootIndex += 1) {
     fingerprints.push(
-      computeFingerprint(graph, colors, rootIndex, depth, chainIds, endpointFlags),
+      computeFingerprintInto(scratch, graph, colors, rootIndex, depth, chainIds, endpointFlags),
     )
   }
   return fingerprints

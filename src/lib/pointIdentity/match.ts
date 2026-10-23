@@ -1,5 +1,4 @@
-import { chainEndpointFlagsForGraph, chainIdsForGraph } from '@/lib/pointIdentity/chainRuns'
-import { computeFingerprint } from '@/lib/pointIdentity/identity'
+import { computeFingerprints } from '@/lib/pointIdentity/identity'
 import type {
   BinaryColor,
   IdentityIndex,
@@ -66,11 +65,9 @@ export function createColorIdentityIndex(
   colors: readonly BinaryColor[],
   depth: number,
 ): ColorIdentityIndex {
-  const chainIds = chainIdsForGraph(graph)
-  const endpointFlags = chainEndpointFlagsForGraph(graph)
   const byKey: ColorIdentityIndex = new Map()
-  for (let rootIndex = 0; rootIndex < graph.points.length; rootIndex += 1) {
-    const fingerprint = computeFingerprint(graph, colors, rootIndex, depth, chainIds, endpointFlags)
+  const fingerprints = computeFingerprints(graph, colors, depth)
+  for (const fingerprint of fingerprints) {
     const key = colorFingerprintKey(fingerprint)
     const existing = byKey.get(key)
     if (existing === undefined) {
@@ -107,20 +104,7 @@ export function matchObservedIdentity(
   const fingerprints =
     options?.fingerprints !== undefined
       ? [...options.fingerprints]
-      : (() => {
-          const chainIds = chainIdsForGraph(observedGraph)
-          const endpointFlags = chainEndpointFlagsForGraph(observedGraph)
-          return observedGraph.points.map((_, rootIndex) =>
-            computeFingerprint(
-              observedGraph,
-              observedColors,
-              rootIndex,
-              depth,
-              chainIds,
-              endpointFlags,
-            ),
-          )
-        })()
+      : computeFingerprints(observedGraph, observedColors, depth)
 
   const candidateLists = fingerprints.map((fingerprint) =>
     options?.looseByKey !== undefined

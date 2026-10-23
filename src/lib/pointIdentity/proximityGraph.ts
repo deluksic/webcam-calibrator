@@ -191,7 +191,54 @@ function countComponents(adjacency: ReadonlyArray<readonly number[]>): number {
   return components
 }
 
-function computeNeighborhoods(points: readonly PatternPoint[]): {
+/** Keeps the grid from degenerating on pathological (spiky) distributions. */
+const MAX_GRID_CELLS = 8192
+
+/**
+ * Insert one candidate into the running top-k, preserving the original
+ * tie-break: equal distances prefer the lower index.
+ */
+function offerNeighbor(
+  bestDistances: Float64Array,
+  bestIndices: Int32Array,
+  length: number,
+  index: number,
+): void {
+  let position = NEIGHBOR_SAMPLE
+  for (let slot = 0; slot < NEIGHBOR_SAMPLE; slot += 1) {
+    const slotDistance = bestDistances[slot]!
+    const tied = Math.abs(length - slotDistance) < 1e-6
+    if (tied ? index < bestIndices[slot]! : length < slotDistance) {
+      position = slot
+      break
+    }
+  }
+  if (position >= NEIGHBOR_SAMPLE) {
+    return
+  }
+  for (let slot = NEIGHBOR_SAMPLE - 1; slot > position; slot -= 1) {
+    bestDistances[slot] = bestDistances[slot - 1]!
+    bestIndices[slot] = bestIndices[slot - 1]!
+  }
+  bestDistances[position] = length
+  bestIndices[position] = index
+}
+
+/**
+ * k-nearest neighbours over a uniform grid.
+ *
+ * The brute-force version compared every point against every other point —
+ * 476² `hypot` calls, about 6.6 ms per frame. Bucketing by roughly one point
+ * spacing replaces that with a few dozen candidates, and the result is
+ * identical rather than approximate:
+ *
+ * Cells are visited in Chebyshev rings around the query cell. Once the ring
+ * radius `r` has been scanned, every cell outside it starts at least `r * cell`
+ * away on one axis, so any unseen point is at distance >= `r * cell`. Stopping
+ * only when the current k-th distance is strictly below that bound therefore
+ * cannot skip a point that belongs in the top-k.
+ */
+export function computeNeighborhoods(points: readonly PatternPoint[]): {
   neighborLists: number[][]
   localScales: number[]
 } {
@@ -200,34 +247,97 @@ function computeNeighborhoods(points: readonly PatternPoint[]): {
   const localScales: number[] = []
   const bestDistances = new Float64Array(NEIGHBOR_SAMPLE)
   const bestIndices = new Int32Array(NEIGHBOR_SAMPLE)
+  if (count === 0) {
+    return { neighborLists, localScales }
+  }
 
-  for (let i = 0; i < count; i += 1) {
-    const origin = points[i]!
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  for (const point of points) {
+    minX = Math.min(minX, point.x)
+    maxX = Math.max(maxX, point.x)
+    minY = Math.min(minY, point.y)
+    maxY = Math.max(maxY, point.y)
+  }
+  const spanX = Math.max(maxX - minX, 1e-6)
+  const spanY = Math.max(maxY - minY, 1e-6)
+
+  // Aim for ~one point per cell; grow the cell if the field is too spiky.
+  let cell = Math.max(1e-6, Math.sqrt((spanX * spanY) / count))
+  let cols = Math.floor(spanX / cell) + 1
+  let rows = Math.floor(spanY / cell) + 1
+  while (cols * rows > MAX_GRID_CELLS) {
+    cell *= 1.5
+    cols = Math.floor(spanX / cell) + 1
+    rows = Math.floor(spanY / cell) + 1
+  }
+
+  const buckets: Array<number[] | undefined> = Array.from({ length: cols * rows })
+  const cellX = new Int32Array(count)
+  const cellY = new Int32Array(count)
+  for (let index = 0; index < count; index += 1) {
+    const point = points[index]!
+    const gx = Math.min(cols - 1, Math.max(0, Math.floor((point.x - minX) / cell)))
+    const gy = Math.min(rows - 1, Math.max(0, Math.floor((point.y - minY) / cell)))
+    cellX[index] = gx
+    cellY[index] = gy
+    const key = gy * cols + gx
+    const bucket = buckets[key]
+    if (bucket === undefined) {
+      buckets[key] = [index]
+    } else {
+      bucket.push(index)
+    }
+  }
+
+  const origin = { x: 0, y: 0 }
+  const scan = (gx: number, gy: number, index: number): void => {
+    if (gx < 0 || gx >= cols || gy < 0 || gy >= rows) {
+      return
+    }
+    const bucket = buckets[gy * cols + gx]
+    if (bucket === undefined) {
+      return
+    }
+    for (const candidate of bucket) {
+      if (candidate === index) {
+        continue
+      }
+      offerNeighbor(bestDistances, bestIndices, distance(origin, points[candidate]!), candidate)
+    }
+  }
+
+  for (let index = 0; index < count; index += 1) {
+    const point = points[index]!
+    origin.x = point.x
+    origin.y = point.y
     bestDistances.fill(Number.POSITIVE_INFINITY)
     bestIndices.fill(-1)
-    for (let j = 0; j < count; j += 1) {
-      if (j === i) {
-        continue
-      }
-      const length = distance(origin, points[j]!)
-      let position = NEIGHBOR_SAMPLE
-      for (let slot = 0; slot < NEIGHBOR_SAMPLE; slot += 1) {
-        const slotDistance = bestDistances[slot]!
-        const tied = Math.abs(length - slotDistance) < 1e-6
-        if (tied ? j < bestIndices[slot]! : length < slotDistance) {
-          position = slot
-          break
+    const gx = cellX[index]!
+    const gy = cellY[index]!
+
+    for (let ring = 0; ; ring += 1) {
+      if (ring === 0) {
+        scan(gx, gy, index)
+      } else {
+        for (let offset = -ring; offset <= ring; offset += 1) {
+          scan(gx + offset, gy - ring, index)
+          scan(gx + offset, gy + ring, index)
+        }
+        for (let offset = -ring + 1; offset <= ring - 1; offset += 1) {
+          scan(gx - ring, gy + offset, index)
+          scan(gx + ring, gy + offset, index)
         }
       }
-      if (position >= NEIGHBOR_SAMPLE) {
-        continue
+      const kth = bestDistances[NEIGHBOR_SAMPLE - 1]!
+      if (kth < ring * cell) {
+        break
       }
-      for (let slot = NEIGHBOR_SAMPLE - 1; slot > position; slot -= 1) {
-        bestDistances[slot] = bestDistances[slot - 1]!
-        bestIndices[slot] = bestIndices[slot - 1]!
+      if (gx - ring <= 0 && gx + ring >= cols - 1 && gy - ring <= 0 && gy + ring >= rows - 1) {
+        break
       }
-      bestDistances[position] = length
-      bestIndices[position] = j
     }
 
     const neighborCount = Math.min(NEIGHBOR_SAMPLE, Math.max(0, count - 1))

@@ -7,6 +7,7 @@ import {
   createDesignGrid,
   createDesignPositionMap,
   type DesignGrid,
+  type DesignLatticeMetrics,
 } from '@/lib/pointIdentity/designGrid'
 import {
   fitHomography,
@@ -81,6 +82,34 @@ export function createLocalIcpOptions(overrides: Partial<LocalIcpOptions> = {}):
   return { ...DEFAULT_LOCAL_ICP_OPTIONS, ...overrides }
 }
 
+/**
+ * Design-only structures shared across every observed frame.
+ *
+ * `computeDesignLatticeMetrics` is O(designN²) — about 3 ms for the default
+ * 476-point target — and the index maps are linear. All of it depends only on
+ * the pattern, so it belongs in a design memo, not in the per-frame path.
+ */
+export type LocalIcpDesign = {
+  lattice: DesignLatticeMetrics
+  /** Design points keyed by stable design id. */
+  pointsByIndex: ReadonlyMap<number, PatternPoint>
+  /** Array position keyed by stable design id. */
+  positionById: ReadonlyMap<number, number>
+}
+
+export function createLocalIcpDesign(designPattern: HexPattern): LocalIcpDesign {
+  const points = designPattern.points
+  const pointsByIndex = new Map<number, PatternPoint>()
+  for (const point of points) {
+    pointsByIndex.set(point.index, point)
+  }
+  return {
+    lattice: computeDesignLatticeMetrics(points),
+    pointsByIndex,
+    positionById: createDesignPositionMap(points),
+  }
+}
+
 export type LocalIcpInput = {
   designPattern: HexPattern
   designColors: readonly BinaryColor[]
@@ -92,6 +121,11 @@ export type LocalIcpInput = {
   observedFingerprints?: readonly PointFingerprint[]
   baseline: IdentityMatchResult
   options: LocalIcpOptions
+  /**
+   * Precomputed design-only structures. Pass `createLocalIcpDesign(designPattern)`
+   * from a memo to keep the O(designN²) lattice scan off the per-frame path.
+   */
+  designCache?: LocalIcpDesign
 }
 
 type LocalPair = {
@@ -384,10 +418,8 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
       maxProofDepth,
     )
   }
-  const designPointsByIndex = new Map<number, PatternPoint>()
-  for (const point of designPattern.points) {
-    designPointsByIndex.set(point.index, point)
-  }
+  const designCache = input.designCache ?? createLocalIcpDesign(designPattern)
+  const designPointsByIndex = designCache.pointsByIndex
   const anchorCollection = collectAnchors(
     observedGraph,
     observedColors,
@@ -403,7 +435,7 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
     },
   )
   const proofPowers = anchorCollection.proofPowers.map((proof) => proof.depth)
-  const lattice = computeDesignLatticeMetrics(designPattern.points)
+  const lattice = designCache.lattice
   const designSpacing = lattice.medianNearest
 
   if (designPattern.points.length < 4 || observed < 4 || !(designSpacing > 1e-9)) {
@@ -464,7 +496,7 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
   const gate = Math.max(0.1, lattice.minNearest * options.localGateFactor)
   const anchorGate = Math.max(0.1, designSpacing * options.localAnchorGateFactor)
   const designGrid = createDesignGrid(designPattern.points, designColors, gate)
-  const designPositionById = createDesignPositionMap(designPattern.points)
+  const designPositionById = designCache.positionById
   // Farthest-from-anchor first. A successful subgraph confirms every ambiguous
   // point it matched, so nearer points can be covered without their own run.
   const anchorDistance = new Int32Array(observed)

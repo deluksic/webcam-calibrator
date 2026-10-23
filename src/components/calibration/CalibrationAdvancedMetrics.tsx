@@ -65,8 +65,7 @@ export function CalibrationAdvancedMetrics(props: CalibrationAdvancedMetricsProp
             <>
               <div class={styles.statsSection}>Pipeline timings</div>
               <div>
-                stats {timings().imageStatsMs.toFixed(2)} (age {timings().statsAgeFrames}
-                {timings().statsRefreshed ? ', refreshed' : ''}) · pre {timings().preprocessMs.toFixed(2)} · queue{' '}
+                stats {timings().statsMs.toFixed(2)} · pre {timings().preprocessMs.toFixed(2)} · queue{' '}
                 {timings().queueWaitMs.toFixed(2)} · inf-run {timings().inferenceRunMs.toFixed(2)} · inf-drain{' '}
                 {timings().inferenceDrainMs.toFixed(2)} · copy {timings().cameraCopyMs.toFixed(2)} · mask{' '}
                 {timings().maskMs.toFixed(2)} · bg {timings().backgroundMs.toFixed(2)} · comp{' '}

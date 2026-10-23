@@ -7,8 +7,9 @@ import { clamp, max, select } from 'typegpu/std'
  *
  * The low-resolution ONNX input is already a downsampled, per-frame-normalized
  * luma image. We blur it with a mask-aware normalized convolution, reconstruct
- * raw luma with the same frame mean/std, and expose the result as a sampled
- * texture. The full-resolution component/histogram stages subtract it.
+ * raw luma with the same frame mean/std (read from the GPU stats buffer, so no
+ * readback is involved), and expose the result as a sampled texture. The
+ * full-resolution component/histogram stages subtract it.
  */
 const BLUR_RADIUS = 12
 const MASK_WEIGHT_EPSILON = 0.001
@@ -16,11 +17,12 @@ const MASK_WEIGHT_EPSILON = 0.001
 const backgroundParams = d.struct({
   size: d.vec2f,
   maskSize: d.vec2f,
-  stats: d.vec2f,
 })
 
 const weightLayout = tgpu.bindGroupLayout({
   inputBuffer: { storage: d.arrayOf(d.f32), access: 'readonly' },
+  /** Frame mean and standard deviation, written by the GPU stats pass. */
+  stats: { storage: d.arrayOf(d.f32), access: 'readonly' },
   maskTexture: { texture: d.texture2d() },
   sampler: { sampler: 'filtering' },
   params: { uniform: backgroundParams },
@@ -35,6 +37,7 @@ const blurLayout = tgpu.bindGroupLayout({
 
 const textureLayout = tgpu.bindGroupLayout({
   input: { storage: d.arrayOf(d.vec2f), access: 'readonly' },
+  stats: { storage: d.arrayOf(d.f32), access: 'readonly' },
   params: { uniform: backgroundParams },
   backgroundTexture: {
     storageTexture: d.textureStorage2d('rgba8unorm', 'write-only'),
@@ -54,7 +57,7 @@ const weightPass = (x: number, y: number) => {
     d.f32(0),
   ).r
   const z = weightLayout.$.inputBuffer[index]!
-  const rawLuma = params.stats.x + params.stats.y * z
+  const rawLuma = weightLayout.$.stats[d.u32(0)]! + weightLayout.$.stats[d.u32(1)]! * z
   weightLayout.$.output[index] = d.vec2f(rawLuma * mask, mask)
 }
 
@@ -91,7 +94,11 @@ const backgroundToTexture = (x: number, y: number) => {
   const width = d.u32(params.size.x)
   const value = textureLayout.$.input[d.u32(y) * width + d.u32(x)]!
   const weight = max(value.y, d.f32(MASK_WEIGHT_EPSILON))
-  const background = select(params.stats.x, value.x / weight, value.y > d.f32(MASK_WEIGHT_EPSILON))
+  const background = select(
+    textureLayout.$.stats[d.u32(0)]!,
+    value.x / weight,
+    value.y > d.f32(MASK_WEIGHT_EPSILON),
+  )
   std.textureStore(
     textureLayout.$.backgroundTexture,
     d.vec2u(x, y),
@@ -102,7 +109,6 @@ const backgroundToTexture = (x: number, y: number) => {
 export type RoiBackgroundStage = {
   backgroundTexture: TgpuTexture & SampledFlag
   encode: () => void
-  setStats: (mean: number, std: number) => void
   destroy: () => void
 }
 
@@ -121,6 +127,7 @@ export function createRoiBackgroundStage(
   inputBuffer: TgpuBuffer<d.WgslArray<d.F32>> & StorageFlag,
   maskTexture: TgpuTexture & SampledFlag,
   sampler: TgpuSampler,
+  statsBuffer: TgpuBuffer<d.WgslArray<d.F32>> & StorageFlag,
   onGpuTiming?: RoiBackgroundTimingCallback,
 ): RoiBackgroundStage {
   const area = modelWidth * modelHeight
@@ -129,7 +136,6 @@ export function createRoiBackgroundStage(
   const paramsBuffer = root.createUniform(backgroundParams, {
     size: d.vec2f(modelWidth, modelHeight),
     maskSize: d.vec2f(modelWidth / 2, modelHeight / 2),
-    stats: d.vec2f(0, 1),
   })
   const backgroundTexture = root
     .createTexture({
@@ -140,6 +146,7 @@ export function createRoiBackgroundStage(
 
   const weightBindGroup = root.createBindGroup(weightLayout, {
     inputBuffer,
+    stats: statsBuffer,
     maskTexture,
     sampler,
     params: paramsBuffer,
@@ -157,6 +164,7 @@ export function createRoiBackgroundStage(
   })
   const textureBindGroup = root.createBindGroup(textureLayout, {
     input: weightedBuffer,
+    stats: statsBuffer,
     params: paramsBuffer,
     backgroundTexture,
   })
@@ -183,13 +191,6 @@ export function createRoiBackgroundStage(
       horizontalPipeline.with(horizontalBindGroup).dispatchThreads(modelWidth, modelHeight)
       verticalPipeline.with(verticalBindGroup).dispatchThreads(modelWidth, modelHeight)
       texturePipeline.with(textureBindGroup).dispatchThreads(modelWidth, modelHeight)
-    },
-    setStats(mean, std) {
-      paramsBuffer.write({
-        size: d.vec2f(modelWidth, modelHeight),
-        maskSize: d.vec2f(modelWidth / 2, modelHeight / 2),
-        stats: d.vec2f(mean, std),
-      })
     },
     destroy() {
       weightedBuffer.destroy()

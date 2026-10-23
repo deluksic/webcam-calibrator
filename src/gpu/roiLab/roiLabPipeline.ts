@@ -21,10 +21,11 @@ const { performance } = globalThis
  * Browser-side ROI segmentation.
  *
  * ONNX graph: normalized grayscale 1×H×192 -> mask probability 1×H×192.
- * The browser computes per-image mean/std from a small canvas readback and
- * feeds `0.4 + 0.2 * z` (z = (luma - mean) / std); the graph's fixed
- * normalization recovers z. This matches the per-image standardization used
- * for training without adding reduction ops to the ONNX graph.
+ * Per-image mean/std are reduced on the GPU every frame and consumed on the
+ * GPU: `0.4 + 0.2 * z` (z = (luma - mean) / std) is written from a shader that
+ * reads the stats buffer directly, so nothing is read back to the CPU. This
+ * matches the per-image standardization used for training without adding
+ * reduction ops to the ONNX graph.
  *
  * The ONNX Runtime WebGPU EP shares the TypeGPU device and queue. The compute
  * pass fills the input buffer, `session.run` reads/writes GPU buffers, then a
@@ -45,8 +46,62 @@ const ROI_CUT_MARGIN_FRACTION = 0.2
 
 const prepareParams = d.struct({
   size: d.vec2f,
-  stats: d.vec2f,
 })
+
+/**
+ * Frame statistics are reduced on the GPU every frame and consumed there:
+ * the normaliser and the background stage both read this buffer, so the CPU
+ * never sees mean/std and no readback is on the frame path.
+ */
+const IMAGE_STATS_COLUMNS = 64
+const IMAGE_STATS_ROWS = 36
+const IMAGE_STATS_SAMPLES = IMAGE_STATS_COLUMNS * IMAGE_STATS_ROWS
+
+const imageStatsSampleLayout = tgpu.bindGroupLayout({
+  inputTexture: { externalTexture: d.textureExternal() },
+  sampler: { sampler: 'filtering' },
+  samples: { storage: d.arrayOf(d.f32), access: 'mutable' },
+})
+
+const imageStatsReduceLayout = tgpu.bindGroupLayout({
+  samples: { storage: d.arrayOf(d.f32), access: 'readonly' },
+  stats: { storage: d.arrayOf(d.f32), access: 'mutable' },
+})
+
+const sampleImageLuma = (x: number, y: number) => {
+  'use gpu'
+  const uv = (d.vec2f(x, y) + d.vec2f(0.5, 0.5)).div(
+    d.vec2f(IMAGE_STATS_COLUMNS, IMAGE_STATS_ROWS),
+  )
+  const color = std.textureSampleBaseClampToEdge(
+    imageStatsSampleLayout.$.inputTexture,
+    imageStatsSampleLayout.$.sampler,
+    uv,
+  )
+  const luma = std.dot(color.rgb, d.vec3f(0.299, 0.587, 0.114))
+  imageStatsSampleLayout.$.samples[d.u32(y) * d.u32(IMAGE_STATS_COLUMNS) + d.u32(x)] = luma
+}
+
+/**
+ * Single-thread reduction over the 2304 luma samples. A serial loop beats a
+ * parallel one here because f32 atomics are not available in WGSL; 2304 reads
+ * from a 9 KiB storage buffer cost a few microseconds.
+ */
+const reduceImageStats = () => {
+  'use gpu'
+  let sum = d.f32(0)
+  let sumSquares = d.f32(0)
+  for (let index = 0; index < IMAGE_STATS_SAMPLES; index += 1) {
+    const value = imageStatsReduceLayout.$.samples[d.u32(index)]!
+    sum += value
+    sumSquares += value * value
+  }
+  const count = d.f32(IMAGE_STATS_SAMPLES)
+  const mean = sum / count
+  const variance = std.max(sumSquares / count - mean * mean, d.f32(1e-6))
+  imageStatsReduceLayout.$.stats[d.u32(0)] = mean
+  imageStatsReduceLayout.$.stats[d.u32(1)] = std.max(std.sqrt(variance), d.f32(0.05))
+}
 
 const roiHistogramSchema = d.arrayOf(d.atomic(d.u32), ROI_HISTOGRAM_BINS)
 
@@ -120,6 +175,7 @@ const accumulateRoiHistogram = (x: number, y: number) => {
 const prepareLayout = tgpu.bindGroupLayout({
   inputTexture: { externalTexture: d.textureExternal() },
   outputBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
+  stats: { storage: d.arrayOf(d.f32), access: 'readonly' },
   sampler: { sampler: 'filtering' },
   params: { uniform: prepareParams },
 })
@@ -137,7 +193,7 @@ const prepareModelInput = (x: number, y: number) => {
   )
   const luma = std.dot(color.rgb, d.vec3f(0.299, 0.587, 0.114))
   prepareLayout.$.outputBuffer[y * d.u32(params.size.x) + x] =
-    (luma - params.stats.x) / params.stats.y
+    (luma - prepareLayout.$.stats[d.u32(0)]!) / prepareLayout.$.stats[d.u32(1)]!
 }
 
 const maskToTextureLayout = tgpu.bindGroupLayout({
@@ -289,9 +345,8 @@ export type RoiHistogramUpdate = {
 }
 
 export type RoiStepTimings = {
-  imageStatsMs: number
-  statsAgeFrames: number
-  statsRefreshed: boolean
+  /** Cost of encoding the GPU mean/std reduction passes. Nothing is read back. */
+  statsMs: number
   preprocessMs: number
   queueWaitMs: number
   /** `await session.run(...)` only. */
@@ -310,6 +365,8 @@ export type RoiStepTimings = {
   readbackBytes: number
   readbackTruncated: boolean
   identityMs: number
+  /** Frames between the one being encoded and the one just presented. */
+  identityLagFrames: number
   renderMs: number
   /** Wait for all frame GPU work before histogram submission. */
   frameDrainMs: number
@@ -379,7 +436,10 @@ export async function createRoiLabPipeline(
   modelUrl: string,
   onStatus?: (message: string) => void,
   onHistogram?: (update: RoiHistogramUpdate) => void,
-  onIdentity?: (points: readonly RoiComponentPoint[], frameId: number) => RoiGraphData | undefined,
+  onIdentity?: (
+    points: readonly RoiComponentPoint[],
+    frameId: number,
+  ) => RoiGraphData | undefined | Promise<RoiGraphData | undefined>,
 ): Promise<RoiLabPipeline> {
   const sampler = root.createSampler({
     magFilter: 'linear',
@@ -437,8 +497,11 @@ export async function createRoiLabPipeline(
     .$usage('storage')
   const prepareUniform = root.createUniform(prepareParams, {
     size: d.vec2f(modelWidth, modelHeight),
-    stats: d.vec2f(0, 1),
   })
+  const imageStatsSamples = root
+    .createBuffer(d.arrayOf(d.f32, IMAGE_STATS_SAMPLES))
+    .$usage('storage')
+  const imageStatsBuffer = root.createBuffer(d.arrayOf(d.f32, 2)).$usage('storage')
   const histogramBuffer = root.createBuffer(roiHistogramSchema).$usage('storage')
   const histogramResetPipeline = withGpuTiming(
     root.createGuardedComputePipeline(resetRoiHistogram),
@@ -451,74 +514,132 @@ export async function createRoiLabPipeline(
   const histogramResetBindGroup = root.createBindGroup(histogramResetLayout, {
     histogram: histogramBuffer,
   })
-  const maskTexture = root
-    .createTexture({
-      size: [maskWidth, maskHeight],
-      format: 'rgba8unorm',
-    })
-    .$usage('sampled', 'render', 'storage')
-  const backgroundStage = createRoiBackgroundStage(
-    root,
-    modelWidth,
-    modelHeight,
-    inputBuffer,
-    maskTexture,
-    sampler,
-    (name, ms) => {
-      gpuMs[name] = ms
-    },
-  )
   const histogramParamsBuffer = root.createUniform(histogramParams, {
     residualGain: 1,
     _pad: d.vec3f(0, 0, 0),
   })
-  const modelInputTexture = root
-    .createTexture({
-      size: [modelWidth, modelHeight],
-      format: 'rgba8unorm',
-    })
-    .$usage('sampled', 'render', 'storage')
-  // Cache each camera frame in a regular texture. The external texture used
-  // for ingest is short-lived, so the overlay uses this copy; that also lets
-  // paused frames re-render when the view mode changes.
-  const cameraTexture = root
-    .createTexture({
-      size: [cameraWidth, cameraHeight],
-      format: 'rgba8unorm',
-    })
-    .$usage('sampled', 'render')
-  const cameraView = cameraTexture.createView()
-  const cameraCopyPipeline = withGpuTiming(createCopyPipeline(root), 'cameraCopy')
-  const histogramAccumulateBindGroup = root.createBindGroup(histogramAccumulateLayout, {
-    cameraTexture,
-    maskTexture,
-    backgroundTexture: backgroundStage.backgroundTexture,
-    sampler,
-    histogram: histogramBuffer,
-    params: histogramParamsBuffer,
-  })
-
   const pixelRatio = Math.max(1, canvas.width / Math.max(1, canvas.clientWidth || canvas.width))
-  const componentsStage = createRoiComponentsStage(
-    root,
-    cameraWidth,
-    cameraHeight,
-    cameraTexture,
-    maskTexture,
-    backgroundStage.backgroundTexture,
-    sampler,
+  const cameraCopyPipeline = withGpuTiming(createCopyPipeline(root), 'cameraCopy')
+  const imageStatsSamplePipeline = withGpuTiming(
+    root.createGuardedComputePipeline(sampleImageLuma),
+    'imageStatsSample',
   )
-  const componentCircleStage = createRoiCircleStage(
-    root,
-    presentationFormat,
-    canvas.width,
-    canvas.height,
-    cameraWidth,
-    cameraHeight,
-    pixelRatio,
-    componentsStage.circleBuffer,
-    componentsStage.drawIndirectBuffer,
+  const imageStatsReducePipeline = withGpuTiming(
+    root.createGuardedComputePipeline(reduceImageStats),
+    'imageStatsReduce',
   )
+  const imageStatsReduceBindGroup = root.createBindGroup(imageStatsReduceLayout, {
+    samples: imageStatsSamples,
+    stats: imageStatsBuffer,
+  })
+  const maskPipeline = withGpuTiming(root.createGuardedComputePipeline(maskToTexture), 'mask')
+  const debugInputPipeline = withGpuTiming(
+    root.createGuardedComputePipeline(debugInputToTexture),
+    'debugInput',
+  )
+
+  /**
+   * Everything one frame writes and the overlay samples.
+   *
+   * Two slots are alive at once: frame N is presented from its own slot while
+   * frame N+1 is encoded into the other. Keeping the pixels per slot is what
+   * lets the render of N happen after N+1 has been captured, without ever
+   * drawing N's identity over N+1's image.
+   */
+  const createFrameSlot = () => {
+    const maskTexture = root
+      .createTexture({
+        size: [maskWidth, maskHeight],
+        format: 'rgba8unorm',
+      })
+      .$usage('sampled', 'render', 'storage')
+    const modelInputTexture = root
+      .createTexture({
+        size: [modelWidth, modelHeight],
+        format: 'rgba8unorm',
+      })
+      .$usage('sampled', 'render', 'storage')
+    // Cache each camera frame in a regular texture. The external texture used
+    // for ingest is short-lived, so the overlay uses this copy; that also lets
+    // paused frames re-render when the view mode changes.
+    const cameraTexture = root
+      .createTexture({
+        size: [cameraWidth, cameraHeight],
+        format: 'rgba8unorm',
+      })
+      .$usage('sampled', 'render')
+    const backgroundStage = createRoiBackgroundStage(
+      root,
+      modelWidth,
+      modelHeight,
+      inputBuffer,
+      maskTexture,
+      sampler,
+      imageStatsBuffer,
+      (name, ms) => {
+        gpuMs[name] = ms
+      },
+    )
+    const componentsStage = createRoiComponentsStage(
+      root,
+      cameraWidth,
+      cameraHeight,
+      cameraTexture,
+      maskTexture,
+      backgroundStage.backgroundTexture,
+      sampler,
+    )
+    componentsStage.setThresholds(blackCut, whiteCut, thresholdValid === 1)
+    return {
+      maskTexture,
+      modelInputTexture,
+      cameraTexture,
+      cameraView: cameraTexture.createView(),
+      backgroundStage,
+      componentsStage,
+      componentCircleStage: createRoiCircleStage(
+        root,
+        presentationFormat,
+        canvas.width,
+        canvas.height,
+        cameraWidth,
+        cameraHeight,
+        pixelRatio,
+        componentsStage.circleBuffer,
+        componentsStage.drawIndirectBuffer,
+      ),
+      maskBindGroup: root.createBindGroup(maskToTextureLayout, {
+        outputBuffer,
+        maskTexture,
+      }),
+      debugInputBindGroup: root.createBindGroup(debugInputLayout, {
+        inputBuffer,
+        inputTexture: modelInputTexture,
+      }),
+      histogramAccumulateBindGroup: root.createBindGroup(histogramAccumulateLayout, {
+        cameraTexture,
+        maskTexture,
+        backgroundTexture: backgroundStage.backgroundTexture,
+        sampler,
+        histogram: histogramBuffer,
+        params: histogramParamsBuffer,
+      }),
+      overlayBindGroup: root.createBindGroup(overlayLayout, {
+        cameraTexture,
+        maskTexture,
+        backgroundTexture: backgroundStage.backgroundTexture,
+        modelInputTexture,
+        labelTexture: componentsStage.labelTexture as never,
+        sampler,
+      }),
+    }
+  }
+
+  type FrameSlot = ReturnType<typeof createFrameSlot>
+
+  const slots: [FrameSlot, FrameSlot] = [createFrameSlot(), createFrameSlot()]
+  let nextSlot = 0
+
   const graphStage = createRoiGraphStage(
     root,
     presentationFormat,
@@ -528,25 +649,6 @@ export async function createRoiLabPipeline(
     cameraHeight,
     pixelRatio,
   )
-  componentsStage.setThresholds(blackCut, whiteCut, false)
-
-  const maskPipeline = withGpuTiming(root.createGuardedComputePipeline(maskToTexture), 'mask')
-  const debugInputPipeline = withGpuTiming(
-    root.createGuardedComputePipeline(debugInputToTexture),
-    'debugInput',
-  )
-  const debugInputBindGroup = root.createBindGroup(debugInputLayout, {
-    inputBuffer,
-    inputTexture: modelInputTexture,
-  })
-  const overlayBindGroup = root.createBindGroup(overlayLayout, {
-    cameraTexture,
-    maskTexture,
-    backgroundTexture: backgroundStage.backgroundTexture,
-    modelInputTexture,
-    labelTexture: componentsStage.labelTexture as never,
-    sampler,
-  })
   const viewUniform = root.createUniform(viewParams, {
     zoom: 1,
     panX: 0,
@@ -566,18 +668,18 @@ export async function createRoiLabPipeline(
       frameHeight: cameraHeight,
     })
   }
-  const overlayPipeline = withGpuTiming(
-    root
-      .with(overlayAccess, overlayUniform)
-      .with(viewAccess, viewUniform)
-      .createRenderPipeline({
-        vertex: common.fullScreenTriangle,
-        fragment: overlayFragment,
-        targets: { format: presentationFormat },
-        multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
-      }),
-    'render',
-  )
+  // The overlay is drawn into a caller-owned pass (see `renderScene`), where
+  // pipeline-level timestamp writes are ignored by WebGPU. Render cost is
+  // reported as CPU submit time (`renderMs`) instead.
+  const overlayPipeline = root
+    .with(overlayAccess, overlayUniform)
+    .with(viewAccess, viewUniform)
+    .createRenderPipeline({
+      vertex: common.fullScreenTriangle,
+      fragment: overlayFragment,
+      targets: { format: presentationFormat },
+      multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
+    })
 
   onStatus?.('fetching model')
   const response = await fetch(modelUrl, { cache: 'no-store' })
@@ -634,7 +736,9 @@ export async function createRoiLabPipeline(
   })
   const msaaView = msaaTexture.createView()
 
-  const renderScene = () => {
+  let lastPresented: { slot: FrameSlot; graph: RoiGraphData | undefined } | undefined
+
+  const renderScene = (slot: FrameSlot) => {
     const encoder = device.createCommandEncoder({ label: 'roi-lab-scene' })
     const pass = encoder.beginRenderPass({
       label: 'roi-lab-scene',
@@ -648,15 +752,29 @@ export async function createRoiLabPipeline(
         },
       ],
     })
-    overlayPipeline.with(pass).with(overlayBindGroup).draw(3)
+    overlayPipeline.with(pass).with(slot.overlayBindGroup).draw(3)
     if (overlayMode === 6) {
-      componentCircleStage.encode(pass)
+      slot.componentCircleStage.encode(pass)
     } else if (overlayMode === 8 || overlayMode === 9) {
       graphStage.encode(pass)
     }
     pass.end()
     device.queue.submit([encoder.finish()])
     hasFrame = true
+  }
+
+  // The graph buffer is written immediately before its own draw is submitted,
+  // so it stays queue-ordered with the frame it belongs to and needs no slot.
+  const presentFrame = (slot: FrameSlot, graph: RoiGraphData | undefined) => {
+    graphStage.setGraph(graph ?? { points: [], edges: [] })
+    lastPresented = { slot, graph }
+    renderScene(slot)
+  }
+
+  const redrawLastFrame = () => {
+    if (hasFrame && lastPresented !== undefined) {
+      presentFrame(lastPresented.slot, lastPresented.graph)
+    }
   }
 
   let readingStats = false
@@ -688,10 +806,6 @@ export async function createRoiLabPipeline(
     }
   }
 
-  const statsCanvas = document.createElement('canvas')
-  statsCanvas.width = 64
-  statsCanvas.height = 36
-  const statsContext = statsCanvas.getContext('2d', { willReadFrequently: true })
   const preparePipeline = withGpuTiming(
     root.with(prepareAccess, prepareUniform).createGuardedComputePipeline(prepareModelInput),
     'preprocess',
@@ -766,7 +880,9 @@ export async function createRoiLabPipeline(
         whiteCut = adjustedWhiteCut
         thresholdValid = analysis.valid ? 1 : 0
         writeOverlayParams()
-        componentsStage.setThresholds(blackCut, whiteCut, analysis.valid)
+        for (const slot of slots) {
+          slot.componentsStage.setThresholds(blackCut, whiteCut, analysis.valid)
+        }
         onHistogram?.({ counts, analysis: adjustedAnalysis })
       })
       .catch((cause: unknown) => {
@@ -786,75 +902,44 @@ export async function createRoiLabPipeline(
       })
   }
 
-  const imageStats = (video: HTMLVideoElement) => {
-    if (!statsContext || video.videoWidth < 2 || video.videoHeight < 2) {
-      return { mean: 0, std: 1 }
-    }
-    statsContext.imageSmoothingEnabled = true
-    statsContext.imageSmoothingQuality = 'high'
-    statsContext.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, 64, 36)
-    const data = statsContext.getImageData(0, 0, 64, 36).data
-    let sum = 0
-    let sumSquares = 0
-    for (let index = 0; index < data.length; index += 4) {
-      const luma =
-        (0.299 * (data[index] ?? 0) +
-          0.587 * (data[index + 1] ?? 0) +
-          0.114 * (data[index + 2] ?? 0)) /
-        255
-      sum += luma
-      sumSquares += luma * luma
-    }
-    const count = data.length / 4
-    const mean = sum / count
-    const variance = Math.max(1e-6, sumSquares / count - mean * mean)
-    return { mean, std: Math.max(0.05, Math.sqrt(variance)) }
-  }
-
-  // Global normalization stats change slowly with exposure/lighting. Reading
-  // them back from a canvas forces a synchronous GPU readback every frame, so
-  // refresh occasionally and reuse between reads.
-  const IMAGE_STATS_INTERVAL = 8
-  let cachedImageStats: { mean: number; std: number } | undefined
-  let imageStatsAge = 0
-
   const preprocessFrame = (video: HTMLVideoElement) => {
-    const refreshStats = cachedImageStats === undefined || imageStatsAge >= IMAGE_STATS_INTERVAL
-    const imageStatsStart = performance.now()
-    if (refreshStats) {
-      cachedImageStats = imageStats(video)
-      imageStatsAge = 0
-    } else {
-      imageStatsAge += 1
-    }
-    const stats = cachedImageStats!
-    const imageStatsMs = refreshStats ? performance.now() - imageStatsStart : 0
-    prepareUniform.write({
-      size: d.vec2f(modelWidth, modelHeight),
-      stats: d.vec2f(stats.mean, stats.std),
-    })
+    const statsStart = performance.now()
+    const inputTexture = device.importExternalTexture({ source: video })
+    imageStatsSamplePipeline
+      .with(
+        root.createBindGroup(imageStatsSampleLayout, {
+          inputTexture,
+          sampler,
+          samples: imageStatsSamples,
+        }),
+      )
+      .dispatchThreads(IMAGE_STATS_COLUMNS, IMAGE_STATS_ROWS)
+    imageStatsReducePipeline.with(imageStatsReduceBindGroup).dispatchThreads()
+    const imageStatsMs = performance.now() - statsStart
     preparePipeline
       .with(
         root.createBindGroup(prepareLayout, {
-          inputTexture: device.importExternalTexture({ source: video }),
+          inputTexture,
           outputBuffer: inputBuffer,
+          stats: imageStatsBuffer,
           sampler,
           params: prepareUniform,
         }),
       )
       .dispatchThreads(modelWidth, modelHeight)
-    return {
-      stats,
-      imageStatsMs,
-      statsAgeFrames: imageStatsAge,
-      statsRefreshed: refreshStats,
-    }
+    return { statsMs: imageStatsMs }
   }
+
+  let pendingFrame:
+    | { slot: FrameSlot; frameId: number; identity: Promise<RoiGraphData | undefined> }
+    | undefined
 
   const processFrame = async (video: HTMLVideoElement) => {
     const start = performance.now()
+    const slot = slots[nextSlot]!
+    nextSlot = nextSlot === 0 ? 1 : 0
     const preprocessStart = performance.now()
-    const { stats, imageStatsMs, statsAgeFrames, statsRefreshed } = preprocessFrame(video)
+    const { statsMs } = preprocessFrame(video)
     const preprocessMs = performance.now() - preprocessStart
 
     // CPU preprocessing is followed by a queue write; wait for it before ORT
@@ -878,60 +963,76 @@ export async function createRoiLabPipeline(
     })
     const cameraCopyStart = performance.now()
     cameraCopyPipeline
-      .withColorAttachment({ view: cameraView })
+      .withColorAttachment({ view: slot.cameraView })
       .with(cameraCopyBindGroup)
       .draw(3)
     const cameraCopyMs = performance.now() - cameraCopyStart
 
     const debugInputStart = performance.now()
-    debugInputPipeline
-      .with(debugInputBindGroup)
-      .dispatchThreads(modelWidth, modelHeight)
+    debugInputPipeline.with(slot.debugInputBindGroup).dispatchThreads(modelWidth, modelHeight)
     const debugInputMs = performance.now() - debugInputStart
 
     const maskStart = performance.now()
-    maskPipeline
-      .with(
-        root.createBindGroup(maskToTextureLayout, {
-          outputBuffer,
-          maskTexture,
-        }),
-      )
-      .dispatchThreads(maskWidth, maskHeight)
+    maskPipeline.with(slot.maskBindGroup).dispatchThreads(maskWidth, maskHeight)
     const maskMs = performance.now() - maskStart
 
     const backgroundStart = performance.now()
-    backgroundStage.setStats(stats.mean, stats.std)
-    backgroundStage.encode()
+    slot.backgroundStage.encode()
     const backgroundMs = performance.now() - backgroundStart
 
     frameSerial++
     const frameId = frameSequence++
     const componentsStart = performance.now()
-    componentsStage.encodeComponents()
+    slot.componentsStage.encodeComponents()
     const componentsEncodeMs = performance.now() - componentsStart
 
     const readbackStart = performance.now()
     const readback =
       onIdentity !== undefined
-        ? await componentsStage.readComponents()
+        ? await slot.componentsStage.readComponents()
         : { points: [], count: 0, bytesCopied: 0, truncated: false }
     const componentPoints = readback.points
     const readbackMs = performance.now() - readbackStart
-    const identityStart = performance.now()
-    let graph: RoiGraphData | undefined
+
+    // Start identity now. It runs in a worker while the previous frame is
+    // presented, and while the next frame is encoded.
+    let identity: Promise<RoiGraphData | undefined> | undefined
     if (onIdentity !== undefined) {
       try {
-        graph = onIdentity(componentPoints, frameId)
+        identity = Promise.resolve(onIdentity(componentPoints, frameId)).catch(
+          (cause: unknown) => {
+            console.error('[roi-lab] identity callback failed', cause)
+            return undefined
+          },
+        )
       } catch (cause: unknown) {
         console.error('[roi-lab] identity callback failed', cause)
       }
     }
-    graphStage.setGraph(graph ?? { points: [], edges: [] })
-    const identityMs = performance.now() - identityStart
-    const renderStart = performance.now()
-    renderScene()
-    const renderMs = performance.now() - renderStart
+
+    // Present the frame whose identity is ready. Its slot still holds that
+    // frame's pixels, so the overlay and the image always belong together.
+    let identityMs = 0
+    let renderMs = 0
+    let presentedFrameId: number | undefined
+    if (pendingFrame !== undefined) {
+      const waitStart = performance.now()
+      const graph = await pendingFrame.identity
+      identityMs = performance.now() - waitStart
+      const renderStart = performance.now()
+      if (!destroyed) {
+        presentFrame(pendingFrame.slot, graph)
+        presentedFrameId = pendingFrame.frameId
+      }
+      renderMs = performance.now() - renderStart
+    } else if (identity === undefined) {
+      // No identity stage at all: present this frame directly.
+      if (!destroyed) {
+        presentFrame(slot, undefined)
+      }
+    }
+    pendingFrame =
+      identity === undefined ? undefined : { slot, frameId, identity }
 
     // Let the queued readbacks and final render finish before a caller can
     // destroy this pipeline during a resolution/stream change.
@@ -942,12 +1043,12 @@ export async function createRoiLabPipeline(
     // Histogram work is queued after the overlay; only its CPU analysis is
     // asynchronous, and it feeds the next frame's thresholds.
     const histogramStart = performance.now()
-    if (frameSerial % ROI_HISTOGRAM_FRAME_INTERVAL === 0) {
+    if (!destroyed && frameSerial % ROI_HISTOGRAM_FRAME_INTERVAL === 0) {
       histogramResetPipeline
         .with(histogramResetBindGroup)
         .dispatchThreads(ROI_HISTOGRAM_BINS)
       histogramAccumulatePipeline
-        .with(histogramAccumulateBindGroup)
+        .with(slot.histogramAccumulateBindGroup)
         .dispatchThreads(cameraWidth, cameraHeight)
       scheduleHistogramReadback()
     }
@@ -976,9 +1077,7 @@ export async function createRoiLabPipeline(
       identityMs,
       frameId,
       steps: {
-        imageStatsMs,
-        statsAgeFrames,
-        statsRefreshed,
+        statsMs,
         preprocessMs,
         queueWaitMs,
         inferenceRunMs,
@@ -994,6 +1093,7 @@ export async function createRoiLabPipeline(
         readbackBytes: readback.bytesCopied,
         readbackTruncated: readback.truncated,
         identityMs,
+        identityLagFrames: presentedFrameId === undefined ? 0 : frameId - presentedFrameId,
         renderMs,
         frameDrainMs,
         histogramMs,
@@ -1015,20 +1115,20 @@ export async function createRoiLabPipeline(
     setViewMode(mode) {
       overlayMode = mode
       writeOverlayParams()
-      if (hasFrame) {
-        // Re-render the cached frame so view switches still work while paused.
-        renderScene()
-      }
+      // Re-render the cached frame so view switches still work while paused.
+      redrawLastFrame()
     },
     setViewport(zoom, panX, panY) {
       viewZoom = zoom
       viewPanX = panX
       viewPanY = panY
       writeViewParams()
-      componentCircleStage.setViewport(zoom, panX, panY)
+      for (const slot of slots) {
+        slot.componentCircleStage.setViewport(zoom, panX, panY)
+      }
       graphStage.setViewport(zoom, panX, panY)
-      if (paused && hasFrame) {
-        renderScene()
+      if (paused) {
+        redrawLastFrame()
       }
     },
     setPaused(value) {
@@ -1068,11 +1168,15 @@ export async function createRoiLabPipeline(
       }
       inputBuffer.destroy()
       outputBuffer.destroy()
-      maskTexture.destroy()
-      modelInputTexture.destroy()
-      cameraTexture.destroy()
-      backgroundStage.destroy()
-      componentsStage.destroy()
+      imageStatsSamples.destroy()
+      imageStatsBuffer.destroy()
+      for (const slot of slots) {
+        slot.maskTexture.destroy()
+        slot.modelInputTexture.destroy()
+        slot.cameraTexture.destroy()
+        slot.backgroundStage.destroy()
+        slot.componentsStage.destroy()
+      }
       graphStage.destroy()
       msaaTexture.destroy()
     },

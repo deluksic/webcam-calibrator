@@ -15,24 +15,18 @@ import {
 } from '@/gpu/roiLab/roiLabPipeline'
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
 import { computeFingerprints, createIdentityIndexesByDepth } from '@/lib/pointIdentity/identity'
-import {
-  createLocalIcpOptions,
-  MAX_FINGERPRINT_DEPTH,
-  refineObservedIdentityWithLocalIcp,
-} from '@/lib/pointIdentity/localIcpRefiner'
-import {
-  createColorIdentityIndex,
-  IDENTITY_AMBIGUOUS,
-  IDENTITY_CONFLICT,
-  IDENTITY_RECOVERED,
-  IDENTITY_RESOLVED,
-  IDENTITY_UNRESOLVED,
-  matchObservedIdentity,
-} from '@/lib/pointIdentity/match'
+import type { IdentityDesignSpec } from '@/lib/pointIdentity/identityPipeline'
+import { MAX_FINGERPRINT_DEPTH } from '@/lib/pointIdentity/localIcpRefiner'
+import { createColorIdentityIndex, matchObservedIdentity } from '@/lib/pointIdentity/match'
 import { buildProximityGraph } from '@/lib/pointIdentity/proximityGraph'
 import { randomBinaryColors } from '@/lib/pointIdentity/random'
 import { ROI_HISTOGRAM_BINS } from '@/lib/roiHistogram'
 import { createFrameLoop } from '@/utils/createFrameLoop'
+import {
+  configureIdentityWorker,
+  disposeIdentityWorker,
+  runIdentityInWorker,
+} from '@/workers/identityClient'
 
 import styles from '@/components/roiLab/RoiLabView.module.css'
 
@@ -235,101 +229,46 @@ export const RoiLabView: Component = () => {
   const identityIndex = createMemo(
     () => identityDesign().indexesByDepth[identityDepth() - 1]!,
   )
-  const identityLooseIndex = createMemo(() =>
-    createColorIdentityIndex(identityDesign().graph, identityDesign().colors, identityDepth()),
-  )
 
-  const runIdentity = (points: readonly RoiComponentPoint[], frameId: number): RoiGraphData => {
+  /** Design inputs the worker needs; rebuilt there only when one of these changes. */
+  const identitySpec = createMemo<IdentityDesignSpec>(() => ({
+    columns: identityColumns(),
+    pointsPerEdge: identityPointsPerEdge(),
+    colorSeed: identityColorSeed(),
+  }))
+
+  // Build the worker's design (lattice, indexes, ~60 ms) on the settings change
+  // instead of on the next frame that happens to need it.
+  createEffect(identitySpec, (spec) => {
+    configureIdentityWorker(spec)
+  })
+
+  onCleanup(() => {
+    disposeIdentityWorker()
+  })
+
+  const runIdentity = async (
+    points: readonly RoiComponentPoint[],
+    frameId: number,
+  ): Promise<RoiGraphData | undefined> => {
     lastObservedPoints = points
-    const design = identityDesign()
-    const depth = identityDepth()
-    const observedPoints = points.map((point, index) => ({
-      x: point.x,
-      y: point.y,
-      index,
-    }))
-    const observedColors = points.map((point) => point.color)
-    const observedGraph = buildProximityGraph(observedPoints, {
-      pointsPerEdge: design.pointsPerEdge,
-    })
-    const baselineFingerprints = computeFingerprints(observedGraph, observedColors, depth)
-    const baseline = matchObservedIdentity(
-      identityIndex(),
-      observedGraph,
-      observedColors,
-      depth,
-      identityRecovery()
-        ? { fingerprints: baselineFingerprints }
-        : { looseByKey: identityLooseIndex(), fingerprints: baselineFingerprints },
-    )
-
-    let finalPoints = baseline.points
-    if (identityRecovery()) {
-      const recoveryFingerprints =
-        depth === MAX_FINGERPRINT_DEPTH
-          ? baselineFingerprints
-          : computeFingerprints(observedGraph, observedColors, MAX_FINGERPRINT_DEPTH)
-      finalPoints = refineObservedIdentityWithLocalIcp({
-        designPattern: design.pattern,
-        designColors: design.colors,
-        designGraph: design.graph,
-        designIndexesByDepth: design.indexesByDepth,
-        observedGraph,
-        observedColors,
-        observedFingerprints: recoveryFingerprints,
-        baseline,
-        options: createLocalIcpOptions({
-          identityDepth: depth,
-          maxProofDepth: MAX_FINGERPRINT_DEPTH,
-          minProofPower: 7,
-          hopRadius: 8,
-        }),
-      }).points
-    }
-
-    let resolved = 0
-    let ambiguous = 0
-    let unresolved = 0
-    let conflicts = 0
-    let recovered = 0
-    for (const point of finalPoints) {
-      switch (point.status) {
-        case IDENTITY_RESOLVED:
-          resolved += 1
-          break
-        case IDENTITY_AMBIGUOUS:
-          ambiguous += 1
-          break
-        case IDENTITY_UNRESOLVED:
-          unresolved += 1
-          break
-        case IDENTITY_CONFLICT:
-          conflicts += 1
-          break
-        case IDENTITY_RECOVERED:
-          recovered += 1
-          break
+    try {
+      // Awaited by the pipeline before it renders, so the overlay always
+      // belongs to the frame it was computed from.
+      const result = await runIdentityInWorker(identitySpec(), {
+        points,
+        depth: identityDepth(),
+        recovery: identityRecovery(),
+        frameId,
+      })
+      if (disposed) {
+        return undefined
       }
-    }
-    setIdentityMetrics({
-      total: finalPoints.length,
-      resolved,
-      ambiguous,
-      unresolved,
-      conflicts,
-      edges: observedGraph.edges.length,
-      components: observedGraph.stats.components,
-      recovered,
-      frameId,
-    })
-    return {
-      points: finalPoints.map((point) => ({
-        x: point.x,
-        y: point.y,
-        designId: point.designId ?? 0,
-        status: point.status,
-      })),
-      edges: observedGraph.edges.map(([a, b]) => ({ a, b })),
+      setIdentityMetrics(result.metrics)
+      return result.graph
+    } catch (cause: unknown) {
+      console.error('[roi-lab] identity worker failed', cause)
+      return undefined
     }
   }
 
@@ -1018,11 +957,8 @@ export const RoiLabView: Component = () => {
           <Show when={stepTimings()}>
             {(timings) => (
               <>
-                <dt>Stats readback</dt>
-                <dd>
-                  {timings().imageStatsMs.toFixed(2)} ms · age {timings().statsAgeFrames}
-                  {timings().statsRefreshed ? ' · refreshed' : ''}
-                </dd>
+                <dt>Stats</dt>
+                <dd>{timings().statsMs.toFixed(2)} ms</dd>
                 <dt>Preprocess</dt>
                 <dd>{timings().preprocessMs.toFixed(2)} ms</dd>
                 <dt>Queue wait</dt>
@@ -1043,8 +979,11 @@ export const RoiLabView: Component = () => {
                   {(timings().readbackBytes / 1024).toFixed(1)} KiB
                   {timings().readbackTruncated ? ' · truncated at cap' : ''}
                 </dd>
-                <dt>Identity</dt>
-                <dd>{timings().identityMs.toFixed(2)} ms</dd>
+                <dt>Identity wait</dt>
+                <dd>
+                  {timings().identityMs.toFixed(2)} ms · lag {timings().identityLagFrames} frame
+                  {timings().identityLagFrames === 1 ? '' : 's'}
+                </dd>
                 <dt>Render</dt>
                 <dd>{timings().renderMs.toFixed(2)} ms</dd>
                 <dt>Inference run</dt>

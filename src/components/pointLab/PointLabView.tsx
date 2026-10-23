@@ -6,6 +6,7 @@ import { extractChainRuns, summarizeChainRuns } from '@/lib/pointIdentity/chainR
 import type { IcpRefineResult } from '@/lib/pointIdentity/icpRefiner'
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
 import {
+  createLocalIcpDesign,
   createLocalIcpOptions,
   MAX_FINGERPRINT_DEPTH,
   refineObservedIdentityWithLocalIcp,
@@ -170,6 +171,7 @@ export function PointLabView() {
   const projected = createMemo(() => projectPattern(pattern().points, pose()))
   const tuning = createMemo<GraphTuning>(() => ({ pointsPerEdge: pointsPerEdge() }))
   const designGraph = createMemo(() => buildProximityGraph(pattern().points, tuning()))
+  const designCache = createMemo(() => createLocalIcpDesign(pattern()))
   const observedPoints = createMemo(() => {
     const masked = applyObservationMask(projected(), {
       cropLeft: cropLeft(),
@@ -244,6 +246,7 @@ export function PointLabView() {
       observedColors: observedColors(),
       observedFingerprints: observedFingerprints(),
       baseline: baselineMatch(),
+      designCache: designCache(),
       options: createLocalIcpOptions({
         enabled: recoveryEnabled(),
         identityDepth: MAX_FINGERPRINT_DEPTH,

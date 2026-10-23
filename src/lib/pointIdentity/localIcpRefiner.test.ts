@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { createIdentityIndexesByDepth } from '@/lib/pointIdentity/identity'
-import { createLocalIcpOptions, refineObservedIdentityWithLocalIcp } from '@/lib/pointIdentity/localIcpRefiner'
+import {
+  createLocalIcpDesign,
+  createLocalIcpOptions,
+  refineObservedIdentityWithLocalIcp,
+} from '@/lib/pointIdentity/localIcpRefiner'
 import {
   IDENTITY_RECOVERED,
   IDENTITY_RESOLVED,
@@ -28,6 +32,7 @@ type ScenarioOptions = {
   pitchDeg?: number
   sphericalDistortion?: number
   hopRadius?: number
+  designCache?: boolean
 }
 
 type Scenario = {
@@ -89,6 +94,7 @@ function scenario(options: ScenarioOptions = {}): Scenario {
     observedGraph,
     observedColors,
     baseline,
+    designCache: options.designCache === true ? createLocalIcpDesign(PATTERN) : undefined,
     options: createLocalIcpOptions({
       identityDepth: IDENTITY_DEPTH,
       maxProofDepth: MAX_PROOF_DEPTH,
@@ -179,6 +185,15 @@ describe('local hop-graph ICP', () => {
     expect(current.result.accepted).toBe(true)
     expect(current.result.metrics.recovered).toBeGreaterThan(0)
     expect(current.falseMatches).toBe(0)
+  }, 30000)
+
+  it('produces identical results with a precomputed design cache', () => {
+    const cached = scenario({ cropLeft: 20, designCache: true })
+    const uncached = scenario({ cropLeft: 20 })
+    expect(cached.result.accepted).toBe(true)
+    expect(cached.result.metrics).toEqual(uncached.result.metrics)
+    expect(cached.result.points).toEqual(uncached.result.points)
+    expect(cached.result.predictedLattice).toEqual(uncached.result.predictedLattice)
   }, 30000)
 
   it('refines distortion points that still have support anchors', () => {
