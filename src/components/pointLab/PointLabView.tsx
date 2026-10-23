@@ -3,8 +3,26 @@ import { createMemo, createSignal } from 'solid-js'
 import { ControlSlider } from '@/components/pointLab/ControlSlider'
 import { PointLabCanvas } from '@/components/pointLab/PointLabCanvas'
 import { extractChainRuns, summarizeChainRuns } from '@/lib/pointIdentity/chainRuns'
+import type { IcpRefineResult } from '@/lib/pointIdentity/icpRefiner'
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
-import { createIdentityIndex, evaluateIdentity } from '@/lib/pointIdentity/identity'
+import {
+  createLocalIcpOptions,
+  MAX_FINGERPRINT_DEPTH,
+  refineObservedIdentityWithLocalIcp,
+} from '@/lib/pointIdentity/localIcpRefiner'
+import {
+  computeFingerprints,
+  createIdentityIndexesByDepth,
+  evaluateIdentity,
+} from '@/lib/pointIdentity/identity'
+import {
+  IDENTITY_AMBIGUOUS,
+  IDENTITY_CONFLICT,
+  IDENTITY_RECOVERED,
+  IDENTITY_UNRESOLVED,
+  matchObservedIdentity,
+  type IdentityStatus,
+} from '@/lib/pointIdentity/match'
 import { applyObservationMask, DEFAULT_OBSERVATION_MASK } from '@/lib/pointIdentity/observation'
 import { DEFAULT_VIEW, outOfPlaneTiltDeg, projectPattern } from '@/lib/pointIdentity/projection'
 import { buildProximityGraph } from '@/lib/pointIdentity/proximityGraph'
@@ -16,10 +34,8 @@ import styles from '@/components/pointLab/PointLabView.module.css'
 const DEFAULTS = {
   columns: 8,
   pointsPerEdge: 4,
-  depth: 6,
   cameraDistance: 2200,
 } as const
-const MAX_IDENTITY_DEPTH = 12
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`
@@ -74,6 +90,27 @@ function formatRing(ring: { size: number; colors: string; partition: string; end
   return `${ring.size} pt${ring.size === 1 ? '' : 's'} · ${ring.colors} · p:${ring.partition} · e:${ring.endpoints}`
 }
 
+function refinedStatusLabel(status: IdentityStatus): string {
+  switch (status) {
+    case IDENTITY_RECOVERED:
+      return 'recovered'
+    case IDENTITY_CONFLICT:
+      return 'conflict'
+    default:
+      return 'safe fail'
+  }
+}
+
+function refinedToneClass(status: IdentityStatus): string {
+  if (status === IDENTITY_RECOVERED) {
+    return styles.statusCorrect ?? ''
+  }
+  if (status === IDENTITY_CONFLICT) {
+    return styles.statusFalse ?? ''
+  }
+  return styles.statusSafe ?? ''
+}
+
 function degreeById(graph: ProximityGraph, id: number): number {
   const position = graph.points.findIndex((point) => point.index === id)
   return position < 0 ? 0 : (graph.neighbors[position]?.length ?? 0)
@@ -89,7 +126,6 @@ export function PointLabView() {
   const [cameraDistance, setCameraDistance] = createSignal(DEFAULTS.cameraDistance)
   const [sphericalDistortion, setSphericalDistortion] = createSignal(0)
 
-  const [depth, setDepth] = createSignal(DEFAULTS.depth)
   const [dropoutPercent, setDropoutPercent] = createSignal(DEFAULT_OBSERVATION_MASK.dropoutPercent)
   const [dropoutSeed, setDropoutSeed] = createSignal(DEFAULT_OBSERVATION_MASK.dropoutSeed)
   const [jitterPercent, setJitterPercent] = createSignal(0)
@@ -102,6 +138,12 @@ export function PointLabView() {
   const [zoomToCursor, setZoomToCursor] = createSignal(true)
   const [selectedIndex, setSelectedIndex] = createSignal<number | undefined>(undefined)
   const [edgeReveal, setEdgeReveal] = createSignal<number | undefined>(undefined)
+  const [recoveryEnabled, setRecoveryEnabled] = createSignal(true)
+  const [minProofPower, setMinProofPower] = createSignal(7)
+  const [hopRadius, setHopRadius] = createSignal(8)
+  const [showAnchors, setShowAnchors] = createSignal(true)
+  const [showPredictedLattice, setShowPredictedLattice] = createSignal(true)
+  const [showPredictedMissing, setShowPredictedMissing] = createSignal(true)
 
   const changePatternNumber = (setter: (value: number) => void) => (value: number) => {
     setter(value)
@@ -149,11 +191,143 @@ export function PointLabView() {
       y: point.y + (random() * 2 - 1) * spacing * (jitter / 100),
     }))
   })
-  const designIndex = createMemo(() => createIdentityIndex(designGraph(), colors(), depth()))
-  const observedGraph = createMemo(() => buildProximityGraph(observedPoints(), tuning()))
-  const evaluation = createMemo(() =>
-    evaluateIdentity(designGraph(), observedGraph(), designIndex(), colors(), depth()),
+  const identityIndexesByDepth = createMemo(() =>
+    createIdentityIndexesByDepth(designGraph(), colors(), MAX_FINGERPRINT_DEPTH),
   )
+  const designIndex = createMemo(
+    () => identityIndexesByDepth()[MAX_FINGERPRINT_DEPTH - 1]!,
+  )
+  const observedGraph = createMemo(() => buildProximityGraph(observedPoints(), tuning()))
+  const observedFingerprints = createMemo(() =>
+    computeFingerprints(observedGraph(), colors(), MAX_FINGERPRINT_DEPTH),
+  )
+  const evaluation = createMemo(() =>
+    evaluateIdentity(
+      designGraph(),
+      observedGraph(),
+      designIndex(),
+      colors(),
+      MAX_FINGERPRINT_DEPTH,
+      observedFingerprints(),
+    ),
+  )
+  const observedColors = createMemo(() => observedGraph().points.map((point) => colors()[point.index] ?? 0))
+  const baselineMatch = createMemo(() =>
+    matchObservedIdentity(designIndex(), observedGraph(), colors(), MAX_FINGERPRINT_DEPTH, {
+      fingerprints: observedFingerprints(),
+    }),
+  )
+  const frameBounds = createMemo(() => {
+    const points = projected()
+    if (points.length === 0) {
+      return undefined
+    }
+    let minX = Number.POSITIVE_INFINITY
+    let maxX = Number.NEGATIVE_INFINITY
+    let minY = Number.POSITIVE_INFINITY
+    let maxY = Number.NEGATIVE_INFINITY
+    for (const point of points) {
+      minX = Math.min(minX, point.x)
+      maxX = Math.max(maxX, point.x)
+      minY = Math.min(minY, point.y)
+      maxY = Math.max(maxY, point.y)
+    }
+    return { minX, minY, maxX, maxY }
+  })
+  const recovery = createMemo<IcpRefineResult>(() =>
+    refineObservedIdentityWithLocalIcp({
+      designPattern: pattern(),
+      designColors: colors(),
+      designGraph: designGraph(),
+      designIndexesByDepth: identityIndexesByDepth(),
+      observedGraph: observedGraph(),
+      observedColors: observedColors(),
+      observedFingerprints: observedFingerprints(),
+      baseline: baselineMatch(),
+      options: createLocalIcpOptions({
+        enabled: recoveryEnabled(),
+        identityDepth: MAX_FINGERPRINT_DEPTH,
+        maxProofDepth: MAX_FINGERPRINT_DEPTH,
+        minProofPower: minProofPower(),
+        hopRadius: hopRadius(),
+        frameBounds: frameBounds(),
+      }),
+    }),
+  )
+  const recoverySummary = createMemo(() => {
+    const result = recovery()
+    const observed = observedGraph().points
+    const truthIds = new Set(observed.map((point) => point.index))
+    let correct = 0
+    let falseMatch = 0
+    let recoveredFalse = 0
+    let recovered = 0
+    let conflicts = 0
+    let safe = 0
+    let remainingAmbiguous = 0
+    let remainingUnresolved = 0
+    for (let position = 0; position < result.points.length; position += 1) {
+      const point = result.points[position]
+      const truth = observed[position]
+      if (point === undefined || truth === undefined) {
+        continue
+      }
+      if (point.status === IDENTITY_RECOVERED) {
+        recovered += 1
+      }
+      if (point.status === IDENTITY_AMBIGUOUS) {
+        remainingAmbiguous += 1
+      }
+      if (point.status === IDENTITY_UNRESOLVED) {
+        remainingUnresolved += 1
+      }
+      if (point.status === IDENTITY_CONFLICT) {
+        conflicts += 1
+      }
+      if (point.designId === undefined) {
+        safe += 1
+      } else if (point.designId === truth.index) {
+        correct += 1
+      } else {
+        falseMatch += 1
+        if (point.status === IDENTITY_RECOVERED) {
+          recoveredFalse += 1
+        }
+      }
+    }
+    let baselineAmbiguous = 0
+    let baselineUnresolved = 0
+    for (const point of result.baseline.points) {
+      if (point.status === IDENTITY_AMBIGUOUS) {
+        baselineAmbiguous += 1
+      }
+      if (point.status === IDENTITY_UNRESOLVED) {
+        baselineUnresolved += 1
+      }
+    }
+    let predictedMissingFalse = 0
+    for (const missing of result.predictedMissing) {
+      if (truthIds.has(missing.designId)) {
+        predictedMissingFalse += 1
+      }
+    }
+    const total = result.points.length
+    return {
+      correct,
+      falseMatch,
+      recoveredFalse,
+      recovered,
+      conflicts,
+      safe,
+      baselineAmbiguous,
+      baselineUnresolved,
+      remainingAmbiguous,
+      remainingUnresolved,
+      total,
+      predictedMissingFalse,
+      accuracy: total === 0 ? 0 : correct / total,
+    }
+  })
 
   const expectedChains = createMemo(() => pattern().stats.sampledEdges)
   const chainDiagnostics = createMemo(() =>
@@ -207,12 +381,17 @@ export function PointLabView() {
       return undefined
     }
     const fingerprint = designIndex().fingerprints.find((entry) => entry.index === index)
+    const observedPosition = observedGraph().points.findIndex((entry) => entry.index === index)
+    const refinedPoint = observedPosition >= 0 ? recovery().points[observedPosition] : undefined
+    const isAnchor = recovery().anchors.some((anchor) => anchor.observedPosition === observedPosition)
     return {
       item,
       color: colors()[index] ?? 0,
       designFingerprint: fingerprint,
       designDegree: degreeById(designGraph(), index),
       observedDegree: degreeById(observedGraph(), index),
+      refinedPoint,
+      isAnchor,
     }
   })
 
@@ -242,10 +421,12 @@ export function PointLabView() {
     setSphericalDistortion(0)
   }
 
+  const displayedFalseMatch = (): number => (recoveryEnabled() ? recoverySummary().falseMatch : summary().falseMatch)
+  const displayedAccuracy = (): number => (recoveryEnabled() ? recoverySummary().accuracy : summary().accuracy)
   const accuracyTone = (): string =>
-    summary().falseMatch > 0
+    displayedFalseMatch() > 0
       ? (styles.metricDanger ?? '')
-      : summary().accuracy >= 0.9
+      : displayedAccuracy() >= 0.9
         ? (styles.metricSuccess ?? '')
         : (styles.metricWarning ?? '')
 
@@ -269,6 +450,11 @@ export function PointLabView() {
           <span class={`${styles.statusChip} ${outcomeToneClass(details.item.outcome)}`}>
             {outcomeLabel(details.item.outcome)}
           </span>
+          {recoveryEnabled() && details.refinedPoint !== undefined ? (
+            <span class={`${styles.statusChip} ${refinedToneClass(details.refinedPoint.status)}`}>
+              ICP: {refinedStatusLabel(details.refinedPoint.status)}
+            </span>
+          ) : null}
           <span class={styles.inspectorRoute}>{outcomeDetail(details.item.outcome)}</span>
         </div>
         <div class={styles.inspectorBody}>
@@ -296,6 +482,34 @@ export function PointLabView() {
             <div>
               <dt>key length</dt>
               <dd>{details.item.fingerprint.key.length}</dd>
+            </div>
+            <div>
+              <dt>proof power</dt>
+              <dd>{details.refinedPoint?.proofPower ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>anchor</dt>
+              <dd>{details.isAnchor ? 'yes' : 'no'}</dd>
+            </div>
+            <div>
+              <dt>ICP residual</dt>
+              <dd>
+                {details.refinedPoint?.designDistance === undefined
+                  ? '—'
+                  : details.refinedPoint.designDistance.toFixed(2)}
+              </dd>
+            </div>
+            <div>
+              <dt>votes</dt>
+              <dd>{details.refinedPoint?.recoveryVotes ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>source</dt>
+              <dd>{details.refinedPoint?.source ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>conflict</dt>
+              <dd>{details.refinedPoint?.geometryConflict === true ? 'yes' : 'no'}</dd>
             </div>
           </dl>
         </div>
@@ -327,21 +541,33 @@ export function PointLabView() {
       <section class={styles.metrics} aria-label="Experiment summary">
         <article class={`${styles.metric} ${accuracyTone()}`}>
           <span class={styles.metricLabel}>Correct identity</span>
-          <strong class={styles.metricValue}>{percent(summary().accuracy)}</strong>
+          <strong class={styles.metricValue}>{percent(displayedAccuracy())}</strong>
           <span class={styles.metricDetail}>
-            {summary().correct} of {summary().total} projected points
+            {recoveryEnabled()
+              ? `${recoverySummary().correct} of ${recoverySummary().total} · baseline ${percent(summary().accuracy)} · ${recoverySummary().recovered} recovered`
+              : `${summary().correct} of ${summary().total} projected points`}
           </span>
         </article>
-        <article class={`${styles.metric} ${summary().falseMatch > 0 ? styles.metricDanger : styles.metricNeutral}`}>
+        <article class={`${styles.metric} ${displayedFalseMatch() > 0 ? styles.metricDanger : styles.metricNeutral}`}>
           <span class={styles.metricLabel}>False matches</span>
-          <strong class={styles.metricValue}>{summary().falseMatch}</strong>
-          <span class={styles.metricDetail}>{percent(summary().falseMatchRate)} of the field · dangerous</span>
+          <strong class={styles.metricValue}>{displayedFalseMatch()}</strong>
+          <span class={styles.metricDetail}>
+            {recoveryEnabled()
+              ? `baseline ${summary().falseMatch} · recovered false ${recoverySummary().recoveredFalse}`
+              : `${percent(summary().falseMatchRate)} of the field · dangerous`}
+          </span>
         </article>
         <article class={`${styles.metric} ${styles.metricWarning}`}>
           <span class={styles.metricLabel}>Safe failures</span>
-          <strong class={styles.metricValue}>{summary().safeFail}</strong>
+          <strong class={styles.metricValue}>
+            {recoveryEnabled() ? recoverySummary().safe : summary().safeFail}
+          </strong>
           <span class={styles.metricDetail}>
-            {summary().unresolved} unmatched · {summary().ambiguous} ambiguous
+            {recoveryEnabled()
+              ? `${recoverySummary().conflicts} conflicts · baseline safe ${summary().safeFail} · ICP ${
+                  recovery().accepted ? 'accepted' : recovery().rejectionReason ?? 'idle'
+                }`
+              : `${summary().unresolved} unmatched · ${summary().ambiguous} ambiguous`}
           </span>
         </article>
         <article class={`${styles.metric} ${styles.metricNeutral}`}>
@@ -387,7 +613,12 @@ export function PointLabView() {
               colors={colors()}
               graph={observedGraph()}
               evaluation={evaluation()}
+              recovery={recovery()}
               showGraph={showGraph()}
+              showRecovery={recoveryEnabled()}
+              showAnchors={showAnchors()}
+              showPredictedLattice={showPredictedLattice()}
+              showPredictedMissing={showPredictedMissing()}
               zoomToCursor={zoomToCursor()}
               visibleEdgeCount={visibleEdgeCount()}
               selectedIndex={selectedIndex()}
@@ -415,6 +646,28 @@ export function PointLabView() {
             <span class={styles.legendItem}>
               <span class={`${styles.statusRing} ${styles.statusFalse}`} />
               false match
+            </span>
+            <span class={styles.legendDivider} />
+            <span class={styles.legendGroupLabel}>ICP</span>
+            <span class={styles.legendItem}>
+              <span class={`${styles.statusRing} ${styles.statusRecovered}`} />
+              recovered
+            </span>
+            <span class={styles.legendItem}>
+              <span class={`${styles.statusRing} ${styles.statusFalse}`} />
+              recovered false
+            </span>
+            <span class={styles.legendItem}>
+              <span class={`${styles.statusRing} ${styles.statusConflict}`} />
+              conflict
+            </span>
+            <span class={styles.legendItem}>
+              <span class={styles.anchorSwatch} />
+              anchor
+            </span>
+            <span class={styles.legendItem}>
+              <span class={styles.predictedSwatch} />
+              predicted missing
             </span>
             <span class={styles.legendDivider} />
             <span class={styles.legendItem}>
@@ -765,19 +1018,10 @@ export function PointLabView() {
               <h2 class={styles.panelTitle}>Identity</h2>
               <span class={styles.seedLabel}>random colors</span>
             </div>
-            <ControlSlider
-              id="lab-depth"
-              label="Fingerprint depth"
-              value={depth()}
-              min={1}
-              max={MAX_IDENTITY_DEPTH}
-              step={1}
-              format={(value) => `${value.toFixed(0)} hops`}
-              onInput={setDepth}
-            />
             <p class={styles.panelNote}>
-              A key is the point's own bit plus angular color rings at each hop. Ring sizes are included, so topology
-              drift cannot silently pass as a color match.
+              Fingerprint depth is fixed at the maximum {MAX_FINGERPRINT_DEPTH} hops. A key is the point's own bit plus
+              angular color rings at each hop. Ring sizes are included, so topology drift cannot silently pass as a
+              color match.
             </p>
             <dl class={styles.inlineStats}>
               <div>
@@ -798,12 +1042,161 @@ export function PointLabView() {
               </div>
             </dl>
           </section>
+
+          <section class={styles.panel}>
+            <div class={styles.panelHead}>
+              <h2 class={styles.panelTitle}>Geometric recovery</h2>
+              <span class={styles.seedLabel}>
+                {recovery().accepted ? 'accepted' : recovery().rejectionReason ?? 'idle'}
+              </span>
+            </div>
+            <label class={styles.toggle}>
+              <input
+                type="checkbox"
+                checked={recoveryEnabled()}
+                onChange={(event) => setRecoveryEnabled(event.currentTarget.checked)}
+              />
+              Enable local color-gated ICP
+            </label>
+            <ControlSlider
+              id="lab-anchor-proof"
+              label="Anchor proof power"
+              value={minProofPower()}
+              min={2}
+              max={MAX_FINGERPRINT_DEPTH}
+              step={1}
+              format={(value) => `${value.toFixed(0)} hops`}
+              onInput={setMinProofPower}
+            />
+            <p class={styles.panelNote}>
+              Only matches with at least this many stable unique hops become anchors. Identity depth itself is fixed at
+              the maximum {MAX_FINGERPRINT_DEPTH} hops.
+            </p>
+            <ControlSlider
+              id="lab-hop-radius"
+              label="Support radius"
+              value={hopRadius()}
+              min={1}
+              max={10}
+              step={1}
+              format={(value) => `${value.toFixed(0)} hops`}
+              onInput={setHopRadius}
+            />
+            <div class={styles.recoveryToggles}>
+              <label class={styles.toggle}>
+                <input
+                  type="checkbox"
+                  checked={showAnchors()}
+                  onChange={(event) => setShowAnchors(event.currentTarget.checked)}
+                />
+                Anchors
+              </label>
+              <label class={styles.toggle}>
+                <input
+                  type="checkbox"
+                  checked={showPredictedLattice()}
+                  onChange={(event) => setShowPredictedLattice(event.currentTarget.checked)}
+                />
+                Warped lattice
+              </label>
+              <label class={styles.toggle}>
+                <input
+                  type="checkbox"
+                  checked={showPredictedMissing()}
+                  onChange={(event) => setShowPredictedMissing(event.currentTarget.checked)}
+                />
+                Predicted missing
+              </label>
+            </div>
+            <dl class={styles.inlineStats}>
+              <div>
+                <dt>anchors</dt>
+                <dd>{recovery().metrics.anchors}</dd>
+              </div>
+              <div>
+                <dt>registrations</dt>
+                <dd>{recovery().metrics.neighborhoods ?? recovery().metrics.initialInliers}</dd>
+              </div>
+              <div>
+                <dt>iterations</dt>
+                <dd>{recovery().metrics.iterations}</dd>
+              </div>
+              <div>
+                <dt>ICP correspondences</dt>
+                <dd>{recovery().metrics.pairs}</dd>
+              </div>
+              <div>
+                <dt>coverage</dt>
+                <dd>{percent(recovery().metrics.pairCoverage)}</dd>
+              </div>
+              <div>
+                <dt>design RMS</dt>
+                <dd>
+                  {recovery().accepted && recovery().metrics.designSpacing > 0
+                    ? `${(recovery().metrics.designRms / recovery().metrics.designSpacing).toFixed(2)} sp`
+                    : '—'}
+                </dd>
+              </div>
+              <div>
+                <dt>recovered</dt>
+                <dd>{recovery().metrics.recovered}</dd>
+              </div>
+              <div>
+                <dt>recovered false</dt>
+                <dd>{recoverySummary().recoveredFalse}</dd>
+              </div>
+              <div>
+                <dt>ambiguous in</dt>
+                <dd>{recoverySummary().baselineAmbiguous}</dd>
+              </div>
+              <div>
+                <dt>unresolved in</dt>
+                <dd>{recoverySummary().baselineUnresolved}</dd>
+              </div>
+              <div>
+                <dt>ambiguous left</dt>
+                <dd>{recoverySummary().remainingAmbiguous}</dd>
+              </div>
+              <div>
+                <dt>unresolved left</dt>
+                <dd>{recoverySummary().remainingUnresolved}</dd>
+              </div>
+              <div>
+                <dt>predicted</dt>
+                <dd>{recovery().predictedMissing.length}</dd>
+              </div>
+              <div>
+                <dt>predicted false</dt>
+                <dd>{recoverySummary().predictedMissingFalse}</dd>
+              </div>
+              <div>
+                <dt>conflicts</dt>
+                <dd>{recovery().metrics.geometryConflicts}</dd>
+              </div>
+              <div>
+                <dt>proof used</dt>
+                <dd>{recovery().usedProofPower}</dd>
+              </div>
+              <div>
+                <dt>color rejects</dt>
+                <dd>{recovery().metrics.colorRejects}</dd>
+              </div>
+            </dl>
+            <p class={styles.panelNote}>
+              For each ambiguous point, the observed-graph support region supplies its anchors. Those anchors fit a
+              local homography; the local observed points are then matched partially against the global design by color
+              and predicted position, and the homography is refit from every matched pair. Fewer than four support
+              anchors, or no match, leaves the point ambiguous. Red rings mark recovered points whose design id
+              disagrees with the synthetic truth so local failures stay visible.
+            </p>
+          </section>
         </aside>
       </div>
 
       <p class={styles.footnote}>
         Values are evaluated on the synthetic view only. Color detection is treated as perfect; failures come from
-        perspective changing the proximity graph.
+        perspective changing the proximity graph. The ICP refiner is truth-blind — design ids are scored against the
+        synthetic truth only after the fact.
       </p>
     </div>
   )

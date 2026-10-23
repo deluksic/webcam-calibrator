@@ -13,9 +13,14 @@ const numberArg = (name: string, fallback: number): number => {
   return value === undefined ? fallback : Number(value)
 }
 
+const booleanArg = (name: string): boolean => {
+  const value = args.get(name)
+  return value === '1' || value === 'true' || value === 'yes'
+}
+
 const options = {
   runs: numberArg('runs', 2000),
-  depth: numberArg('depth', 5),
+  depth: numberArg('depth', 12),
   pointsPerEdge: numberArg('pointsPerEdge', 4),
   columns: numberArg('columns', 8),
   baseSeed: numberArg('baseSeed', 1),
@@ -29,6 +34,11 @@ const options = {
   cropRight: numberArg('cropRight', 0),
   cropTop: numberArg('cropTop', 0),
   cropBottom: numberArg('cropBottom', 0),
+  jitterPercent: numberArg('jitter', 0),
+  recovery: booleanArg('recover'),
+  minProofPower: numberArg('minProofPower', 7),
+  maxLocalIterations: numberArg('localIterations', 3),
+  hopRadius: numberArg('hopRadius', 8),
 }
 
 const start = Date.now()
@@ -45,4 +55,28 @@ console.log(`perfect=${report.perfectRuns}/${report.runs} >=99%=${report.atLeast
 console.log(`falseMatchRuns=${report.falseMatchRuns} totalFalseMatches=${report.totalFalseMatches}`)
 console.log(`designCollisions mean=${report.meanDesignCollisions.toFixed(2)} max=${report.maxDesignCollisions}`)
 console.log(`detectedPoints mean=${report.meanDetectedPoints.toFixed(1)}`)
+
+if (report.recovery !== undefined) {
+  const recovery = report.recovery
+  console.log(
+    `refined accuracy mean=${(recovery.meanRefinedAccuracy * 100).toFixed(3)}% min=${(recovery.minRefinedAccuracy * 100).toFixed(2)}%`,
+  )
+  console.log(
+    `accepted accuracy mean=${(recovery.meanAcceptedRefinedAccuracy * 100).toFixed(3)}% min=${(recovery.minAcceptedRefinedAccuracy * 100).toFixed(2)}%`,
+  )
+  console.log(
+    `refined accepted=${recovery.acceptedRuns}/${report.runs} rejected=${recovery.rejectedRuns}/${report.runs} falseMatches=${recovery.refinedFalseMatches}`,
+  )
+  console.log(
+    `recovered mean=${recovery.meanRecovered.toFixed(1)} predictedMissing mean=${recovery.meanPredictedMissing.toFixed(1)} predictedMissingFalse=${recovery.predictedMissingFalse}`,
+  )
+  console.log(
+    `anchors mean=${recovery.meanAnchors.toFixed(1)} neighborhoods mean=${recovery.meanInliers.toFixed(1)} pairs mean=${recovery.meanPairs.toFixed(1)} rms mean=${recovery.meanDesignRms.toFixed(3)} conflicts mean=${recovery.meanConflicts.toFixed(2)}`,
+  )
+  const reasons = Object.entries(recovery.rejectionReasons)
+    .map(([reason, count]) => `${reason}:${count}`)
+    .join(', ')
+  console.log(`rejectionReasons=${reasons || 'none'}`)
+}
+
 console.log(`elapsed=${elapsed.toFixed(2)}s`)

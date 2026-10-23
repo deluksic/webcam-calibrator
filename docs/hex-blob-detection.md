@@ -250,6 +250,17 @@ Initial acceptance targets:
 - centroid error <0.2 px
 - 60 fps at 1280×720
 
+## Identity recovery
+
+The blob detector feeds a separate point-identity stage. For each ambiguous
+point, high-proof hash anchors in its observed-graph support fit a local
+homography; the local observed points are then matched partially against the
+global design by color and predicted position, and the homography is refit from
+all matched pairs. Point Lab exposes the full experiment; ROI Lab runs the same
+recovery behind its “Local homography recovery” toggle. This is documented in
+[`point-identity-icp-recovery.md`](point-identity-icp-recovery.md). It does not
+change the blob detection pipeline above.
+
 ## Implementation phases
 
 1. CPU reference detector and synthetic tests.

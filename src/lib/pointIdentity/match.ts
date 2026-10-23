@@ -11,12 +11,18 @@ export const IDENTITY_RESOLVED = 0
 export const IDENTITY_AMBIGUOUS = 1
 export const IDENTITY_UNRESOLVED = 2
 export const IDENTITY_CONFLICT = 3
+/** Identity assigned by geometric ICP, not by the local hash. */
+export const IDENTITY_RECOVERED = 4
+/** Virtual design point with no detection; never a measurement. */
+export const IDENTITY_PREDICTED_MISSING = 5
 
 export type IdentityStatus =
   | typeof IDENTITY_RESOLVED
   | typeof IDENTITY_AMBIGUOUS
   | typeof IDENTITY_UNRESOLVED
   | typeof IDENTITY_CONFLICT
+  | typeof IDENTITY_RECOVERED
+  | typeof IDENTITY_PREDICTED_MISSING
 
 export type MatchedIdentityPoint = {
   x: number
@@ -24,6 +30,16 @@ export type MatchedIdentityPoint = {
   color: BinaryColor
   designId: number | undefined
   status: IdentityStatus
+  /** Position in the observed graph; useful when the observed index is not the design id. */
+  observedPosition?: number
+  source?: 'hash' | 'hash-loose' | 'geometry'
+  proofPower?: number
+  /** Design-space distance from the final ICP prediction. */
+  designDistance?: number
+  /** The ICP transform disagreed with a resolved hash identity. */
+  geometryConflict?: boolean
+  /** Number of overlapping local neighborhoods that voted for this assignment. */
+  recoveryVotes?: number
 }
 
 export type IdentityMatchSummary = {
@@ -85,13 +101,26 @@ export function matchObservedIdentity(
   depth: number,
   options?: {
     looseByKey?: ColorIdentityIndex
+    fingerprints?: readonly PointFingerprint[]
   },
 ): IdentityMatchResult {
-  const chainIds = chainIdsForGraph(observedGraph)
-  const endpointFlags = chainEndpointFlagsForGraph(observedGraph)
-  const fingerprints = observedGraph.points.map((_, rootIndex) =>
-    computeFingerprint(observedGraph, observedColors, rootIndex, depth, chainIds, endpointFlags),
-  )
+  const fingerprints =
+    options?.fingerprints !== undefined
+      ? [...options.fingerprints]
+      : (() => {
+          const chainIds = chainIdsForGraph(observedGraph)
+          const endpointFlags = chainEndpointFlagsForGraph(observedGraph)
+          return observedGraph.points.map((_, rootIndex) =>
+            computeFingerprint(
+              observedGraph,
+              observedColors,
+              rootIndex,
+              depth,
+              chainIds,
+              endpointFlags,
+            ),
+          )
+        })()
 
   const candidateLists = fingerprints.map((fingerprint) =>
     options?.looseByKey !== undefined

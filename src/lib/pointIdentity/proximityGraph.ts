@@ -195,23 +195,58 @@ function computeNeighborhoods(points: readonly PatternPoint[]): {
   neighborLists: number[][]
   localScales: number[]
 } {
+  const count = points.length
   const neighborLists: number[][] = []
   const localScales: number[] = []
-  for (let i = 0; i < points.length; i += 1) {
+  const bestDistances = new Float64Array(NEIGHBOR_SAMPLE)
+  const bestIndices = new Int32Array(NEIGHBOR_SAMPLE)
+
+  for (let i = 0; i < count; i += 1) {
     const origin = points[i]!
-    const sorted: Array<{ index: number; length: number }> = []
-    for (let j = 0; j < points.length; j += 1) {
-      if (j !== i) {
-        sorted.push({ index: j, length: distance(origin, points[j]!) })
+    bestDistances.fill(Number.POSITIVE_INFINITY)
+    bestIndices.fill(-1)
+    for (let j = 0; j < count; j += 1) {
+      if (j === i) {
+        continue
       }
+      const length = distance(origin, points[j]!)
+      let position = NEIGHBOR_SAMPLE
+      for (let slot = 0; slot < NEIGHBOR_SAMPLE; slot += 1) {
+        const slotDistance = bestDistances[slot]!
+        const tied = Math.abs(length - slotDistance) < 1e-6
+        if (tied ? j < bestIndices[slot]! : length < slotDistance) {
+          position = slot
+          break
+        }
+      }
+      if (position >= NEIGHBOR_SAMPLE) {
+        continue
+      }
+      for (let slot = NEIGHBOR_SAMPLE - 1; slot > position; slot -= 1) {
+        bestDistances[slot] = bestDistances[slot - 1]!
+        bestIndices[slot] = bestIndices[slot - 1]!
+      }
+      bestDistances[position] = length
+      bestIndices[position] = j
     }
-    sorted.sort((first, second) =>
-      Math.abs(first.length - second.length) < 1e-6 ? first.index - second.index : first.length - second.length,
-    )
-    neighborLists.push(sorted.slice(0, Math.min(NEIGHBOR_SAMPLE, sorted.length)).map((item) => item.index))
-    localScales.push(
-      Math.max(median(sorted.slice(0, Math.min(LOCAL_SCALE_SAMPLE, sorted.length)).map((item) => item.length)), 1e-6),
-    )
+
+    const neighborCount = Math.min(NEIGHBOR_SAMPLE, Math.max(0, count - 1))
+    const neighbors: number[] = []
+    for (let slot = 0; slot < neighborCount; slot += 1) {
+      neighbors.push(bestIndices[slot]!)
+    }
+    neighborLists.push(neighbors)
+
+    const scaleCount = Math.min(LOCAL_SCALE_SAMPLE, neighborCount)
+    let localScale = 0
+    if (scaleCount > 0) {
+      const middle = scaleCount >> 1
+      localScale =
+        scaleCount % 2 === 1
+          ? bestDistances[middle]!
+          : (bestDistances[middle - 1]! + bestDistances[middle]!) / 2
+    }
+    localScales.push(Math.max(localScale, 1e-6))
   }
   return { neighborLists, localScales }
 }

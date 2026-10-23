@@ -13,8 +13,21 @@ import {
   type RoiLabPipeline,
 } from '@/gpu/roiLab/roiLabPipeline'
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
-import { createIdentityIndex } from '@/lib/pointIdentity/identity'
-import { createColorIdentityIndex, matchObservedIdentity } from '@/lib/pointIdentity/match'
+import { computeFingerprints, createIdentityIndexesByDepth } from '@/lib/pointIdentity/identity'
+import {
+  createLocalIcpOptions,
+  MAX_FINGERPRINT_DEPTH,
+  refineObservedIdentityWithLocalIcp,
+} from '@/lib/pointIdentity/localIcpRefiner'
+import {
+  createColorIdentityIndex,
+  IDENTITY_AMBIGUOUS,
+  IDENTITY_CONFLICT,
+  IDENTITY_RECOVERED,
+  IDENTITY_RESOLVED,
+  IDENTITY_UNRESOLVED,
+  matchObservedIdentity,
+} from '@/lib/pointIdentity/match'
 import { buildProximityGraph } from '@/lib/pointIdentity/proximityGraph'
 import { randomBinaryColors } from '@/lib/pointIdentity/random'
 import { ROI_HISTOGRAM_BINS } from '@/lib/roiHistogram'
@@ -35,13 +48,14 @@ const [DEMO_WIDTH, DEMO_HEIGHT] = (() => {
 const MIN_ZOOM = 1
 const MAX_ZOOM = 12
 const WHEEL_SENSITIVITY = 0.0018
-const MAX_IDENTITY_DEPTH = 12
-
 const IDENTITY_DEFAULTS = {
   columns: Math.min(14, Math.max(2, Number(QUERY.get('columns')) || 7)),
   pointsPerEdge: Math.min(6, Math.max(1, Number(QUERY.get('points')) || 4)),
   colorSeed: Math.max(0, Math.round(Number(QUERY.get('seed')) || 1)),
-  depth: Math.min(MAX_IDENTITY_DEPTH, Math.max(1, Number(QUERY.get('depth')) || 6)),
+  depth: Math.min(
+    MAX_FINGERPRINT_DEPTH,
+    Math.max(1, Number(QUERY.get('depth')) || MAX_FINGERPRINT_DEPTH),
+  ),
 } as const
 
 type RoiViewMode = 'blobs' | 'components' | 'labels' | 'identity' | 'mask' | 'input' | 'camera'
@@ -75,7 +89,7 @@ const VIEW_MODE_INDEX: Record<RoiViewMode, 1 | 2 | 3 | 4 | 6 | 7 | 8> = {
 
 function parseViewMode(value: string | null): RoiViewMode {
   const match = VIEW_OPTIONS.find((option) => option.mode === value)
-  return match?.mode ?? 'labels'
+  return match?.mode ?? 'identity'
 }
 
 const INITIAL_VIEW: RoiViewMode = parseViewMode(QUERY.get('view'))
@@ -146,6 +160,7 @@ type IdentityMetrics = {
   conflicts: number
   edges: number
   components: number
+  recovered: number
   frameId: number
 }
 
@@ -181,6 +196,7 @@ export const RoiLabView: Component = () => {
   const [identityPointsPerEdge, setIdentityPointsPerEdge] = createSignal(IDENTITY_DEFAULTS.pointsPerEdge)
   const [identityColorSeed, setIdentityColorSeed] = createSignal(IDENTITY_DEFAULTS.colorSeed)
   const [identityDepth, setIdentityDepth] = createSignal(IDENTITY_DEFAULTS.depth)
+  const [identityRecovery, setIdentityRecovery] = createSignal(true)
   const [identityMetrics, setIdentityMetrics] = createSignal<IdentityMetrics>()
   const [identityPerf, setIdentityPerf] = createSignal<IdentityPerf>()
   const [seedScanRange, setSeedScanRange] = createSignal(512)
@@ -206,14 +222,25 @@ export const RoiLabView: Component = () => {
     })
     const colors = randomBinaryColors(pattern.points.length, identityColorSeed())
     const graph = buildProximityGraph(pattern.points, { pointsPerEdge })
-    const index = createIdentityIndex(graph, colors, identityDepth())
-    const looseIndex = createColorIdentityIndex(graph, colors, identityDepth())
-    return { pattern, colors, graph, index, looseIndex, pointsPerEdge }
+    const indexesByDepth = createIdentityIndexesByDepth(
+      graph,
+      colors,
+      MAX_FINGERPRINT_DEPTH,
+    )
+    return { pattern, colors, graph, indexesByDepth, pointsPerEdge }
   })
+
+  const identityIndex = createMemo(
+    () => identityDesign().indexesByDepth[identityDepth() - 1]!,
+  )
+  const identityLooseIndex = createMemo(() =>
+    createColorIdentityIndex(identityDesign().graph, identityDesign().colors, identityDepth()),
+  )
 
   const runIdentity = (points: readonly RoiComponentPoint[], frameId: number): RoiGraphData => {
     lastObservedPoints = points
     const design = identityDesign()
+    const depth = identityDepth()
     const observedPoints = points.map((point, index) => ({
       x: point.x,
       y: point.y,
@@ -223,21 +250,78 @@ export const RoiLabView: Component = () => {
     const observedGraph = buildProximityGraph(observedPoints, {
       pointsPerEdge: design.pointsPerEdge,
     })
-    const matched = matchObservedIdentity(design.index, observedGraph, observedColors, identityDepth(), {
-      looseByKey: design.looseIndex,
-    })
+    const baselineFingerprints = computeFingerprints(observedGraph, observedColors, depth)
+    const baseline = matchObservedIdentity(
+      identityIndex(),
+      observedGraph,
+      observedColors,
+      depth,
+      identityRecovery()
+        ? { fingerprints: baselineFingerprints }
+        : { looseByKey: identityLooseIndex(), fingerprints: baselineFingerprints },
+    )
+
+    let finalPoints = baseline.points
+    if (identityRecovery()) {
+      const recoveryFingerprints =
+        depth === MAX_FINGERPRINT_DEPTH
+          ? baselineFingerprints
+          : computeFingerprints(observedGraph, observedColors, MAX_FINGERPRINT_DEPTH)
+      finalPoints = refineObservedIdentityWithLocalIcp({
+        designPattern: design.pattern,
+        designColors: design.colors,
+        designGraph: design.graph,
+        designIndexesByDepth: design.indexesByDepth,
+        observedGraph,
+        observedColors,
+        observedFingerprints: recoveryFingerprints,
+        baseline,
+        options: createLocalIcpOptions({
+          identityDepth: depth,
+          maxProofDepth: MAX_FINGERPRINT_DEPTH,
+          minProofPower: 7,
+          hopRadius: 8,
+        }),
+      }).points
+    }
+
+    let resolved = 0
+    let ambiguous = 0
+    let unresolved = 0
+    let conflicts = 0
+    let recovered = 0
+    for (const point of finalPoints) {
+      switch (point.status) {
+        case IDENTITY_RESOLVED:
+          resolved += 1
+          break
+        case IDENTITY_AMBIGUOUS:
+          ambiguous += 1
+          break
+        case IDENTITY_UNRESOLVED:
+          unresolved += 1
+          break
+        case IDENTITY_CONFLICT:
+          conflicts += 1
+          break
+        case IDENTITY_RECOVERED:
+          recovered += 1
+          break
+      }
+    }
     setIdentityMetrics({
-      total: matched.summary.total,
-      resolved: matched.summary.resolved,
-      ambiguous: matched.summary.ambiguous,
-      unresolved: matched.summary.unresolved,
-      conflicts: matched.summary.conflicts,
+      total: finalPoints.length,
+      resolved,
+      ambiguous,
+      unresolved,
+      conflicts,
       edges: observedGraph.edges.length,
       components: observedGraph.stats.components,
+      recovered,
       frameId,
     })
     return {
-      points: matched.points.map((point) => ({
+      points: finalPoints.map((point) => ({
         x: point.x,
         y: point.y,
         designId: point.designId ?? 0,
@@ -257,6 +341,8 @@ export const RoiLabView: Component = () => {
     const observedPoints = points.map((point, index) => ({ x: point.x, y: point.y, index }))
     const observedColors = points.map((point) => point.color)
     const observedGraph = buildProximityGraph(observedPoints, { pointsPerEdge: design.pointsPerEdge })
+    const observedFingerprints = computeFingerprints(observedGraph, observedColors, depth)
+    const designIndex = identityIndex()
     const limit = Math.min(10000, Math.max(0, Math.round(seedScanRange())))
     let bestSeed: number | undefined
     let bestScore = Number.NEGATIVE_INFINITY
@@ -266,8 +352,9 @@ export const RoiLabView: Component = () => {
       for (let seed = 0; seed <= limit; seed += 1) {
         const designColors = randomBinaryColors(design.pattern.points.length, seed)
         const looseIndex = createColorIdentityIndex(design.graph, designColors, depth)
-        const matched = matchObservedIdentity(design.index, observedGraph, observedColors, depth, {
+        const matched = matchObservedIdentity(designIndex, observedGraph, observedColors, depth, {
           looseByKey: looseIndex,
+          fingerprints: observedFingerprints,
         })
         const score =
           matched.summary.resolved * 100 -
@@ -684,7 +771,7 @@ export const RoiLabView: Component = () => {
             ))}
           </div>
           <p class={styles.viewHint}>
-            Labels: random component colors · Centroids: component centers · Identity: graph + design IDs.
+            Identity: design IDs · Labels: colors · Centroids: centers.
           </p>
         </div>
         <div class={styles.identityPanel}>
@@ -734,16 +821,27 @@ export const RoiLabView: Component = () => {
               <input
                 type="number"
                 min="1"
-                max={MAX_IDENTITY_DEPTH}
+                max={MAX_FINGERPRINT_DEPTH}
                 value={identityDepth()}
                 onChange={(event) => {
                   setIdentityDepth(
-                    Math.min(MAX_IDENTITY_DEPTH, Math.max(1, Math.round(Number(event.currentTarget.value) || 6))),
+                    Math.min(
+                      MAX_FINGERPRINT_DEPTH,
+                      Math.max(1, Math.round(Number(event.currentTarget.value) || MAX_FINGERPRINT_DEPTH)),
+                    ),
                   )
                 }}
               />
             </label>
           </div>
+          <label class={styles.identityToggle}>
+            <input
+              type="checkbox"
+              checked={identityRecovery()}
+              onChange={(event) => setIdentityRecovery(event.currentTarget.checked)}
+            />
+            Local homography recovery
+          </label>
           <div class={styles.seedScan}>
             <label class={styles.identityField}>
               Scan 0…
@@ -812,6 +910,10 @@ export const RoiLabView: Component = () => {
                 <div>
                   <dt>unresolved</dt>
                   <dd>{metrics().unresolved}</dd>
+                </div>
+                <div>
+                  <dt>recovered</dt>
+                  <dd>{metrics().recovered}</dd>
                 </div>
                 <div>
                   <dt>conflicts</dt>

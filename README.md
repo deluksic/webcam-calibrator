@@ -14,6 +14,6 @@ In-browser camera calibration against **AprilTag36h11** targets. Detection and t
 - **Results** — After a good solve, explore the board in a simple 3D view and **export** camera parameters (intrinsics, distortion, poses) as JSON.
 - **Debug** — GPU pipeline tuning (display modes, histograms, edge profiles, quad grid + tag decode, undistort preview).
 
-For how it works under the hood, see [`docs/architecture.md`](docs/architecture.md) and [`docs/plan.md`](docs/plan.md).
+For how it works under the hood, see [`docs/architecture.md`](docs/architecture.md) and [`docs/plan.md`](docs/plan.md). The hex-target identity ICP recovery experiment is documented in [`docs/point-identity-icp-recovery.md`](docs/point-identity-icp-recovery.md).
 
 **Dev:** Solid.js, Vite — `pnpm dev`, `pnpm build`, `pnpm test`.

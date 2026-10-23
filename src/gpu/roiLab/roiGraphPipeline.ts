@@ -16,6 +16,7 @@ export const ROI_IDENTITY_RESOLVED = 0
 export const ROI_IDENTITY_AMBIGUOUS = 1
 export const ROI_IDENTITY_UNRESOLVED = 2
 export const ROI_IDENTITY_CONFLICT = 3
+export const ROI_IDENTITY_RECOVERED = 4
 
 export type RoiGraphPoint = {
   x: number
@@ -181,7 +182,10 @@ export function createRoiGraphStage(
     const radius = length(unit)
     const aa = fwidth(radius)
     const coverage = d.f32(1) - smoothstep(d.f32(1) - aa * d.f32(1.5), d.f32(1), radius)
-    if (status === d.u32(ROI_IDENTITY_RESOLVED)) {
+    if (
+      status === d.u32(ROI_IDENTITY_RESOLVED) ||
+      status === d.u32(ROI_IDENTITY_RECOVERED)
+    ) {
       const fill = stableHashToRgb01(designId)
       const outline = smoothstep(d.f32(0.72) - aa, d.f32(0.72) + aa, radius)
       const color = mix(fill, d.vec3f(0.035, 0.04, 0.055), outline)

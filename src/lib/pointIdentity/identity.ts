@@ -19,44 +19,76 @@ function colorAt(colors: readonly BinaryColor[], index: number): BinaryColor {
  * equal. Only rotations are considered: a perspective view cannot mirror the
  * angular order of a neighborhood.
  */
+const BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz'
+
 function canonicalRingFeatures(
   colors: string,
-  chainIds: readonly number[],
+  chainIds: Int32Array,
+  chainCount: number,
   endpoints: string,
   rootChain: number,
 ): { colors: string; partition: string; endpoints: string } {
-  if (colors.length <= 1) {
-    const label = rootChain >= 0 && chainIds[0] === rootChain ? 0 : 0
-    return { colors, partition: String(label), endpoints }
+  if (chainCount <= 1) {
+    return { colors, partition: '0', endpoints }
+  }
+
+  let colorsUniform = true
+  for (let index = 1; index < chainCount; index += 1) {
+    if (colors[index] !== colors[0]) {
+      colorsUniform = false
+      break
+    }
+  }
+  let endpointsUniform = true
+  for (let index = 1; index < chainCount; index += 1) {
+    if (endpoints[index] !== endpoints[0]) {
+      endpointsUniform = false
+      break
+    }
   }
 
   let bestColors = ''
   let bestPartition = ''
   let bestEndpoints = ''
   let hasBest = false
+  // Reused across shifts. No Map and no per-shift arrays.
+  const distinctChains: number[] = []
+  const distinctLabels: number[] = []
 
-  for (let shift = 0; shift < colors.length; shift += 1) {
-    const candidateColors = colors.slice(shift) + colors.slice(0, shift)
-    const candidateEndpoints = endpoints.slice(shift) + endpoints.slice(0, shift)
-    const rotatedChains = [...chainIds.slice(shift), ...chainIds.slice(0, shift)]
-    const labels = new Map<number, number>()
-    let nextLabel = 1
-    if (rootChain >= 0) {
-      labels.set(rootChain, 0)
-    } else {
-      nextLabel = 0
-    }
-    const partitionLabels: number[] = []
-    for (const chainId of rotatedChains) {
-      let label = labels.get(chainId)
-      if (label === undefined) {
-        label = nextLabel
-        nextLabel += 1
-        labels.set(chainId, label)
+  for (let shift = 0; shift < chainCount; shift += 1) {
+    const candidateColors = colorsUniform
+      ? colors
+      : colors.slice(shift) + colors.slice(0, shift)
+    const candidateEndpoints = endpointsUniform
+      ? endpoints
+      : endpoints.slice(shift) + endpoints.slice(0, shift)
+
+    distinctChains.length = 0
+    distinctLabels.length = 0
+    let nextLabel = rootChain >= 0 ? 1 : 0
+    let candidatePartition = ''
+
+    for (let index = 0; index < chainCount; index += 1) {
+      const chainId = chainIds[(shift + index) % chainCount] ?? -1
+      let label = -1
+      if (rootChain >= 0 && chainId === rootChain) {
+        label = 0
+      } else {
+        for (let known = 0; known < distinctChains.length; known += 1) {
+          if (distinctChains[known] === chainId) {
+            label = distinctLabels[known]!
+            break
+          }
+        }
+        if (label < 0) {
+          label = nextLabel
+          nextLabel += 1
+          distinctChains.push(chainId)
+          distinctLabels.push(label)
+        }
       }
-      partitionLabels.push(label)
+      candidatePartition += BASE36[label]
     }
-    const candidatePartition = partitionLabels.map((label) => label.toString(36)).join('')
 
     if (
       !hasBest ||
@@ -112,6 +144,7 @@ export function computeFingerprint(
   const seen = new Set<number>([rootIndex])
   let frontier: number[] = [rootIndex]
   const rings: RingDescriptor[] = []
+  let rawChains = new Int32Array(0)
 
   for (let level = 0; level < depth; level += 1) {
     const next = new Set<number>()
@@ -137,10 +170,24 @@ export function computeFingerprint(
       return a - b
     })
 
-    const raw = ordered.map((node) => String(colorAt(colors, graph.points[node]!.index))).join('')
-    const rawChains = ordered.map((node) => chainIds[node] ?? -1)
-    const rawEndpoints = ordered.map((node) => String(endpointFlags[node] ?? 0)).join('')
-    const canonical = canonicalRingFeatures(raw, rawChains, rawEndpoints, rootChain)
+    if (rawChains.length < ordered.length) {
+      rawChains = new Int32Array(ordered.length)
+    }
+    let raw = ''
+    let rawEndpoints = ''
+    for (let index = 0; index < ordered.length; index += 1) {
+      const node = ordered[index]!
+      raw += colorAt(colors, graph.points[node]!.index) === 1 ? '1' : '0'
+      rawChains[index] = chainIds[node] ?? -1
+      rawEndpoints += (endpointFlags[node] ?? 0) === 1 ? '1' : '0'
+    }
+    const canonical = canonicalRingFeatures(
+      raw,
+      rawChains,
+      ordered.length,
+      rawEndpoints,
+      rootChain,
+    )
     rings.push({
       size: ordered.length,
       colors: canonical.colors,
@@ -154,35 +201,59 @@ export function computeFingerprint(
   }
 
   const rootColor = colorAt(colors, root.index)
-  let key = `${rootColor}:${rootEndpoint ? 1 : 0}`
+  let key = fingerprintRootKey(rootColor, rootEndpoint)
   for (const ring of rings) {
-    key += `|${ring.size}:${ring.colors}:${ring.partition}:${ring.endpoints}`
+    key += `|${fingerprintRingKey(ring)}`
   }
 
   return { index: root.index, color: rootColor, endpoint: rootEndpoint, rings, key }
 }
 
-export function createIdentityIndex(
+export function fingerprintRootKey(color: BinaryColor, endpoint: boolean): string {
+  return `${color}:${endpoint ? 1 : 0}`
+}
+
+export function fingerprintRingKey(ring: RingDescriptor): string {
+  return `${ring.size}:${ring.colors}:${ring.partition}:${ring.endpoints}`
+}
+
+/**
+ * Rebuild the lookup key for a fingerprint prefix. A full-depth fingerprint is
+ * built once per point; its rings are already the exact BFS rings for every
+ * shallower depth, so prefix keys avoid recomputing the graph traversal.
+ *
+ * Prefer the incremental builders below when walking every prefix depth: this
+ * helper intentionally rebuilds from the root.
+ */
+export function fingerprintKeyAtDepth(fingerprint: PointFingerprint, depth: number): string {
+  let key = fingerprintRootKey(fingerprint.color, fingerprint.endpoint)
+  const limit = Math.max(0, Math.min(depth, fingerprint.rings.length))
+  for (let index = 0; index < limit; index += 1) {
+    key += `|${fingerprintRingKey(fingerprint.rings[index]!)}`
+  }
+  return key
+}
+
+export function computeFingerprints(
   graph: ProximityGraph,
   colors: readonly BinaryColor[],
   depth: number,
-): IdentityIndex {
-  const fingerprints: PointFingerprint[] = []
-  const byKey = new Map<string, number[]>()
+): PointFingerprint[] {
   const chainIds = chainIdsForGraph(graph)
   const endpointFlags = chainEndpointFlagsForGraph(graph)
-
+  const fingerprints: PointFingerprint[] = []
   for (let rootIndex = 0; rootIndex < graph.points.length; rootIndex += 1) {
-    const fingerprint = computeFingerprint(graph, colors, rootIndex, depth, chainIds, endpointFlags)
-    fingerprints.push(fingerprint)
-    const existing = byKey.get(fingerprint.key)
-    if (existing === undefined) {
-      byKey.set(fingerprint.key, [fingerprint.index])
-    } else {
-      existing.push(fingerprint.index)
-    }
+    fingerprints.push(
+      computeFingerprint(graph, colors, rootIndex, depth, chainIds, endpointFlags),
+    )
   }
+  return fingerprints
+}
 
+function identityIndexFromMap(
+  byKey: Map<string, number[]>,
+  fingerprints: PointFingerprint[],
+): IdentityIndex {
   let uniqueKeys = 0
   let duplicateKeyCount = 0
   let collidingPointCount = 0
@@ -203,6 +274,67 @@ export function createIdentityIndex(
     duplicateKeyCount,
     collidingPointCount,
   }
+}
+
+export function createIdentityIndex(
+  graph: ProximityGraph,
+  colors: readonly BinaryColor[],
+  depth: number,
+): IdentityIndex {
+  const fingerprints = computeFingerprints(graph, colors, depth)
+  const byKey = new Map<string, number[]>()
+  for (const fingerprint of fingerprints) {
+    const existing = byKey.get(fingerprint.key)
+    if (existing === undefined) {
+      byKey.set(fingerprint.key, [fingerprint.index])
+    } else {
+      existing.push(fingerprint.index)
+    }
+  }
+  return identityIndexFromMap(byKey, fingerprints)
+}
+
+/**
+ * Build one design index per depth from a single full-depth fingerprint pass.
+ * `indexes[depth - 1]` is equivalent to `createIdentityIndex(graph, colors, depth)`.
+ */
+export function createIdentityIndexesByDepth(
+  graph: ProximityGraph,
+  colors: readonly BinaryColor[],
+  maxDepth: number,
+): IdentityIndex[] {
+  const depthCount = Math.max(0, Math.floor(maxDepth))
+  if (depthCount === 0) {
+    return []
+  }
+  const fingerprints = computeFingerprints(graph, colors, depthCount)
+  const maps: Array<Map<string, number[]>> = []
+  for (let depth = 0; depth < depthCount; depth += 1) {
+    maps.push(new Map())
+  }
+  for (const fingerprint of fingerprints) {
+    let key = fingerprintRootKey(fingerprint.color, fingerprint.endpoint)
+    for (let depth = 0; depth < depthCount; depth += 1) {
+      // Depth 1 is the root color plus the first ring, matching
+      // fingerprintKeyAtDepth. Append first, then index this prefix.
+      const ring = fingerprint.rings[depth]
+      if (ring !== undefined) {
+        key += `|${fingerprintRingKey(ring)}`
+      }
+      const byKey = maps[depth]!
+      const existing = byKey.get(key)
+      if (existing === undefined) {
+        byKey.set(key, [fingerprint.index])
+      } else {
+        existing.push(fingerprint.index)
+      }
+    }
+  }
+  const indexes: IdentityIndex[] = []
+  for (const map of maps) {
+    indexes.push(identityIndexFromMap(map, fingerprints))
+  }
+  return indexes
 }
 
 function classify(fingerprint: PointFingerprint, designIndex: IdentityIndex): MatchOutcome {
@@ -270,12 +402,25 @@ export function evaluateIdentity(
   designIndex: IdentityIndex,
   colors: readonly BinaryColor[],
   depth: number,
+  fingerprints?: readonly PointFingerprint[],
 ): IdentityEvaluation {
-  const observedChainIds = chainIdsForGraph(observedGraph)
-  const observedEndpoints = chainEndpointFlagsForGraph(observedGraph)
-  const observedFingerprints = observedGraph.points.map((_, rootIndex) =>
-    computeFingerprint(observedGraph, colors, rootIndex, depth, observedChainIds, observedEndpoints),
-  )
+  const observedFingerprints =
+    fingerprints !== undefined
+      ? [...fingerprints]
+      : (() => {
+          const observedChainIds = chainIdsForGraph(observedGraph)
+          const observedEndpoints = chainEndpointFlagsForGraph(observedGraph)
+          return observedGraph.points.map((_, rootIndex) =>
+            computeFingerprint(
+              observedGraph,
+              colors,
+              rootIndex,
+              depth,
+              observedChainIds,
+              observedEndpoints,
+            ),
+          )
+        })()
 
   const perPoint: PointEvaluation[] = observedFingerprints.map((fingerprint) => ({
     index: fingerprint.index,

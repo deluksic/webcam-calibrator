@@ -1,6 +1,13 @@
 import type { Component } from 'solid-js'
 import { createSignal, createTrackedEffect } from 'solid-js'
 
+import type { IcpRefineResult } from '@/lib/pointIdentity/icpRefiner'
+import {
+  IDENTITY_CONFLICT,
+  IDENTITY_RECOVERED,
+  IDENTITY_RESOLVED,
+  type MatchedIdentityPoint,
+} from '@/lib/pointIdentity/match'
 import type {
   BinaryColor,
   IdentityEvaluation,
@@ -20,7 +27,12 @@ type PointLabCanvasProps = {
   colors: readonly BinaryColor[]
   graph: ProximityGraph
   evaluation: IdentityEvaluation
+  recovery?: IcpRefineResult
   showGraph: boolean
+  showRecovery: boolean
+  showAnchors: boolean
+  showPredictedLattice: boolean
+  showPredictedMissing: boolean
   zoomToCursor: boolean
   visibleEdgeCount: number
   selectedIndex: number | undefined
@@ -239,6 +251,16 @@ export const PointLabCanvas: Component<PointLabCanvasProps> = (props) => {
       const id = props.graph.points[position]?.index
       return id === undefined ? undefined : screenByIndex.get(id)
     }
+    const refinedByIndex = new Map<number, MatchedIdentityPoint>()
+    if (props.showRecovery && props.recovery !== undefined) {
+      for (let position = 0; position < props.recovery.points.length; position += 1) {
+        const refinedPoint = props.recovery.points[position]
+        const observedPoint = props.graph.points[position]
+        if (refinedPoint !== undefined && observedPoint !== undefined) {
+          refinedByIndex.set(observedPoint.index, refinedPoint)
+        }
+      }
+    }
     lastTransform = { points: screenPoints }
 
     context.save()
@@ -249,6 +271,23 @@ export const PointLabCanvas: Component<PointLabCanvasProps> = (props) => {
     const totalEdges = props.graph.edges.length
     const visibleEdgeCount = Math.max(0, Math.min(props.visibleEdgeCount, totalEdges))
     const visibleEdges = props.graph.edges.slice(0, visibleEdgeCount)
+
+    if (props.showRecovery && props.showPredictedLattice && props.recovery !== undefined) {
+      // Only show lattice dots for design points that were actually assigned.
+      // Unmatched graph nodes can be valid affine extrapolations but are not
+      // meaningful predictions; drawing them looked like a splatter of points.
+      const assignedDesignIds = new Set(props.recovery.matches.map((match) => match.designId))
+      context.fillStyle = 'rgba(34, 211, 238, 0.35)'
+      for (const prediction of props.recovery.predictedLattice) {
+        if (!assignedDesignIds.has(prediction.designId)) {
+          continue
+        }
+        const screen = toScreen(prediction.predicted)
+        context.beginPath()
+        context.arc(screen.x, screen.y, 1.4, 0, Math.PI * 2)
+        context.fill()
+      }
+    }
 
     if (props.showGraph) {
       context.strokeStyle = 'rgba(160, 168, 190, 0.38)'
@@ -329,6 +368,18 @@ export const PointLabCanvas: Component<PointLabCanvasProps> = (props) => {
       if (outcome === undefined || outcome.kind === 'correct') {
         continue
       }
+      const refined = refinedByIndex.get(point.index)
+      if (
+        refined !== undefined &&
+        (refined.status === IDENTITY_RESOLVED ||
+          refined.status === IDENTITY_RECOVERED ||
+          refined.status === IDENTITY_CONFLICT ||
+          refined.geometryConflict === true)
+      ) {
+        // The baseline hash may still say safe-fail, but the refined result is
+        // final. Do not paint its old amber ring over the anchor/final marker.
+        continue
+      }
       context.beginPath()
       context.arc(point.x, point.y, ringRadius(outcome), 0, Math.PI * 2)
       context.strokeStyle = outcomeColor(outcome)
@@ -336,6 +387,56 @@ export const PointLabCanvas: Component<PointLabCanvasProps> = (props) => {
       context.lineWidth = ringWidth(outcome)
       context.stroke()
       context.globalAlpha = 1
+    }
+
+    for (const point of screenPoints) {
+      const refined = refinedByIndex.get(point.index)
+      if (refined === undefined) {
+        continue
+      }
+      if (refined.status === IDENTITY_RECOVERED) {
+        const recoveredFalse = refined.designId === undefined || refined.designId !== point.index
+        context.beginPath()
+        context.arc(point.x, point.y, recoveredFalse ? 8.2 : 6.8, 0, Math.PI * 2)
+        context.strokeStyle = recoveredFalse ? '#f87171' : '#22d3ee'
+        context.lineWidth = recoveredFalse ? 2.2 : 1.8
+        context.stroke()
+      } else if (refined.status === IDENTITY_CONFLICT || refined.geometryConflict === true) {
+        context.beginPath()
+        context.arc(point.x, point.y, 7.4, 0, Math.PI * 2)
+        context.strokeStyle = '#e879f9'
+        context.lineWidth = 1.8
+        context.stroke()
+      }
+    }
+
+    if (props.showRecovery && props.showAnchors && props.recovery !== undefined) {
+      context.strokeStyle = '#a3e635'
+      context.lineWidth = 1.4
+      for (const anchor of props.recovery.anchors) {
+        const screen = toScreen(anchor.observed)
+        context.beginPath()
+        context.moveTo(screen.x, screen.y - 5)
+        context.lineTo(screen.x + 5, screen.y)
+        context.lineTo(screen.x, screen.y + 5)
+        context.lineTo(screen.x - 5, screen.y)
+        context.closePath()
+        context.stroke()
+      }
+    }
+
+    if (props.showRecovery && props.showPredictedMissing && props.recovery !== undefined) {
+      context.save()
+      context.setLineDash([3, 3])
+      context.strokeStyle = 'rgba(34, 211, 238, 0.8)'
+      context.lineWidth = 1.2
+      for (const missing of props.recovery.predictedMissing) {
+        const screen = toScreen(missing.predicted)
+        context.beginPath()
+        context.arc(screen.x, screen.y, 5, 0, Math.PI * 2)
+        context.stroke()
+      }
+      context.restore()
     }
 
     if (selectedIndex !== undefined) {
