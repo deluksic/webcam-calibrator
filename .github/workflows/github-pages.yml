@@ -30,6 +30,9 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Fetch model weights
+        run: pnpm model:fetch
+
       - name: Build
         env:
           VITE_BASE_URL: /${{ github.event.repository.name }}/

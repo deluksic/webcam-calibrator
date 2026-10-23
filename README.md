@@ -19,3 +19,7 @@ The target is editable on the Target page (columns, rows, points per cell edge, 
 For how it works under the hood, see [`docs/architecture.md`](docs/architecture.md) and [`docs/plan.md`](docs/plan.md). The identity ICP recovery algorithm is documented in [`docs/point-identity-icp-recovery.md`](docs/point-identity-icp-recovery.md).
 
 **Dev:** Solid.js, Vite — `pnpm dev`, `pnpm build`, `pnpm test`.
+
+## Model weights
+
+The ONNX model is not committed. `model-manifest.json` pins a GitHub release asset and its SHA-256; `pnpm dev` and `pnpm build` fetch it into the ignored `public/models/` directory, and the Pages workflow fetches it before building. See [`docs/model-weights.md`](docs/model-weights.md).

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The browser app calibrates a camera against an editable hex target. All vision work is client-side:
+The browser app calibrates a camera against an editable hex target. All vision work is client-side. The ONNX model is fetched from a GitHub release asset using [`model-manifest.json`](../model-manifest.json) before dev/build; see [`model-weights.md`](model-weights.md).
 
 ```text
 camera frame

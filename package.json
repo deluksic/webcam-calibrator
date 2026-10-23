@@ -1,6 +1,6 @@
 {
   "name": "webcam-calibrator",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -9,6 +9,8 @@
     "fmt": "oxfmt",
     "lint": "oxlint",
     "test": "vitest run",
+    "model:fetch": "tsx scripts/fetchModel.ts",
+    "model:verify": "tsx scripts/verifyModel.ts",
     "stress:identity": "tsx scripts/pointIdentityStress.ts"
   },
   "dependencies": {

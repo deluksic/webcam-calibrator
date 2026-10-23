@@ -6,6 +6,8 @@ import typegpuPlugin from 'unplugin-typegpu/vite'
 import { defineConfig, type Plugin } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 
+import { ensureModelAsset } from './scripts/modelAsset'
+
 const root = path.dirname(fileURLToPath(import.meta.url))
 const ortSourceDir = path.resolve(root, 'node_modules/onnxruntime-web/dist')
 const ortAssetDir = path.resolve(root, 'public/ort')
@@ -21,6 +23,25 @@ function copyOrtRuntimeAssets(): void {
     if (fs.existsSync(source)) {
       fs.copyFileSync(source, path.join(ortAssetDir, filename))
     }
+  }
+}
+
+function modelWeights(): Plugin {
+  const log = (message: string): void => {
+    console.log(`[model] ${message}`)
+  }
+  return {
+    name: 'model-weights',
+    async buildStart() {
+      if (!process.env.VITEST) {
+        await ensureModelAsset({ log })
+      }
+    },
+    async configureServer() {
+      if (!process.env.VITEST) {
+        await ensureModelAsset({ log })
+      }
+    },
   }
 }
 
@@ -74,6 +95,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    modelWeights(),
     ortRuntimeAssets(),
     // tsover(), disabled because slow
     typegpuPlugin(),

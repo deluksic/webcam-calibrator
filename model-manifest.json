@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "releaseTag": "models-v1",
+  "url": "https://github.com/deluksic/webcam-calibrator/releases/download/models-v1/roi_tiny_no_concat.onnx",
+  "path": "public/models/roi_tiny_no_concat.onnx",
+  "bytes": 303700,
+  "sha256": "8a15e30fcc63d795a64e04cdfa0759cbab7694cb40c1c0d3cc4ed617168aaf31"
+}
