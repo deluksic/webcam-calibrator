@@ -82,6 +82,11 @@ function parseViewMode(value: string | null): RoiViewMode {
 
 const INITIAL_VIEW: RoiViewMode = parseViewMode(QUERY.get('view'))
 
+/** `mapAsync` rejects with a device-lost error when mobile Chrome loses the GPU device. */
+function isGpuLossMessage(message: string): boolean {
+  return /device.*lost|mapAsync/i.test(message)
+}
+
 function formatPercent(pixels: number, total: number): string {
   return total > 0 ? `${((pixels / total) * 100).toFixed(1)}%` : '0%'
 }
@@ -157,6 +162,9 @@ export const RoiLabView: Component = () => {
   const [ready, setReady] = createSignal(false)
   const [phase, setPhase] = createSignal('loading')
   const [roiPipeline, setRoiPipeline] = createSignal<RoiLabPipeline>()
+  /** Bumped when the GPU device is lost so the pipeline effect rebuilds. */
+  const [pipelineRetryNonce, setPipelineRetryNonce] = createSignal(0)
+  let gpuLossRestarts = 0
   const [viewMode, setViewMode] = createSignal<RoiViewMode>(INITIAL_VIEW)
   const [paused, setPaused] = createSignal(false)
   const [zoom, setZoom] = createSignal(1)
@@ -433,6 +441,7 @@ export const RoiLabView: Component = () => {
       video: videoElement(),
       canvas: canvasElement(),
       size: videoSize(),
+      retry: pipelineRetryNonce(),
     }),
     ({ video, canvas, size }) => {
       if (!video || !canvas || !size || size.width < 8 || size.height < 8) {
@@ -445,6 +454,30 @@ export const RoiLabView: Component = () => {
       let inFlight: Promise<void> | undefined
       let busy = false
       let lastFrameAt = 0
+      let gpuLossHandled = false
+
+      const restartAfterGpuLoss = (cause: unknown): void => {
+        if (cancelled || disposed || gpuLossHandled) {
+          return
+        }
+        gpuLossHandled = true
+        if (gpuLossRestarts >= 3) {
+          setError('WebGPU device was lost repeatedly. Reload the page to continue.')
+          setPhase('error')
+          return
+        }
+        gpuLossRestarts += 1
+        setError(cause instanceof Error ? cause.message : String(cause))
+        setReady(false)
+        setPhase('GPU lost; restarting')
+        // Let the shared-GPU cache clear its lost-device promise first, then
+        // rebuild the pipeline against a fresh device.
+        setTimeout(() => {
+          if (!cancelled && !disposed) {
+            setPipelineRetryNonce((value) => value + 1)
+          }
+        }, 0)
+      }
 
       setZoom(1)
       setPanX(0)
@@ -473,6 +506,11 @@ export const RoiLabView: Component = () => {
           if (cancelled) {
             return
           }
+          void shared.device.lost.then((info) => {
+            restartAfterGpuLoss(
+              new Error(`WebGPU device lost (${info.reason}${info.message ? `: ${info.message}` : ''})`),
+            )
+          })
           pipeline = await createRoiLabPipeline(
             shared.root,
             shared.device,
@@ -531,10 +569,17 @@ export const RoiLabView: Component = () => {
                     frameId: timings.frameId,
                   })
                   setStepTimings(timings.steps)
+                  gpuLossRestarts = 0
                 })
                 .catch((cause: unknown) => {
-                  if (!cancelled && !disposed) {
-                    setError(cause instanceof Error ? cause.message : String(cause))
+                  if (cancelled || disposed) {
+                    return
+                  }
+                  const message = cause instanceof Error ? cause.message : String(cause)
+                  if (isGpuLossMessage(message)) {
+                    restartAfterGpuLoss(cause)
+                  } else {
+                    setError(message)
                   }
                 })
                 .finally(() => {
@@ -546,8 +591,13 @@ export const RoiLabView: Component = () => {
         } catch (cause: unknown) {
           console.error('[roi-lab] pipeline setup failed', cause)
           if (!cancelled) {
-            setError(cause instanceof Error ? cause.message : String(cause))
-            setPhase('error')
+            const message = cause instanceof Error ? cause.message : String(cause)
+            if (isGpuLossMessage(message)) {
+              restartAfterGpuLoss(cause)
+            } else {
+              setError(message)
+              setPhase('error')
+            }
           }
         }
       })()
@@ -558,12 +608,21 @@ export const RoiLabView: Component = () => {
         setRoiPipeline(undefined)
         const oldPipeline = pipeline
         pipeline = undefined
+        const destroyOldPipeline = () => {
+          try {
+            oldPipeline?.destroy()
+          } catch (cause: unknown) {
+            // Teardown of a lost device can fail; reinitialization is already
+            // handled by the shared GPU cache.
+            console.error('[roi-lab] pipeline teardown failed', cause)
+          }
+        }
         if (inFlight) {
           // An in-flight processFrame may still be using the session and
           // textures; destroy only after it settles.
-          void inFlight.finally(() => oldPipeline?.destroy())
+          void inFlight.finally(destroyOldPipeline)
         } else {
-          oldPipeline?.destroy()
+          destroyOldPipeline()
         }
       }
     },
@@ -944,11 +1003,11 @@ export const RoiLabView: Component = () => {
                 <dd>{timings().maskMs.toFixed(2)} ms</dd>
                 <dt>Background</dt>
                 <dd>{timings().backgroundMs.toFixed(2)} ms</dd>
-                <dt>Components</dt>
+                <dt>Components encode</dt>
                 <dd>{timings().componentsEncodeMs.toFixed(2)} ms</dd>
                 <dt>Debug input</dt>
                 <dd>{timings().debugInputMs.toFixed(2)} ms</dd>
-                <dt>Readback</dt>
+                <dt>Readback wait</dt>
                 <dd>
                   {timings().readbackMs.toFixed(2)} ms · {timings().readbackComponents} components ·{' '}
                   {(timings().readbackBytes / 1024).toFixed(1)} KiB
@@ -959,9 +1018,9 @@ export const RoiLabView: Component = () => {
                   {timings().identityMs.toFixed(2)} ms · lag {timings().identityLagFrames} frame
                   {timings().identityLagFrames === 1 ? '' : 's'}
                 </dd>
-                <dt>Render</dt>
+                <dt>Render submit</dt>
                 <dd>{timings().renderMs.toFixed(2)} ms</dd>
-                <dt>Inference run</dt>
+                <dt>Inference submit</dt>
                 <dd>{timings().inferenceRunMs.toFixed(2)} ms</dd>
                 <dt>Inference drain</dt>
                 <dd>{timings().inferenceDrainMs.toFixed(2)} ms</dd>
@@ -977,25 +1036,25 @@ export const RoiLabView: Component = () => {
                 <dd>{timings().overheadMs.toFixed(2)} ms</dd>
                 <dt>GPU preprocess</dt>
                 <dd>{timings().gpuMs.preprocess?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU copy</dt>
-                <dd>{timings().gpuMs.cameraCopy?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU inference</dt>
+                <dd>{timings().gpuMs.inference?.toFixed(2) ?? '—'} ms</dd>
                 <dt>GPU mask</dt>
                 <dd>{timings().gpuMs.mask?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU bg blur</dt>
-                <dd>
-                  {(
-                    (timings().gpuMs.backgroundWeight ?? 0) +
-                    (timings().gpuMs.backgroundHorizontal ?? 0) +
-                    (timings().gpuMs.backgroundVertical ?? 0) +
-                    (timings().gpuMs.backgroundTexture ?? 0)
-                  ).toFixed(2)}{' '}
-                  ms
-                </dd>
+                <dt>GPU background</dt>
+                <dd>{timings().gpuMs.background?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU components</dt>
+                <dd>{timings().gpuMs.components?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU copy</dt>
+                <dd>{timings().gpuMs.cameraCopy?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU render</dt>
+                <dd>{timings().gpuMs.render?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU histogram</dt>
+                <dd>{timings().gpuMs.histogram?.toFixed(2) ?? '—'} ms</dd>
               </>
             )}
           </Show>
           <dt>Inference</dt>
-          <dd>{inferenceMs().toFixed(2)} ms</dd>
+          <dd>{stepTimings()?.gpuMs.inference?.toFixed(2) ?? inferenceMs().toFixed(2)} ms</dd>
           <dt>Total</dt>
           <dd>{totalMs().toFixed(2)} ms</dd>
           <dt>Process FPS</dt>

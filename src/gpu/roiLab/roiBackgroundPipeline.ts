@@ -50,12 +50,7 @@ const weightPass = (x: number, y: number) => {
   const width = d.u32(params.size.x)
   const index = d.u32(y) * width + d.u32(x)
   const uv = (d.vec2f(x, y) + d.vec2f(0.5, 0.5)).div(params.size)
-  const mask = std.textureSampleLevel(
-    weightLayout.$.maskTexture,
-    weightLayout.$.sampler,
-    uv,
-    d.f32(0),
-  ).r
+  const mask = std.textureSampleLevel(weightLayout.$.maskTexture, weightLayout.$.sampler, uv, d.f32(0)).r
   const z = weightLayout.$.inputBuffer[index]!
   const rawLuma = weightLayout.$.stats[d.u32(0)]! + weightLayout.$.stats[d.u32(1)]! * z
   weightLayout.$.output[index] = d.vec2f(rawLuma * mask, mask)
@@ -94,11 +89,7 @@ const backgroundToTexture = (x: number, y: number) => {
   const width = d.u32(params.size.x)
   const value = textureLayout.$.input[d.u32(y) * width + d.u32(x)]!
   const weight = max(value.y, d.f32(MASK_WEIGHT_EPSILON))
-  const background = select(
-    textureLayout.$.stats[d.u32(0)]!,
-    value.x / weight,
-    value.y > d.f32(MASK_WEIGHT_EPSILON),
-  )
+  const background = select(textureLayout.$.stats[d.u32(0)]!, value.x / weight, value.y > d.f32(MASK_WEIGHT_EPSILON))
   std.textureStore(
     textureLayout.$.backgroundTexture,
     d.vec2u(x, y),
@@ -169,10 +160,7 @@ export function createRoiBackgroundStage(
     backgroundTexture,
   })
 
-  const timed = (
-    name: RoiBackgroundTimingName,
-    pipeline: ReturnType<typeof root.createGuardedComputePipeline>,
-  ) =>
+  const timed = (name: RoiBackgroundTimingName, pipeline: ReturnType<typeof root.createGuardedComputePipeline>) =>
     onGpuTiming === undefined
       ? pipeline
       : pipeline.withPerformanceCallback((start, end) => {

@@ -3,17 +3,13 @@ import { common, d, std, tgpu } from 'typegpu'
 import type { TgpuRoot } from 'typegpu'
 import { atomicAdd, atomicStore, intdiv } from 'typegpu/std'
 
+import { copyBindGroupLayout, createCopyPipeline } from '@/gpu/pipelines/copyPipeline'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { createRoiBackgroundStage } from '@/gpu/roiLab/roiBackgroundPipeline'
 import { createRoiCircleStage } from '@/gpu/roiLab/roiCirclePipeline'
-import { copyBindGroupLayout, createCopyPipeline } from '@/gpu/pipelines/copyPipeline'
 import { createRoiComponentsStage, type RoiComponentPoint } from '@/gpu/roiLab/roiComponentsPipeline'
 import { createRoiGraphStage, type RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
-import {
-  analyzeRoiHistogram,
-  ROI_HISTOGRAM_BINS,
-  type RoiHistogramAnalysis,
-} from '@/lib/roiHistogram'
+import { analyzeRoiHistogram, ROI_HISTOGRAM_BINS, type RoiHistogramAnalysis } from '@/lib/roiHistogram'
 
 const { performance } = globalThis
 
@@ -70,9 +66,7 @@ const imageStatsReduceLayout = tgpu.bindGroupLayout({
 
 const sampleImageLuma = (x: number, y: number) => {
   'use gpu'
-  const uv = (d.vec2f(x, y) + d.vec2f(0.5, 0.5)).div(
-    d.vec2f(IMAGE_STATS_COLUMNS, IMAGE_STATS_ROWS),
-  )
+  const uv = (d.vec2f(x, y) + d.vec2f(0.5, 0.5)).div(d.vec2f(IMAGE_STATS_COLUMNS, IMAGE_STATS_ROWS))
   const color = std.textureSampleBaseClampToEdge(
     imageStatsSampleLayout.$.inputTexture,
     imageStatsSampleLayout.$.sampler,
@@ -142,19 +136,11 @@ const accumulateRoiHistogram = (x: number, y: number) => {
   const maskSize = std.textureDimensions(histogramAccumulateLayout.$.maskTexture)
   const maskX = intdiv(px * maskSize.x, size.x)
   const maskY = intdiv(py * maskSize.y, size.y)
-  const mask = std.textureLoad(
-    histogramAccumulateLayout.$.maskTexture,
-    d.vec2u(maskX, maskY),
-    d.i32(0),
-  ).r
+  const mask = std.textureLoad(histogramAccumulateLayout.$.maskTexture, d.vec2u(maskX, maskY), d.i32(0)).r
   if (mask < d.f32(0.5)) {
     return
   }
-  const color = std.textureLoad(
-    histogramAccumulateLayout.$.cameraTexture,
-    d.vec2u(px, py),
-    d.i32(0),
-  )
+  const color = std.textureLoad(histogramAccumulateLayout.$.cameraTexture, d.vec2u(px, py), d.i32(0))
   const uv = (d.vec2f(px, py) + d.vec2f(0.5, 0.5)).div(d.vec2f(size.x, size.y))
   const background = std.textureSampleLevel(
     histogramAccumulateLayout.$.backgroundTexture,
@@ -172,6 +158,20 @@ const accumulateRoiHistogram = (x: number, y: number) => {
   atomicAdd(histogramAccumulateLayout.$.histogram[bin]!, d.u32(1))
 }
 
+/**
+ * Empty pass used only to place a timestamp on the GPU timeline.
+ *
+ * GPU timestamps are recorded by the device, so the delta between two markers
+ * is the exact device time of everything queued between them — including passes
+ * we do not own and cannot instrument, such as ONNX Runtime's inference.
+ */
+const timestampMarker = (index: number) => {
+  'use gpu'
+  if (index >= 1) {
+    return
+  }
+}
+
 const prepareLayout = tgpu.bindGroupLayout({
   inputTexture: { externalTexture: d.textureExternal() },
   outputBuffer: { storage: d.arrayOf(d.f32), access: 'mutable' },
@@ -186,11 +186,7 @@ const prepareModelInput = (x: number, y: number) => {
   'use gpu'
   const params = prepareAccess.$
   const uv = (d.vec2f(x, y) + d.vec2f(0.5, 0.5)).div(params.size)
-  const color = std.textureSampleBaseClampToEdge(
-    prepareLayout.$.inputTexture,
-    prepareLayout.$.sampler,
-    uv,
-  )
+  const color = std.textureSampleBaseClampToEdge(prepareLayout.$.inputTexture, prepareLayout.$.sampler, uv)
   const luma = std.dot(color.rgb, d.vec3f(0.299, 0.587, 0.114))
   prepareLayout.$.outputBuffer[y * d.u32(params.size.x) + x] =
     (luma - prepareLayout.$.stats[d.u32(0)]!) / prepareLayout.$.stats[d.u32(1)]!
@@ -245,22 +241,14 @@ const debugInputToTexture = (x: number, y: number) => {
   const width = std.textureDimensions(debugInputLayout.$.inputTexture).x
   const value = debugInputLayout.$.inputBuffer[y * width + x]!
   const display = std.smoothstep(d.f32(-2.5), d.f32(2.5), value)
-  std.textureStore(
-    debugInputLayout.$.inputTexture,
-    d.vec2u(x, y),
-    d.vec4f(display, display, display, 1),
-  )
+  std.textureStore(debugInputLayout.$.inputTexture, d.vec2u(x, y), d.vec4f(display, display, display, 1))
 }
 
 const maskToTexture = (x: number, y: number) => {
   'use gpu'
   const width = std.textureDimensions(maskToTextureLayout.$.maskTexture).x
   const value = maskToTextureLayout.$.outputBuffer[y * width + x]!
-  std.textureStore(
-    maskToTextureLayout.$.maskTexture,
-    d.vec2u(x, y),
-    d.vec4f(value, value, value, 1),
-  )
+  std.textureStore(maskToTextureLayout.$.maskTexture, d.vec2u(x, y), d.vec4f(value, value, value, 1))
 }
 
 const overlayFragment = ({ uv }: { uv: d.v2f }) => {
@@ -278,21 +266,11 @@ const overlayFragment = ({ uv }: { uv: d.v2f }) => {
     const py = d.u32(std.clamp(srcUv.y * view.frameHeight, d.f32(0), view.frameHeight - d.f32(1)))
     return std.textureLoad(overlayLayout.$.labelTexture, d.vec2u(px, py), d.i32(0))
   }
-  const video = std.textureSampleLevel(
-    overlayLayout.$.cameraTexture,
-    overlayLayout.$.sampler,
-    srcUv,
-    d.f32(0),
-  )
+  const video = std.textureSampleLevel(overlayLayout.$.cameraTexture, overlayLayout.$.sampler, srcUv, d.f32(0))
   if (overlayAccess.$.mode === d.u32(3) || overlayAccess.$.mode === d.u32(9)) {
     return video
   }
-  const mask = std.textureSampleLevel(
-    overlayLayout.$.maskTexture,
-    overlayLayout.$.sampler,
-    srcUv,
-    d.f32(0),
-  ).r
+  const mask = std.textureSampleLevel(overlayLayout.$.maskTexture, overlayLayout.$.sampler, srcUv, d.f32(0)).r
   if (overlayAccess.$.mode === d.u32(1)) {
     return d.vec4f(mask, mask, mask, 1)
   }
@@ -305,11 +283,7 @@ const overlayFragment = ({ uv }: { uv: d.v2f }) => {
     ).r
     return d.vec4f(modelInput, modelInput, modelInput, 1)
   }
-  if (
-    overlayAccess.$.mode === d.u32(5) ||
-    overlayAccess.$.mode === d.u32(6) ||
-    overlayAccess.$.mode === d.u32(8)
-  ) {
+  if (overlayAccess.$.mode === d.u32(5) || overlayAccess.$.mode === d.u32(6) || overlayAccess.$.mode === d.u32(8)) {
     const luma = std.dot(video.rgb, d.vec3f(0.299, 0.587, 0.114))
     const dim = mask >= d.f32(0.5) ? luma : luma * d.f32(0.3)
     return d.vec4f(dim, dim, dim, d.f32(1))
@@ -460,19 +434,223 @@ export async function createRoiLabPipeline(
   let destroyed = false
   let hasFrame = false
   let frameSequence = 0
+  /**
+   * GPU timings come from one timestamp query set with an explicit index pair
+   * per stage.
+   *
+   * TypeGPU's `withPerformanceCallback` hands every pipeline the same query
+   * indices (0 and 1) and drops a read whenever another timed pass is submitted
+   * before the previous read resolves. With a dozen timed passes per frame that
+   * made most numbers stale. Resolving the whole set once per frame, with
+   * distinct indices, gives every stage a fresh and correctly paired timestamp.
+   *
+   * A "pass" stage writes both boundaries itself; a "bracket" stage uses two
+   * no-op marker passes around a region we do not own (ORT inference, the
+   * multi-pass component stage, the render pass).
+   */
+  const GPU_STAGES = [
+    'preprocess',
+    'inference',
+    'mask',
+    'background',
+    'components',
+    'cameraCopy',
+    'render',
+    'histogram',
+  ] as const
+  type GpuStage = (typeof GPU_STAGES)[number]
+  const GPU_TIMESTAMP_COUNT = GPU_STAGES.length * 2
   const gpuMs: Record<string, number> = {}
   const gpuTimingEnabled = device.features.has('timestamp-query')
-  const withGpuTiming = <T extends {
-    withPerformanceCallback(callback: (start: bigint, end: bigint) => void): T
-  }>(
+  const timingQuerySet = gpuTimingEnabled ? root.createQuerySet('timestamp', GPU_TIMESTAMP_COUNT) : undefined
+  const timingResolveBuffer = gpuTimingEnabled
+    ? device.createBuffer({
+        label: 'roi-lab-timestamps-resolve',
+        size: GPU_TIMESTAMP_COUNT * 8,
+        usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+      })
+    : undefined
+  const timingReadBuffer = gpuTimingEnabled
+    ? device.createBuffer({
+        label: 'roi-lab-timestamps-read',
+        size: GPU_TIMESTAMP_COUNT * 8,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      })
+    : undefined
+
+  const stageIndex = (stage: GpuStage): number => GPU_STAGES.indexOf(stage) * 2
+
+  /** Records both boundaries of a single pass. */
+  const timedPass = <
+    T extends {
+      withTimestampWrites(options: {
+        querySet: NonNullable<typeof timingQuerySet>
+        beginningOfPassWriteIndex?: number
+        endOfPassWriteIndex?: number
+      }): T
+    },
+  >(
     pipeline: T,
-    name: string,
+    stage: GpuStage,
   ): T =>
-    gpuTimingEnabled
-      ? pipeline.withPerformanceCallback((start, end) => {
-          gpuMs[name] = Number(end - start) / 1e6
+    timingQuerySet === undefined
+      ? pipeline
+      : pipeline.withTimestampWrites({
+          querySet: timingQuerySet,
+          beginningOfPassWriteIndex: stageIndex(stage),
+          endOfPassWriteIndex: stageIndex(stage) + 1,
         })
-      : pipeline
+
+  /** Records one boundary at each end of a region we do not encode ourselves. */
+  const createGpuBracket = (stage: GpuStage): { begin: () => void; end: () => void } => {
+    if (timingQuerySet === undefined) {
+      return { begin: () => {}, end: () => {} }
+    }
+    const beginPipeline = root
+      .createGuardedComputePipeline(timestampMarker)
+      .withTimestampWrites({ querySet: timingQuerySet, beginningOfPassWriteIndex: stageIndex(stage) })
+    const endPipeline = root.createGuardedComputePipeline(timestampMarker).withTimestampWrites({
+      querySet: timingQuerySet,
+      beginningOfPassWriteIndex: stageIndex(stage) + 1,
+    })
+    return {
+      begin: () => beginPipeline.dispatchThreads(1),
+      end: () => endPipeline.dispatchThreads(1),
+    }
+  }
+
+  /** Device and CPU timings are averaged over this many frames before display. */
+  /** The panel republishes its numbers once per window instead of every frame. */
+  const TIMING_WINDOW = 5
+  let timingBatch: RoiStepTimings[] = []
+  let publishedTimings: { ms: Map<string, number>; gpu: Map<string, number> } | undefined
+
+  const averageBatch = (
+    batch: readonly RoiStepTimings[],
+  ): {
+    ms: Map<string, number>
+    gpu: Map<string, number>
+  } => {
+    const ms = new Map<string, number>()
+    const gpu = new Map<string, number>()
+    const latest = batch[batch.length - 1]
+    if (latest === undefined) {
+      return { ms, gpu }
+    }
+    for (const key of Object.keys(latest)) {
+      if (key === 'gpuMs' || !key.endsWith('Ms')) {
+        continue
+      }
+      let total = 0
+      let count = 0
+      for (const sample of batch) {
+        const value = (sample as unknown as Record<string, unknown>)[key]
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          total += value
+          count += 1
+        }
+      }
+      if (count > 0) {
+        ms.set(key, total / count)
+      }
+    }
+    const stages = new Set<string>()
+    for (const sample of batch) {
+      for (const stage of Object.keys(sample.gpuMs)) {
+        stages.add(stage)
+      }
+    }
+    for (const stage of stages) {
+      let total = 0
+      let count = 0
+      for (const sample of batch) {
+        const value = sample.gpuMs[stage]
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          total += value
+          count += 1
+        }
+      }
+      if (count > 0) {
+        gpu.set(stage, total / count)
+      }
+    }
+    return { ms, gpu }
+  }
+
+  /**
+   * Publishes averaged timings once per `TIMING_WINDOW` frames, and holds them
+   * frozen in between.
+   *
+   * A rolling average still changed every frame, which made the panel hard to
+   * read; this samples instead. Only timing fields are held — `frameId`,
+   * component counts and flags always reflect the current frame. `accountedMs`,
+   * `overheadMs` and `totalMs` are linear combinations of the averaged fields,
+   * so the panel keeps adding up.
+   */
+  const smoothTimings = (steps: RoiStepTimings): RoiStepTimings => {
+    timingBatch.push(steps)
+    if (timingBatch.length >= TIMING_WINDOW || publishedTimings === undefined) {
+      publishedTimings = averageBatch(timingBatch)
+      if (timingBatch.length >= TIMING_WINDOW) {
+        timingBatch = []
+      }
+    }
+    const result = { ...steps } as unknown as Record<string, unknown>
+    for (const [key, value] of publishedTimings!.ms) {
+      result[key] = value
+    }
+    const gpuStages: Record<string, number> = { ...steps.gpuMs }
+    for (const [stage, value] of publishedTimings!.gpu) {
+      gpuStages[stage] = value
+    }
+    result.gpuMs = gpuStages
+    return result as unknown as RoiStepTimings
+  }
+
+  let timingReadBusy = false
+  /** Resolves the frame's timestamps and publishes every stage. Fire and forget. */
+  const readGpuTimings = (): void => {
+    if (
+      timingQuerySet === undefined ||
+      timingResolveBuffer === undefined ||
+      timingReadBuffer === undefined ||
+      timingReadBusy
+    ) {
+      return
+    }
+    timingReadBusy = true
+    const encoder = device.createCommandEncoder({ label: 'roi-lab-timestamps' })
+    encoder.resolveQuerySet(root.unwrap(timingQuerySet), 0, GPU_TIMESTAMP_COUNT, timingResolveBuffer, 0)
+    encoder.copyBufferToBuffer(timingResolveBuffer, 0, timingReadBuffer, 0, GPU_TIMESTAMP_COUNT * 8)
+    device.queue.submit([encoder.finish()])
+    void timingReadBuffer
+      .mapAsync(GPUMapMode.READ)
+      .then(() => {
+        const values = new BigUint64Array(timingReadBuffer.getMappedRange().slice())
+        timingReadBuffer.unmap()
+        for (let stage = 0; stage < GPU_STAGES.length; stage += 1) {
+          const begin = values[stage * 2]
+          const finish = values[stage * 2 + 1]
+          // Unwritten query slots read as zero; a real GPU timestamp never is.
+          if (begin === undefined || finish === undefined || begin === 0n || finish === 0n) {
+            continue
+          }
+          if (finish < begin) {
+            continue
+          }
+          gpuMs[GPU_STAGES[stage]!] = Number(finish - begin) / 1e6
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!destroyed) {
+          console.error('[roi-lab] timestamp readback failed', cause)
+        }
+      })
+      .finally(() => {
+        timingReadBusy = false
+      })
+  }
+
   const presentationFormat = globalThis.navigator.gpu.getPreferredCanvasFormat()
   const overlayUniform = root.createUniform(overlayParams, {
     mode: overlayMode,
@@ -489,28 +667,16 @@ export async function createRoiLabPipeline(
     })
   }
 
-  const inputBuffer = root
-    .createBuffer(d.arrayOf(d.f32, modelWidth * modelHeight))
-    .$usage('storage')
-  const outputBuffer = root
-    .createBuffer(d.arrayOf(d.f32, maskWidth * maskHeight))
-    .$usage('storage')
+  const inputBuffer = root.createBuffer(d.arrayOf(d.f32, modelWidth * modelHeight)).$usage('storage')
+  const outputBuffer = root.createBuffer(d.arrayOf(d.f32, maskWidth * maskHeight)).$usage('storage')
   const prepareUniform = root.createUniform(prepareParams, {
     size: d.vec2f(modelWidth, modelHeight),
   })
-  const imageStatsSamples = root
-    .createBuffer(d.arrayOf(d.f32, IMAGE_STATS_SAMPLES))
-    .$usage('storage')
+  const imageStatsSamples = root.createBuffer(d.arrayOf(d.f32, IMAGE_STATS_SAMPLES)).$usage('storage')
   const imageStatsBuffer = root.createBuffer(d.arrayOf(d.f32, 2)).$usage('storage')
   const histogramBuffer = root.createBuffer(roiHistogramSchema).$usage('storage')
-  const histogramResetPipeline = withGpuTiming(
-    root.createGuardedComputePipeline(resetRoiHistogram),
-    'histogramReset',
-  )
-  const histogramAccumulatePipeline = withGpuTiming(
-    root.createGuardedComputePipeline(accumulateRoiHistogram),
-    'histogramAccumulate',
-  )
+  const histogramResetPipeline = root.createGuardedComputePipeline(resetRoiHistogram)
+  const histogramAccumulatePipeline = timedPass(root.createGuardedComputePipeline(accumulateRoiHistogram), 'histogram')
   const histogramResetBindGroup = root.createBindGroup(histogramResetLayout, {
     histogram: histogramBuffer,
   })
@@ -519,24 +685,20 @@ export async function createRoiLabPipeline(
     _pad: d.vec3f(0, 0, 0),
   })
   const pixelRatio = Math.max(1, canvas.width / Math.max(1, canvas.clientWidth || canvas.width))
-  const cameraCopyPipeline = withGpuTiming(createCopyPipeline(root), 'cameraCopy')
-  const imageStatsSamplePipeline = withGpuTiming(
-    root.createGuardedComputePipeline(sampleImageLuma),
-    'imageStatsSample',
-  )
-  const imageStatsReducePipeline = withGpuTiming(
-    root.createGuardedComputePipeline(reduceImageStats),
-    'imageStatsReduce',
-  )
+  const cameraCopyPipeline = timedPass(createCopyPipeline(root), 'cameraCopy')
+  const preprocessBracket = createGpuBracket('preprocess')
+  const inferenceBracket = createGpuBracket('inference')
+  const backgroundBracket = createGpuBracket('background')
+  const componentsBracket = createGpuBracket('components')
+  const renderBracket = createGpuBracket('render')
+  const imageStatsSamplePipeline = root.createGuardedComputePipeline(sampleImageLuma)
+  const imageStatsReducePipeline = root.createGuardedComputePipeline(reduceImageStats)
   const imageStatsReduceBindGroup = root.createBindGroup(imageStatsReduceLayout, {
     samples: imageStatsSamples,
     stats: imageStatsBuffer,
   })
-  const maskPipeline = withGpuTiming(root.createGuardedComputePipeline(maskToTexture), 'mask')
-  const debugInputPipeline = withGpuTiming(
-    root.createGuardedComputePipeline(debugInputToTexture),
-    'debugInput',
-  )
+  const maskPipeline = timedPass(root.createGuardedComputePipeline(maskToTexture), 'mask')
+  const debugInputPipeline = root.createGuardedComputePipeline(debugInputToTexture)
 
   /**
    * Everything one frame writes and the overlay samples.
@@ -576,9 +738,6 @@ export async function createRoiLabPipeline(
       maskTexture,
       sampler,
       imageStatsBuffer,
-      (name, ms) => {
-        gpuMs[name] = ms
-      },
     )
     const componentsStage = createRoiComponentsStage(
       root,
@@ -806,10 +965,7 @@ export async function createRoiLabPipeline(
     }
   }
 
-  const preparePipeline = withGpuTiming(
-    root.with(prepareAccess, prepareUniform).createGuardedComputePipeline(prepareModelInput),
-    'preprocess',
-  )
+  const preparePipeline = root.with(prepareAccess, prepareUniform).createGuardedComputePipeline(prepareModelInput)
 
   const histogramReadback = device.createBuffer({
     size: ROI_HISTOGRAM_BINS * 4,
@@ -831,13 +987,7 @@ export async function createRoiLabPipeline(
     }
     readbackBusy = true
     const encoder = device.createCommandEncoder({ label: 'roi-histogram-readback' })
-    encoder.copyBufferToBuffer(
-      root.unwrap(histogramBuffer),
-      0,
-      histogramReadback,
-      0,
-      ROI_HISTOGRAM_BINS * 4,
-    )
+    encoder.copyBufferToBuffer(root.unwrap(histogramBuffer), 0, histogramReadback, 0, ROI_HISTOGRAM_BINS * 4)
     device.queue.submit([encoder.finish()])
     void histogramReadback
       .mapAsync(GPUMapMode.READ)
@@ -903,6 +1053,7 @@ export async function createRoiLabPipeline(
   }
 
   const preprocessFrame = (video: HTMLVideoElement) => {
+    preprocessBracket.begin()
     const statsStart = performance.now()
     const inputTexture = device.importExternalTexture({ source: video })
     imageStatsSamplePipeline
@@ -927,12 +1078,11 @@ export async function createRoiLabPipeline(
         }),
       )
       .dispatchThreads(modelWidth, modelHeight)
+    preprocessBracket.end()
     return { statsMs: imageStatsMs }
   }
 
-  let pendingFrame:
-    | { slot: FrameSlot; frameId: number; identity: Promise<RoiGraphData | undefined> }
-    | undefined
+  let pendingFrame: { slot: FrameSlot; frameId: number; identity: Promise<RoiGraphData | undefined> } | undefined
 
   const processFrame = async (video: HTMLVideoElement) => {
     const start = performance.now()
@@ -947,7 +1097,9 @@ export async function createRoiLabPipeline(
     // (reading `outputBuffer`) are already ordered around ORT's work. The CPU
     // never reads either buffer here, so nothing needs a completion signal.
     const inferenceStart = performance.now()
+    inferenceBracket.begin()
     await session.run({ input: inputGpuTensor }, { mask: outputGpuTensor })
+    inferenceBracket.end()
     const inferenceRunMs = performance.now() - inferenceStart
     const queueWaitMs = 0
     const inferenceDrainMs = 0
@@ -960,10 +1112,7 @@ export async function createRoiLabPipeline(
       cameraTex: device.importExternalTexture({ source: video }),
     })
     const cameraCopyStart = performance.now()
-    cameraCopyPipeline
-      .withColorAttachment({ view: slot.cameraView })
-      .with(cameraCopyBindGroup)
-      .draw(3)
+    cameraCopyPipeline.withColorAttachment({ view: slot.cameraView }).with(cameraCopyBindGroup).draw(3)
     const cameraCopyMs = performance.now() - cameraCopyStart
 
     const debugInputStart = performance.now()
@@ -975,13 +1124,17 @@ export async function createRoiLabPipeline(
     const maskMs = performance.now() - maskStart
 
     const backgroundStart = performance.now()
+    backgroundBracket.begin()
     slot.backgroundStage.encode()
+    backgroundBracket.end()
     const backgroundMs = performance.now() - backgroundStart
 
     frameSerial++
     const frameId = frameSequence++
     const componentsStart = performance.now()
+    componentsBracket.begin()
     slot.componentsStage.encodeComponents()
+    componentsBracket.end()
     const componentsEncodeMs = performance.now() - componentsStart
 
     const readbackStart = performance.now()
@@ -997,12 +1150,10 @@ export async function createRoiLabPipeline(
     let identity: Promise<RoiGraphData | undefined> | undefined
     if (onIdentity !== undefined) {
       try {
-        identity = Promise.resolve(onIdentity(componentPoints, frameId)).catch(
-          (cause: unknown) => {
-            console.error('[roi-lab] identity callback failed', cause)
-            return undefined
-          },
-        )
+        identity = Promise.resolve(onIdentity(componentPoints, frameId)).catch((cause: unknown) => {
+          console.error('[roi-lab] identity callback failed', cause)
+          return undefined
+        })
       } catch (cause: unknown) {
         console.error('[roi-lab] identity callback failed', cause)
       }
@@ -1018,10 +1169,12 @@ export async function createRoiLabPipeline(
       const graph = await pendingFrame.identity
       identityMs = performance.now() - waitStart
       const renderStart = performance.now()
+      renderBracket.begin()
       if (!destroyed) {
         presentFrame(pendingFrame.slot, graph)
         presentedFrameId = pendingFrame.frameId
       }
+      renderBracket.end()
       renderMs = performance.now() - renderStart
     } else if (identity === undefined) {
       // No identity stage at all: present this frame directly.
@@ -1029,8 +1182,7 @@ export async function createRoiLabPipeline(
         presentFrame(slot, undefined)
       }
     }
-    pendingFrame =
-      identity === undefined ? undefined : { slot, frameId, identity }
+    pendingFrame = identity === undefined ? undefined : { slot, frameId, identity }
 
     // Let the queued readbacks and final render finish before a caller can
     // destroy this pipeline during a resolution/stream change.
@@ -1042,15 +1194,12 @@ export async function createRoiLabPipeline(
     // asynchronous, and it feeds the next frame's thresholds.
     const histogramStart = performance.now()
     if (!destroyed && frameSerial % ROI_HISTOGRAM_FRAME_INTERVAL === 0) {
-      histogramResetPipeline
-        .with(histogramResetBindGroup)
-        .dispatchThreads(ROI_HISTOGRAM_BINS)
-      histogramAccumulatePipeline
-        .with(slot.histogramAccumulateBindGroup)
-        .dispatchThreads(cameraWidth, cameraHeight)
+      histogramResetPipeline.with(histogramResetBindGroup).dispatchThreads(ROI_HISTOGRAM_BINS)
+      histogramAccumulatePipeline.with(slot.histogramAccumulateBindGroup).dispatchThreads(cameraWidth, cameraHeight)
       scheduleHistogramReadback()
     }
     const histogramMs = performance.now() - histogramStart
+    readGpuTimings()
 
     const totalMs = performance.now() - start
     const accountedMs =
@@ -1068,39 +1217,40 @@ export async function createRoiLabPipeline(
       renderMs +
       frameDrainMs +
       histogramMs
-    return {
+    const steps = smoothTimings({
+      statsMs,
+      preprocessMs,
+      queueWaitMs,
+      inferenceRunMs,
+      inferenceDrainMs,
       inferenceMs,
-      totalMs,
+      cameraCopyMs,
+      debugInputMs,
+      maskMs,
+      backgroundMs,
+      componentsEncodeMs,
       readbackMs,
+      readbackComponents: readback.count,
+      readbackBytes: readback.bytesCopied,
+      readbackTruncated: readback.truncated,
       identityMs,
+      identityLagFrames: presentedFrameId === undefined ? 0 : frameId - presentedFrameId,
+      renderMs,
+      frameDrainMs,
+      histogramMs,
+      accountedMs,
+      overheadMs: totalMs - accountedMs,
+      totalMs,
       frameId,
-      steps: {
-        statsMs,
-        preprocessMs,
-        queueWaitMs,
-        inferenceRunMs,
-        inferenceDrainMs,
-        inferenceMs,
-        cameraCopyMs,
-        debugInputMs,
-        maskMs,
-        backgroundMs,
-        componentsEncodeMs,
-        readbackMs,
-        readbackComponents: readback.count,
-        readbackBytes: readback.bytesCopied,
-        readbackTruncated: readback.truncated,
-        identityMs,
-        identityLagFrames: presentedFrameId === undefined ? 0 : frameId - presentedFrameId,
-        renderMs,
-        frameDrainMs,
-        histogramMs,
-        accountedMs,
-        overheadMs: totalMs - accountedMs,
-        totalMs,
-        frameId,
-        gpuMs: { ...gpuMs },
-      },
+      gpuMs: { ...gpuMs },
+    })
+    return {
+      inferenceMs: steps.inferenceMs,
+      totalMs: steps.totalMs,
+      readbackMs: steps.readbackMs,
+      identityMs: steps.identityMs,
+      frameId,
+      steps,
     }
   }
 
@@ -1168,6 +1318,9 @@ export async function createRoiLabPipeline(
       outputBuffer.destroy()
       imageStatsSamples.destroy()
       imageStatsBuffer.destroy()
+      timingQuerySet?.destroy()
+      timingResolveBuffer?.destroy()
+      timingReadBuffer?.destroy()
       for (const slot of slots) {
         slot.maskTexture.destroy()
         slot.modelInputTexture.destroy()
