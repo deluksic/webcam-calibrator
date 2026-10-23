@@ -1,7 +1,6 @@
 import { invertMat3RowMajor } from '@/lib/geometry'
 import { applyHomography, type Mat3 } from '@/lib/geometry'
 import { collectAnchors, type Anchor } from '@/lib/pointIdentity/anchors'
-import type { IcpPair } from '@/lib/pointIdentity/designSpaceIcp'
 import {
   computeDesignLatticeMetrics,
   createDesignGrid,
@@ -9,6 +8,7 @@ import {
   type DesignGrid,
   type DesignLatticeMetrics,
 } from '@/lib/pointIdentity/designGrid'
+import type { IcpPair } from '@/lib/pointIdentity/designSpaceIcp'
 import {
   fitHomography,
   homographyCentroid,
@@ -16,7 +16,6 @@ import {
   robustHomography,
   type HomographyCorrespondence,
 } from '@/lib/pointIdentity/homographyFit'
-import { computeFingerprints } from '@/lib/pointIdentity/identity'
 import type {
   FrameBounds,
   IcpRefineMetrics,
@@ -24,6 +23,7 @@ import type {
   PredictedLatticePoint,
   PredictedMissingPoint,
 } from '@/lib/pointIdentity/icpRefiner'
+import { computeFingerprints } from '@/lib/pointIdentity/identity'
 import {
   IDENTITY_AMBIGUOUS,
   IDENTITY_RECOVERED,
@@ -164,11 +164,7 @@ function pairKey(pairs: readonly LocalPair[]): string {
 }
 
 /** BFS over either graph. Used for the local observed support. */
-function collectHopGraph(
-  graph: ProximityGraph,
-  rootPosition: number,
-  hopRadius: number,
-): number[] {
+function collectHopGraph(graph: ProximityGraph, rootPosition: number, hopRadius: number): number[] {
   const visited = new Set<number>([rootPosition])
   let frontier = [rootPosition]
   for (let hop = 0; hop < hopRadius; hop += 1) {
@@ -252,11 +248,7 @@ function matchLocalSupport(
       colorRejects += 1
       continue
     }
-    const designPosition = designGrid.nearest(
-      predicted,
-      gate,
-      observedColors[observedPosition] ?? 0,
-    )
+    const designPosition = designGrid.nearest(predicted, gate, observedColors[observedPosition] ?? 0)
     if (designPosition === undefined) {
       colorRejects += 1
       continue
@@ -356,7 +348,7 @@ function noRecoveryResult(
       ...point,
       observedPosition,
       proofPower: proofPowers[observedPosition],
-      source: point.designId === undefined ? undefined : 'hash-loose',
+      source: point.designId === undefined ? undefined : input.baseline.source,
     }
   })
   const metrics: IcpRefineMetrics = {
@@ -412,11 +404,7 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
       const point = observedGraph.points[position]!
       observedColorByGraphIndex[point.index] = observedColors[position] ?? 0
     }
-    observedFingerprints = computeFingerprints(
-      observedGraph,
-      observedColorByGraphIndex,
-      maxProofDepth,
-    )
+    observedFingerprints = computeFingerprints(observedGraph, observedColorByGraphIndex, maxProofDepth)
   }
   const designCache = input.designCache ?? createLocalIcpDesign(designPattern)
   const designPointsByIndex = designCache.pointsByIndex
@@ -554,11 +542,7 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
     if (choiceByObserved.has(observedPosition)) {
       continue
     }
-    const localObservedPositions = collectHopGraph(
-      observedGraph,
-      observedPosition,
-      options.hopRadius,
-    )
+    const localObservedPositions = collectHopGraph(observedGraph, observedPosition, options.hopRadius)
     const localAnchors: Anchor[] = []
     for (const position of localObservedPositions) {
       const anchor = anchorByObservedPosition.get(position)
@@ -569,12 +553,7 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
     if (localAnchors.length < Math.max(4, options.minLocalAnchors)) {
       continue
     }
-    const anchorFit = fitFromAnchors(
-      localAnchors,
-      designSpacing,
-      gate,
-      Math.max(4, options.minLocalAnchors),
-    )
+    const anchorFit = fitFromAnchors(localAnchors, designSpacing, gate, Math.max(4, options.minLocalAnchors))
     if (anchorFit === undefined) {
       continue
     }
@@ -596,13 +575,7 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
       if (match.pairs.length < 4) {
         break
       }
-      const next = refitFromPairs(
-        match.pairs,
-        observedGraph.points,
-        designPattern.points,
-        localAnchors,
-        anchorGate,
-      )
+      const next = refitFromPairs(match.pairs, observedGraph.points, designPattern.points, localAnchors, anchorGate)
       if (next === undefined) {
         break
       }
@@ -625,9 +598,7 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
       gate,
     )
     colorRejects += finalMatch.colorRejects
-    const rootPair = finalMatch.pairs.find(
-      (pair) => pair.observedPosition === observedPosition,
-    )
+    const rootPair = finalMatch.pairs.find((pair) => pair.observedPosition === observedPosition)
     if (rootPair === undefined) {
       continue
     }
@@ -705,9 +676,7 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
     )
   }
 
-  const strictResolved = input.baseline.points.filter(
-    (point) => point.designId !== undefined,
-  ).length
+  const strictResolved = input.baseline.points.filter((point) => point.designId !== undefined).length
   let geometryConflicts = 0
   const points: MatchedIdentityPoint[] = input.baseline.points.map((base, observedPosition) => {
     const choice = choiceByObserved.get(observedPosition)
@@ -728,11 +697,10 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
         ...base,
         observedPosition,
         proofPower,
-        source: base.designId === undefined ? undefined : 'hash-loose',
+        source: base.designId === undefined ? undefined : input.baseline.source,
       }
     }
-    const geometryConflict =
-      base.designId !== undefined && base.designId !== choice.designId
+    const geometryConflict = base.designId !== undefined && base.designId !== choice.designId
     if (geometryConflict) {
       geometryConflicts += 1
     }
@@ -811,10 +779,7 @@ export function refineObservedIdentityWithLocalIcp(input: LocalIcpInput): IcpRef
     designId: choice.designId,
     designDistance: choice.distance,
   }))
-  const squared = matches.reduce(
-    (sum, match) => sum + match.designDistance * match.designDistance,
-    0,
-  )
+  const squared = matches.reduce((sum, match) => sum + match.designDistance * match.designDistance, 0)
   const metrics: IcpRefineMetrics = {
     observed,
     anchors: anchors.length,

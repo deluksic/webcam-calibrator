@@ -216,7 +216,7 @@ function baselinePointsWithPositions(
     ...point,
     observedPosition,
     proofPower: proofPowers[observedPosition],
-    source: point.designId === undefined ? undefined : 'hash-loose',
+    source: point.designId === undefined ? undefined : baseline.source,
   }))
 }
 
@@ -419,7 +419,7 @@ export function refineObservedIdentityWithIcp(input: IcpRefineInput): IcpRefineR
         ...base,
         observedPosition,
         proofPower,
-        source: base.designId === undefined ? undefined : 'hash-loose',
+        source: base.designId === undefined ? undefined : input.baseline.source,
         geometryConflict: pair !== undefined && pair.designId !== base.designId,
       }
     }
@@ -463,7 +463,7 @@ export function refineObservedIdentityWithIcp(input: IcpRefineInput): IcpRefineR
       ...base,
       observedPosition,
       proofPower,
-      source: base.designId === undefined ? undefined : 'hash-loose',
+      source: base.designId === undefined ? undefined : input.baseline.source,
     }
   })
 

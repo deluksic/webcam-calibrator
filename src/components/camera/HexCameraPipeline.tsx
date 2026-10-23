@@ -2,20 +2,20 @@ import type { Component } from 'solid-js'
 import { Show, createEffect, createMemo, createSignal, createTrackedEffect } from 'solid-js'
 
 import { CalibrateFocusOverlay } from '@/components/calibration/CalibrateFocusOverlay'
-import type { RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
+import { initSharedGPUForOnnx } from '@/gpu/init'
 import type { RoiComponentPoint } from '@/gpu/roiLab/roiComponentsPipeline'
+import type { RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
 import {
   ROI_MODEL_WIDTH,
   createRoiLabPipeline,
   type RoiLabPipeline,
   type RoiStepTimings,
 } from '@/gpu/roiLab/roiLabPipeline'
-import { initSharedGPUForOnnx } from '@/gpu/init'
 import type { CalibrationFrameObservation, CalibrationPointObservation } from '@/lib/calibrationTypes'
-import { toCalibrationFramePoints } from '@/lib/hexTarget/calibrationPoints'
-import type { HexTargetModel } from '@/lib/hexTarget/target'
-import { matchHexTargetPoints, type HexTargetMatch } from '@/lib/hexTarget/match'
 import type { HexReprojectionResult } from '@/lib/hexReprojection'
+import { toCalibrationFramePoints } from '@/lib/hexTarget/calibrationPoints'
+import { matchHexTargetPoints, type HexTargetMatch } from '@/lib/hexTarget/match'
+import type { HexTargetModel } from '@/lib/hexTarget/target'
 import { createElementSize } from '@/utils/createElementSize'
 import { createFrameLoop } from '@/utils/createFrameLoop'
 
@@ -34,11 +34,13 @@ export type HexDetectionMeta = {
 export type HexCameraPipelineProps = {
   stream: MediaStream | undefined
   targetModel: HexTargetModel
-  onDetection: (
-    match: HexTargetMatch,
-    points: CalibrationPointObservation[],
-    meta: HexDetectionMeta,
-  ) => void
+  onDetection: (match: HexTargetMatch, points: CalibrationPointObservation[], meta: HexDetectionMeta) => void
+  /**
+   * Async identity matcher (normally the worker). Returning a promise lets the
+   * ROI pipeline overlap matching with the next frame's GPU work; the resolved
+   * graph is presented with the pixels it was computed from.
+   */
+  matchTarget?: (design: HexTargetModel, points: readonly RoiComponentPoint[]) => Promise<HexTargetMatch>
   onFrameSize?: (size: { width: number; height: number }) => void
   onError?: (message: string | undefined) => void
   setRequestSnapshot?: (request: ((callback: SnapshotCallback) => void) | undefined) => void
@@ -68,10 +70,7 @@ function captureGray(
   for (let index = 0; index < data.length; index += 1) {
     const offset = index * 4
     data[index] =
-      (0.299 * (pixels[offset] ?? 0) +
-        0.587 * (pixels[offset + 1] ?? 0) +
-        0.114 * (pixels[offset + 2] ?? 0)) /
-      255
+      (0.299 * (pixels[offset] ?? 0) + 0.587 * (pixels[offset + 1] ?? 0) + 0.114 * (pixels[offset + 2] ?? 0)) / 255
   }
   return { data, width, height }
 }
@@ -211,24 +210,42 @@ export const HexCameraPipeline: Component<HexCameraPipelineProps> = (props) => {
             }
           },
           undefined,
-          (points: readonly RoiComponentPoint[], frameId: number) => {
+          async (points: readonly RoiComponentPoint[], frameId: number) => {
             if (cancelled) {
               return { points: [], edges: [] }
             }
             const design = props.targetModel
-            const match = matchHexTargetPoints(design, points)
-            const conversion = toCalibrationFramePoints(match, design)
-            const accepted = conversion.points
-            const callback = pendingSnapshot
-            if (
-              callback &&
+            const matchTarget = props.matchTarget
+
+            // Capture a pending snapshot before awaiting identity. The worker
+            // can take longer than a camera frame; grabbing the pixels first
+            // keeps the saved image paired with the components we just read.
+            const snapshotRequest = pendingSnapshot
+            const canCapture =
+              snapshotRequest !== undefined &&
               video.readyState >= 2 &&
               video.videoWidth === size.width &&
               video.videoHeight === size.height
-            ) {
+            const gray = canCapture ? captureGray(video, size.width, size.height) : undefined
+
+            let match: HexTargetMatch
+            try {
+              match = matchTarget ? await matchTarget(design, points) : matchHexTargetPoints(design, points)
+            } catch (cause: unknown) {
+              reportPipelineError(cause, () => cancelled)
+              return { points: [], edges: [] }
+            }
+            if (cancelled) {
+              return { points: [], edges: [] }
+            }
+
+            const conversion = toCalibrationFramePoints(match, design)
+            const accepted = conversion.points
+            // A newer snapshot request may have arrived while the matcher ran;
+            // only satisfy the request this frame was captured for.
+            if (canCapture && pendingSnapshot === snapshotRequest) {
               pendingSnapshot = undefined
-              const gray = captureGray(video, size.width, size.height)
-              callback({
+              snapshotRequest({
                 frameId,
                 points: accepted,
                 grayData: gray?.data,

@@ -1,10 +1,5 @@
 import { computeFingerprints } from '@/lib/pointIdentity/identity'
-import type {
-  BinaryColor,
-  IdentityIndex,
-  PointFingerprint,
-  ProximityGraph,
-} from '@/lib/pointIdentity/types'
+import type { BinaryColor, IdentityIndex, PointFingerprint, ProximityGraph } from '@/lib/pointIdentity/types'
 
 export const IDENTITY_RESOLVED = 0
 export const IDENTITY_AMBIGUOUS = 1
@@ -83,6 +78,8 @@ export type IdentityMatchResult = {
   points: MatchedIdentityPoint[]
   fingerprints: PointFingerprint[]
   summary: IdentityMatchSummary
+  /** Which hash index produced the assignments (strict keys vs loose color keys). */
+  source: 'hash' | 'hash-loose'
 }
 
 /**
@@ -158,11 +155,13 @@ export function matchObservedIdentity(
       status = IDENTITY_UNRESOLVED
       unresolved += 1
     }
-    const source = observedGraph.points[index]!
+    const observedPoint = observedGraph.points[index]!
     return {
-      x: source.x,
-      y: source.y,
-      color: observedColors[index] ?? 0,
+      x: observedPoint.x,
+      y: observedPoint.y,
+      // Colours are indexed by the graph point's stable id, not its array
+      // position: callers such as Point Lab filter the observed graph.
+      color: observedColors[observedPoint.index] ?? 0,
       designId: status === IDENTITY_RESOLVED ? designId : undefined,
       status,
     }
@@ -171,6 +170,7 @@ export function matchObservedIdentity(
   return {
     points,
     fingerprints,
+    source: options?.looseByKey !== undefined ? 'hash-loose' : 'hash',
     summary: {
       total: points.length,
       resolved,

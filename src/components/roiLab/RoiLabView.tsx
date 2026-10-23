@@ -15,18 +15,14 @@ import {
 } from '@/gpu/roiLab/roiLabPipeline'
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
 import { computeFingerprints, createIdentityIndexesByDepth } from '@/lib/pointIdentity/identity'
-import type { IdentityDesignSpec } from '@/lib/pointIdentity/identityPipeline'
+import type { IdentityDesignSpec, IdentityMetrics } from '@/lib/pointIdentity/identityPipeline'
 import { MAX_FINGERPRINT_DEPTH } from '@/lib/pointIdentity/localIcpRefiner'
 import { createColorIdentityIndex, matchObservedIdentity } from '@/lib/pointIdentity/match'
 import { buildProximityGraph } from '@/lib/pointIdentity/proximityGraph'
 import { randomBinaryColors } from '@/lib/pointIdentity/random'
 import { ROI_HISTOGRAM_BINS } from '@/lib/roiHistogram'
 import { createFrameLoop } from '@/utils/createFrameLoop'
-import {
-  configureIdentityWorker,
-  disposeIdentityWorker,
-  runIdentityInWorker,
-} from '@/workers/identityClient'
+import { configureIdentityWorker, disposeIdentityWorker, runIdentityInWorker } from '@/workers/identityClient'
 
 import styles from '@/components/roiLab/RoiLabView.module.css'
 
@@ -47,10 +43,7 @@ const IDENTITY_DEFAULTS = {
   columns: Math.min(14, Math.max(2, Number(QUERY.get('columns')) || 8)),
   pointsPerEdge: Math.min(6, Math.max(1, Number(QUERY.get('points')) || 4)),
   colorSeed: Math.max(0, Math.round(Number(QUERY.get('seed')) || 1)),
-  depth: Math.min(
-    MAX_FINGERPRINT_DEPTH,
-    Math.max(1, Number(QUERY.get('depth')) || MAX_FINGERPRINT_DEPTH),
-  ),
+  depth: Math.min(MAX_FINGERPRINT_DEPTH, Math.max(1, Number(QUERY.get('depth')) || MAX_FINGERPRINT_DEPTH)),
 } as const
 
 type RoiViewMode = 'blobs' | 'components' | 'labels' | 'identity' | 'mask' | 'input' | 'camera'
@@ -147,18 +140,6 @@ function drawRoiHistogram(canvas: HTMLCanvasElement, update: RoiHistogramUpdate)
   context.fillText('255', width - 20, height - 3)
 }
 
-type IdentityMetrics = {
-  total: number
-  resolved: number
-  ambiguous: number
-  unresolved: number
-  conflicts: number
-  edges: number
-  components: number
-  recovered: number
-  frameId: number
-}
-
 type IdentityPerf = {
   readbackMs: number
   identityMs: number
@@ -218,17 +199,11 @@ export const RoiLabView: Component = () => {
     })
     const colors = randomBinaryColors(pattern.points.length, identityColorSeed())
     const graph = buildProximityGraph(pattern.points, { pointsPerEdge })
-    const indexesByDepth = createIdentityIndexesByDepth(
-      graph,
-      colors,
-      MAX_FINGERPRINT_DEPTH,
-    )
+    const indexesByDepth = createIdentityIndexesByDepth(graph, colors, MAX_FINGERPRINT_DEPTH)
     return { pattern, colors, graph, indexesByDepth, pointsPerEdge }
   })
 
-  const identityIndex = createMemo(
-    () => identityDesign().indexesByDepth[identityDepth() - 1]!,
-  )
+  const identityIndex = createMemo(() => identityDesign().indexesByDepth[identityDepth() - 1]!)
 
   /** Design inputs the worker needs; rebuilt there only when one of these changes. */
   const identitySpec = createMemo<IdentityDesignSpec>(() => ({
@@ -712,9 +687,7 @@ export const RoiLabView: Component = () => {
               </button>
             ))}
           </div>
-          <p class={styles.viewHint}>
-            Identity: design IDs · Labels: colors · Centroids: centers.
-          </p>
+          <p class={styles.viewHint}>Identity: design IDs · Labels: colors · Centroids: centers.</p>
         </div>
         <div class={styles.identityPanel}>
           <div class={styles.identityHeader}>

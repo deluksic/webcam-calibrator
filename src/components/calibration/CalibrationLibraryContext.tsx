@@ -82,11 +82,15 @@ export function CalibrationLibraryProvider(props: ParentProps) {
   }
 
   const addFromCurrentSolve: CalibrationLibraryContextValue['addFromCurrentSolve'] = (args) => {
-    const entry = createCalibrationLibraryEntry(args.result, {
-      validSolveFrameCount: args.validSolveFrameCount,
-      videoWidth: args.video?.width,
-      videoHeight: args.video?.height,
-    }, args.label ?? '')
+    const entry = createCalibrationLibraryEntry(
+      args.result,
+      {
+        validSolveFrameCount: args.validSolveFrameCount,
+        videoWidth: args.video?.width,
+        videoHeight: args.video?.height,
+      },
+      args.label ?? '',
+    )
     setStore((s) => {
       s.entries = [...s.entries, entry]
       s.selectedId = entry.id
@@ -107,10 +111,12 @@ export function CalibrationLibraryProvider(props: ParentProps) {
 
   const rename: CalibrationLibraryContextValue['rename'] = (id, label) => {
     setStore((s) => {
-      const i = s.entries.findIndex((e) => e.id === id)
-      if (i >= 0) {
-        const prev = s.entries[i]!
-        s.entries[i] = { ...prev, label }
+      const entry = s.entries.find((e) => e.id === id)
+      // Mutate the stored row instead of replacing it: `For` keys rows by
+      // object identity, and replacing the entry on every keystroke would
+      // recreate the label input and drop focus.
+      if (entry) {
+        entry.label = label
       }
     })
   }

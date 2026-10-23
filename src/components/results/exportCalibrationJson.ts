@@ -87,18 +87,29 @@ export function downloadCalibrationOkJson(c: CalibrationOk) {
  * Enriches the calibration result with target metadata, frame image references,
  * and per-frame point observations; downloads JSON plus one PNG per frame.
  */
-export async function downloadCalibrationOkWithImages(
-  c: CalibrationOk,
-  framePool: CalibrationFrameObservation[],
-) {
+export async function downloadCalibrationOkWithImages(c: CalibrationOk, framePool: CalibrationFrameObservation[]) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   const imageFilePrefix = (frameId: number) => `frame_${frameId}.png`
 
   const frameImages: Record<string, string> = {}
   const observations: NonNullable<CalibrationOk['observations']> = []
   const pngDownloads: Promise<void>[] = []
+  const solvedFrameIds = new Set(c.extrinsics.map((extrinsic) => extrinsic.frameId))
 
   for (const frame of framePool) {
+    // Only export frames this solve actually used. The caller may hand us the
+    // whole live pool, which can contain frames that failed the shared-point
+    // filter or were captured at another camera resolution.
+    if (!solvedFrameIds.has(frame.frameId)) {
+      continue
+    }
+    if (
+      frame.imageWidth !== undefined &&
+      frame.imageHeight !== undefined &&
+      (frame.imageWidth !== c.imageSize.width || frame.imageHeight !== c.imageSize.height)
+    ) {
+      continue
+    }
     const points = frame.points.map((point) => ({
       designId: point.designId,
       x: point.x,

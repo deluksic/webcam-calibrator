@@ -2,8 +2,9 @@
 
 Status: active in Point Lab, ROI Lab, and the production Calibrate path. ROI Lab
 runs the same matcher behind the “Local homography recovery” toggle; Calibrate
-always enables recovery and filters accepted points before they reach the
-calibration frame pool.
+always enables recovery, runs the matcher in a worker (so the two-slot capture
+pipeline can present the previous frame while the next match is computed), and
+filters accepted points before they reach the calibration frame pool.
 
 ## Problem
 
@@ -128,16 +129,16 @@ Anchor-first local homography, 20 stress runs, seed range 1–20, identity depth
 fixed at 12, anchor proof power 7, 8 columns, 4 points/edge, observed hop radius
 8:
 
-| Scenario | Final coverage | Accepted | Recovered | Recovered false |
-|---|---:|---:|---:|---:|
-| Crop left 20% | 97.35% mean | 20/20 | 51.0 | 0 |
-| Crop left 30% | 100% | 20/20 | 56.0 | 0 |
-| Dropout 2% | 93.62% mean | 20/20 | 216.9 | 0 |
-| Dropout 5% | 64.96% mean | 20/20 | 215.8 | 0 |
-| Dropout 10% | 16.50% mean | 16/20 | 56.6 | 0 |
-| Crop 20% + distortion 40% | 99.73% mean | 20/20 | 54.0 | 0 |
-| Yaw 40° + crop 10% | 97.70% mean | 20/20 | 51.0 | 0 |
-| Pitch 30° + crop top 10% | 100% | 20/20 | 91.0 | 0 |
+| Scenario                  | Final coverage | Accepted | Recovered | Recovered false |
+| ------------------------- | -------------: | -------: | --------: | --------------: |
+| Crop left 20%             |    97.35% mean |    20/20 |      51.0 |               0 |
+| Crop left 30%             |           100% |    20/20 |      56.0 |               0 |
+| Dropout 2%                |    93.62% mean |    20/20 |     216.9 |               0 |
+| Dropout 5%                |    64.96% mean |    20/20 |     215.8 |               0 |
+| Dropout 10%               |    16.50% mean |    16/20 |      56.6 |               0 |
+| Crop 20% + distortion 40% |    99.73% mean |    20/20 |      54.0 |               0 |
+| Yaw 40° + crop 10%        |    97.70% mean |    20/20 |      51.0 |               0 |
+| Pitch 30° + crop top 10%  |           100% |    20/20 |      91.0 |               0 |
 
 The design side is global; only the observed local support is transformed. The
 support anchors identify the local homography, and the ambiguous point's own

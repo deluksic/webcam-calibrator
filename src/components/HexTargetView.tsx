@@ -1,6 +1,6 @@
+import qrcode from 'qrcode-generator'
 import type { Component } from 'solid-js'
 import { Show, createMemo, createSignal, createTrackedEffect, onCleanup } from 'solid-js'
-import qrcode from 'qrcode-generator'
 import type { TgpuRoot } from 'typegpu'
 
 import { createHexTargetRenderer, type HexTargetRenderer } from '@/gpu/hexTargetRenderer'
@@ -170,13 +170,17 @@ export const HexTargetView: Component = () => {
     width: resolution().width / pixelRatio(),
     height: resolution().height / pixelRatio(),
   }))
+  // What the user asked for, before the "fit the display" clamp. The inputs
+  // must show this value, otherwise editing one axis writes the already
+  // clamped other axis back into the config and silently changes the aspect.
+  const requestedWidth = createMemo(() => config().widthPx ?? resolution().width)
+  const requestedHeight = createMemo(() => config().heightPx ?? resolution().height)
   const accuracyStatus = createMemo(() => {
     const nextLayout = layout()
     const current = config()
     const clamped =
-      current.widthPx !== undefined &&
-      current.heightPx !== undefined &&
-      (current.widthPx !== nextLayout.widthPx || current.heightPx !== nextLayout.heightPx)
+      (current.widthPx !== undefined && current.widthPx !== nextLayout.widthPx) ||
+      (current.heightPx !== undefined && current.heightPx !== nextLayout.heightPx)
     return `${current.columns} × ${current.rows} cells · ${nextLayout.widthPx} × ${nextLayout.heightPx} device px${clamped ? ' (clamped to display)' : ''} · spacing ${nextLayout.spacingPx} · side ${nextLayout.sidePx}`
   })
 
@@ -312,11 +316,11 @@ export const HexTargetView: Component = () => {
                 type="number"
                 min="320"
                 max="8192"
-                value={resolution().width}
+                value={requestedWidth()}
                 onChange={(event) =>
                   patchConfig({
                     widthPx: Number(event.currentTarget.value),
-                    heightPx: resolution().height,
+                    heightPx: requestedHeight(),
                   })
                 }
               />
@@ -328,17 +332,21 @@ export const HexTargetView: Component = () => {
                 type="number"
                 min="240"
                 max="8192"
-                value={resolution().height}
+                value={requestedHeight()}
                 onChange={(event) =>
                   patchConfig({
-                    widthPx: resolution().width,
+                    widthPx: requestedWidth(),
                     heightPx: Number(event.currentTarget.value),
                   })
                 }
               />
             </label>
           </div>
-          <button type="button" class={styles.button} onClick={() => patchConfig({ widthPx: undefined, heightPx: undefined })}>
+          <button
+            type="button"
+            class={styles.button}
+            onClick={() => patchConfig({ widthPx: undefined, heightPx: undefined })}
+          >
             Use window-fit resolution
           </button>
         </div>

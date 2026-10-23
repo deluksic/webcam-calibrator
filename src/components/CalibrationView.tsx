@@ -1,5 +1,5 @@
 import { A, useSearchParams } from '@solidjs/router'
-import { Errored, Show, createEffect, createMemo, createSignal } from 'solid-js'
+import { Errored, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 
 import { CalibrateGuidancePanel, type GuidanceBand } from '@/components/calibration/CalibrateGuidancePanel'
 import { CalibrationAdvancedMetrics, type CalibMetricsRow } from '@/components/calibration/CalibrationAdvancedMetrics'
@@ -7,16 +7,18 @@ import { useCalibrationLibrary } from '@/components/calibration/CalibrationLibra
 import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
-import { HexCameraPipeline, type SnapshotCallback } from '@/components/camera/HexCameraPipeline'
+import { HexCameraPipeline, type HexDetectionMeta, type SnapshotCallback } from '@/components/camera/HexCameraPipeline'
+import type { RoiStepTimings } from '@/gpu/roiLab/roiLabPipeline'
 import { DEFAULT_CALIBRATION_TOP_K, mergeCalibrationFramesTopK } from '@/lib/calibrationTopK'
 import type { CalibrationFrameObservation, CalibrationPointObservation } from '@/lib/calibrationTypes'
 import { countValidSolveFrames } from '@/lib/calibrationValidFrames'
 import { isProgressShapedError, percentile, type SnapshotFeedback } from '@/lib/calibrationViewUtils'
 import { formatFixed } from '@/lib/formatFixed'
-import { hexTargetConfigFromSearchParams, TARGET_MIN_CAPTURE_POINTS } from '@/lib/hexTarget/config'
-import type { HexTargetMatch } from '@/lib/hexTarget/match'
 import { buildHexReprojection, type HexReprojectionResult } from '@/lib/hexReprojection'
-import type { RoiStepTimings } from '@/gpu/roiLab/roiLabPipeline'
+import { hexTargetConfigFromSearchParams, TARGET_MIN_CAPTURE_POINTS } from '@/lib/hexTarget/config'
+import type { HexObservedPoint, HexTargetMatch } from '@/lib/hexTarget/match'
+import type { HexTargetModel } from '@/lib/hexTarget/target'
+import { configureHexMatchWorker, disposeHexMatchWorker, matchHexTargetInWorker } from '@/workers/hexMatchClient'
 
 import styles from '@/components/CalibrationView.module.css'
 
@@ -38,9 +40,7 @@ function CalibrationView() {
   const [pipelineTimings, setPipelineTimings] = createSignal<RoiStepTimings>()
   const [currentMatch, setCurrentMatch] = createSignal<HexTargetMatch>()
   const [currentPoints, setCurrentPoints] = createSignal<CalibrationPointObservation[]>([])
-  const [requestSnapshotFn, setRequestSnapshotFn] = createSignal<
-    ((callback: SnapshotCallback) => void) | undefined
-  >()
+  const [requestSnapshotFn, setRequestSnapshotFn] = createSignal<((callback: SnapshotCallback) => void) | undefined>()
   let autoFirstAttempted = false
 
   createEffect(
@@ -58,6 +58,23 @@ function CalibrationView() {
     },
   )
 
+  createEffect(
+    () => runCtx.targetConfig(),
+    (config) => configureHexMatchWorker(config),
+  )
+  onCleanup(() => disposeHexMatchWorker())
+
+  /**
+   * Identity runs in a worker so the ROI pipeline can overlap it with the next
+   * frame's GPU work. The resolved graph is then presented with the pixels it
+   * was computed from instead of stalling the camera loop.
+   */
+  const matchTarget = (design: HexTargetModel, points: readonly HexObservedPoint[]) =>
+    matchHexTargetInWorker(design.config, points, {
+      depth: design.config.identityDepth,
+      recovery: true,
+    })
+
   const minimumCapturePoints = createMemo(() =>
     Math.min(TARGET_MIN_CAPTURE_POINTS, Math.max(8, runCtx.targetModel().pattern.points.length)),
   )
@@ -70,7 +87,15 @@ function CalibrationView() {
       }
       return false
     }
-    if (uniqueDesignCount(frame.points) < minimumCapturePoints()) {
+    // Point coordinates are image pixels. Stamp every frame with the frame size
+    // so frames from a previous camera resolution cannot enter the same solve.
+    const size = runCtx.videoFrameSize()
+    const acceptedFrame: CalibrationFrameObservation = {
+      ...frame,
+      imageWidth: frame.imageWidth ?? size?.width,
+      imageHeight: frame.imageHeight ?? size?.height,
+    }
+    if (uniqueDesignCount(acceptedFrame.points) < minimumCapturePoints()) {
       if (source === 'manual') {
         setSnapshotFeedback({
           kind: 'fail',
@@ -81,7 +106,7 @@ function CalibrationView() {
     }
 
     runCtx.setRun((prev) => {
-      const { next, evicted } = mergeCalibrationFramesTopK(prev.framePool, [frame], DEFAULT_CALIBRATION_TOP_K)
+      const { next, evicted } = mergeCalibrationFramesTopK(prev.framePool, [acceptedFrame], DEFAULT_CALIBRATION_TOP_K)
       return {
         ...prev,
         framePool: next,
@@ -96,7 +121,7 @@ function CalibrationView() {
     return true
   }
 
-  const onDetection = (match: HexTargetMatch, points: CalibrationPointObservation[]) => {
+  const onDetection = (match: HexTargetMatch, points: CalibrationPointObservation[], meta: HexDetectionMeta) => {
     setCurrentMatch(match)
     setCurrentPoints(points)
     runCtx.setRun((run) => ({
@@ -111,7 +136,10 @@ function CalibrationView() {
       !autoFirstAttempted &&
       uniqueDesignCount(points) >= minimumCapturePoints()
     ) {
-      autoFirstAttempted = attemptAddFrame({ frameId: Date.now(), points }, 'autoFirst')
+      autoFirstAttempted = attemptAddFrame(
+        { frameId: meta.frameId, points, imageWidth: meta.width, imageHeight: meta.height },
+        'autoFirst',
+      )
     }
   }
 
@@ -129,9 +157,13 @@ function CalibrationView() {
   const currentMatchedCount = createMemo(() => uniqueDesignCount(currentPoints()))
   const canPressStart = createMemo(() => currentMatchedCount() >= minimumCapturePoints())
 
+  // The run object changes on every stats tick; keep the pool identity
+  // separate so expensive pool scans only rerun when frames are added.
+  const framePool = createMemo(() => runCtx.run().framePool)
+
   const uniquePointCount = createMemo(() => {
     const ids = new Set<number>()
-    for (const frame of runCtx.run().framePool) {
+    for (const frame of framePool()) {
       for (const point of frame.points) {
         ids.add(point.designId)
       }
@@ -139,15 +171,11 @@ function CalibrationView() {
     return ids.size
   })
 
-  const validSolveCount = createMemo(() => countValidSolveFrames(runCtx.run().framePool))
+  const validSolveCount = createMemo(() => countValidSolveFrames(framePool(), runCtx.videoFrameSize()))
 
   const canResetSession = createMemo(() => {
     const run = runCtx.run()
-    return (
-      run.collection === 'running' ||
-      run.framePool.length > 0 ||
-      runCtx.calib() !== undefined
-    )
+    return run.collection === 'running' || framePool().length > 0 || runCtx.calib() !== undefined
   })
 
   const canOpenResults = createMemo(() => {
@@ -309,6 +337,7 @@ function CalibrationView() {
           <HexCameraPipeline
             stream={cam.stream()}
             onDetection={onDetection}
+            matchTarget={matchTarget}
             onFrameSize={runCtx.setVideoFrameSize}
             setRequestSnapshot={setRequestSnapshotFn}
             targetModel={runCtx.targetModel()}

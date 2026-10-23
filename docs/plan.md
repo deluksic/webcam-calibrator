@@ -10,14 +10,14 @@ In-browser camera calibration against a fixed hex marker target; no server. Capt
 
 ## UI
 
-| View          | Role                                                                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| **Home**      | Two-role landing copy; links to Target / Calibrate; dismissible tips                                                                 |
-| **Target**    | Editable hex target (columns, rows, points, seed, scale, resolution); QR link to Calibrate; JSON export                         |
-| **Calibrate** | Live ROI/identity feed; **Start** only with ≥12 identified markers; snapshot/auto-first; frame pool; worker solve + live reprojection; guidance + collapsed advanced metrics |
-| **Results**   | WebGPU orbit view of refined target points; **Export JSON** (hex schema v2); **Save to library** & **Continue Calibration**            |
-| **Point Lab** | Hex pattern, fingerprint, and local homography/ICP experiments                                                                        |
-| **ROI Lab**   | ONNX mask, blob segmentation, component, label, and identity diagnostics with a seed scan                                              |
+| View          | Role                                                                                                                                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Home**      | Two-role landing copy; links to Target / Calibrate; dismissible tips                                                                                                                            |
+| **Target**    | Editable hex target (columns, rows, points, seed, scale, resolution); QR link to Calibrate; JSON export                                                                                         |
+| **Calibrate** | Live ROI/identity feed; **Start** only with ≥12 identified markers; snapshot/auto-first; frame pool; worker identity match and solve + live reprojection; guidance + collapsed advanced metrics |
+| **Results**   | WebGPU orbit view of refined target points; **Export JSON** (hex schema v2); **Save to library** & **Continue Calibration**                                                                     |
+| **Point Lab** | Hex pattern, fingerprint, and local homography/ICP experiments                                                                                                                                  |
+| **ROI Lab**   | ONNX mask, blob segmentation, component, label, and identity diagnostics with a seed scan                                                                                                       |
 
 **Camera** — shared [`CameraStreamContext`](../src/components/camera/CameraStreamContext.tsx) at the root. **Calibrate** capture: [`HexCameraPipeline`](../src/components/camera/HexCameraPipeline.tsx). Removed routes `/hex-target`, `/debug`, `/gradient-profiles` are not redirected.
 
@@ -29,7 +29,7 @@ In-browser camera calibration against a fixed hex marker target; no server. Capt
 2. Masked full-resolution luma histogram → black / gray / white cuts.
 3. 2×2 color-aware opening, pointer-jump connected components, centroid NMS.
 4. Observed proximity graph + binary-color fingerprints.
-5. Hash identity match; local homography/ICP recovery for ambiguous markers.
+5. Hash identity match in a worker; local homography/ICP recovery for ambiguous markers. The two-slot capture pipeline overlaps matching with the next frame.
 6. Accepted point observations feed the calibration frame pool.
 
 Details: [`architecture.md`](architecture.md), [`hex-blob-detection.md`](hex-blob-detection.md), [`point-identity-icp-recovery.md`](point-identity-icp-recovery.md).

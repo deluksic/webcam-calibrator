@@ -1,17 +1,16 @@
 import { A } from '@solidjs/router'
 import { Show, createEffect, createMemo, createSignal } from 'solid-js'
+import type { TgpuRoot } from 'typegpu'
 
 import { useCalibrationLibrary } from '@/components/calibration/CalibrationLibraryContext'
 import { CalibrationLibraryPanel } from '@/components/calibration/CalibrationLibraryPanel'
 import { useCalibrationRun } from '@/components/calibration/CalibrationRunContext'
-import { ResultsDistortionCanvas } from '@/components/results/ResultsDistortionCanvas'
-import { ResultsOrbitCanvas } from '@/components/results/ResultsOrbitCanvas'
 import { downloadCalibrationOkWithImages } from '@/components/results/exportCalibrationJson'
 import { buildResultsCalibrationScene } from '@/components/results/resultsCalibrationScene'
+import { ResultsDistortionCanvas } from '@/components/results/ResultsDistortionCanvas'
+import { ResultsOrbitCanvas } from '@/components/results/ResultsOrbitCanvas'
 import { initGPU } from '@/gpu/init'
 import { calibrationPointCount } from '@/gpu/pipelines/resultsSceneCpu'
-import type { TgpuRoot } from 'typegpu'
-
 import type { CalibrationOk } from '@/workers/calibration.worker'
 import type { CalibrationResult } from '@/workers/calibrationClient'
 
@@ -139,12 +138,11 @@ export function ResultsView() {
     if (c === undefined || c.kind !== 'ok') {
       return
     }
-    const meta = latestCalibrationMeta()
-    if (meta?.framePool?.length) {
-      downloadCalibrationOkWithImages(c, meta.framePool)
-    } else {
-      downloadCalibrationOkWithImages(c, [])
-    }
+    // The pool belongs to the latest live solve. A saved library entry has no
+    // frame pool of its own, so exporting it must not attach someone else's
+    // observations and PNGs.
+    const meta = calibrationLibrary.selectedId() ? undefined : latestCalibrationMeta()
+    downloadCalibrationOkWithImages(c, meta?.framePool ?? [])
   }
 
   return (
@@ -201,8 +199,8 @@ export function ResultsView() {
           <Show when={!hasOkDisplay()}>
             <p class={styles.hint}>
               When calibration data is available (from <strong>Calibrate</strong> or a saved entry below), this view
-              shows the refined target points and axes. Nothing is wrong yet if you are still setting up—run Calibrate, or
-              pick a saved calibration.
+              shows the refined target points and axes. Nothing is wrong yet if you are still setting up—run Calibrate,
+              or pick a saved calibration.
             </p>
           </Show>
           <Show when={hasOkDisplay()}>

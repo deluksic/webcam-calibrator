@@ -87,10 +87,7 @@ export function matchHexTargetPoints(
 ): HexTargetMatch {
   const depth = Math.max(
     1,
-    Math.min(
-      design.indexesByDepth.length,
-      Math.round(options.depth ?? design.indexesByDepth.length),
-    ),
+    Math.min(design.indexesByDepth.length, Math.round(options.depth ?? design.indexesByDepth.length)),
   )
   const observedPoints = observed.map((point, index) => ({
     x: point.x,
@@ -107,9 +104,7 @@ export function matchHexTargetPoints(
 
   const baseline = matchObservedIdentity(identityIndex, observedGraph, observedColors, depth, {
     fingerprints,
-    looseByKey: recovery
-      ? undefined
-      : createColorIdentityIndex(design.graph, design.colors, depth),
+    looseByKey: recovery ? undefined : createColorIdentityIndex(design.graph, design.colors, depth),
   })
 
   let points = baseline.points
@@ -127,6 +122,7 @@ export function matchHexTargetPoints(
       observedColors,
       observedFingerprints: recoveryFingerprints,
       baseline,
+      designCache: design.designCache,
       options: createLocalIcpOptions({
         identityDepth: depth,
         maxProofDepth: MAX_FINGERPRINT_DEPTH,

@@ -1,12 +1,12 @@
-import { initCalibrator } from '@deluksic/opencv-calibration-wasm'
+import { CALIBRATION_FLAGS, initCalibrator } from '@deluksic/opencv-calibration-wasm'
 import CALIBRATE_WASM_PATH from '@deluksic/opencv-calibration-wasm/wasm/calibrate.wasm?url'
 import * as Comlink from 'comlink'
 
 import { buildCalibrationInput } from '@/lib/calibrationInput'
 import type { CalibrationFrameObservation, TargetObjectPoint } from '@/lib/calibrationTypes'
 import { calibratorInitOptions } from '@/lib/calibratorWasmInit'
-import type { HexTargetConfig } from '@/lib/hexTarget/config'
 import type { CameraIntrinsics, RationalDistortion8 } from '@/lib/cameraModel'
+import type { HexTargetConfig } from '@/lib/hexTarget/config'
 import { rvecToMatrix, type Mat3, type Vec3 } from '@/lib/poseMath'
 
 export type { Mat3, Vec3 } from '@/lib/poseMath'
@@ -57,6 +57,26 @@ function cameraIntrinsicsFromMatrix(
   return { fx: cm[0]![0]!, fy: cm[1]![1]!, cx: cm[0]![2]!, cy: cm[1]![2]! }
 }
 
+type Calibrator = Awaited<ReturnType<typeof initCalibrator>>
+
+/**
+ * The wasm module is ~1.4 MB and recompiling it for every frame-pool change is
+ * wasted work. The calibrator is stateless between calls, so the worker keeps
+ * one instance for its lifetime. A failed init clears the cache so a later
+ * solve can retry instead of reusing a rejected promise.
+ */
+let calibratorPromise: Promise<Calibrator> | undefined
+
+function getCalibrator(): Promise<Calibrator> {
+  if (calibratorPromise === undefined) {
+    calibratorPromise = initCalibrator(calibratorInitOptions(CALIBRATE_WASM_PATH)).catch((cause: unknown) => {
+      calibratorPromise = undefined
+      throw cause
+    })
+  }
+  return calibratorPromise
+}
+
 function padDistortion(coeffs: number[]): RationalDistortion8 {
   return [
     coeffs[0] ?? 0,
@@ -84,11 +104,16 @@ const api: CalibWorkerApi = {
       }
       const { objectPoints, imagePoints, frameIds, sharedDesignIds } = built.input
 
-      const calibrator = await initCalibrator(calibratorInitOptions(CALIBRATE_WASM_PATH))
+      const calibrator = await getCalibrator()
       const wasmResult = calibrator.calibrateCameraRO({
         objectPoints,
         imagePoints,
         imageSize,
+        // The export type, shader, and reprojection path all use the rational
+        // model (k1…k6). Without this flag OpenCV returns only the 5-term model
+        // and k4–k6 are silently pad-filled with zeros.
+        flags: CALIBRATION_FLAGS.CALIB_RATIONAL_MODEL,
+        maxDistCoeffs: 8,
       })
 
       const K = cameraIntrinsicsFromMatrix(wasmResult.cameraMatrix)
@@ -126,17 +151,11 @@ const api: CalibWorkerApi = {
           sq.push(dx * dx + dy * dy)
         }
         if (sq.length > 0) {
-          perFrameRmsPx.push([
-            frameIds[view]!,
-            Math.sqrt(sq.reduce((sum, value) => sum + value, 0) / sq.length),
-          ])
+          perFrameRmsPx.push([frameIds[view]!, Math.sqrt(sq.reduce((sum, value) => sum + value, 0) / sq.length)])
           allSq.push(...sq)
         }
       }
-      const rmsPx =
-        allSq.length > 0
-          ? Math.sqrt(allSq.reduce((sum, value) => sum + value, 0) / allSq.length)
-          : 0
+      const rmsPx = allSq.length > 0 ? Math.sqrt(allSq.reduce((sum, value) => sum + value, 0) / allSq.length) : 0
 
       const extrinsics: { frameId: number; R: Mat3; t: Vec3 }[] = []
       for (let index = 0; index < wasmResult.rvecs.length; index += 1) {

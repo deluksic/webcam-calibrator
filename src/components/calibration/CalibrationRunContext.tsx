@@ -4,11 +4,7 @@ import { createContext, createEffect, createMemo, createSignal, useContext } fro
 import { CameraStreamContext } from '@/components/camera/CameraStreamContext'
 import type { CalibrationFrameObservation } from '@/lib/calibrationTypes'
 import { countValidSolveFrames, filterFramesForSolve } from '@/lib/calibrationValidFrames'
-import {
-  DEFAULT_TARGET_CONFIG,
-  normalizeHexTargetConfig,
-  type HexTargetConfig,
-} from '@/lib/hexTarget/config'
+import { DEFAULT_TARGET_CONFIG, normalizeHexTargetConfig, type HexTargetConfig } from '@/lib/hexTarget/config'
 import { createHexTargetDesign, type HexTargetModel } from '@/lib/hexTarget/target'
 import { calibApi, type CalibrationResult } from '@/workers/calibrationClient'
 
@@ -24,6 +20,14 @@ export type CalibRun = {
   collection: Collection
   framePool: CalibrationFrameObservation[]
   stats: CalibRunStats
+}
+
+/** The subset of run state that can change a calibration solve. */
+type CalibrationSolveInput = {
+  collection: Collection
+  framePool: CalibrationFrameObservation[]
+  frameSize: { width: number; height: number } | undefined
+  cameraId: string | undefined
 }
 
 export const initialCalibRunStats: CalibRunStats = {
@@ -96,7 +100,7 @@ export function CalibrationRunProvider(props: ParentProps) {
       return
     }
     setLatestCalibration(result, {
-      validSolveFrameCount: countValidSolveFrames(run().framePool),
+      validSolveFrameCount: countValidSolveFrames(run().framePool, videoFrameSize()),
       video: videoFrameSize(),
       framePool: run().framePool,
     })
@@ -105,6 +109,12 @@ export function CalibrationRunProvider(props: ParentProps) {
   let pendingVersion = 0
   let lastSolveKey: string | undefined
 
+  /** Discard any solve already in flight; its result no longer describes this run. */
+  const invalidatePendingSolve = () => {
+    pendingVersion += 1
+    lastSolveKey = undefined
+  }
+
   const updateCalib = async (
     collection: Collection,
     framePool: CalibrationFrameObservation[],
@@ -112,13 +122,16 @@ export function CalibrationRunProvider(props: ParentProps) {
     cameraId: string | undefined,
   ) => {
     if (collection === 'idle') {
-      lastSolveKey = undefined
+      invalidatePendingSolve()
       setCalib(undefined)
       return
     }
-    const usableFrames = filterFramesForSolve(framePool)
+    const usableFrames = filterFramesForSolve(framePool, frameSize)
     if (usableFrames.length < 3) {
-      lastSolveKey = undefined
+      // The frame set changed (for example a camera-resolution switch filtered
+      // the old frames out). Any solve still in flight describes different
+      // input now, so it must not publish a result.
+      invalidatePendingSolve()
       setCalib({ kind: 'error', reason: 'too-few-views' })
       return
     }
@@ -127,7 +140,7 @@ export function CalibrationRunProvider(props: ParentProps) {
     }
 
     const config = targetConfig()
-    const solveKey = `${collection}|${cameraId}|${JSON.stringify(config)}|${usableFrames
+    const solveKey = `${collection}|${cameraId}|${frameSize.width}x${frameSize.height}|${JSON.stringify(config)}|${usableFrames
       .map((frame) => `${frame.frameId}:${frame.points.length}`)
       .join(',')}`
     if (solveKey === lastSolveKey) {
@@ -138,12 +151,11 @@ export function CalibrationRunProvider(props: ParentProps) {
     const currentVersion = ++pendingVersion
     try {
       setSolveInFlight((count) => count + 1)
-      const result = await calibApi.solveCalibration(
-        [...targetModel().objectPoints],
-        usableFrames,
-        frameSize,
-        cameraId,
-      )
+      // Do not clone the full-resolution gray frames into the worker: the
+      // solver only reads point correspondences, and the frame pool can hold
+      // megabytes of image data that stays on this thread for export.
+      const solveFrames = usableFrames.map(({ frameId, points }) => ({ frameId, points }))
+      const result = await calibApi.solveCalibration([...targetModel().objectPoints], solveFrames, frameSize, cameraId)
       if (currentVersion === pendingVersion) {
         setCalib(result.kind === 'ok' ? { ...result, targetConfig: config } : result)
       }
@@ -157,21 +169,45 @@ export function CalibrationRunProvider(props: ParentProps) {
     }
   }
 
+  /**
+   * `run()` is a new object for every per-frame stats tick, but stats cannot
+   * change a solve. This memo suppresses those notifications so the solve key
+   * is not rebuilt (and the frame list not rescanned) on every camera frame.
+   */
+  const solveInput = createMemo<CalibrationSolveInput>(
+    () => {
+      const current = run()
+      return {
+        collection: current.collection,
+        framePool: current.framePool,
+        frameSize: videoFrameSize(),
+        cameraId: selectedCameraDeviceId(),
+      }
+    },
+    {
+      equals: (previous, next) =>
+        previous.collection === next.collection &&
+        previous.framePool === next.framePool &&
+        previous.frameSize?.width === next.frameSize?.width &&
+        previous.frameSize?.height === next.frameSize?.height &&
+        previous.cameraId === next.cameraId,
+    },
+  )
+
   createEffect(
-    () => ({ r: run(), frameSize: videoFrameSize(), cameraId: selectedCameraDeviceId() }),
-    ({ r, frameSize, cameraId }) => {
+    () => solveInput(),
+    ({ collection, framePool, frameSize, cameraId }) => {
       if (frameSize) {
-        void updateCalib(r.collection, r.framePool, frameSize, cameraId)
+        void updateCalib(collection, framePool, frameSize, cameraId)
       }
     },
   )
 
   const isSolving = createMemo(() => solveInFlight() > 0)
-  const calibrationSessionActive = createMemo(
-    () => run().collection === 'running' || run().framePool.length > 0,
-  )
+  const calibrationSessionActive = createMemo(() => run().collection === 'running' || run().framePool.length > 0)
 
   const resetSession = () => {
+    invalidatePendingSolve()
     setCalib(undefined)
     setRun({
       collection: 'idle',
@@ -181,6 +217,7 @@ export function CalibrationRunProvider(props: ParentProps) {
   }
 
   const startSession = () => {
+    invalidatePendingSolve()
     setCalib(undefined)
     setRun({
       collection: 'running',
