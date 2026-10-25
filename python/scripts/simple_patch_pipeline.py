@@ -2,11 +2,11 @@
 """Simplified local-peak pipeline.
 
 Exact pipeline requested:
-  blurred input (sigma 0.8)
-  -> production histogram cuts restricted to the synthetic target mask
-  -> separate black/white support masks
-  -> 3x3 minima/maxima inside the corresponding mask
-  -> 10-term cubic fit on the 5x5 square around each candidate
+  raw high-pass input, blurred with sigma 1.0
+  -> production histogram cuts on the blurred image, restricted to the mask
+  -> separate raw high-pass black/white support masks
+  -> 3x3 minima/maxima of the blurred image inside each support mask
+  -> 10-term cubic fit on the 5x5 square around each candidate (edge-clamped)
   -> Newton stationary point; keep only a definite Hessian of the correct sign
   -> local-patch clustering per patch and per polarity, using peak + Hessian
      eigenvalues only
@@ -58,10 +58,12 @@ FEATURE_LABELS = ("peak", "lambda_1", "lambda_2")
 
 
 def _fit_cubic_5x5(image: np.ndarray, x: int, y: int) -> dict[str, Any] | None:
-    """Fit the 10-term cubic on the 5x5 square and Newton-refine its extremum."""
+    """Fit the 10-term cubic on the 5x5 square and Newton-refine its extremum.
+
+    Edge candidates are allowed. Their 5x5 window repeats the nearest edge
+    pixel, matching the GPU's clamped reads.
+    """
     height, width = image.shape
-    if x < 2 or y < 2 or x >= width - 2 or y >= height - 2:
-        return None
     dx = np.asarray([side for side in (-2, -1, 0, 1, 2)], dtype=np.float64)
     grid_x, grid_y = np.meshgrid(dx, dx, indexing="xy")
     u = grid_x.ravel() / 2.0
@@ -81,7 +83,9 @@ def _fit_cubic_5x5(image: np.ndarray, x: int, y: int) -> dict[str, Any] | None:
         ],
         axis=1,
     )
-    values = image[y - 2 : y + 3, x - 2 : x + 3].reshape(-1).astype(np.float64)
+    xs = np.clip(np.arange(x - 2, x + 3), 0, width - 1)
+    ys = np.clip(np.arange(y - 2, y + 3), 0, height - 1)
+    values = image[np.ix_(ys, xs)].reshape(-1).astype(np.float64)
     try:
         coefficients, *_ = np.linalg.lstsq(design, values, rcond=None)
     except np.linalg.LinAlgError:
@@ -146,6 +150,7 @@ def _fit_cubic_5x5(image: np.ndarray, x: int, y: int) -> dict[str, Any] | None:
         "peak": peak,
         "eigenvalue_1": float(eigenvalues[0]),
         "eigenvalue_2": float(eigenvalues[1]),
+        "hessian_xy": float(physical_hessian[0, 1]),
     }
 
 
@@ -185,10 +190,8 @@ def _candidates(
         local = cv2.erode(image, kernel, borderType=cv2.BORDER_REPLICATE)
         extrema = image <= local + 1e-7
     extrema &= support
-    extrema[:2, :] = False
-    extrema[:, :2] = False
-    extrema[-2:, :] = False
-    extrema[:, -2:] = False
+    # No border crop: every pixel in the blob class is eligible. The 3x3
+    # support is replicate-padded and the 5x5 fit clamps at the edge.
     return _plateau_representatives(extrema, image)
 
 
@@ -359,7 +362,9 @@ def run(args: argparse.Namespace) -> None:
     )
 
     cuts = histogram_cuts(blurred, cnn_mask)
-    black_mask, white_mask = segment(blurred, cnn_mask, cuts)
+    # The blob class comes from the raw high-pass image, matching the ROI Lab
+    # "Blobs" view. Only the 3x3 extrema and cubic fit use the blurred image.
+    black_mask, white_mask = segment(gray, cnn_mask, cuts)
     if not black_mask.any() or not white_mask.any():
         raise SystemExit(
             f"histogram masks are empty: cuts={cuts['black_cut']}/{cuts['white_cut']} "
@@ -640,7 +645,7 @@ def main() -> None:
     parser.add_argument("--case", default="oblique_1280x960")
     parser.add_argument("--sample", type=int, default=0)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--blur-sigma", type=float, default=0.8)
+    parser.add_argument("--blur-sigma", type=float, default=1.0)
     parser.add_argument("--hessian-epsilon", type=float, default=1e-7)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     run(parser.parse_args())

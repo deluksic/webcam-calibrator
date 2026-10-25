@@ -119,7 +119,13 @@ uv run python scripts/fetch_office_images.py --count 24
 uv run python scripts/preview_roi_dataset.py --samples 6
 uv run python scripts/train_roi.py --samples 500 --epochs 20
 uv run python scripts/roi_ablation.py --samples 500 --epochs 20
+uv run python scripts/evaluate_roi_views.py notebooks/blob_lab_data/roi_net_best.pt
 ```
+
+The current browser checkpoint uses the close-up-heavy production recipe:
+3,000 composites, 80 epochs, batch size 32, `(16,24,24,24)` channels at 256×192,
+and `--full-view-fraction 0.60`. See
+[`docs/roi-full-view-report.md`](../docs/roi-full-view-report.md).
 
 Training uses horizontal flips and a false-negative-weighted BCE + Dice +
 Tversky loss: missing target pixels is much worse than including a little
@@ -161,7 +167,7 @@ Unannotated camera frames with the target present go in a single folder,
 ```
 
 The loader cover-resizes/center-crops each pair to 640x480, adds it to the
-training split only, and repeats it `--real-positive-repeat` times (default 4).
+training split only, and repeats it `--real-positive-repeat` times (default 8).
 Annotate with the built-in polygon tool:
 
 ```bash
@@ -202,39 +208,43 @@ The
 training defaults now use `--natural-fraction 0.45` and a separate
 `--negative-dir`; positives still composite onto the office backgrounds.
 
-The larger `(16,24,24,24)` model was trained at 256×192 with far targets
-(15–75% width), reduced scale-aware blur, 2,200 samples, 100 epochs, batch size
-32, plus the real-positive frames repeated 8×. On the mixed test split (174
-positives / 156 negatives) it reached 0.997 center containment, 0.0000 negative
-mask area, and 100% presence accuracy. Pure negatives were drawn from all photo pools (offices,
-user backgrounds, walls, art, and synthetic noise). On 120
-held-out wall/art negatives the previous checkpoint produced mask area 0.0319
-and 68.3% presence accuracy; the retrained family reduced mask area to
-~0.00006 and raised presence accuracy to ~89% before the final run.
+The browser checkpoint is the `(16,24,24,24)` family at 256×192. The previous
+checkpoint (2,200 samples, 100 epochs, batch size 32) was strong on far,
+close-up, and cropped targets, but predicted almost nothing once the marker
+pattern covered the whole frame. The current checkpoint adds a dedicated
+full-view branch and was trained on 3,000 composites for 80 epochs at batch
+size 32 with the real-positive frames repeated 8×. On a fresh 600-frame
+held-out view suite it raised full-view center containment from 0.078 to 1.000
+and overall containment from 0.564 to 0.995; negative mask area stayed at
+2.2×10⁻⁵. See [`docs/roi-full-view-report.md`](../docs/roi-full-view-report.md)
+for the per-branch table and the exact training command.
 
-### Close-up / blur / rotation augmentation
+Training defaults now use `--natural-fraction 0.45` and a separate
+`--negative-dir`; positives still composite onto the office backgrounds.
 
-The current ROI dataset also samples:
+### Close-up / full-view / blur / rotation augmentation
 
-- positive target widths from 15% to 90% of the frame, including far targets
-  at 15–30% width,
-- 30% close-ups at 70–90% of the frame width,
-- 30% cropped targets: one side is pushed past the frame edge, with a
+The current ROI dataset samples:
+
+- regular positive target widths from 15% to 72% of the frame, including far
+  targets at 15–30% width,
+- 20% close-ups at 75–95% of the canvas width,
+- 20% cropped targets: one side is pushed past the frame edge, with a
   minimum 8% of the target still visible,
+- full-view close-ups (`--full-view-fraction 0.60` of non-cropped positives):
+  the marker hull targets 95–115% of the frame width and at least 80% of its
+  height, with ±3.5% center jitter. The hull is fitted directly instead of the
+  padded canvas, so the browser's 10% padding cannot shrink the target,
 - heavy defocus blur (`sigma` 0.6–1.8) on 20% of positives,
 - full-frame Gaussian blur on 15% of positives,
 - blur sigma scaled by target width, so far targets receive much less blur,
 - canvas aspects 4:3, 16:9, and 1:1,
 - in-plane roll from −180° to +180°.
 
-For cropped scenes the training mask is clipped at the image border and
-touches the edge, so the model cannot learn a background margin there.
-
-This is deliberately harder than the earlier easy set. On a mixed hard test
-with cropped targets, the current 27.5k checkpoint reached 0.932 overall
-containment; cropped targets 0.965 vs 0.817 for the previous checkpoint,
-close-ups 0.986 vs 0.881, heavy blur 0.891 vs 0.838, and non-4:3 canvases
-0.901 vs 0.878. On the real phone photo the target mask remains bright.
+For cropped and full-view scenes the training mask is clipped at the image
+border and can touch multiple edges, so the model cannot rely on a guaranteed
+background margin. The retrained checkpoint keeps close-up, cropped, and
+regular containment at 0.978–1.000 while fixing the full-view cases.
 
 False-negative weighting matters: at 320×240 the 49k model went from 0.975
 containment at `fn=1` to 0.990 at `fn=5` and 0.991 at `fn=10`; the 194k model
@@ -245,8 +255,9 @@ A single-frame MPS timing is ~1–2 ms for all variants and is dispatch-bound,
 so GFLOPs is the useful scaling metric. At 0.064 GFLOPs/frame, the `tiny`
 model is ~3.9 GFLOPs/s at 60 fps.
 
-The recommended checkpoint is `notebooks/blob_lab_data/roi_net_best.pt`
-(`tiny`, 27,542 parameters, 192×144 input, fn=10). The ablation JSONs are
+The recommended browser checkpoint is
+`notebooks/blob_lab_data/roi_net_best.pt` (`(16,24,24,24)`, 73,986 parameters,
+256×192 input, fn=10, Tversky=1.0). The ablation JSONs are
 `roi_ablation.json`, `roi_fn_ablation.json`, `roi_size_ablation.json`, and
 `roi_size_640.json`.
 
@@ -372,7 +383,11 @@ set the local clustered filter is intended to clean up.
 ## Simplified patch pipeline
 
 A stripped-down pipeline using the production histogram cuts and the synthetic
-target mask:
+target mask. The black/white **candidate class** is the raw high-pass signal
+(the same signal as the browser "Blobs" view); the histogram cuts are computed
+on the σ1.0 blurred image, and the 3×3 extrema and 5×5 cubic fit also run on the
+blurred image. The cut walk uses a 1.9% gray-peak noise floor (stricter than the
+earlier 2%). There is no border crop; edge windows are clamped.
 
 ```bash
 uv run python scripts/simple_patch_pipeline.py
@@ -380,10 +395,8 @@ uv run python scripts/simple_patch_pipeline.py
 
 It writes `refined_candidates.png`, `cluster_patches.png`,
 `feature_histograms_per_patch.png`, and `summary.json` under
-`notebooks/blob_lab_data/simple_patch_pipeline/`. The candidate stage finds
-456/476 visible points with zero false positives on the oblique 1280x960
-synthetic frame; the current per-patch K=2 majority cluster filter is diagnostic
-only and currently removes true markers. See
+`notebooks/blob_lab_data/simple_patch_pipeline/`. The current per-patch K=2
+majority cluster filter is diagnostic only and can remove true markers. See
 [`docs/simple-patch-pipeline-report.md`](../docs/simple-patch-pipeline-report.md).
 
 ### Neighbour-consistency filter
@@ -392,13 +405,12 @@ only and currently removes true markers. See
 uv run python scripts/simple_neighbor_pipeline.py
 ```
 
-Compares each accepted point with its 20 nearest same-polarity neighbours and
-keeps it only if `peak`, `λ1`, and `λ2` are each within the neighbour
-mean ± σ (default 4.0). At 3σ it removes 9 true markers on the clean synthetic
-set; at 4σ it removes none. On `real_positive_01` at 4σ it removes only the one
-non-marker blot, leaving 476 kept points; on the closer `real_positive_02` it
-removes 2 black reflection outliers, leaving 431. Per-point neighbour histograms
-with the mean, ±σ band, and the point value are written under `per_point/`. See
+Compares each accepted point with its 40 nearest same-polarity neighbours. The
+features are `peak`, `λ1/c`, `λ2/c`, and `hxy/c`, where `c = |peak - 0.5|`; the
+peak is a hard gate and at least two of the three Hessian features must pass the
+accept-σ test (default 4.0). Neighbour outliers are trimmed at 2σ once, then the
+statistics are recomputed. Per-point neighbour histograms with the mean, ±σ
+band, and the point value are written under `per_point/`. See
 [`docs/simple-neighbor-filter-report.md`](../docs/simple-neighbor-filter-report.md).
 
 Real-photo runs with the ONNX ROI and production-style high-pass:

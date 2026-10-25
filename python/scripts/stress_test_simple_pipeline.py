@@ -5,8 +5,9 @@ Synthetic: the 14-case angle suite, clean and camera-sharpened, with exact truth
 Real: the two annotated real positives and the unannotated real hex photo.
 Negatives: office/wall images with no target.
 
-The candidate stage is run once per example; the neighbour filter is evaluated at
-20 and 40 same-polarity neighbours, trim 2 sigma, accept 4 sigma.
+The candidate stage is run once per example (raw high-pass blob class, sigma 1.0
+blur, 3x3 extrema, 5x5 edge-clamped cubic, no border crop). The neighbour filter
+is evaluated at 20 and 40 same-polarity neighbours, trim 2 sigma, accept 4 sigma.
 """
 
 from __future__ import annotations
@@ -71,14 +72,16 @@ def _candidate_stage(processed: np.ndarray, mask: np.ndarray) -> CandidateResult
     blurred = cv2.GaussianBlur(
         processed,
         (0, 0),
-        sigmaX=0.8,
-        sigmaY=0.8,
+        sigmaX=1.0,
+        sigmaY=1.0,
         borderType=cv2.BORDER_REFLECT,
     )
     if not mask.any():
         return CandidateResult(raw=0, accepted=[], saddles=0, failures=0)
     cuts = histogram_cuts(blurred, mask)
-    black_mask, white_mask = segment(blurred, mask, cuts)
+    # Raw high-pass class; the blurred image only supplies the 3x3 extrema and
+    # the 5x5 fit. No border crop.
+    black_mask, white_mask = segment(processed, mask, cuts)
     raw_candidates: list[dict[str, Any]] = []
     for polarity, support in ((0, black_mask), (1, white_mask)):
         for x, y in _candidates(blurred, support, polarity):

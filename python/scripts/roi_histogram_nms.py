@@ -78,7 +78,12 @@ def roi_mask_from_onnx(image_path: Path, model_path: Path = ONNX_MODEL) -> np.nd
     return full >= 0.5
 
 
-def histogram_cuts(gray: np.ndarray, roi: np.ndarray, noise_floor_fraction: float = 0.02) -> dict:
+def histogram_cuts(gray: np.ndarray, roi: np.ndarray, noise_floor_fraction: float = 0.019) -> dict:
+    """Find black/white cuts at a fraction of the gray peak.
+
+    Lower ``noise_floor_fraction`` moves both cuts away from gray, making the
+    blob classes stricter.
+    """
     values = np.clip(np.floor(gray[roi] * 255.0 + 0.5), 0, 255).astype(np.int32)
     hist = np.bincount(values, minlength=256).astype(np.float64)
     kernel = np.array([1, 4, 6, 4, 1], dtype=np.float64)

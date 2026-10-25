@@ -12,7 +12,8 @@ ONNX ROI mask + mask-aware background
   → GPU: Gaussian σ1.0 blur of the flattened luma
   → GPU: 256-bin histogram of the blurred image, masked
   → CPU: black/white cuts from the blurred histogram
-  → GPU: 3×3 extrema inside the black/white support masks
+  → GPU: raw high-pass black/white classification (the "Blobs" view)
+  → GPU: 3×3 extrema of the blurred image inside that class
   → GPU: 5×5 10-term cubic fit, Newton peak, physical Hessian
   → GPU readback: { x, y, polarity, peak, λ1, λ2, hxy }
   → worker: same-polarity kNN, trim 2σ, recompute, accept 4σ
@@ -25,9 +26,16 @@ the GPU.
 ## Candidate stage
 
 - Blur: 9-tap OpenCV `GaussianBlur(0, 0, sigmaX=1.0)` kernel, `BORDER_REFLECT`.
-- Histogram: blurred value, masked with bilinear mask sampling.
-- Extrema: 3×3 minima for black, maxima for white; one representative per
-  equal-valued plateau; 2 px border excluded.
+- Histogram: blurred value, masked with bilinear mask sampling. The cut walk
+  stops at 1.9% of the gray peak (down from 2%), so both cuts sit slightly
+  farther from gray.
+- Blob class: raw high-pass value (the same signal as the ROI Lab "Blobs"
+  view), tested against the cuts from the blurred histogram. The blurred value
+  is not re-tested here.
+- Extrema: 3×3 minima for black, maxima for white on the blurred image; one
+  representative per equal-valued plateau. All pixels are eligible, including
+  the border. The 3×3 test only considers in-frame neighbours; the 5×5 fit
+  clamps its reads at the frame edge.
 - Fit: fixed 25×10 design `[1,u,v,u²,uv,v²,u³,u²v,uv²,v³]`, `u=dx/2`,
   `v=dy/2`; least squares is a precomputed 10×25 pseudo-inverse.
 - Newton: 25 iterations, step limit 0.5, f32-safe convergence `1e-6`,
@@ -40,16 +48,16 @@ the GPU.
 
 `readPeaks()` copies a 16-byte counter header plus `4096 × 32` records:
 
-| field | type |
-|---|---|
-| `x` | f32 |
-| `y` | f32 |
-| `peak` | f32 |
-| `lambda1` | f32 |
-| `lambda2` | f32 |
-| `hxy` | f32 |
-| `polarity` | u32 |
-| padding | u32 |
+| field      | type |
+| ---------- | ---- |
+| `x`        | f32  |
+| `y`        | f32  |
+| `peak`     | f32  |
+| `lambda1`  | f32  |
+| `lambda2`  | f32  |
+| `hxy`      | f32  |
+| `polarity` | u32  |
+| padding    | u32  |
 
 The header stores candidate, refined, and rejected counts. Only definite-Hessian
 peaks are read back; saddles and fit failures stay in the GPU reject buffer for
@@ -96,9 +104,11 @@ the optional overlay.
 - `pnpm type`, `pnpm test`, `pnpm build`.
 - ROI Lab “Peaks” shows the pre-filter candidates; “Identity” shows the filtered
   graph.
-- Real-photo counts at σ1.0 with the current rule (Python reference):
-  `real_positive_01` 473 / 476 kept; `real_positive_02` 419 / 423;
-  `roi_real_01` 420 / 420.
+- Python reference, current raw-class/no-border candidate stage:
+  - synthetic `oblique_1280x960` sample 0: 481 accepted, 455 kept
+    (455 TP / 0 FP / 21 FN at 1 px);
+  - `real_positive_01`: 477 accepted, 473 kept;
+  - `real_positive_02`: 426 accepted, 419 kept.
 
 ## ROI Lab inspector
 

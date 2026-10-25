@@ -64,7 +64,7 @@ const VIEW_OPTIONS: readonly ViewOption[] = [
   { mode: 'input', label: 'Input', hint: 'Normalized grayscale fed to the ROI model' },
   { mode: 'mask', label: 'Mask', hint: 'Raw ROI mask prediction' },
   { mode: 'blobs', label: 'Blobs', hint: 'Histogram-segmented black and white blobs inside the mask' },
-  { mode: 'peaks', label: 'Peaks', hint: 'Refined 5×5 cubic peaks, before the CPU 4σ neighbour filter' },
+  { mode: 'peaks', label: 'Peaks', hint: 'Refined 5×5 cubic peaks, before the worker 4σ neighbour filter' },
   { mode: 'identity', label: 'Identity', hint: 'Observed graph with stable design identities' },
 ]
 
@@ -805,7 +805,7 @@ export const RoiLabView: Component = () => {
           Histogram-driven peak detection inside the target mask. The tiny U-Net is a 74.0k-parameter ONNX model at 256
           px wide, with the height following the camera aspect. A full-resolution histogram of the blurred image picks
           black/gray/white cuts, then 3×3 extrema are refined with a 5×5 cubic fit and a definite-Hessian test. Peaks
-          shows the refined candidates before the CPU 4σ same-polarity neighbour filter; Identity shows the observed
+          shows the refined candidates before the worker 4σ same-polarity neighbour filter; Identity shows the observed
           graph and stable design-ID colors after that filter.
         </p>
         <Show when={DEMO_MODE}>
@@ -845,7 +845,7 @@ export const RoiLabView: Component = () => {
             ))}
           </div>
           <p class={styles.viewHint}>
-            Identity: design IDs · Peaks: refined candidates before the CPU filter; click one to inspect.
+            Identity: design IDs · Peaks: refined candidates before the worker filter; click one to inspect.
           </p>
         </div>
         <PeakInspector detail={selectedPeakDetail()} />

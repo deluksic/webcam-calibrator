@@ -18,20 +18,25 @@ the manifest and scripts.
 
 ## One-time release setup
 
-Create a GitHub release (for example tag `models-v1`) and attach
+Create a GitHub release (for example tag `models-v2`) and attach
 `roi_tiny_no_concat.onnx`:
 
 ```bash
-gh release create models-v1 public/models/roi_tiny_no_concat.onnx \
-  --title "ROI model v1" \
-  --notes "roi_tiny_no_concat.onnx sha256 8a15e30fcc63d795a64e04cdfa0759cbab7694cb40c1c0d3cc4ed617168aaf31"
+gh release create models-v2 public/models/roi_tiny_no_concat.onnx \
+  --title "ROI model v2 (full-view close-ups)" \
+  --notes "roi_tiny_no_concat.onnx sha256 1207adee2f7fee9bc8caa67483bfaa75902abc112ff57e441fdf1422e1a2641e"
 ```
 
 The manifest URL is:
 
 ```text
-https://github.com/deluksic/webcam-calibrator/releases/download/models-v1/roi_tiny_no_concat.onnx
+https://github.com/deluksic/webcam-calibrator/releases/download/models-v2/roi_tiny_no_concat.onnx
 ```
+
+The current manifest points at `models-v2`. The release asset must be uploaded
+under that tag before a fresh checkout or CI run can fetch the weights; an
+existing local `public/models/roi_tiny_no_concat.onnx` that matches the
+manifest hash is reused without a download.
 
 For a fork, update `url` in `model-manifest.json` (or set `MODEL_ASSET_URL`).
 Release assets are only friction-free without authentication for a public

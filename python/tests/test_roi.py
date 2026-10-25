@@ -53,6 +53,7 @@ class RoiDatasetTest(unittest.TestCase):
                 natural_fraction=0.0,
                 natural_dir=None,
                 target_width_fraction=(0.65, 0.65),
+                full_view_fraction=0.0,
                 mask_mode="hull",
                 mask_margin=0.03,
                 randomize_colors=False,
@@ -90,6 +91,7 @@ class RoiDatasetTest(unittest.TestCase):
                 natural_fraction=0.0,
                 natural_dir=None,
                 target_width_fraction=(0.65, 0.65),
+                full_view_fraction=0.0,
                 target_gray_range=(0.4, 0.4),
                 randomize_colors=False,
                 seed=6,
@@ -126,6 +128,7 @@ class RoiDatasetTest(unittest.TestCase):
                 samples=1,
                 natural_fraction=0.0,
                 natural_dir=None,
+                full_view_fraction=0.0,
                 closeup_fraction=1.0,
                 closeup_width_fraction=(0.8, 0.8),
                 heavy_blur_fraction=1.0,
@@ -147,6 +150,50 @@ class RoiDatasetTest(unittest.TestCase):
         self.assertLess(meta["frame_blur_sigma"], 0.8)
         self.assertIn(round(meta["canvas_aspect"], 3), (1.333, 1.778))
 
+    def test_full_view_target_covers_frame(self):
+        layout = build_hex_target_layout(
+            width_px=320,
+            height_px=240,
+            columns=4,
+            points_per_edge=4,
+            marker_scale=0.45,
+            color_seed=1,
+        )
+        dataset = generate_roi_dataset(
+            RoiDatasetConfig(
+                output_width=160,
+                output_height=120,
+                samples=3,
+                natural_fraction=0.0,
+                natural_dir=None,
+                cropped_fraction=0.0,
+                closeup_fraction=0.0,
+                full_view_fraction=1.0,
+                full_view_marker_width_fraction=(1.05, 1.05),
+                full_view_center_jitter=0.0,
+                canvas_aspects=(4 / 3,),
+                randomize_colors=False,
+                seed=12,
+            ),
+            layout,
+        )
+        self.assertEqual(len(dataset), 3)
+        for index, meta in enumerate(dataset.metadata):
+            self.assertTrue(meta["full_view"])
+            self.assertFalse(meta["cropped"])
+            self.assertFalse(meta["closeup"])
+            self.assertGreaterEqual(meta["marker_width_fraction"], 1.04)
+            self.assertGreaterEqual(meta["marker_height_fraction"], 0.79)
+            self.assertGreater(meta["mask_area_fraction"], 0.55)
+            mask = dataset.masks[index, :, :, 0] > 0.5
+            borders = (
+                bool(mask[0].any()),
+                bool(mask[-1].any()),
+                bool(mask[:, 0].any()),
+                bool(mask[:, -1].any()),
+            )
+            self.assertGreaterEqual(sum(borders), 3)
+
     def test_cropped_target_is_visible_and_metadata_marked(self):
         layout = build_hex_target_layout(
             width_px=320,
@@ -163,6 +210,7 @@ class RoiDatasetTest(unittest.TestCase):
                 samples=3,
                 natural_fraction=0.0,
                 natural_dir=None,
+                full_view_fraction=0.0,
                 cropped_fraction=1.0,
                 cropped_width_fraction=(0.8, 0.8),
                 cropped_min_visible_fraction=0.02,

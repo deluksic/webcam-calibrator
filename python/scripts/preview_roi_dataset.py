@@ -33,7 +33,7 @@ def _srgb(image: np.ndarray) -> np.ndarray:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--samples", type=int, default=6)
+    parser.add_argument("--samples", type=int, default=9)
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--output-width", type=int, default=640)
     parser.add_argument("--output-height", type=int, default=480)
@@ -62,9 +62,12 @@ def main() -> None:
             negative_dir=str(args.negative_dir),
             background_dir=str(NATURAL_DIR),
             target_width_fraction=(0.15, 0.72),
-            closeup_fraction=0.35,
-            closeup_width_fraction=(0.70, 0.90),
-            cropped_fraction=0.35,
+            closeup_fraction=0.20,
+            closeup_width_fraction=(0.75, 0.95),
+            full_view_fraction=0.60,
+            full_view_marker_width_fraction=(0.95, 1.15),
+            full_view_min_marker_height_fraction=0.80,
+            cropped_fraction=0.20,
             cropped_width_fraction=(0.45, 0.90),
             heavy_blur_fraction=0.20,
             frame_blur_fraction=0.15,
@@ -117,6 +120,8 @@ def main() -> None:
             f"target_width={meta.get('target_width_px', 0):.1f}px",
             f"board_gray={meta.get('board_gray', 0):.2f}",
             f"closeup={meta.get('closeup', False)}",
+            f"full_view={meta.get('full_view', False)}",
+            f"marker_width={meta.get('marker_width_fraction', 0):.2f}",
             f"cropped={meta.get('cropped', False)}",
             f"visible={meta.get('visible_fraction', 0):.2f}",
             f"blur={meta.get('blur_sigma', 0):.2f}",

@@ -1,4 +1,10 @@
-# Simplified local-peak pipeline — current result
+# Simplified local-peak pipeline — historical result
+
+> **Historical.** This report predates the raw-high-pass candidate class and the
+> removal of the 2 px border crop. The current pipeline is documented in
+> [`gpu-refined-peak-pipeline.md`](gpu-refined-peak-pipeline.md). The current
+> patch script uses σ1.0, raw-high-pass black/white masks, no border crop, and
+> edge-clamped 5×5 fits.
 
 One synthetic oblique 1280×960 frame. The synthetic target mask is used directly;
 no ONNX run.

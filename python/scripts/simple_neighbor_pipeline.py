@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Simplified pipeline with a per-point neighbour-consistency filter.
 
-Candidate stage is unchanged from the simplified pipeline:
-  histogram masks -> 3x3 extrema -> 5x5 cubic -> definite-Hessian filter.
+Candidate stage:
+  raw high-pass blob class -> 3x3 extrema of the blurred image -> 5x5 cubic
+  -> definite-Hessian filter. No border crop; edge windows are clamped.
 
-Instead of patches/clustering, each accepted point is compared with its 20
-nearest neighbours **of the same polarity** in image space.  For each feature
-(peak, lambda_1, lambda_2) the point must lie within
-    mean_neighbours +/- 3 * std_neighbours.
+Instead of patches/clustering, each accepted point is compared with its nearest
+same-polarity neighbours in image space. Features are peak, lambda_1/c,
+lambda_2/c, and hxy/c, where c = abs(peak - 0.5). The peak must pass the
+accept_sigma test and at least two of the three Hessian features must pass.
+This matches the browser's 40-neighbour filter.
 """
 
 from __future__ import annotations
@@ -55,15 +57,25 @@ ROOT = Path(__file__).resolve().parents[2]
 ONNX_MODEL = ROOT / "public" / "models" / "roi_tiny_no_concat.onnx"
 DEFAULT_OUT = ROOT / "python" / "notebooks" / "blob_lab_data" / "simple_neighbor_pipeline"
 
-FEATURE_KEYS = ("peak", "eigenvalue_1", "eigenvalue_2")
-FEATURE_LABELS = ("peak", "lambda_1", "lambda_2")
+FEATURE_KEYS = ("peak", "eigenvalue_1", "eigenvalue_2", "hessian_xy")
+FEATURE_LABELS = ("peak", "lambda_1/c", "lambda_2/c", "hxy/c")
+PEAK_FEATURE = 0
+MIN_PASSING_HESSIAN_FEATURES = 2
+CONTRAST_FLOOR = 1e-6
+
+
+def _feature_values(point: dict[str, Any]) -> list[float]:
+    scale = max(abs(float(point["peak"]) - 0.5), CONTRAST_FLOOR)
+    return [
+        float(point["peak"]),
+        float(point["eigenvalue_1"]) / scale,
+        float(point["eigenvalue_2"]) / scale,
+        float(point["hessian_xy"]) / scale,
+    ]
 
 
 def _features(accepted: list[dict[str, Any]]) -> np.ndarray:
-    return np.asarray(
-        [[point[key] for key in FEATURE_KEYS] for point in accepted],
-        dtype=np.float64,
-    )
+    return np.asarray([_feature_values(point) for point in accepted], dtype=np.float64)
 
 
 def _neighbor_filter(
@@ -136,7 +148,9 @@ def _neighbor_filter(
             neighbour_mean_initial[global_index] = mean_initial
             neighbour_std_initial[global_index] = std_initial
             inside = np.abs(z) <= float(sigma)
-            if not inside.all():
+            peak_pass = bool(inside[PEAK_FEATURE])
+            hessian_passing = int(inside[PEAK_FEATURE + 1 :].sum())
+            if not (peak_pass and hessian_passing >= MIN_PASSING_HESSIAN_FEATURES):
                 polarity_keep[local_index] = False
                 for feature_index, key in enumerate(FEATURE_LABELS):
                     if not inside[feature_index]:
@@ -366,7 +380,7 @@ def _plot_features(
     sigma: float,
 ) -> None:
     features = _features(accepted)
-    fig, axes = plt.subplots(2, 3, figsize=(11.0, 6.0))
+    fig, axes = plt.subplots(2, 4, figsize=(14.0, 6.0))
     for column, (key, label) in enumerate(zip(FEATURE_KEYS, FEATURE_LABELS)):
         values = features[:, column]
         kept_values = values[keep]
@@ -409,7 +423,7 @@ def _plot_features(
         axis.axvline(sigma, color="#d62728", linestyle="--", linewidth=1.0)
         axis.set_title(f"{label} · neighbour z-score", fontsize=8)
         axis.grid(alpha=0.2)
-    fig.suptitle(f"Per-point neighbour test (20 same-polarity neighbours, ±3σ)", fontsize=10)
+    fig.suptitle(f"Per-point neighbour test (same-polarity neighbours, ±{sigma:g}σ)", fontsize=10)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -428,7 +442,7 @@ def _plot_point_feature(axis, index, feature_index, accepted, result, sigma):
     sample = values[:, feature_index]
     mean = float(result["neighbour_mean"][index, feature_index])
     std = float(result["neighbour_std"][index, feature_index])
-    value = float(point[FEATURE_KEYS[feature_index]])
+    value = float(_feature_values(point)[feature_index])
     trim_mask = result["trim_masks"][index]
     trimmed = sample[~trim_mask[:, feature_index]] if trim_mask is not None else np.asarray([])
     low = float(np.min(np.concatenate([sample, [value]])))
@@ -474,15 +488,17 @@ def _plot_per_point(
     def make_figure(indices: list[int], name: str) -> None:
         if not indices:
             return
-        fig, axes = plt.subplots(len(indices), 3, figsize=(13.0, 2.6 * len(indices)), squeeze=False)
+        fig, axes = plt.subplots(
+            len(indices), len(FEATURE_LABELS), figsize=(16.0, 2.6 * len(indices)), squeeze=False
+        )
         for row, index in enumerate(indices):
-            for column in range(3):
+            for column in range(len(FEATURE_LABELS)):
                 _plot_point_feature(axes[row, column], index, column, accepted, result, sigma)
             point = accepted[index]
             polarity = "white" if point["polarity"] == 1 else "black"
             failed = [
                 FEATURE_LABELS[column]
-                for column in range(3)
+                for column in range(len(FEATURE_LABELS))
                 if abs(float(result["z_scores"][index, column])) > sigma
             ]
             axes[row, 0].set_ylabel(
@@ -561,7 +577,10 @@ def run(args: argparse.Namespace) -> None:
         borderType=cv2.BORDER_REFLECT,
     )
     cuts = histogram_cuts(blurred, cnn_mask)
-    black_mask, white_mask = segment(blurred, cnn_mask, cuts)
+    # Candidate membership is the raw high-pass class, not a second test of the
+    # blurred value. The histogram cuts themselves still come from the blurred
+    # image. This matches the browser candidate stage.
+    black_mask, white_mask = segment(processed, cnn_mask, cuts)
     if not black_mask.any() or not white_mask.any():
         raise SystemExit(
             f"histogram masks are empty: cuts={cuts['black_cut']}/{cuts['white_cut']}"
@@ -613,8 +632,13 @@ def run(args: argparse.Namespace) -> None:
 
     sigma_scan = {}
     for candidate_sigma in (3.0, 3.5, 4.0, 4.5, 5.0):
-        failing = int(np.sum(np.nanmax(np.abs(filter_result["z_scores"]), axis=1) > candidate_sigma))
-        sigma_scan[f"{candidate_sigma:g}"] = failing
+        scan = _neighbor_filter(
+            accepted,
+            neighbours=args.neighbours,
+            sigma=candidate_sigma,
+            trim_sigma=args.trim_sigma,
+        )
+        sigma_scan[f"{candidate_sigma:g}"] = int((~scan["keep"]).sum())
 
     summary = {
         "case": spec_name,
@@ -633,6 +657,9 @@ def run(args: argparse.Namespace) -> None:
             "background": int(cuts["background"]),
             "black_cut": int(cuts["black_cut"]),
             "white_cut": int(cuts["white_cut"]),
+            "source": "blurred high-pass",
+            "candidate_class": "raw high-pass",
+            "border_margin": 0,
         },
         "neighbour_filter": {
             "neighbours": int(args.neighbours),
@@ -641,7 +668,9 @@ def run(args: argparse.Namespace) -> None:
             "sigma": float(args.sigma),
             "sigma_scan_removed": sigma_scan,
             "same_polarity": True,
-            "features": ["peak", "eigenvalue_1", "eigenvalue_2"],
+            "features": list(FEATURE_LABELS),
+            "peak_gate": True,
+            "min_passing_hessian_features": MIN_PASSING_HESSIAN_FEATURES,
             "rejection_by_feature": filter_result["rejection_by_feature"],
             "per_polarity": filter_result["per_polarity"],
         },
@@ -667,7 +696,7 @@ def run(args: argparse.Namespace) -> None:
                 "y": float(point["y"]),
                 "polarity": int(point["polarity"]),
                 "z": [float(value) for value in filter_result["z_scores"][index]],
-                "value": [float(point[key]) for key in FEATURE_KEYS],
+                "value": _feature_values(point),
                 "neighbour_mean": [
                     float(value) for value in filter_result["neighbour_mean"][index]
                 ],
@@ -773,9 +802,9 @@ def main() -> None:
     parser.add_argument("--residual-gain", type=float, default=1.0)
     parser.add_argument("--sample", type=int, default=0)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--blur-sigma", type=float, default=0.8)
+    parser.add_argument("--blur-sigma", type=float, default=1.0)
     parser.add_argument("--hessian-epsilon", type=float, default=1e-7)
-    parser.add_argument("--neighbours", type=int, default=20)
+    parser.add_argument("--neighbours", type=int, default=40)
     parser.add_argument("--trim-sigma", type=float, default=2.0)
     parser.add_argument("--sigma", type=float, default=4.0)
     parser.add_argument("--per-point-kept", type=int, default=3)

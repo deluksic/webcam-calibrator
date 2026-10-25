@@ -1,4 +1,9 @@
-# Simplified pipeline — stress test
+# Simplified pipeline — historical stress test
+
+> **Historical.** These counts predate the raw-high-pass candidate class, the
+> removal of the 2 px border crop, and the current 40-neighbour filter. The
+> current pipeline is documented in
+> [`gpu-refined-peak-pipeline.md`](gpu-refined-peak-pipeline.md).
 
 40 examples:
 

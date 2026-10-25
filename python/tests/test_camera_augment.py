@@ -209,6 +209,7 @@ class DatasetAugmentationTest(unittest.TestCase):
             samples=1,
             natural_fraction=0.0,
             target_width_fraction=(0.6, 0.6),
+            full_view_fraction=0.0,
             mask_mode="hull",
             target_gray_range=(0.5, 0.5),
             randomize_colors=False,

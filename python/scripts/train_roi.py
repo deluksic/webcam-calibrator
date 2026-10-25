@@ -14,7 +14,9 @@ from blob_lab import (
     BROWSER_TARGET_PADDING,
     CameraRanges,
     RoiDatasetConfig,
+    evaluate_roi_groups,
     load_real_positives,
+    load_roi_checkpoint,
     RoiNetConfig,
     build_hex_target_layout,
     evaluate_roi,
@@ -72,26 +74,40 @@ def _draw_preview(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--samples", type=int, default=500)
-    parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--samples", type=int, default=3000)
+    parser.add_argument("--epochs", type=int, default=60)
+    parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--output-width", type=int, default=640)
     parser.add_argument("--output-height", type=int, default=480)
-    parser.add_argument("--input-width", type=int, default=192)
-    parser.add_argument("--input-height", type=int, default=144)
-    parser.add_argument("--channels", default="tiny", help="preset or comma-separated c1,c2,c3,c4")
+    parser.add_argument("--input-width", type=int, default=256)
+    parser.add_argument("--input-height", type=int, default=192)
+    parser.add_argument(
+        "--channels",
+        default="16,24,24,24",
+        help="preset or comma-separated c1,c2,c3,c4",
+    )
     parser.add_argument("--mask-mode", choices=("hull", "canvas", "cells"), default="hull")
     parser.add_argument("--natural-fraction", type=float, default=0.45)
     parser.add_argument("--negative-dir", type=Path, default=NEGATIVE_DIR)
     parser.add_argument("--real-positive-dir", type=Path, default=REAL_POSITIVE_DIR)
-    parser.add_argument("--real-positive-repeat", type=int, default=4)
+    parser.add_argument("--real-positive-repeat", type=int, default=8)
     parser.add_argument("--target-min", type=float, default=0.15)
     parser.add_argument("--target-max", type=float, default=0.75)
-    parser.add_argument("--closeup-fraction", type=float, default=0.30)
-    parser.add_argument("--closeup-min", type=float, default=0.70)
-    parser.add_argument("--closeup-max", type=float, default=0.90)
-    parser.add_argument("--cropped-fraction", type=float, default=0.30)
+    parser.add_argument("--closeup-fraction", type=float, default=0.20)
+    parser.add_argument("--closeup-min", type=float, default=0.75)
+    parser.add_argument("--closeup-max", type=float, default=0.95)
+    parser.add_argument(
+        "--full-view-fraction",
+        type=float,
+        default=0.60,
+        help="fraction of non-cropped positives where the marker pattern fills the frame",
+    )
+    parser.add_argument("--full-view-min", type=float, default=0.95)
+    parser.add_argument("--full-view-max", type=float, default=1.15)
+    parser.add_argument("--full-view-min-height", type=float, default=0.80)
+    parser.add_argument("--full-view-jitter", type=float, default=0.035)
+    parser.add_argument("--cropped-fraction", type=float, default=0.20)
     parser.add_argument("--cropped-min", type=float, default=0.45)
     parser.add_argument("--cropped-max", type=float, default=0.90)
     parser.add_argument("--heavy-blur-fraction", type=float, default=0.20)
@@ -107,6 +123,15 @@ def main() -> None:
     parser.add_argument("--target-gray-max", type=float, default=0.62)
     parser.add_argument("--false-negative-weight", type=float, default=10.0)
     parser.add_argument("--tversky-weight", type=float, default=1.0)
+    parser.add_argument("--checkpoint", type=Path, default=CHECKPOINT)
+    parser.add_argument("--metrics", type=Path, default=OUT_DIR / "roi_metrics.json")
+    parser.add_argument("--preview-dir", type=Path, default=PREVIEW_DIR)
+    parser.add_argument(
+        "--init-checkpoint",
+        type=Path,
+        default=None,
+        help="optional warm start from an existing ROI checkpoint",
+    )
     parser.add_argument("--no-flip", action="store_true")
     parser.add_argument("--no-preview", action="store_true")
     args = parser.parse_args()
@@ -142,6 +167,10 @@ def main() -> None:
             target_width_fraction=(args.target_min, args.target_max),
             closeup_fraction=args.closeup_fraction,
             closeup_width_fraction=(args.closeup_min, args.closeup_max),
+            full_view_fraction=args.full_view_fraction,
+            full_view_marker_width_fraction=(args.full_view_min, args.full_view_max),
+            full_view_min_marker_height_fraction=args.full_view_min_height,
+            full_view_center_jitter=args.full_view_jitter,
             cropped_fraction=args.cropped_fraction,
             cropped_width_fraction=(args.cropped_min, args.cropped_max),
             heavy_blur_fraction=args.heavy_blur_fraction,
@@ -159,6 +188,10 @@ def main() -> None:
         ),
         layout,
     )
+    branch_counts: dict[str, int] = {}
+    for meta in dataset.metadata:
+        branch = str(meta.get("view_branch", "negative"))
+        branch_counts[branch] = branch_counts.get(branch, 0) + 1
     train, validation, test = dataset.shuffled(args.seed).split((0.7, 0.15, 0.15))
     real = load_real_positives(args.real_positive_dir, dataset.config)
     if real is not None:
@@ -173,7 +206,8 @@ def main() -> None:
     log(
         f"dataset train={len(train)} val={len(validation)} test={len(test)} "
         f"negatives_train={int((train.presence < 0.5).sum())} "
-        f"mean_mask_area={float(dataset.masks.mean()):.3f}"
+        f"mean_mask_area={float(dataset.masks.mean()):.3f} "
+        f"branches={branch_counts}"
     )
 
     channel_options = {
@@ -203,6 +237,13 @@ def main() -> None:
         seed=args.seed,
     )
 
+    initial_model = None
+    if args.init_checkpoint is not None:
+        initial_model = load_roi_checkpoint(args.init_checkpoint, config)
+        if initial_model is None:
+            raise SystemExit(f"could not load init checkpoint {args.init_checkpoint}")
+        log(f"warm start from {args.init_checkpoint}")
+
     def on_epoch(epoch: int, total: int, train_loss: float, val_loss: float) -> None:
         if epoch == 1 or epoch == total or epoch % 5 == 0:
             log(f"epoch {epoch}/{total} train={train_loss:.4f} val={val_loss:.4f}")
@@ -216,6 +257,7 @@ def main() -> None:
         validation.presence,
         config,
         on_epoch=on_epoch,
+        initial_model=initial_model,
     )
     log(f"trained params={roi_parameter_count(model.model)} device={model.device}")
 
@@ -224,6 +266,23 @@ def main() -> None:
         "channels": channels,
         "input": [config.input_width, config.input_height],
         "mask_mode": args.mask_mode,
+        "dataset": {
+            "samples": args.samples,
+            "natural_fraction": args.natural_fraction,
+            "closeup_fraction": args.closeup_fraction,
+            "closeup_width_fraction": [args.closeup_min, args.closeup_max],
+            "full_view_fraction": args.full_view_fraction,
+            "full_view_marker_width_fraction": [
+                args.full_view_min,
+                args.full_view_max,
+            ],
+            "full_view_min_marker_height_fraction": args.full_view_min_height,
+            "cropped_fraction": args.cropped_fraction,
+            "cropped_width_fraction": [args.cropped_min, args.cropped_max],
+            "real_positive_repeat": args.real_positive_repeat,
+            "seed": args.seed,
+            "branch_counts": branch_counts,
+        },
         "train": model.history,
     }
     split_predictions: dict[str, tuple[np.ndarray, np.ndarray]] = {}
@@ -231,30 +290,63 @@ def main() -> None:
         probabilities, presence = model.predict(split.images)
         split_predictions[split_name] = (probabilities, presence)
         metrics = evaluate_roi(probabilities, presence, split)
+        group_metrics = evaluate_roi_groups(probabilities, presence, split)
         result[split_name] = metrics
+        result[f"{split_name}_groups"] = group_metrics
         log(f"{split_name}: {json.dumps(metrics)}")
+        for group_name, group in group_metrics.items():
+            log(
+                f"  {split_name}/{group_name}: containment="
+                f"{group['center_containment']:.4f} iou={group['mask_iou']:.4f} "
+                f"samples={group['samples']}"
+            )
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    save_roi_checkpoint(CHECKPOINT, model.model, config)
-    result["checkpoint"] = str(CHECKPOINT)
-    (OUT_DIR / "roi_metrics.json").write_text(json.dumps(result, indent=2))
-    log(f"saved {CHECKPOINT}")
+    args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    args.metrics.parent.mkdir(parents=True, exist_ok=True)
+    save_roi_checkpoint(args.checkpoint, model.model, config)
+    result["checkpoint"] = str(args.checkpoint)
+    args.metrics.write_text(json.dumps(result, indent=2))
+    (args.checkpoint.with_suffix(args.checkpoint.suffix + ".json")).write_text(
+        json.dumps(
+            {
+                "channels": channels,
+                "input": [config.input_width, config.input_height],
+                "output_stride": config.output_stride,
+                "false_negative_weight": config.false_negative_weight,
+                "tversky_weight": config.tversky_weight,
+                "full_view_fraction": args.full_view_fraction,
+                "full_view_marker_width_fraction": [
+                    args.full_view_min,
+                    args.full_view_max,
+                ],
+                "full_view_min_marker_height_fraction": args.full_view_min_height,
+            },
+            indent=2,
+        )
+    )
+    log(f"saved {args.checkpoint}")
 
     if not args.no_preview:
         test_probabilities, _test_presence = split_predictions["test"]
-        PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+        args.preview_dir.mkdir(parents=True, exist_ok=True)
+        # Keep the usual mixed previews, plus the full-view examples that this
+        # run is specifically meant to fix.
+        full_view_indices = [
+            index for index, meta in enumerate(test.metadata) if meta.get("full_view")
+        ][:4]
         positive_indices = [
             index for index, meta in enumerate(test.metadata) if meta.get("points")
         ][:4]
-        for index in positive_indices:
+        preview_indices = sorted(set([*positive_indices, *full_view_indices]))
+        for index in preview_indices:
             _draw_preview(
                 test.images[index, :, :, 0],
                 test_probabilities[index],
                 test.masks[index, :, :, 0],
                 test.metadata[index]["points"],
-                PREVIEW_DIR / f"test_{index:03d}.png",
+                args.preview_dir / f"test_{index:03d}.png",
             )
-        log(f"saved {len(positive_indices)} previews to {PREVIEW_DIR}")
+        log(f"saved {len(preview_indices)} previews to {args.preview_dir}")
 
 
 if __name__ == "__main__":

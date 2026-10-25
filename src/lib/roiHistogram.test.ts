@@ -57,6 +57,21 @@ describe('analyzeRoiHistogram', () => {
     expect(analysis.grayPixels).toBeGreaterThan(analysis.maskedPixels * 0.8)
   })
 
+  it('moves both cuts away from gray at a lower noise floor', () => {
+    const counts = syntheticHistogram([
+      { mean: 70, stdDev: 9, weight: 900 },
+      { mean: 180, stdDev: 3.5, weight: 24000 },
+      { mean: 240, stdDev: 8, weight: 700 },
+    ])
+    const looser = analyzeRoiHistogram(counts, { noiseFloorFraction: 0.03 })
+    const stricter = analyzeRoiHistogram(counts, { noiseFloorFraction: 0.019 })
+    expect(looser.valid).toBe(true)
+    expect(stricter.valid).toBe(true)
+    expect(stricter.blackCut).toBeLessThanOrEqual(looser.blackCut)
+    expect(stricter.whiteCut).toBeGreaterThanOrEqual(looser.whiteCut)
+    expect(stricter.blackCut < looser.blackCut || stricter.whiteCut > looser.whiteCut).toBe(true)
+  })
+
   it('does not invent blobs on a flat gray target', () => {
     const counts = syntheticHistogram([{ mean: 180, stdDev: 4, weight: 24000 }])
     const analysis = analyzeRoiHistogram(counts)

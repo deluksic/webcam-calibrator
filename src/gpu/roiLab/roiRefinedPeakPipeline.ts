@@ -58,6 +58,8 @@ const verticalBlurLayout = tgpu.bindGroupLayout({
 })
 
 const candidateLayout = tgpu.bindGroupLayout({
+  cameraTexture: { texture: d.texture2d() },
+  backgroundTexture: { texture: d.texture2d() },
   maskTexture: { texture: d.texture2d() },
   sampler: { sampler: 'filtering' },
   blurred: { storage: d.arrayOf(d.f32), access: 'readonly' },
@@ -107,6 +109,28 @@ const sampledMask = tgpu.fn(
   return std.textureSampleLevel(candidateLayout.$.maskTexture, candidateLayout.$.sampler, uv, d.f32(0)).r
 })
 
+/**
+ * Raw high-pass value, matching the ROI Lab "Blobs" view. Candidate membership
+ * is decided on this signal; the blurred buffer is only used for the 3x3
+ * extremum and the cubic fit.
+ */
+const rawFlattenedAt = tgpu.fn(
+  [d.u32, d.u32, d.f32, d.f32],
+  d.f32,
+)((px, py, width, height) => {
+  'use gpu'
+  const color = std.textureLoad(candidateLayout.$.cameraTexture, d.vec2u(px, py), d.i32(0))
+  const luma = std.dot(color.rgb, d.vec3f(0.299, 0.587, 0.114))
+  const uv = (d.vec2f(d.f32(px), d.f32(py)) + d.vec2f(0.5, 0.5)).div(d.vec2f(width, height))
+  const background = std.textureSampleLevel(
+    candidateLayout.$.backgroundTexture,
+    candidateLayout.$.sampler,
+    uv,
+    d.f32(0),
+  ).r
+  return std.clamp(d.f32(0.5) + (luma - background), d.f32(0), d.f32(1))
+})
+
 const supportAt = tgpu.fn(
   [d.u32, d.u32, d.u32, d.f32, d.f32],
   d.bool,
@@ -119,7 +143,7 @@ const supportAt = tgpu.fn(
   if (sampledMask(px, py, width, height) < d.f32(0.5)) {
     return false
   }
-  const value = candidateLayout.$.blurred[py * d.u32(width) + px]!
+  const value = rawFlattenedAt(px, py, width, height)
   const bin = d.u32(clamp(value, d.f32(0), d.f32(1)) * d.f32(255) + d.f32(0.5))
   if (polarity === d.u32(0)) {
     return bin < params.blackCut
@@ -132,32 +156,35 @@ const plateauBlocked = tgpu.fn(
   d.bool,
 )((px, py, value, polarity, width, height) => {
   'use gpu'
-  const left = px - d.u32(1)
-  const up = py - d.u32(1)
-  // The Python pipeline removes the 2 px border before choosing a plateau
-  // representative, so border pixels cannot suppress a candidate.
-  if (up >= d.u32(2)) {
-    if (left >= d.u32(2)) {
-      if (supportAt(left, up, polarity, width, height)) {
-        if (abs(candidateLayout.$.blurred[up * d.u32(width) + left]! - value) <= d.f32(1e-7)) {
+  const left = d.i32(px) - d.i32(1)
+  const up = d.i32(py) - d.i32(1)
+  const right = d.i32(px) + d.i32(1)
+  const maxX = d.i32(width) - d.i32(1)
+  if (up >= d.i32(0)) {
+    const upRow = d.u32(up) * d.u32(width)
+    if (left >= d.i32(0)) {
+      if (supportAt(d.u32(left), d.u32(up), polarity, width, height)) {
+        if (abs(candidateLayout.$.blurred[upRow + d.u32(left)]! - value) <= d.f32(1e-7)) {
           return true
         }
       }
     }
-    if (supportAt(px, up, polarity, width, height)) {
-      if (abs(candidateLayout.$.blurred[up * d.u32(width) + px]! - value) <= d.f32(1e-7)) {
+    if (supportAt(px, d.u32(up), polarity, width, height)) {
+      if (abs(candidateLayout.$.blurred[upRow + px]! - value) <= d.f32(1e-7)) {
         return true
       }
     }
-    if (supportAt(px + d.u32(1), up, polarity, width, height)) {
-      if (abs(candidateLayout.$.blurred[up * d.u32(width) + px + d.u32(1)]! - value) <= d.f32(1e-7)) {
-        return true
+    if (right <= maxX) {
+      if (supportAt(d.u32(right), d.u32(up), polarity, width, height)) {
+        if (abs(candidateLayout.$.blurred[upRow + d.u32(right)]! - value) <= d.f32(1e-7)) {
+          return true
+        }
       }
     }
   }
-  if (left >= d.u32(2)) {
-    if (supportAt(left, py, polarity, width, height)) {
-      if (abs(candidateLayout.$.blurred[py * d.u32(width) + left]! - value) <= d.f32(1e-7)) {
+  if (left >= d.i32(0)) {
+    if (supportAt(d.u32(left), py, polarity, width, height)) {
+      if (abs(candidateLayout.$.blurred[py * d.u32(width) + d.u32(left)]! - value) <= d.f32(1e-7)) {
         return true
       }
     }
@@ -267,22 +294,23 @@ export function createRoiRefinedPeakStage(
     }
     const px = d.u32(x)
     const py = d.u32(y)
-    if (px < d.u32(2) || py < d.u32(2) || px >= d.u32(frameWidth - 2) || py >= d.u32(frameHeight - 2)) {
-      return
-    }
     if (sampledMask(px, py, d.f32(frameWidth), d.f32(frameHeight)) < d.f32(0.5)) {
       return
     }
-    const value = candidateLayout.$.blurred[py * d.u32(frameWidth) + px]!
-    const bin = d.u32(clamp(value, d.f32(0), d.f32(1)) * d.f32(255) + d.f32(0.5))
+    // Blob membership is decided on the raw high-pass signal, exactly like the
+    // "Blobs" view. Do not re-test the blurred value here: blurring can move a
+    // small blob's peak below the luma cut even though it is a valid blob.
+    const rawValue = rawFlattenedAt(px, py, d.f32(frameWidth), d.f32(frameHeight))
+    const rawBin = d.u32(clamp(rawValue, d.f32(0), d.f32(1)) * d.f32(255) + d.f32(0.5))
     let polarity = d.u32(0)
-    if (bin < params.blackCut) {
+    if (rawBin < params.blackCut) {
       polarity = d.u32(0)
-    } else if (bin >= params.whiteCut) {
+    } else if (rawBin >= params.whiteCut) {
       polarity = d.u32(1)
     } else {
       return
     }
+    const value = candidateLayout.$.blurred[py * d.u32(frameWidth) + px]!
     for (let oy = -1; oy <= 1; oy += 1) {
       for (let ox = -1; ox <= 1; ox += 1) {
         if (ox === 0 && oy === 0) {
@@ -290,6 +318,9 @@ export function createRoiRefinedPeakStage(
         }
         const sx = d.i32(px) + d.i32(ox)
         const sy = d.i32(py) + d.i32(oy)
+        if (sx < d.i32(0) || sx >= d.i32(frameWidth) || sy < d.i32(0) || sy >= d.i32(frameHeight)) {
+          continue
+        }
         const neighbour = candidateLayout.$.blurred[d.u32(sy) * d.u32(frameWidth) + d.u32(sx)]!
         if (polarity === d.u32(1)) {
           if (neighbour > value + d.f32(1e-7)) {
@@ -323,8 +354,20 @@ export function createRoiRefinedPeakStage(
     const values = d.arrayOf(d.f32, 25)()
     for (let dy = -2; dy <= 2; dy += 1) {
       for (let dx = -2; dx <= 2; dx += 1) {
-        const sx = d.i32(candidate.x) + d.i32(dx)
-        const sy = d.i32(candidate.y) + d.i32(dy)
+        let sx = d.i32(candidate.x) + d.i32(dx)
+        let sy = d.i32(candidate.y) + d.i32(dy)
+        if (sx < d.i32(0)) {
+          sx = d.i32(0)
+        }
+        if (sx >= d.i32(frameWidth)) {
+          sx = d.i32(frameWidth) - d.i32(1)
+        }
+        if (sy < d.i32(0)) {
+          sy = d.i32(0)
+        }
+        if (sy >= d.i32(frameHeight)) {
+          sy = d.i32(frameHeight) - d.i32(1)
+        }
         values[d.u32((dy + 2) * 5 + (dx + 2))] = fitLayout.$.blurred[d.u32(sy) * d.u32(frameWidth) + d.u32(sx)]!
       }
     }
@@ -498,6 +541,8 @@ export function createRoiRefinedPeakStage(
     blurred: blurredBuffer,
   })
   const candidateBindGroup = root.createBindGroup(candidateLayout, {
+    cameraTexture,
+    backgroundTexture,
     maskTexture,
     sampler,
     blurred: blurredBuffer,

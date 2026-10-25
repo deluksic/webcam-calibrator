@@ -9,7 +9,8 @@ camera frame
   → ROI ONNX mask (256 px wide, aspect-following height)
   → mask-aware high-pass, Gaussian σ1.0
   → blurred histogram cuts: black / gray / white
-  → 3×3 extrema, 5×5 cubic peak fit, definite Hessian
+  → raw high-pass black/white class, 3×3 extrema on the blurred image
+  → 5×5 cubic peak fit, definite Hessian
   → GPU readback of refined peaks { x, y, polarity, peak, λ1, λ2, hxy }
   → worker same-polarity 4σ neighbour filter
   → observed proximity graph + binary-color fingerprints

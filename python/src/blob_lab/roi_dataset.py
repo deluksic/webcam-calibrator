@@ -65,12 +65,24 @@ class RoiDatasetConfig:
     target_width_fraction: tuple[float, float] = (0.15, 0.72)
     # A separate close-up branch: the target fills most of the frame, as when
     # the phone is held near the webcam.
-    closeup_fraction: float = 0.30
-    closeup_width_fraction: tuple[float, float] = (0.70, 0.90)
+    closeup_fraction: float = 0.20
+    closeup_width_fraction: tuple[float, float] = (0.75, 0.95)
+    # Full-view close-ups: the marker pattern itself (not the padded browser
+    # canvas) spans almost the whole frame. This is the view when a phone
+    # screen is held right up to the webcam: the target usually extends past
+    # the frame edges and there is no background margin to key on.
+    full_view_fraction: float = 0.60
+    full_view_marker_width_fraction: tuple[float, float] = (0.95, 1.15)
+    # Wide canvases (16:9) reach the requested width while still leaving a
+    # large blank band above/below. Scale up further until the marker hull
+    # also covers this fraction of the frame height.
+    full_view_min_marker_height_fraction: float = 0.80
+    full_view_center_jitter: float = 0.035
+    full_view_min_visible_fraction: float = 0.40
     # Targets near or past the frame edge. The mask is clipped, but the model
     # must still segment the visible part instead of behaving as if the border
     # were a guaranteed background margin.
-    cropped_fraction: float = 0.30
+    cropped_fraction: float = 0.20
     cropped_width_fraction: tuple[float, float] = (0.45, 0.90)
     cropped_min_visible_fraction: float = 0.08
     # Randomize the rendered canvas aspect so the model cannot key on a 4:3
@@ -152,6 +164,14 @@ class RoiDataset:
             metadata=[self.metadata[i] for i in np.arange(len(self))[selection]],
             config=self.config,
         )
+
+    def filtered(self, predicate) -> "RoiDataset":
+        """Return the samples whose metadata satisfies ``predicate``."""
+        indices = np.asarray(
+            [index for index, meta in enumerate(self.metadata) if predicate(meta)],
+            dtype=np.int64,
+        )
+        return self.subset(indices)
 
     def shuffled(self, seed: int = 0) -> "RoiDataset":
         order = np.random.default_rng(seed).permutation(len(self))
@@ -288,6 +308,84 @@ def _canvas_corners_size(target_w: int, target_h: int) -> np.ndarray:
     return np.asarray([[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]], dtype=np.float32)
 
 
+def _marker_corners(layout: HexTargetLayout) -> np.ndarray:
+    """Return the four corners of every marker quad in canvas coordinates."""
+    corners: list[list[float]] = []
+    for quad in layout.quads:
+        corners.extend(
+            [
+                [quad.left, quad.top],
+                [quad.right, quad.top],
+                [quad.right, quad.bottom],
+                [quad.left, quad.bottom],
+            ]
+        )
+    if not corners:
+        return _canvas_corners(layout)
+    return np.asarray(corners, dtype=np.float32)
+
+
+def _projected_marker_box(
+    h: np.ndarray, layout: HexTargetLayout
+) -> tuple[np.ndarray, np.ndarray]:
+    """Projected (min, max) corners of the marker hull in output pixels."""
+    projected = _project(h, _marker_corners(layout))
+    return projected.min(axis=0), projected.max(axis=0)
+
+
+def _scale_homography_about(
+    h: np.ndarray, center: np.ndarray | tuple[float, float], scale: float
+) -> np.ndarray:
+    """Apply an output-space uniform scale about ``center`` to a homography."""
+    cx, cy = float(center[0]), float(center[1])
+    transform = np.asarray(
+        [
+            [float(scale), 0.0, cx * (1.0 - float(scale))],
+            [0.0, float(scale), cy * (1.0 - float(scale))],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    return (transform @ np.asarray(h, dtype=np.float32)).astype(np.float32)
+
+
+def _fit_full_view_homography(
+    h: np.ndarray,
+    layout: HexTargetLayout,
+    output_size: tuple[int, int],
+    marker_width_fraction: float,
+    center: tuple[float, float],
+    min_marker_height_fraction: float = 0.0,
+) -> np.ndarray:
+    """Fit the marker hull, rather than the padded canvas, to a width fraction.
+
+    The canvas is fitted to the frame first, then scaled about the projected
+    marker center so the visible marker pattern itself covers the requested
+    fraction of the frame width. Padding therefore does not eat into the
+    close-up coverage the way ``closeup_width_fraction`` does. A wider canvas
+    (16:9) is scaled up further when needed so its marker hull also covers
+    ``min_marker_height_fraction`` of the frame height.
+    """
+    fitted, _projected, _scale = _fit_homography_to_box(
+        h,
+        (layout.width_px, layout.height_px),
+        output_size,
+        1.0,
+        center,
+    )
+    lo, hi = _projected_marker_box(fitted, layout)
+    bbox_w = max(1e-3, float(hi[0] - lo[0]))
+    bbox_h = max(1e-3, float(hi[1] - lo[1]))
+    scale_w = (float(output_size[0]) * float(marker_width_fraction)) / bbox_w
+    scale_h = (
+        (float(output_size[1]) * float(min_marker_height_fraction)) / bbox_h
+        if min_marker_height_fraction > 0.0
+        else 0.0
+    )
+    marker_center = (lo + hi) * 0.5
+    return _scale_homography_about(fitted, marker_center, max(scale_w, scale_h))
+
+
 def _fill_polygon(shape: tuple[int, int], polygon: np.ndarray) -> np.ndarray:
     mask = np.zeros(shape, dtype=np.uint8)
     if polygon.shape[0] >= 3:
@@ -323,23 +421,8 @@ def _target_mask(
         # Keep the cell union as the base mask; the polygon is only metadata.
         base = mask
     else:
-        marker_corners: list[np.ndarray] = []
-        for quad in layout.quads:
-            marker_corners.append(
-                _project(
-                    h,
-                    np.asarray(
-                        [
-                            [quad.left, quad.top],
-                            [quad.right, quad.top],
-                            [quad.right, quad.bottom],
-                            [quad.left, quad.bottom],
-                        ],
-                        dtype=np.float32,
-                    ),
-                )
-            )
-        points = np.concatenate(marker_corners, axis=0) if marker_corners else corners
+        marker_corners = _project(h, _marker_corners(layout))
+        points = marker_corners if marker_corners.size else corners
         polygon = cv2.convexHull(points.astype(np.float32)).reshape(-1, 2)
 
     if mode != "cells":
@@ -675,6 +758,9 @@ def generate_roi_dataset(
                     "mask_area": 0,
                     "pose_branch": "negative",
                     "tilt_deg": None,
+                    "cropped": False,
+                    "full_view": False,
+                    "view_branch": "negative",
                     "sharpen": None
                     if sharpen_params is None
                     else sharpen_params.as_dict(),
@@ -701,14 +787,26 @@ def generate_roi_dataset(
             continue
 
         cropped = rng.random() < config.cropped_fraction
-        closeup = rng.random() < config.closeup_fraction
+        full_view = (not cropped) and rng.random() < config.full_view_fraction
+        closeup = (
+            (not cropped)
+            and (not full_view)
+            and rng.random() < config.closeup_fraction
+        )
+        marker_width_target: float | None = None
         if cropped:
-            width_range = config.cropped_width_fraction
+            width_fraction = float(rng.uniform(*config.cropped_width_fraction))
+        elif full_view:
+            # The canvas is scaled up until the marker hull, not the padded
+            # canvas, reaches this fraction of the frame width.
+            width_fraction = 1.0
+            marker_width_target = float(
+                rng.uniform(*config.full_view_marker_width_fraction)
+            )
         elif closeup:
-            width_range = config.closeup_width_fraction
+            width_fraction = float(rng.uniform(*config.closeup_width_fraction))
         else:
-            width_range = config.target_width_fraction
-        width_fraction = float(rng.uniform(*width_range))
+            width_fraction = float(rng.uniform(*config.target_width_fraction))
         height_fraction = width_fraction * (
             sample_layout.height_px / max(1.0, float(sample_layout.width_px))
         )
@@ -732,6 +830,18 @@ def generate_roi_dataset(
                 cy = float(rng.uniform(0.75, 1.10) * config.output_height)
                 cx += float(rng.uniform(-0.20, 0.20) * config.output_width)
             center = (cx, cy)
+        elif full_view:
+            jitter = float(config.full_view_center_jitter)
+            center = (
+                float(
+                    config.output_width
+                    * (0.5 + rng.uniform(-jitter, jitter))
+                ),
+                float(
+                    config.output_height
+                    * (0.5 + rng.uniform(-jitter, jitter))
+                ),
+            )
         else:
             cx_lo = 0.5 * width_fraction + margin
             cx_hi = 1.0 - cx_lo
@@ -743,13 +853,24 @@ def generate_roi_dataset(
                 float(rng.uniform(cx_lo, cx_hi) * config.output_width),
                 float(rng.uniform(cy_lo, cy_hi) * config.output_height),
             )
-        fitted_h, canvas_projected, _scale = _fit_homography_to_box(
-            np.asarray(h, dtype=np.float32),
-            (sample_layout.width_px, sample_layout.height_px),
-            (config.output_width, config.output_height),
-            width_fraction,
-            center,
-        )
+        if full_view:
+            fitted_h = _fit_full_view_homography(
+                np.asarray(h, dtype=np.float32),
+                sample_layout,
+                (config.output_width, config.output_height),
+                float(marker_width_target),
+                center,
+                config.full_view_min_marker_height_fraction,
+            )
+            canvas_projected = _project(fitted_h, _canvas_corners(sample_layout))
+        else:
+            fitted_h, canvas_projected, _scale = _fit_homography_to_box(
+                np.asarray(h, dtype=np.float32),
+                (sample_layout.width_px, sample_layout.height_px),
+                (config.output_width, config.output_height),
+                width_fraction,
+                center,
+            )
         if not np.isfinite(fitted_h).all() or abs(float(np.linalg.det(fitted_h))) < 1e-10:
             continue
 
@@ -757,6 +878,11 @@ def generate_roi_dataset(
         canvas_hi = canvas_projected.max(axis=0)
         target_width_px = float(max(1.0, canvas_hi[0] - canvas_lo[0]))
         target_height_px = float(max(1.0, canvas_hi[1] - canvas_lo[1]))
+        marker_lo, marker_hi = _projected_marker_box(fitted_h, sample_layout)
+        marker_width_px = float(max(1.0, marker_hi[0] - marker_lo[0]))
+        marker_height_px = float(max(1.0, marker_hi[1] - marker_lo[1]))
+        marker_width_fraction = marker_width_px / max(1.0, float(config.output_width))
+        marker_height_fraction = marker_height_px / max(1.0, float(config.output_height))
 
         heavy_blur = rng.random() < config.heavy_blur_fraction
         # Keep the PSF proportional to the target size: a 3 px blur destroys a
@@ -828,11 +954,22 @@ def generate_roi_dataset(
         min_visible = (
             config.cropped_min_visible_fraction
             if cropped
+            else config.full_view_min_visible_fraction
+            if full_view
             else config.min_visible_fraction
         )
         if visible_fraction < min_visible:
             continue
 
+        view_branch = (
+            "cropped"
+            if cropped
+            else "full_view"
+            if full_view
+            else "closeup"
+            if closeup
+            else "regular"
+        )
         images.append(image[:, :, None])
         masks.append(mask[:, :, None])
         presence.append(1.0)
@@ -855,11 +992,18 @@ def generate_roi_dataset(
                 "canvas_corners": canvas_projected.tolist(),
                 "target_width_px": target_width_px,
                 "target_height_px": target_height_px,
+                "marker_width_px": marker_width_px,
+                "marker_height_px": marker_height_px,
+                "marker_width_fraction": marker_width_fraction,
+                "marker_height_fraction": marker_height_fraction,
+                "marker_width_target": marker_width_target,
                 "mask_area": float(mask.sum()),
                 "mask_area_fraction": mask_area_fraction,
                 "contained_fraction": contained_fraction,
                 "visible_fraction": visible_fraction,
                 "cropped": cropped,
+                "full_view": full_view,
+                "view_branch": view_branch,
                 "blur_sigma": sigma,
                 "blur_scale": blur_scale,
                 "heavy_blur": heavy_blur,

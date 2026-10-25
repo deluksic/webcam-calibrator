@@ -503,6 +503,55 @@ def evaluate_roi(
     }
 
 
+def evaluate_roi_groups(
+    mask_probabilities: np.ndarray,
+    presence_scores: np.ndarray,
+    dataset,
+    *,
+    groups: dict[str, Any] | None = None,
+    **kwargs,
+) -> dict[str, dict[str, float]]:
+    """Evaluate the same predictions split by dataset branch.
+
+    The mixed metrics hide the scale-specific behaviour: a model can score
+    well overall while missing full-view targets entirely. These groups make
+    the close-up/far-target tradeoff explicit.
+    """
+    if groups is None:
+        groups = {
+            "positive": lambda meta: float(meta.get("presence", 1)) >= 0.5,
+            "full_view": lambda meta: bool(meta.get("full_view", False)),
+            "closeup": lambda meta: bool(meta.get("closeup", False)),
+            "cropped": lambda meta: bool(meta.get("cropped", False)),
+            "regular": lambda meta: float(meta.get("presence", 1)) >= 0.5
+            and not meta.get("full_view", False)
+            and not meta.get("closeup", False)
+            and not meta.get("cropped", False),
+            "heavy_blur": lambda meta: bool(meta.get("heavy_blur", False)),
+            "negative": lambda meta: float(meta.get("presence", 1)) < 0.5,
+        }
+    probabilities = np.asarray(mask_probabilities)
+    presence = np.asarray(presence_scores)
+    results: dict[str, dict[str, float]] = {}
+    for name, predicate in groups.items():
+        indices = np.asarray(
+            [
+                index
+                for index, meta in enumerate(dataset.metadata)
+                if predicate(meta)
+            ],
+            dtype=np.int64,
+        )
+        if indices.size == 0:
+            continue
+        metrics = evaluate_roi(
+            probabilities[indices], presence[indices], dataset.subset(indices), **kwargs
+        )
+        metrics["samples"] = int(indices.size)
+        results[name] = metrics
+    return results
+
+
 def save_roi_checkpoint(path: str | Path, model: TinyRoiNet, config: RoiNetConfig) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

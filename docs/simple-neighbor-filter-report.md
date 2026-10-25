@@ -1,4 +1,11 @@
-# Neighbour-consistency filter — current result
+# Neighbour-consistency filter — historical result
+
+> **Historical.** This report predates the raw-high-pass candidate class, the
+> removal of the 2 px border crop, and the 40-neighbour normalized-Hessian
+> filter. The current pipeline is documented in
+> [`gpu-refined-peak-pipeline.md`](gpu-refined-peak-pipeline.md). The tables
+> below describe the older 20-neighbour, raw-λ variant and should not be used to
+> interpret current ROI Lab counts.
 
 ## Pipeline
 

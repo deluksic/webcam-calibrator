@@ -43,7 +43,10 @@ export type RoiHistogramOptions = {
   minBlobFraction?: number
   /** Minimum mean-luma distance between a blob class and the gray mode. */
   minContrast?: number
-  /** Fraction of the gray peak that counts as the noise floor. */
+  /**
+   * Fraction of the gray peak that counts as the noise floor. Lower values
+   * move both cuts away from gray and make the blob classes stricter.
+   */
   noiseFloorFraction?: number
 }
 
@@ -53,7 +56,7 @@ const DEFAULTS: Required<RoiHistogramOptions> = {
   minBackgroundFraction: 0.5,
   minBlobFraction: 0.001,
   minContrast: 18,
-  noiseFloorFraction: 0.02,
+  noiseFloorFraction: 0.019,
 }
 
 const SMOOTH_KERNEL = [1, 4, 6, 4, 1] as const
