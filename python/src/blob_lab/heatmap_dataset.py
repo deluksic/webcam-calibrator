@@ -12,7 +12,18 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from blob_lab.camera import CameraRanges, random_pose
+from blob_lab.augment import (
+    CameraSharpenConfig,
+    apply_camera_sharpen,
+    sample_augmentation_rng,
+    sample_sharpen_params,
+)
+from blob_lab.camera import (
+    CameraRanges,
+    PoseAugmentConfig,
+    pose_tilt_deg,
+    random_pose,
+)
 from blob_lab.dataset import _crop
 from blob_lab.render import apply_homography, camera_homography, render_target
 from blob_lab.target_layout import HexTargetLayout, build_target_texture
@@ -25,6 +36,8 @@ class HeatmapDatasetConfig:
     samples: int = 80
     supersample: int = 1
     camera: CameraRanges = field(default_factory=CameraRanges)
+    pose_augment: PoseAugmentConfig = field(default_factory=PoseAugmentConfig)
+    sharpen: CameraSharpenConfig = field(default_factory=CameraSharpenConfig)
     blur_sigma: tuple[float, float] = (0.0, 1.2)
     noise_sigma: tuple[float, float] = (0.0, 0.025)
     contrast: tuple[float, float] = (0.75, 1.0)
@@ -35,6 +48,9 @@ class HeatmapDatasetConfig:
     feature_sigma: float = 1.2
     variance_window: int = 5
     keypoint_sigma: float = 0.8
+    # Reject extreme oblique scenes that leave almost none of the target in
+    # frame; otherwise the heatmap is mostly empty and the sample is noise.
+    min_visible_marker_fraction: float = 0.15
     seed: int = 0
 
 
@@ -177,6 +193,7 @@ def extract_features(image: np.ndarray, config: HeatmapDatasetConfig) -> np.ndar
     return np.stack(channels, axis=-1).astype(np.float32)
 
 
+
 def generate_heatmap_dataset(
     config: HeatmapDatasetConfig,
     layout: HexTargetLayout,
@@ -232,16 +249,37 @@ def generate_heatmap_dataset(
             if noise > 0:
                 image = image + rng.normal(0.0, noise, size=image.shape).astype(np.float32)
             image = np.clip(image, 0.0, 1.0)[:, :, None]
+            sharpen_params = sample_sharpen_params(
+                config.sharpen,
+                sample_augmentation_rng(config.seed, len(images)),
+            )
+            image = apply_camera_sharpen(image, sharpen_params)
             images.append(image)
             features.append(extract_features(image[:, :, 0], config))
             heatmaps.append(np.zeros((config.output_height, config.output_width, 1), dtype=np.float32))
             masks.append(np.zeros((config.output_height, config.output_width, 1), dtype=np.float32))
             junctions.append(np.zeros((config.output_height, config.output_width, 1), dtype=np.float32))
-            metadata.append({"points": [], "junctions": [], "natural": True})
+            metadata.append(
+                {
+                    "points": [],
+                    "junctions": [],
+                    "natural": True,
+                    "pose": None,
+                    "pose_branch": "natural",
+                    "tilt_deg": None,
+                    "H": None,
+                    "point_targets": [],
+                    "point_design_ids": [],
+                    "point_colors": [],
+                    "sharpen": None
+                    if sharpen_params is None
+                    else sharpen_params.as_dict(),
+                }
+            )
             natural_done += 1
             continue
 
-        pose = random_pose(rng, config.camera)
+        pose = random_pose(rng, config.camera, config.pose_augment)
         h = camera_homography(
             yaw_deg=pose.yaw_deg,
             pitch_deg=pose.pitch_deg,
@@ -270,8 +308,10 @@ def generate_heatmap_dataset(
                 build_target_texture(_sample_layout, config.background_linear),
                 dtype=jnp.float32,
             )
+            _truth_quads = _sample_layout.quads
         else:
             _sample_texture = texture
+            _truth_quads = layout.quads
         image = np.asarray(render_fn(h, _sample_texture, sigma), dtype=np.float32)
         if image.shape != (config.output_height, config.output_width):
             image = image.reshape(config.output_height, config.output_width)
@@ -283,13 +323,21 @@ def generate_heatmap_dataset(
             continue
         heatmap = np.zeros((config.output_height, config.output_width, 1), dtype=np.float32)
         kept: list[tuple[float, float]] = []
-        for x, y in projected:
+        kept_targets: list[tuple[float, float]] = []
+        kept_design_ids: list[int] = []
+        kept_colors: list[int] = []
+        for (x, y), center, quad in zip(projected, layout.square_centers, _truth_quads):
             ix = int(np.floor(float(x)))
             iy = int(np.floor(float(y)))
             if 0 <= ix < config.output_width and 0 <= iy < config.output_height:
                 _add_gaussian(heatmap, float(x), float(y), config.keypoint_sigma)
                 kept.append((float(x), float(y)))
+                kept_targets.append((float(center.x), float(center.y)))
+                kept_design_ids.append(int(quad.design_id))
+                kept_colors.append(int(quad.color))
         if not kept:
+            continue
+        if len(kept) / max(1, len(layout.square_centers)) < config.min_visible_marker_fraction:
             continue
 
         contrast = float(rng.uniform(*config.contrast))
@@ -298,6 +346,11 @@ def generate_heatmap_dataset(
         if noise > 0:
             image = image + rng.normal(0.0, noise, size=image.shape).astype(np.float32)
         image = np.clip(image, 0.0, 1.0)[:, :, None]
+        sharpen_params = sample_sharpen_params(
+            config.sharpen,
+            sample_augmentation_rng(config.seed, len(images)),
+        )
+        image = apply_camera_sharpen(image, sharpen_params)
 
         _junction_source = layout.three_way_junction_points or layout.junction_points
         _junction_arr = np.asarray([[p.x, p.y] for p in _junction_source], dtype=np.float32)
@@ -352,6 +405,15 @@ def generate_heatmap_dataset(
                     "distance": pose.distance,
                     "focal": pose.focal,
                 },
+                "pose_branch": pose.pose_branch,
+                "tilt_deg": float(pose_tilt_deg(pose)),
+                "H": np.asarray(h, dtype=np.float32).tolist(),
+                "point_targets": kept_targets,
+                "point_design_ids": kept_design_ids,
+                "point_colors": kept_colors,
+                "sharpen": None
+                if sharpen_params is None
+                else sharpen_params.as_dict(),
                 "blur_sigma": sigma,
             }
         )

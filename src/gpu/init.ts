@@ -61,7 +61,14 @@ async function createSharedGPUForOnnx(): Promise<SharedOnnxGpu> {
   if (adapter.features.has('timestamp-query')) {
     requiredFeatures.push('timestamp-query')
   }
-  const device = await adapter.requestDevice({ requiredFeatures })
+  // Some WebGPU workloads (including ORT's WebGPU EP on some adapters) bind
+  // more than the default eight storage buffers per stage. Request the
+  // adapter's actual capacity when it is higher.
+  const requiredLimits: Record<string, number> = {}
+  if (adapter.limits.maxStorageBuffersPerShaderStage > 8) {
+    requiredLimits.maxStorageBuffersPerShaderStage = Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 16)
+  }
+  const device = await adapter.requestDevice({ requiredFeatures, requiredLimits })
   const gpu = navigator.gpu
   originalGpuRequestAdapter ??= gpu.requestAdapter.bind(gpu)
   originalAdapterRequestDevice ??= adapter.requestDevice.bind(adapter)

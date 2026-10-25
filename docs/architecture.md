@@ -7,8 +7,11 @@ The browser app calibrates a camera against an editable hex target. All vision w
 ```text
 camera frame
   → ROI ONNX mask (256 px wide, aspect-following height)
-  → histogram segmentation: black / gray / white
-  → 2×2 color-aware opening, connected components, centroid NMS
+  → mask-aware high-pass, Gaussian σ1.0
+  → blurred histogram cuts: black / gray / white
+  → 3×3 extrema, 5×5 cubic peak fit, definite Hessian
+  → GPU readback of refined peaks { x, y, polarity, peak, λ1, λ2, hxy }
+  → worker same-polarity 4σ neighbour filter
   → observed proximity graph + binary-color fingerprints
   → identity match in a worker: hash first, local homography/ICP recovery for ambiguous markers
   → accepted point observations { designId, x, y }
@@ -24,7 +27,7 @@ The target is configured on the Target page: columns, rows, points per cell edge
 - **Views** ([`App.tsx`](../src/components/App.tsx)): **Home**, **Target** ([`HexTargetView.tsx`](../src/components/HexTargetView.tsx) — editable target, QR Calibrate link, fullscreen, JSON export), **Calibrate** ([`CalibrationView.tsx`](../src/components/CalibrationView.tsx)), **Results** ([`ResultsView.tsx`](../src/components/results/ResultsView.tsx)), **Point Lab**, **ROI Lab**. Removed routes (`/hex-target`, `/debug`, `/gradient-profiles`) are not redirected.
 - **Camera** — [`CameraStreamProvider`](../src/components/camera/CameraStreamContext.tsx) at the app root; stream acquisition and device constraints in [`cameraStreamAcquire.ts`](../src/components/camera/cameraStreamAcquire.ts).
 - **GPU lifecycle** — [`init.ts`](../src/gpu/init.ts) creates one adapter/device/root for capture, Target, and Results. Target deliberately reuses the ONNX/capture device instead of caching a second root; renderers unconfigure their canvas on destroy. Target, ROI Lab, and Calibrate all rebuild after a WebGPU device loss (mobile orientation, GPU-process reset); ROI Lab also treats a rejected `mapAsync` as a loss signal.
-- **Live capture** — [`HexCameraPipeline.tsx`](../src/components/camera/HexCameraPipeline.tsx) wraps [`roiLabPipeline.ts`](../src/gpu/roiLab/roiLabPipeline.ts): ONNX mask, component readback, identity graph overlay, snapshot capture, and a lightweight reprojection overlay. The pipeline keeps two frame slots (encode N+1 while presenting N) and `HexCameraPipeline` hands identity to [`hexMatch.worker.ts`](../src/workers/hexMatch.worker.ts), so marker matching overlaps the next frame's GPU work instead of blocking the camera loop.
+- **Live capture** — [`HexCameraPipeline.tsx`](../src/components/camera/HexCameraPipeline.tsx) wraps [`roiLabPipeline.ts`](../src/gpu/roiLab/roiLabPipeline.ts): ONNX mask, refined-peak readback, identity-worker neighbour filter, identity graph overlay, snapshot capture, and a lightweight reprojection overlay. The pipeline keeps two frame slots (encode N+1 while presenting N) and `HexCameraPipeline` hands identity to [`hexMatch.worker.ts`](../src/workers/hexMatch.worker.ts), so marker matching overlaps the next frame's GPU work instead of blocking the camera loop.
 - **Calibration session** — [`CalibrationRunContext`](../src/components/calibration/CalibrationRunContext.tsx) owns the frame pool, the background worker solve, and the latest result shared with Results.
 
 ## Target geometry and identity
@@ -88,7 +91,7 @@ AprilTag exports (schema v1) remain valid files; the current differential render
 ## Labs
 
 - **Point Lab** ([`PointLabView.tsx`](../src/components/pointLab/PointLabView.tsx)) — synthetic projection, fingerprint matching, local homography recovery, and stress metrics.
-- **ROI Lab** ([`RoiLabView.tsx`](../src/components/roiLab/RoiLabView.tsx)) — configurable detector/identity diagnostics, seed scan, component and label views.
+- **ROI Lab** ([`RoiLabView.tsx`](../src/components/roiLab/RoiLabView.tsx)) — configurable detector/identity diagnostics, seed scan, refined-peak and identity views, and a click-to-inspect neighbour histogram panel.
 
 ## Deleted legacy stack
 

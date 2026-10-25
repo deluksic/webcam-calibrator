@@ -293,3 +293,133 @@ The TypeGPU examples that informed the shared-device and mask-texture path are:
 The ORT wasm bootstrap files are copied to `public/ort/` and loaded with the
 ROI page. They are about 26 MiB. They initialize the ORT runtime/WebGPU EP;
 model inference does not fall back to WASM.
+
+## Camera realism: sharpening and oblique poses
+
+Both synthetic dataset generators now include two camera/training conditions by
+default:
+
+- **Camera sharpening** (`blob_lab.augment.CameraSharpenConfig`) is applied to
+  the final rendered/composited frame that contains the target, so the marker
+  edges, padding, target/background boundary, and surrounding scene receive the
+  same camera processing. It samples single-scale or two-scale unsharp masking,
+  a coring threshold, linear or display (sRGB) space, and optional overshoot
+  limiting. The default probability is 0.7; set
+  `CameraSharpenConfig(probability=0.0)` for a clean control. The sampled
+  parameters are stored in each sample's `sharpen` metadata.
+- **Oblique pose oversampling** (`blob_lab.camera.PoseAugmentConfig`) mixes the
+  usual uniform poses with a high-tilt branch (`yaw 35-65°`, `pitch 20-45°`,
+  minimum tilt 40°) at `oblique_fraction=0.5`. Metadata records `tilt_deg`,
+  `pose_branch`, and per-marker `H`/`point_targets`/`point_colors`. Set
+  `oblique_fraction=0.0` to recover the old sampling.
+
+These are data-generator changes; no checkpoint is retrained or overwritten by
+this change. The next training run picks them up automatically.
+
+## Bicubic local-peak fit experiment
+
+`scripts/roi_bicubic_fits.py` replaces the segmentation/CCL/NMS localization
+chain with local extrema of the smoothed luma and a locally fitted bivariate
+cubic. It does **not** use histogram masks, CCL, NMS, or a quadratic center fit.
+The cubic is fitted on an adaptive support that stops before the local gray
+background or a neighbouring marker; the fitted stationary point is the
+subpixel center. Support radii are estimated locally from each candidate's
+four nearest neighbours, not from one global image spacing. Six support
+variants are compared: compact circle, full large-window circle, adaptive
+circle, adaptive circle restricted to positive-curvature pixels, a
+Hessian-aligned adaptive ellipse restricted to positive-curvature pixels, and a
+connected positive-curvature region (`curvature_region`).
+
+```bash
+# Clean control and mixed-sharpening runs (same geometry/seeds)
+uv run python scripts/roi_bicubic_fits.py \
+  --sharpen-probability 0 \
+  --out notebooks/blob_lab_data/roi_bicubic/clean
+uv run python scripts/roi_bicubic_fits.py \
+  --out notebooks/blob_lab_data/roi_bicubic/mixed
+
+# Descriptor/cluster diagnostics for the shape-cluster-filter design
+uv run python scripts/analyze_peak_shapes.py \
+  --descriptors notebooks/blob_lab_data/roi_bicubic/mixed/descriptors.csv
+```
+
+The angle groups are frontal (0°/0°), moderate (30°/20°), oblique (50°/30°), and
+steep (60°/40°); metrics are reported per per-point foreshortening bin, not just
+aggregated. Truth points within 8 px of the frame border are excluded from the
+metrics (they are clipped/off-screen and the detector intentionally ignores
+them); overlays draw those excluded points as dim crosses and visible truth as
+yellow crosses. `summary.json` contains overall F1 at 0.5/1.0/2.0 px, center
+error/bias, fit/fallback counts, and per-bin recall/error. `descriptors.csv`
+contains one row per fitted candidate with truth labels, shape descriptors,
+angle, and sharpening parameters.
+
+The cluster analysis is deliberately diagnostic: clustering is performed in
+overlapping local patches (50% overlap), not over the whole image, because
+marker shape varies systematically across the target under perspective. Each
+patch standardizes the shape descriptors, runs KMeans, keeps its majority
+cluster, and candidates are fused by a patch vote. The script reports cluster
+purity, fused precision/recall/F1, per-feature-set comparisons, and per-bin
+effects. It does not hard-gate the detector yet; the evidence is used to choose
+the feature set and majority rule for the next iteration.
+
+Current results, per-angle tables, local-patch cluster diagnostics, and links
+to the representative overlays are in
+[`docs/bicubic-peak-fit-report.md`](../docs/bicubic-peak-fit-report.md). The
+recall-oriented run uses `--min-prominence 0.015`; it finds the low-contrast
+640x480 markers at the cost of extra false positives, which is the candidate
+set the local clustered filter is intended to clean up.
+
+## Simplified patch pipeline
+
+A stripped-down pipeline using the production histogram cuts and the synthetic
+target mask:
+
+```bash
+uv run python scripts/simple_patch_pipeline.py
+```
+
+It writes `refined_candidates.png`, `cluster_patches.png`,
+`feature_histograms_per_patch.png`, and `summary.json` under
+`notebooks/blob_lab_data/simple_patch_pipeline/`. The candidate stage finds
+456/476 visible points with zero false positives on the oblique 1280x960
+synthetic frame; the current per-patch K=2 majority cluster filter is diagnostic
+only and currently removes true markers. See
+[`docs/simple-patch-pipeline-report.md`](../docs/simple-patch-pipeline-report.md).
+
+### Neighbour-consistency filter
+
+```bash
+uv run python scripts/simple_neighbor_pipeline.py
+```
+
+Compares each accepted point with its 20 nearest same-polarity neighbours and
+keeps it only if `peak`, `λ1`, and `λ2` are each within the neighbour
+mean ± σ (default 4.0). At 3σ it removes 9 true markers on the clean synthetic
+set; at 4σ it removes none. On `real_positive_01` at 4σ it removes only the one
+non-marker blot, leaving 476 kept points; on the closer `real_positive_02` it
+removes 2 black reflection outliers, leaving 431. Per-point neighbour histograms
+with the mean, ±σ band, and the point value are written under `per_point/`. See
+[`docs/simple-neighbor-filter-report.md`](../docs/simple-neighbor-filter-report.md).
+
+Real-photo runs with the ONNX ROI and production-style high-pass:
+
+```bash
+uv run python scripts/simple_neighbor_pipeline.py \
+  --image notebooks/real_positives/real_positive_01.jpg \
+  --manual-mask notebooks/real_positives/real_positive_01_mask.png \
+  --out notebooks/blob_lab_data/simple_neighbor_pipeline/real_positive_01
+
+uv run python scripts/simple_neighbor_pipeline.py \
+  --image notebooks/real_positives/real_positive_02.png \
+  --manual-mask notebooks/real_positives/real_positive_02_mask.png \
+  --out notebooks/blob_lab_data/simple_neighbor_pipeline/real_positive_02
+```
+
+Stress test across the synthetic angle suite, real photos, and negatives:
+
+```bash
+uv run python scripts/stress_test_simple_pipeline.py
+```
+
+Reports 20- and 40-neighbour results; see
+[`docs/stress-test-report.md`](../docs/stress-test-report.md).

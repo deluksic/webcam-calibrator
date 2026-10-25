@@ -20,7 +20,19 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from blob_lab.camera import CameraRanges, random_pose
+from blob_lab.augment import (
+    CameraSharpenConfig,
+    SharpenParams,
+    apply_camera_sharpen,
+    sample_augmentation_rng,
+    sample_sharpen_params,
+)
+from blob_lab.camera import (
+    CameraRanges,
+    PoseAugmentConfig,
+    pose_tilt_deg,
+    random_pose,
+)
 from blob_lab.heatmap_dataset import HeatmapDatasetConfig, _load_natural_image, _srgb_to_linear
 from blob_lab.render import apply_homography, camera_homography, render_target
 from blob_lab.target_layout import (
@@ -66,6 +78,8 @@ class RoiDatasetConfig:
     canvas_aspects: tuple[float, ...] = (4.0 / 3.0,)
     center_margin: float = 0.04
     camera: CameraRanges = field(default_factory=CameraRanges)
+    pose_augment: PoseAugmentConfig = field(default_factory=PoseAugmentConfig)
+    sharpen: CameraSharpenConfig = field(default_factory=CameraSharpenConfig)
     blur_sigma: tuple[float, float] = (0.2, 0.8)
     # Out-of-focus close-ups are common on webcams, but far targets are
     # already only tens of pixels wide. Blur is scaled by target width below.
@@ -346,9 +360,10 @@ def _composite_target(
     alpha: np.ndarray,
     *,
     target_width_px: float,
+    sample_index: int,
     config: RoiDatasetConfig,
     rng: np.random.Generator,
-) -> tuple[np.ndarray, float]:
+) -> tuple[np.ndarray, float, SharpenParams | None]:
     """Composite a premultiplied target over a background with a soft shadow."""
     h, w = background.shape
     if config.shadow_strength > 0.0:
@@ -380,7 +395,13 @@ def _composite_target(
         image = cv2.GaussianBlur(
             image, (0, 0), frame_blur_sigma, borderType=cv2.BORDER_REPLICATE
         )
-    return np.clip(image, 0.0, 1.0).astype(np.float32), frame_blur_sigma
+    image = np.clip(image, 0.0, 1.0).astype(np.float32)
+    sharpen_params = sample_sharpen_params(
+        config.sharpen,
+        sample_augmentation_rng(config.seed, sample_index),
+    )
+    image = apply_camera_sharpen(image, sharpen_params)
+    return image, frame_blur_sigma, sharpen_params
 
 
 def _project_visible_points(
@@ -497,9 +518,14 @@ def load_real_positives(
         mask = mask[
             top : top + config.output_height, left : left + config.output_width
         ]
-        images.append(
-            _srgb_to_linear(image.astype(np.float32) / 255.0)[:, :, None]
+        linear = _srgb_to_linear(image.astype(np.float32) / 255.0)
+        sharpen_params = sample_sharpen_params(
+            config.sharpen,
+            sample_augmentation_rng(config.seed, len(images)),
+            probability=config.sharpen.real_positive_probability,
         )
+        linear = apply_camera_sharpen(linear, sharpen_params)
+        images.append(linear[:, :, None])
         masks.append((mask >= 127).astype(np.uint8)[:, :, None])
         metadata.append(
             {
@@ -507,6 +533,11 @@ def load_real_positives(
                 "presence": 1,
                 "real_positive": True,
                 "source": str(image_path),
+                "pose_branch": "real",
+                "tilt_deg": None,
+                "sharpen": None
+                if sharpen_params is None
+                else sharpen_params.as_dict(),
             }
         )
     if not images:
@@ -622,6 +653,11 @@ def generate_roi_dataset(
         )
         if need_natural:
             background = _load_negative(rng, config)
+            sharpen_params = sample_sharpen_params(
+                config.sharpen,
+                sample_augmentation_rng(config.seed, len(images)),
+            )
+            background = apply_camera_sharpen(background, sharpen_params)
             images.append(background[:, :, None])
             masks.append(
                 np.zeros(
@@ -637,6 +673,11 @@ def generate_roi_dataset(
                     "junctions": [],
                     "canvas_corners": [],
                     "mask_area": 0,
+                    "pose_branch": "negative",
+                    "tilt_deg": None,
+                    "sharpen": None
+                    if sharpen_params is None
+                    else sharpen_params.as_dict(),
                 }
             )
             natural_done += 1
@@ -644,7 +685,7 @@ def generate_roi_dataset(
 
         aspect_index = int(rng.integers(0, len(aspect_layouts)))
         sample_layout = aspect_layouts[aspect_index]
-        pose = random_pose(rng, config.camera)
+        pose = random_pose(rng, config.camera, config.pose_augment)
         h = camera_homography(
             yaw_deg=pose.yaw_deg,
             pitch_deg=pose.pitch_deg,
@@ -743,11 +784,12 @@ def generate_roi_dataset(
         if float(alpha_np.sum()) <= 0.0:
             continue
         background = _load_background(rng, config)
-        image, frame_blur_sigma = _composite_target(
+        image, frame_blur_sigma, sharpen_params = _composite_target(
             background,
             target_np,
             alpha_np,
             target_width_px=target_width_px,
+            sample_index=len(images),
             config=config,
             rng=rng,
         )
@@ -805,6 +847,8 @@ def generate_roi_dataset(
                     "distance": pose.distance,
                     "focal": pose.focal,
                 },
+                "pose_branch": pose.pose_branch,
+                "tilt_deg": float(pose_tilt_deg(pose)),
                 "H": fitted_h.tolist(),
                 "points": points,
                 "junctions": junctions,
@@ -824,6 +868,9 @@ def generate_roi_dataset(
                 "canvas_aspect": sample_layout.width_px / max(1, sample_layout.height_px),
                 "board_gray": board_gray,
                 "mask_mode": config.mask_mode,
+                "sharpen": None
+                if sharpen_params is None
+                else sharpen_params.as_dict(),
             }
         )
         target_done += 1

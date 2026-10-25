@@ -17,7 +17,7 @@ In-browser camera calibration against a fixed hex marker target; no server. Capt
 | **Calibrate** | Live ROI/identity feed; **Start** only with ≥12 identified markers; snapshot/auto-first; frame pool; worker identity match and solve + live reprojection; guidance + collapsed advanced metrics |
 | **Results**   | WebGPU orbit view of refined target points; **Export JSON** (hex schema v2); **Save to library** & **Continue Calibration**                                                                     |
 | **Point Lab** | Hex pattern, fingerprint, and local homography/ICP experiments                                                                                                                                  |
-| **ROI Lab**   | ONNX mask, blob segmentation, component, label, and identity diagnostics with a seed scan                                                                                                       |
+| **ROI Lab**   | ONNX mask, blurred histogram, cubic refined peaks, CPU neighbour filter, and identity diagnostics with a seed scan                                                                              |
 
 **Camera** — shared [`CameraStreamContext`](../src/components/camera/CameraStreamContext.tsx) at the root. **Calibrate** capture: [`HexCameraPipeline`](../src/components/camera/HexCameraPipeline.tsx). Removed routes `/hex-target`, `/debug`, `/gradient-profiles` are not redirected.
 
@@ -26,13 +26,14 @@ In-browser camera calibration against a fixed hex marker target; no server. Capt
 ## Detection pipeline
 
 1. ROI ONNX mask at 256 px wide with aspect-following height.
-2. Masked full-resolution luma histogram → black / gray / white cuts.
-3. 2×2 color-aware opening, pointer-jump connected components, centroid NMS.
-4. Observed proximity graph + binary-color fingerprints.
-5. Hash identity match in a worker; local homography/ICP recovery for ambiguous markers. The two-slot capture pipeline overlaps matching with the next frame.
-6. Accepted point observations feed the calibration frame pool.
+2. Mask-aware high-pass, Gaussian σ1.0, and a masked histogram of the blurred image → black / gray / white cuts.
+3. 3×3 extrema, 5×5 cubic peak fit, definite-Hessian filter on the GPU.
+4. GPU readback of refined peaks and features; CPU same-polarity 4σ neighbour filter.
+5. Observed proximity graph + binary-color fingerprints.
+6. Hash identity match in a worker; local homography/ICP recovery for ambiguous markers. The two-slot capture pipeline overlaps matching with the next frame.
+7. Accepted point observations feed the calibration frame pool.
 
-Details: [`architecture.md`](architecture.md), [`hex-blob-detection.md`](hex-blob-detection.md), [`point-identity-icp-recovery.md`](point-identity-icp-recovery.md).
+Details: [`architecture.md`](architecture.md), [`gpu-refined-peak-pipeline.md`](gpu-refined-peak-pipeline.md), [`hex-blob-detection.md`](hex-blob-detection.md), [`point-identity-icp-recovery.md`](point-identity-icp-recovery.md).
 
 ---
 

@@ -16,8 +16,9 @@ import { COMPONENT_LABEL_INVALID } from '@/gpu/pipelines/pointerJumpPipeline'
  *    neighbour in another tile, so this dispatches `tiles × 32` threads instead
  *    of the full frame (12.5% of it) and unions the two tile roots.
  * 3. **resolve** — every pixel walks its own chain to the root. Chains are
- *    short because pass 1 already collapsed each tile to one root, so a bounded
- *    walk inside a single dispatch replaces a series of pointer-jump dispatches.
+ *    short because pass 1 already collapsed each tile and the merge attaches
+ *    roots directly to the lowest root it has seen, so a bounded walk inside a
+ *    single dispatch replaces a series of pointer-jump dispatches.
  *
  * Init and union only ever *lower* a parent, so `parent[x] <= x` holds
  * throughout, every walk strictly descends, and the surviving root is the
@@ -35,8 +36,20 @@ const TILE_AREA = TILE * TILE
  * propagate a hook across the full tile width.
  */
 const TILE_ITERATIONS = 16
-/** A component may span at most this many tiles; beyond that it stays split. */
-const MAX_HOPS = 8
+/**
+ * Bound on a root walk, not a limit on the component's size. A union has to be
+ * applied to the *current* root, so both sides of a border are re-walked before
+ * every attempt; unions only lower a parent, so the tree flattens as it grows
+ * and real chains measured 1–2 hops even for a thin shape spanning the frame.
+ */
+const MAX_ROOT_HOPS = 64
+/**
+ * A union is dropped when `atomicMin` targets a slot that another border has
+ * already lowered below the value being written. Re-walking and retrying turns
+ * that into a repair instead of a split; a second merge *dispatch* would not,
+ * because it re-reads the same tile-root slots and repeats the same no-op.
+ */
+const UNION_ATTEMPTS = 4
 const MERGE_WORKGROUP = 64
 const RESOLVE_WORKGROUP = 16
 
@@ -229,15 +242,44 @@ export function createTileLabeling(
     if (length(mergeLayout.$.edgeBuffer[b]!) <= d.f32(0)) {
       return
     }
-    const rootA = atomicLoad(mergeLayout.$.parent[a]!)
-    const rootB = atomicLoad(mergeLayout.$.parent[b]!)
-    if (rootA === d.u32(COMPONENT_LABEL_INVALID) || rootB === d.u32(COMPONENT_LABEL_INVALID)) {
+    if (
+      atomicLoad(mergeLayout.$.parent[a]!) === d.u32(COMPONENT_LABEL_INVALID) ||
+      atomicLoad(mergeLayout.$.parent[b]!) === d.u32(COMPONENT_LABEL_INVALID)
+    ) {
       return
     }
-    const low = min(rootA, rootB)
-    const high = max(rootA, rootB)
-    if (low !== high) {
+    for (let attempt = 0; attempt < UNION_ATTEMPTS; attempt += 1) {
+      // Both sides are walked to their *current* root first. `atomicMin` is a
+      // no-op when the target already holds something smaller, so a union
+      // applied to a root captured earlier is silently dropped — and a dropped
+      // union is exactly what splits one blob into pieces at a tile seam.
+      let walkA = atomicLoad(mergeLayout.$.parent[a]!)
+      let walkB = atomicLoad(mergeLayout.$.parent[b]!)
+      for (let hop = 0; hop < MAX_ROOT_HOPS; hop += 1) {
+        const next = atomicLoad(mergeLayout.$.parent[walkA]!)
+        if (next >= walkA) {
+          break
+        }
+        walkA = next
+      }
+      for (let hop = 0; hop < MAX_ROOT_HOPS; hop += 1) {
+        const next = atomicLoad(mergeLayout.$.parent[walkB]!)
+        if (next >= walkB) {
+          break
+        }
+        walkB = next
+      }
+      if (walkA === walkB) {
+        return
+      }
+      const low = min(walkA, walkB)
+      const high = max(walkA, walkB)
       atomicMin(mergeLayout.$.parent[high]!, low)
+      // Only a concurrent lowering between the walk and the write can lose the
+      // union; re-check and retry rather than leaving the components apart.
+      if (atomicLoad(mergeLayout.$.parent[high]!) === low) {
+        return
+      }
     }
   })
 
@@ -260,7 +302,7 @@ export function createTileLabeling(
       return
     }
     let root = start
-    for (let hop = 0; hop < MAX_HOPS; hop += 1) {
+    for (let hop = 0; hop < MAX_ROOT_HOPS; hop += 1) {
       const next = atomicLoad(resolveLayout.$.parent[root]!)
       if (next === d.u32(COMPONENT_LABEL_INVALID) || next >= root) {
         break
@@ -301,6 +343,5 @@ export function createTileLabeling(
     },
   }
 }
-
 
 export type TileLabeling = ReturnType<typeof createTileLabeling>

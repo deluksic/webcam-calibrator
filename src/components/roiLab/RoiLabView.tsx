@@ -3,16 +3,18 @@ import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-j
 
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
+import { PeakInspector } from '@/components/roiLab/PeakInspector'
 import { initSharedGPUForOnnx } from '@/gpu/init'
-import type { RoiComponentPoint } from '@/gpu/roiLab/roiComponentsPipeline'
 import type { RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
 import {
   ROI_MODEL_WIDTH,
   createRoiLabPipeline,
   type RoiHistogramUpdate,
   type RoiLabPipeline,
+  type RoiPeakFrameAnalysis,
   type RoiStepTimings,
 } from '@/gpu/roiLab/roiLabPipeline'
+import type { RoiDetectedPoint } from '@/gpu/roiLab/roiPeakTypes'
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
 import { computeFingerprints, createIdentityIndexesByDepth } from '@/lib/pointIdentity/identity'
 import type { IdentityDesignSpec, IdentityMetrics } from '@/lib/pointIdentity/identityPipeline'
@@ -21,6 +23,8 @@ import { createColorIdentityIndex, matchObservedIdentity } from '@/lib/pointIden
 import { buildProximityGraph } from '@/lib/pointIdentity/proximityGraph'
 import { randomBinaryColors } from '@/lib/pointIdentity/random'
 import { ROI_HISTOGRAM_BINS } from '@/lib/roiHistogram'
+import { pointerToFrame } from '@/lib/roiLabPointer'
+import { describeRefinedPeak } from '@/lib/roiNeighbourFilter'
 import { createFrameLoop } from '@/utils/createFrameLoop'
 import { configureIdentityWorker, disposeIdentityWorker, runIdentityInWorker } from '@/workers/identityClient'
 
@@ -46,7 +50,7 @@ const IDENTITY_DEFAULTS = {
   depth: Math.min(MAX_FINGERPRINT_DEPTH, Math.max(1, Number(QUERY.get('depth')) || MAX_FINGERPRINT_DEPTH)),
 } as const
 
-type RoiViewMode = 'blobs' | 'components' | 'labels' | 'identity' | 'mask' | 'input' | 'camera'
+type RoiViewMode = 'blobs' | 'peaks' | 'identity' | 'mask' | 'input' | 'camera'
 
 type ViewOption = {
   mode: RoiViewMode
@@ -54,24 +58,22 @@ type ViewOption = {
   hint: string
 }
 
-/** Ordered by the pipeline: camera -> model input -> mask -> blobs -> components -> identity. */
+/** Ordered by the pipeline: camera -> model input -> mask -> blobs -> peaks -> identity. */
 const VIEW_OPTIONS: readonly ViewOption[] = [
   { mode: 'camera', label: 'Camera', hint: 'Raw camera frame' },
   { mode: 'input', label: 'Input', hint: 'Normalized grayscale fed to the ROI model' },
   { mode: 'mask', label: 'Mask', hint: 'Raw ROI mask prediction' },
   { mode: 'blobs', label: 'Blobs', hint: 'Histogram-segmented black and white blobs inside the mask' },
-  { mode: 'labels', label: 'Labels', hint: 'Connected components colored randomly' },
-  { mode: 'components', label: 'Centroids', hint: 'Binary components and their centroids' },
+  { mode: 'peaks', label: 'Peaks', hint: 'Refined 5×5 cubic peaks, before the CPU 4σ neighbour filter' },
   { mode: 'identity', label: 'Identity', hint: 'Observed graph with stable design identities' },
 ]
 
-const VIEW_MODE_INDEX: Record<RoiViewMode, 1 | 2 | 3 | 4 | 6 | 7 | 8> = {
+const VIEW_MODE_INDEX: Record<RoiViewMode, 1 | 2 | 3 | 4 | 6 | 8> = {
   mask: 1,
   input: 2,
   camera: 3,
   blobs: 4,
-  components: 6,
-  labels: 7,
+  peaks: 6,
   identity: 8,
 }
 
@@ -184,6 +186,8 @@ export const RoiLabView: Component = () => {
   const [identityMetrics, setIdentityMetrics] = createSignal<IdentityMetrics>()
   const [identityPerf, setIdentityPerf] = createSignal<IdentityPerf>()
   const [stepTimings, setStepTimings] = createSignal<RoiStepTimings>()
+  const [peakAnalysis, setPeakAnalysis] = createSignal<RoiPeakFrameAnalysis>()
+  const [selectedPeak, setSelectedPeak] = createSignal<{ x: number; y: number }>()
   const [seedScanRange, setSeedScanRange] = createSignal(512)
   const [seedScan, setSeedScan] = createSignal<{
     scanning: boolean
@@ -191,7 +195,7 @@ export const RoiLabView: Component = () => {
     bestSeed?: number
     bestResolved?: number
   }>()
-  let lastObservedPoints: readonly RoiComponentPoint[] = []
+  let lastObservedPoints: readonly RoiDetectedPoint[] = []
 
   let disposed = false
 
@@ -231,7 +235,7 @@ export const RoiLabView: Component = () => {
   })
 
   const runIdentity = async (
-    points: readonly RoiComponentPoint[],
+    points: readonly RoiDetectedPoint[],
     frameId: number,
   ): Promise<RoiGraphData | undefined> => {
     lastObservedPoints = points
@@ -254,6 +258,36 @@ export const RoiLabView: Component = () => {
       return undefined
     }
   }
+
+  const nearestPeak = (
+    analysis: RoiPeakFrameAnalysis,
+    target: { x: number; y: number },
+    maxDistance = 24,
+  ): { index: number; peak: RoiPeakFrameAnalysis['peaks'][number] } | undefined => {
+    let bestIndex = -1
+    let bestDistanceSq = maxDistance * maxDistance
+    for (let index = 0; index < analysis.peaks.length; index += 1) {
+      const peak = analysis.peaks[index]!
+      const dx = peak.x - target.x
+      const dy = peak.y - target.y
+      const distanceSq = dx * dx + dy * dy
+      if (distanceSq < bestDistanceSq) {
+        bestDistanceSq = distanceSq
+        bestIndex = index
+      }
+    }
+    return bestIndex >= 0 ? { index: bestIndex, peak: analysis.peaks[bestIndex]! } : undefined
+  }
+
+  const selectedPeakDetail = createMemo(() => {
+    const analysis = peakAnalysis()
+    const target = selectedPeak()
+    if (!analysis || !target) {
+      return undefined
+    }
+    const nearest = nearestPeak(analysis, target)
+    return nearest ? describeRefinedPeak(analysis.peaks, nearest.index) : undefined
+  })
 
   const scanSeeds = async (): Promise<void> => {
     const points = lastObservedPoints
@@ -331,6 +365,13 @@ export const RoiLabView: Component = () => {
     }),
     ({ pipeline, zoom, panX, panY }) => {
       pipeline?.setViewport(zoom, panX, panY)
+    },
+  )
+
+  createEffect(
+    () => ({ pipeline: roiPipeline(), selected: selectedPeak() }),
+    ({ pipeline, selected }) => {
+      pipeline?.setSelectedPeak(selected)
     },
   )
 
@@ -569,6 +610,20 @@ export const RoiLabView: Component = () => {
                     frameId: timings.frameId,
                   })
                   setStepTimings(timings.steps)
+                  const analysis = pipeline?.getPresentedPeakAnalysis()
+                  setPeakAnalysis(analysis)
+                  const target = selectedPeak()
+                  if (analysis && target) {
+                    const nearest = nearestPeak(analysis, target)
+                    if (!nearest) {
+                      setSelectedPeak(undefined)
+                    } else if (
+                      Math.abs(nearest.peak.x - target.x) > 0.01 ||
+                      Math.abs(nearest.peak.y - target.y) > 0.01
+                    ) {
+                      setSelectedPeak({ x: nearest.peak.x, y: nearest.peak.y })
+                    }
+                  }
                   gpuLossRestarts = 0
                 })
                 .catch((cause: unknown) => {
@@ -660,32 +715,73 @@ export const RoiLabView: Component = () => {
     setPanY(0)
   }
 
-  const handleWheel = (event: WheelEvent): void => {
-    event.preventDefault()
+  const pointerToCanvas = (event: { clientX: number; clientY: number }): ReturnType<typeof pointerToFrame> => {
     const canvas = canvasElement()
     const size = videoSize()
     if (!canvas || !size) {
-      return
+      return undefined
     }
     const rect = canvas.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) {
+    return pointerToFrame(event.clientX, event.clientY, rect, size.width, size.height, zoom(), panX(), panY())
+  }
+
+  const handleWheel = (event: WheelEvent): void => {
+    event.preventDefault()
+    const point = pointerToCanvas(event)
+    if (!point) {
       return
     }
-    const anchorX = ((event.clientX - rect.left) / rect.width) * size.width
-    const anchorY = ((event.clientY - rect.top) / rect.height) * size.height
     const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY
     const factor = Math.exp(-delta * WHEEL_SENSITIVITY)
     if (!Number.isFinite(factor) || factor <= 0) {
       return
     }
-    zoomAt(factor, anchorX, anchorY)
+    zoomAt(factor, point.canvasX, point.canvasY)
+  }
+
+  const handlePointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0 || viewMode() !== 'peaks') {
+      return
+    }
+    const analysis = peakAnalysis()
+    const point = pointerToCanvas(event)
+    if (!analysis || analysis.peaks.length === 0 || !point) {
+      return
+    }
+    const threshold = Math.max(4, 5 / zoom())
+    let bestIndex = -1
+    let bestDistanceSq = threshold * threshold
+    for (let index = 0; index < analysis.peaks.length; index += 1) {
+      const peak = analysis.peaks[index]!
+      const dx = peak.x - point.frameX
+      const dy = peak.y - point.frameY
+      const distanceSq = dx * dx + dy * dy
+      if (distanceSq < bestDistanceSq) {
+        bestDistanceSq = distanceSq
+        bestIndex = index
+      }
+    }
+    setSelectedPeak(
+      bestIndex >= 0
+        ? {
+            x: analysis.peaks[bestIndex]!.x,
+            y: analysis.peaks[bestIndex]!.y,
+          }
+        : undefined,
+    )
   }
 
   return (
     <div class={styles.root}>
       <div class={styles.display}>
         <video ref={setVideoElement} class={styles.videoSource} muted playsinline />
-        <canvas ref={setCanvasElement} class={styles.canvas} onWheel={handleWheel} />
+        <canvas
+          ref={setCanvasElement}
+          class={styles.canvas}
+          style={{ cursor: viewMode() === 'peaks' ? 'crosshair' : 'zoom-in' }}
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown}
+        />
         <div class={styles.zoomHud}>
           <button type="button" class={styles.zoomButton} aria-label="Zoom out" onClick={() => zoomFromCenter(1 / 1.5)}>
             −
@@ -706,11 +802,11 @@ export const RoiLabView: Component = () => {
       <aside class={styles.controls}>
         <h1 class={styles.title}>ROI Lab</h1>
         <p class={styles.note}>
-          Histogram-driven blob segmentation inside the target mask. The tiny U-Net is a 74.0k-parameter ONNX model at
-          256 px wide, with the height following the camera aspect. A full-resolution raw-luma histogram inside the mask
-          picks black/gray/white cuts. The component path applies a color-aware 2×2 opening, pointer-jump
-          connected-component labeling, centroid extraction, and close-centroid NMS. Labels shows one random color per
-          component; Centroids shows their centers; Identity shows the observed graph and stable design-ID colors.
+          Histogram-driven peak detection inside the target mask. The tiny U-Net is a 74.0k-parameter ONNX model at 256
+          px wide, with the height following the camera aspect. A full-resolution histogram of the blurred image picks
+          black/gray/white cuts, then 3×3 extrema are refined with a 5×5 cubic fit and a definite-Hessian test. Peaks
+          shows the refined candidates before the CPU 4σ same-polarity neighbour filter; Identity shows the observed
+          graph and stable design-ID colors after that filter.
         </p>
         <Show when={DEMO_MODE}>
           <p class={styles.note}>
@@ -748,8 +844,11 @@ export const RoiLabView: Component = () => {
               </button>
             ))}
           </div>
-          <p class={styles.viewHint}>Identity: design IDs · Labels: colors · Centroids: centers.</p>
+          <p class={styles.viewHint}>
+            Identity: design IDs · Peaks: refined candidates before the CPU filter; click one to inspect.
+          </p>
         </div>
+        <PeakInspector detail={selectedPeakDetail()} />
         <div class={styles.identityPanel}>
           <div class={styles.identityHeader}>
             <span>Identity target</span>
@@ -872,7 +971,7 @@ export const RoiLabView: Component = () => {
                   <dd>{metrics().edges}</dd>
                 </div>
                 <div>
-                  <dt>components</dt>
+                  <dt>observed</dt>
                   <dd>{metrics().components}</dd>
                 </div>
                 <div>
@@ -993,41 +1092,36 @@ export const RoiLabView: Component = () => {
               <>
                 <dt>Stats</dt>
                 <dd>{timings().statsMs.toFixed(2)} ms</dd>
-                <dt>Preprocess</dt>
-                <dd>{timings().preprocessMs.toFixed(2)} ms</dd>
-                <dt>Queue wait</dt>
-                <dd>{timings().queueWaitMs.toFixed(2)} ms</dd>
-                <dt>Camera copy</dt>
-                <dd>{timings().cameraCopyMs.toFixed(2)} ms</dd>
-                <dt>Mask</dt>
-                <dd>{timings().maskMs.toFixed(2)} ms</dd>
-                <dt>Background</dt>
-                <dd>{timings().backgroundMs.toFixed(2)} ms</dd>
-                <dt>Components encode</dt>
-                <dd>{timings().componentsEncodeMs.toFixed(2)} ms</dd>
-                <dt>Debug input</dt>
-                <dd>{timings().debugInputMs.toFixed(2)} ms</dd>
+                <dt>CPU encode</dt>
+                <dd>
+                  {(
+                    timings().preprocessMs +
+                    timings().cameraCopyMs +
+                    timings().maskMs +
+                    timings().backgroundMs +
+                    timings().detectionEncodeMs +
+                    timings().debugInputMs +
+                    timings().renderMs +
+                    timings().histogramMs
+                  ).toFixed(2)}{' '}
+                  ms
+                </dd>
                 <dt>Readback wait</dt>
                 <dd>
-                  {timings().readbackMs.toFixed(2)} ms · {timings().readbackComponents} components ·{' '}
-                  {(timings().readbackBytes / 1024).toFixed(1)} KiB
-                  {timings().readbackTruncated ? ' · truncated at cap' : ''}
+                  {timings().readbackMs.toFixed(2)} ms · {(timings().readbackBytes / 1024).toFixed(1)} KiB
+                  {timings().readbackTruncated ? ' · truncated' : ''}
                 </dd>
+                <dt>Neighbour filter</dt>
+                <dd>{timings().neighbourFilterMs.toFixed(2)} ms</dd>
                 <dt>Identity wait</dt>
                 <dd>
                   {timings().identityMs.toFixed(2)} ms · lag {timings().identityLagFrames} frame
                   {timings().identityLagFrames === 1 ? '' : 's'}
                 </dd>
-                <dt>Render submit</dt>
-                <dd>{timings().renderMs.toFixed(2)} ms</dd>
                 <dt>Inference submit</dt>
                 <dd>{timings().inferenceRunMs.toFixed(2)} ms</dd>
-                <dt>Inference drain</dt>
-                <dd>{timings().inferenceDrainMs.toFixed(2)} ms</dd>
                 <dt>Frame drain</dt>
                 <dd>{timings().frameDrainMs.toFixed(2)} ms</dd>
-                <dt>Histogram submit</dt>
-                <dd>{timings().histogramMs.toFixed(2)} ms</dd>
                 <dt>Accounted / total</dt>
                 <dd>
                   {timings().accountedMs.toFixed(2)} / {timings().totalMs.toFixed(2)} ms
@@ -1036,26 +1130,12 @@ export const RoiLabView: Component = () => {
                 <dd>{timings().overheadMs.toFixed(2)} ms</dd>
                 <dt>GPU preprocess</dt>
                 <dd>{timings().gpuMs.preprocess?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU inference</dt>
-                <dd>{timings().gpuMs.inference?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU mask</dt>
-                <dd>{timings().gpuMs.mask?.toFixed(2) ?? '—'} ms</dd>
                 <dt>GPU background</dt>
                 <dd>{timings().gpuMs.background?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU morphology</dt>
-                <dd>{timings().gpuMs.componentsMorphology?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU labeling</dt>
-                <dd>{timings().gpuMs.componentsLabeling?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU comp stats</dt>
-                <dd>{timings().gpuMs.componentsStats?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU comp nms</dt>
-                <dd>{timings().gpuMs.componentsNms?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU copy</dt>
-                <dd>{timings().gpuMs.cameraCopy?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU render</dt>
-                <dd>{timings().gpuMs.render?.toFixed(2) ?? '—'} ms</dd>
-                <dt>GPU histogram</dt>
-                <dd>{timings().gpuMs.histogram?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU detection</dt>
+                <dd>{timings().gpuMs.detection?.toFixed(2) ?? '—'} ms</dd>
+                <dt>GPU present</dt>
+                <dd>{((timings().gpuMs.cameraCopy ?? 0) + (timings().gpuMs.render ?? 0)).toFixed(2)} ms</dd>
               </>
             )}
           </Show>

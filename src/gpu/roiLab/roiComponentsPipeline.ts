@@ -14,6 +14,14 @@ const MIN_COMPONENT_AREA = 4
 // leaves headroom while keeping the NMS loops and fixed readback small.
 const MAX_COMPONENTS = 2048
 const SUPPRESSED_BIT = 0x8000_0000
+// TEMPORARY: disabled to measure how much the radius filter was dropping at
+// oblique angles. With it off nothing is suppressed, the raw component set is
+// drawn and read back, and `encodeNms` skips its four dispatches.
+const NMS_ENABLED = false
+// `reason` doubles as the component area for the NMS passes. Nothing reads it
+// while the filter is off, and a non-zero value would draw every circle as a
+// rejection marker, so the raw set zeroes it by multiplying the area by 0.
+const AREA_SCALE = NMS_ENABLED ? 1 : 0
 
 const componentParams = d.struct({
   blackCut: d.u32,
@@ -135,7 +143,7 @@ export type RoiComponentsStage = {
   encodeLabeling: () => void
   encodeStats: () => void
   encodeNms: () => void
-  setLabelView: (enabled: boolean) => void
+  setLabelOverlay: (enabled: boolean) => void
   readComponents: () => Promise<RoiComponentReadback>
   setThresholds: (blackCut: number, whiteCut: number, valid: boolean) => void
   destroy: () => void
@@ -166,6 +174,10 @@ export function createRoiComponentsStage(
   const nmsStatsBuffer = root.createBuffer(NmsStats).$usage('storage')
   nmsStatsBuffer.write({ meanDistance: 0, radius: 2 })
   const filteredCountBuffer = root.createBuffer(d.atomic(d.u32)).$usage('storage')
+  // The circles that are drawn and read back. With NMS off the filtered
+  // buffers are never written, so both fall back to the raw component set.
+  const drawCountBuffer = NMS_ENABLED ? filteredCountBuffer : componentCountBuffer
+  const drawCircleBuffer = NMS_ENABLED ? filteredCircleBuffer : circleBuffer
   const componentReadbackBuffer = root.device.createBuffer({
     label: 'roi-component-readback',
     size: 4 + MAX_COMPONENTS * 16,
@@ -185,7 +197,10 @@ export function createRoiComponentsStage(
     firstVertex: 0,
     firstInstance: 0,
   })
-  let labelViewEnabled = false
+  // The labels overlay is only reachable from the ROI lab's view modes; the
+  // calibration pipeline turns it off for its whole lifetime. It stays on by
+  // default because a paused redraw samples the texture without re-encoding.
+  let labelOverlayEnabled = true
   const paramsBuffer = root.createUniform(componentParams, {
     blackCut: 0,
     whiteCut: 256,
@@ -372,7 +387,7 @@ export function createRoiComponentsStage(
       x: d.f32(sumX) / d.f32(count) + d.f32(0.5),
       y: d.f32(sumY) / d.f32(count) + d.f32(0.5),
       polarity,
-      reason: count,
+      reason: count * d.u32(AREA_SCALE),
     })
   })
 
@@ -605,12 +620,12 @@ export function createRoiComponentsStage(
     filteredCount: filteredCountBuffer,
   })
   const publishBindGroup = root.createBindGroup(publishLayout, {
-    componentCount: filteredCountBuffer,
+    componentCount: drawCountBuffer,
     drawIndirect: drawIndirectBuffer,
   })
 
   return {
-    circleBuffer: filteredCircleBuffer,
+    circleBuffer: drawCircleBuffer,
     drawIndirectBuffer,
     labelTexture,
     async readComponents() {
@@ -621,9 +636,9 @@ export function createRoiComponentsStage(
       try {
         const bytesCopied = 4 + MAX_COMPONENTS * 16
         const encoder = root.device.createCommandEncoder({ label: 'roi-component-readback' })
-        encoder.copyBufferToBuffer(root.unwrap(filteredCountBuffer), 0, componentReadbackBuffer, 0, 4)
+        encoder.copyBufferToBuffer(root.unwrap(drawCountBuffer), 0, componentReadbackBuffer, 0, 4)
         encoder.copyBufferToBuffer(
-          root.unwrap(filteredCircleBuffer),
+          root.unwrap(drawCircleBuffer),
           0,
           componentReadbackBuffer,
           4,
@@ -661,8 +676,8 @@ export function createRoiComponentsStage(
         residualGain: 1,
       })
     },
-    setLabelView(enabled) {
-      labelViewEnabled = enabled
+    setLabelOverlay(enabled) {
+      labelOverlayEnabled = enabled
     },
     encodeMorphology() {
       rawPipeline.with(rawBindGroup).dispatchThreads(frameWidth, frameHeight)
@@ -684,18 +699,20 @@ export function createRoiComponentsStage(
     encodeStats() {
       statsResetPipeline.with(statsResetBindGroup).dispatchThreads(frameWidth, frameHeight)
       accumulatePipeline.with(accumulateBindGroup).dispatchThreads(frameWidth, frameHeight)
-      // Only the "Labels" overlay samples this texture; writing a full frame
-      // for every other mode is pure bandwidth.
-      if (labelViewEnabled) {
+      // Off only when the owning pipeline can never show this overlay; gating
+      // it on the *current* view mode would leave paused redraws black.
+      if (labelOverlayEnabled) {
         labelColorPipeline.with(labelColorBindGroup).dispatchThreads(frameWidth, frameHeight)
       }
       finalizePipeline.with(finalizeBindGroup).dispatchThreads(frameWidth, frameHeight)
     },
     encodeNms() {
-      nmsNearestPipeline.with(nmsNearestBindGroup).dispatchThreads(MAX_COMPONENTS)
-      nmsStatsPipeline.with(nmsStatsBindGroup).dispatchThreads()
-      nmsSuppressPipeline.with(nmsSuppressBindGroup).dispatchThreads(MAX_COMPONENTS)
-      nmsCompactPipeline.with(nmsCompactBindGroup).dispatchThreads(MAX_COMPONENTS)
+      if (NMS_ENABLED) {
+        nmsNearestPipeline.with(nmsNearestBindGroup).dispatchThreads(MAX_COMPONENTS)
+        nmsStatsPipeline.with(nmsStatsBindGroup).dispatchThreads()
+        nmsSuppressPipeline.with(nmsSuppressBindGroup).dispatchThreads(MAX_COMPONENTS)
+        nmsCompactPipeline.with(nmsCompactBindGroup).dispatchThreads(MAX_COMPONENTS)
+      }
       publishPipeline.with(publishBindGroup).dispatchThreads()
     },
     destroy() {

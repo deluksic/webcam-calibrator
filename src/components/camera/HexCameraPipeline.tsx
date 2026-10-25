@@ -3,7 +3,6 @@ import { Show, createEffect, createMemo, createSignal, createTrackedEffect } fro
 
 import { CalibrateFocusOverlay } from '@/components/calibration/CalibrateFocusOverlay'
 import { initSharedGPUForOnnx } from '@/gpu/init'
-import type { RoiComponentPoint } from '@/gpu/roiLab/roiComponentsPipeline'
 import type { RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
 import {
   ROI_MODEL_WIDTH,
@@ -11,6 +10,7 @@ import {
   type RoiLabPipeline,
   type RoiStepTimings,
 } from '@/gpu/roiLab/roiLabPipeline'
+import type { RoiDetectedPoint } from '@/gpu/roiLab/roiPeakTypes'
 import type { CalibrationFrameObservation, CalibrationPointObservation } from '@/lib/calibrationTypes'
 import type { HexReprojectionResult } from '@/lib/hexReprojection'
 import { toCalibrationFramePoints } from '@/lib/hexTarget/calibrationPoints'
@@ -40,7 +40,7 @@ export type HexCameraPipelineProps = {
    * ROI pipeline overlap matching with the next frame's GPU work; the resolved
    * graph is presented with the pixels it was computed from.
    */
-  matchTarget?: (design: HexTargetModel, points: readonly RoiComponentPoint[]) => Promise<HexTargetMatch>
+  matchTarget?: (design: HexTargetModel, points: readonly RoiDetectedPoint[]) => Promise<HexTargetMatch>
   onFrameSize?: (size: { width: number; height: number }) => void
   onError?: (message: string | undefined) => void
   setRequestSnapshot?: (request: ((callback: SnapshotCallback) => void) | undefined) => void
@@ -215,7 +215,7 @@ export const HexCameraPipeline: Component<HexCameraPipelineProps> = (props) => {
             }
           },
           undefined,
-          async (points: readonly RoiComponentPoint[], frameId: number) => {
+          async (points: readonly RoiDetectedPoint[], frameId: number) => {
             if (cancelled) {
               return { points: [], edges: [] }
             }

@@ -1,6 +1,37 @@
 """Synthetic full-target blob-detector experiments."""
 
-from blob_lab.camera import CameraPose, CameraRanges, random_pose
+from blob_lab.augment import (
+    CameraSharpenConfig,
+    SharpenParams,
+    apply_camera_sharpen,
+    sample_augmentation_rng,
+    sample_sharpen_params,
+)
+from blob_lab.camera import (
+    TILT_BINS,
+    CameraPose,
+    CameraRanges,
+    PoseAugmentConfig,
+    homography_jacobian,
+    local_foreshortening,
+    pose_tilt_deg,
+    random_pose,
+    tilt_bin,
+)
+from blob_lab.local_peak_fit import (
+    CurvatureData,
+    LocalPeak,
+    LocalPeakCandidate,
+    SupportRegion,
+    curvature_maps,
+    detect_local_peaks,
+    estimate_spacing,
+    fit_peak,
+    fit_peaks,
+    refresh_candidate,
+    smooth_luma,
+    support_radii,
+)
 from blob_lab.dataset import (
     FullTargetDatasetConfig,
     PatchDataset,
@@ -69,6 +100,29 @@ from blob_lab.target_layout import (
 
 __all__ = [
     "BROWSER_TARGET_BACKGROUND",
+    "CameraSharpenConfig",
+    "CurvatureData",
+    "LocalPeak",
+    "LocalPeakCandidate",
+    "PoseAugmentConfig",
+    "SupportRegion",
+    "TILT_BINS",
+    "apply_camera_sharpen",
+    "curvature_maps",
+    "detect_local_peaks",
+    "estimate_spacing",
+    "fit_peak",
+    "fit_peaks",
+    "homography_jacobian",
+    "local_foreshortening",
+    "pose_tilt_deg",
+    "refresh_candidate",
+    "sample_augmentation_rng",
+    "sample_sharpen_params",
+    "smooth_luma",
+    "support_radii",
+    "tilt_bin",
+    "SharpenParams",
     "BROWSER_TARGET_PADDING",
     "CameraPose",
     "CameraRanges",

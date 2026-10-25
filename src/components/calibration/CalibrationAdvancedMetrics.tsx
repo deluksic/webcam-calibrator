@@ -1,9 +1,9 @@
 import { Show } from 'solid-js'
 
 import type { CalibRun } from '@/components/calibration/CalibrationRunContext'
+import type { RoiStepTimings } from '@/gpu/roiLab/roiLabPipeline'
 import { DEFAULT_CALIBRATION_TOP_K } from '@/lib/calibrationTopK'
 import { formatFixed } from '@/lib/formatFixed'
-import type { RoiStepTimings } from '@/gpu/roiLab/roiLabPipeline'
 import type { HexReprojectionResult } from '@/lib/hexReprojection'
 
 import styles from '@/components/CalibrationView.module.css'
@@ -36,8 +36,8 @@ export function CalibrationAdvancedMetrics(props: CalibrationAdvancedMetricsProp
       <div class={styles.stats}>
         <div>
           Solver-ready (Results): {props.validSolveCount} / 4 · Pool {props.run.framePool.length} /{' '}
-          {DEFAULT_CALIBRATION_TOP_K} · {props.uniqueTargetPointCount} target points in pool ·{' '}
-          {props.matchedPointCount} identified now
+          {DEFAULT_CALIBRATION_TOP_K} · {props.uniqueTargetPointCount} target points in pool · {props.matchedPointCount}{' '}
+          identified now
         </div>
         <div>
           Stream: {props.run.stats.framesProcessed} frames · {props.run.stats.framesAccepted} snapshots ·{' '}
@@ -57,8 +57,8 @@ export function CalibrationAdvancedMetrics(props: CalibrationAdvancedMetricsProp
         <div class={styles.statsSection}>Live reprojection</div>
         <div>
           RMS {props.reproj ? formatFixed(props.reproj.rms, 3) : '—'} px · points{' '}
-          {props.reproj ? props.reproj.pointCount : '—'} · ‖t‖ {props.reproj ? formatFixed(props.reproj.dist, 3) : '—'} ·
-          tilt {props.reproj ? formatFixed(props.reproj.tiltDeg, 1) : '—'}°
+          {props.reproj ? props.reproj.pointCount : '—'} · ‖t‖ {props.reproj ? formatFixed(props.reproj.dist, 3) : '—'}{' '}
+          · tilt {props.reproj ? formatFixed(props.reproj.tiltDeg, 1) : '—'}°
         </div>
         <Show when={props.timings}>
           {(timings) => (
@@ -68,16 +68,17 @@ export function CalibrationAdvancedMetrics(props: CalibrationAdvancedMetricsProp
                 stats {timings().statsMs.toFixed(2)} · pre {timings().preprocessMs.toFixed(2)} · queue{' '}
                 {timings().queueWaitMs.toFixed(2)} · inf-run {timings().inferenceRunMs.toFixed(2)} · inf-drain{' '}
                 {timings().inferenceDrainMs.toFixed(2)} · copy {timings().cameraCopyMs.toFixed(2)} · mask{' '}
-                {timings().maskMs.toFixed(2)} · bg {timings().backgroundMs.toFixed(2)} · comp{' '}
-                {timings().componentsEncodeMs.toFixed(2)} · readback {timings().readbackMs.toFixed(2)} ({timings().readbackComponents}{' '}
-                comps, {(timings().readbackBytes / 1024).toFixed(1)} KiB{timings().readbackTruncated ? ', truncated' : ''}) · identity{' '}
-                {timings().identityMs.toFixed(2)} · frame-drain {timings().frameDrainMs.toFixed(2)} · hist{' '}
+                {timings().maskMs.toFixed(2)} · bg {timings().backgroundMs.toFixed(2)} · detect{' '}
+                {timings().detectionEncodeMs.toFixed(2)} · readback {timings().readbackMs.toFixed(2)} (
+                {(timings().readbackBytes / 1024).toFixed(1)} KiB
+                {timings().readbackTruncated ? ', truncated' : ''}) · filter {timings().neighbourFilterMs.toFixed(2)} ·
+                identity {timings().identityMs.toFixed(2)} · frame-drain {timings().frameDrainMs.toFixed(2)} · hist{' '}
                 {timings().histogramMs.toFixed(2)} · account {timings().accountedMs.toFixed(2)} / total{' '}
                 {timings().totalMs.toFixed(2)} ms
               </div>
               <div>
-                GPU pre {timings().gpuMs.preprocess?.toFixed(2) ?? '—'} · mask{' '}
-                {timings().gpuMs.mask?.toFixed(2) ?? '—'} · copy {timings().gpuMs.cameraCopy?.toFixed(2) ?? '—'} · bg{' '}
+                GPU pre {timings().gpuMs.preprocess?.toFixed(2) ?? '—'} · mask {timings().gpuMs.mask?.toFixed(2) ?? '—'}{' '}
+                · copy {timings().gpuMs.cameraCopy?.toFixed(2) ?? '—'} · bg{' '}
                 {(
                   (timings().gpuMs.backgroundWeight ?? 0) +
                   (timings().gpuMs.backgroundHorizontal ?? 0) +

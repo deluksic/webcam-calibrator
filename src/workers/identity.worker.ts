@@ -9,6 +9,12 @@ import {
   type IdentityObservedPoint,
   type IdentityRunOutput,
 } from '@/lib/pointIdentity/identityPipeline'
+import {
+  filterRefinedPeaks,
+  type RoiNeighbourFilterOptions,
+  type RoiNeighbourFilterResult,
+  type RoiRefinedPeak,
+} from '@/lib/roiNeighbourFilter'
 
 export type IdentityJob = {
   points: readonly IdentityObservedPoint[]
@@ -25,6 +31,8 @@ export type IdentityWorkerApi = {
    */
   configure: (spec: IdentityDesignSpec) => void
   run: (spec: IdentityDesignSpec, job: IdentityJob) => IdentityRunOutput
+  /** CPU neighbour filter for refined ROI peaks, before identity. */
+  filter: (peaks: readonly RoiRefinedPeak[], options?: RoiNeighbourFilterOptions) => RoiNeighbourFilterResult
 }
 
 // The worker owns the design: it is derived from `spec` alone, so caching a
@@ -53,6 +61,9 @@ const api: IdentityWorkerApi = {
       recovery: job.recovery,
       frameId: job.frameId,
     })
+  },
+  filter(peaks, options = {}) {
+    return filterRefinedPeaks(peaks, options)
   },
 }
 

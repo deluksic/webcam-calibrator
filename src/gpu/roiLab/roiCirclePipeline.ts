@@ -3,18 +3,18 @@ import type { TgpuRoot } from 'typegpu'
 import { d, tgpu } from 'typegpu'
 import { abs, length, min, mix, smoothstep } from 'typegpu/std'
 
-import { PREMULTIPLIED_ALPHA_BLEND } from '@/gpu/pipelines/shared'
 import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
-import { ROI_CIRCLE_RADIUS_CSS_PX } from '@/gpu/roiLab/roiCircleConstants'
+import { PREMULTIPLIED_ALPHA_BLEND } from '@/gpu/pipelines/shared'
+import { ROI_CIRCLE_RADIUS_CSS_PX, ROI_CIRCLE_VERTEX_COUNT } from '@/gpu/roiLab/roiCircleConstants'
 import {
   ROI_REJECT_FIT,
   ROI_REJECT_GATE,
+  ROI_REJECT_INDEFINITE,
   ROI_REJECT_LOW_AREA,
   ROI_REJECT_LOW_RESPONSE,
   ROI_REJECT_NMS,
   RoiCircleSchema,
-} from '@/gpu/roiLab/roiPeakPipeline'
-
+} from '@/gpu/roiLab/roiPeakTypes'
 
 const circleParams = d.struct({
   radiusPx: d.f32,
@@ -32,10 +32,30 @@ const circlesLayout = tgpu.bindGroupLayout({
   params: { uniform: circleParams },
 })
 
+const selectionParams = d.struct({
+  radiusPx: d.f32,
+  canvasWidth: d.f32,
+  canvasHeight: d.f32,
+  frameWidth: d.f32,
+  frameHeight: d.f32,
+  zoom: d.f32,
+  panX: d.f32,
+  panY: d.f32,
+  x: d.f32,
+  y: d.f32,
+  enabled: d.u32,
+  _pad: d.u32,
+})
+
+const selectionLayout = tgpu.bindGroupLayout({
+  params: { uniform: selectionParams },
+})
+
 export type RoiCircleStage = {
   encode: (pass: GPURenderPassEncoder) => void
   setViewport: (zoom: number, panX: number, panY: number) => void
   setShowRejections: (show: boolean) => void
+  setSelectedPeak: (peak: { x: number; y: number } | undefined) => void
 }
 
 export function createRoiCircleStage(
@@ -74,6 +94,43 @@ export function createRoiCircleStage(
         })
       : undefined
   let showRejects = false
+  let selectedPeak: { x: number; y: number } | undefined
+  let viewZoom = 1
+  let viewPanX = 0
+  let viewPanY = 0
+  const selectionUniform = root.createUniform(selectionParams, {
+    radiusPx,
+    canvasWidth,
+    canvasHeight,
+    frameWidth,
+    frameHeight,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    x: 0,
+    y: 0,
+    enabled: 0,
+    _pad: 0,
+  })
+  const selectionBindGroup = root.createBindGroup(selectionLayout, {
+    params: selectionUniform,
+  })
+  const writeSelection = () => {
+    selectionUniform.write({
+      radiusPx,
+      canvasWidth,
+      canvasHeight,
+      frameWidth,
+      frameHeight,
+      zoom: viewZoom,
+      panX: viewPanX,
+      panY: viewPanY,
+      x: selectedPeak?.x ?? 0,
+      y: selectedPeak?.y ?? 0,
+      enabled: selectedPeak === undefined ? 0 : 1,
+      _pad: 0,
+    })
+  }
 
   const vertex = tgpu.vertexFn({
     in: { vertexIndex: d.builtin.vertexIndex, instanceIndex: d.builtin.instanceIndex },
@@ -92,9 +149,7 @@ export function createRoiCircleStage(
     const screenY = circleInstance.y * params.zoom + params.panY
     const centerX = (screenX / params.frameWidth) * d.f32(2) - d.f32(1)
     const centerY = d.f32(1) - (screenY / params.frameHeight) * d.f32(2)
-    const markerRadius = circleInstance.reason === d.u32(0)
-      ? params.radiusPx
-      : params.radiusPx * d.f32(1.6)
+    const markerRadius = circleInstance.reason === d.u32(0) ? params.radiusPx : params.radiusPx * d.f32(1.6)
     const offsetX = (unit.x * markerRadius * d.f32(2)) / params.canvasWidth
     const offsetY = (unit.y * markerRadius * d.f32(2)) / params.canvasHeight
     return {
@@ -125,6 +180,8 @@ export function createRoiCircleStage(
         color = d.vec3f(0.2, 0.9, 1.0)
       } else if (reason === d.u32(ROI_REJECT_FIT)) {
         color = d.vec3f(1.0, 0.2, 0.15)
+      } else if (reason === d.u32(ROI_REJECT_INDEFINITE)) {
+        color = d.vec3f(1.0, 0.55, 0.1)
       } else if (reason === d.u32(ROI_REJECT_NMS)) {
         color = d.vec3f(1.0, 0.2, 0.8)
       } else if (reason === d.u32(ROI_REJECT_LOW_AREA)) {
@@ -148,20 +205,75 @@ export function createRoiCircleStage(
     multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
   })
 
+  const selectionVertex = tgpu.vertexFn({
+    in: { vertexIndex: d.builtin.vertexIndex },
+    out: {
+      clipPosition: d.builtin.position,
+      unit: d.vec2f,
+    },
+  })(({ vertexIndex }) => {
+    'use gpu'
+    const params = selectionLayout.$.params
+    const unit = circle(vertexIndex)
+    const screenX = params.x * params.zoom + params.panX
+    const screenY = params.y * params.zoom + params.panY
+    const centerX = (screenX / params.frameWidth) * d.f32(2) - d.f32(1)
+    const centerY = d.f32(1) - (screenY / params.frameHeight) * d.f32(2)
+    const markerRadius = params.radiusPx * d.f32(2.6)
+    const offsetX = (unit.x * markerRadius * d.f32(2)) / params.canvasWidth
+    const offsetY = (unit.y * markerRadius * d.f32(2)) / params.canvasHeight
+    return {
+      clipPosition: d.vec4f(centerX + offsetX, centerY + offsetY, d.f32(0), d.f32(1)),
+      unit,
+    }
+  })
+
+  const selectionFragment = tgpu.fragmentFn({
+    in: { unit: d.vec2f },
+    out: d.vec4f,
+  })(({ unit }) => {
+    'use gpu'
+    const radius = length(unit)
+    const ring = d.f32(1) - smoothstep(d.f32(0.025), d.f32(0.1), abs(radius - d.f32(0.82)))
+    const halo = (d.f32(1) - smoothstep(d.f32(0.9), d.f32(1), radius)) * d.f32(0.18)
+    return d.vec4f(d.vec3f(1.0, 0.92, 0.2), ring * d.f32(0.95) + halo)
+  })
+
+  const selectionPipeline = root.createRenderPipeline({
+    vertex: selectionVertex,
+    fragment: selectionFragment,
+    targets: { format: presentationFormat, blend: PREMULTIPLIED_ALPHA_BLEND },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    multisample: { count: RESULTS_MSAA_SAMPLE_COUNT },
+  })
+
   return {
     encode(pass) {
-      pipeline.with(pass).with(bindGroup).drawIndirect(drawIndirectBuffer as never)
+      pipeline
+        .with(pass)
+        .with(bindGroup)
+        .drawIndirect(drawIndirectBuffer as never)
       if (showRejects && rejectBindGroup !== undefined && rejectDrawIndirectBuffer !== undefined) {
         pipeline
           .with(pass)
           .with(rejectBindGroup)
           .drawIndirect(rejectDrawIndirectBuffer as never)
       }
+      if (selectedPeak !== undefined) {
+        selectionPipeline.with(pass).with(selectionBindGroup).draw(ROI_CIRCLE_VERTEX_COUNT)
+      }
     },
     setShowRejections(show) {
       showRejects = show
     },
+    setSelectedPeak(peak) {
+      selectedPeak = peak
+      writeSelection()
+    },
     setViewport(zoom, panX, panY) {
+      viewZoom = zoom
+      viewPanX = panX
+      viewPanY = panY
       uniform.write({
         radiusPx,
         canvasWidth,
@@ -172,6 +284,7 @@ export function createRoiCircleStage(
         panX,
         panY,
       })
+      writeSelection()
     },
   }
 }
