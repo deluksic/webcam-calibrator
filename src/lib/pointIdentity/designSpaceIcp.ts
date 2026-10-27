@@ -17,6 +17,14 @@ import {
 } from '@/lib/pointIdentity/homographyFit'
 import type { BinaryColor, PatternPoint, Vec2 } from '@/lib/pointIdentity/types'
 
+/** Planar distance. `Math.hypot` is overflow-safe but markedly slower, and
+ *  coordinates here are pixel-scale, so the plain form is safe and faster. */
+function planarDistance(a: Vec2, b: Vec2): number {
+  const dx = a.x - b.x
+  const dy = a.y - b.y
+  return Math.sqrt(dx * dx + dy * dy)
+}
+
 export type IcpPair = {
   observedPosition: number
   designId: number
@@ -139,7 +147,7 @@ function medianNearestDistance(points: readonly Vec2[]): number {
         continue
       }
       const candidate = points[second]!
-      minimum = Math.min(minimum, Math.hypot(origin.x - candidate.x, origin.y - candidate.y))
+      minimum = Math.min(minimum, planarDistance(origin, candidate))
     }
     if (Number.isFinite(minimum)) {
       nearest.push(minimum)
@@ -154,7 +162,7 @@ function medianNearestDistance(points: readonly Vec2[]): number {
 }
 
 function designDistance(predicted: Vec2, target: Vec2): number {
-  return Math.hypot(predicted.x - target.x, predicted.y - target.y)
+  return planarDistance(predicted, target)
 }
 
 function matchPass(

@@ -29,9 +29,9 @@ let sharedGpuPromise: Promise<SharedGpu> | undefined
 /**
  * Creates the app-wide WebGPU device.
  *
- * `shader-f16` is required: the ROI model runs its convolutions in f16 (see
- * docs/runntime-evaluation.md). Adapters without it — Adreno 5xx and most 6xx,
- * NVIDIA Pascal — cannot run the capture pipeline at all.
+ * `shader-f16` is required: the ROI model runs its convolutions in f16.
+ * Adapters without it — Adreno 5xx and most 6xx, NVIDIA Pascal — cannot run the
+ * capture pipeline at all.
  */
 export function initSharedGPU(): Promise<SharedGpu> {
   if (!sharedGpuPromise) {

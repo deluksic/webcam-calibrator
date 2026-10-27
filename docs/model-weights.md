@@ -6,8 +6,7 @@ the manifest and scripts.
 
 The asset is `roi_net.safetensors`, an **f16** `safetensors` blob consumed by
 the vendored ruNNtime core. It is produced from the blob_lab checkpoint by
-`scripts/exportRoiRunntime.py`; see
-[`runntime-evaluation.md`](runntime-evaluation.md).
+`scripts/exportRoiRunntime.py`.
 
 ## Train → deploy
 
@@ -27,10 +26,9 @@ pnpm model:verify
 so `spike.html` keeps checking the deployed weights against PyTorch on the same
 frame.
 
-BatchNorm is folded **at export**, in f32, and only then rounded to f16 — the
-same arithmetic the runtime used to do at load, so the numbers are unchanged and
-the file is half the size. The exporter omits the `bn.*` keys entirely, so the
-runtime fold is a no-op.
+BatchNorm is folded **at export**, in f32, and only then rounded to f16, which
+halves the file without changing the numbers. The exporter omits the `bn.*` keys
+entirely, so the runtime fold is a no-op.
 
 ## Files
 
@@ -115,7 +113,7 @@ pnpm model:fetch -- --force                            # (only if you host it re
 Then update `bytes` and `sha256` in `model-manifest.json`
 (`shasum -a 256 public/models/roi_net.safetensors`).
 
-> **After the ruNNtime migration the `models-v3` release does not exist yet.**
-> Local builds work because the asset is already in `public/models/` and matches
-> the manifest hash, but a fresh clone or CI run will fail until the release is
-> uploaded (or the file is force-added to git).
+> **The `models-v3` release has not been uploaded yet.** Local builds work
+> because the asset is already in `public/models/` and matches the manifest hash,
+> but a fresh clone or CI run will fail until it is uploaded (or the file is
+> force-added to git).

@@ -4,10 +4,9 @@
  * so runntime's loader can bind the checkpoint and fold the BatchNorms into
  * their preceding convs.
  *
- * Deliberate differences from the original exported graph:
- *  - plain `cat` instead of the additive conv split, which only existed because
- *    ORT WebGPU mis-executed Concat;
- *  - `halfPixel` bilinear resize, matching torch's align_corners=False;
+ * Shape notes:
+ *  - channel skips are plain `cat`, the natural form of the decoder;
+ *  - `halfPixel` bilinear resize matches torch's align_corners=False;
  *  - runs f16 end to end (conv2d is f16-only in runntime core).
  */
 import {

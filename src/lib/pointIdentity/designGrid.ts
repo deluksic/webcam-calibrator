@@ -1,5 +1,13 @@
 import type { BinaryColor, PatternPoint, Vec2 } from '@/lib/pointIdentity/types'
 
+/** Planar distance. `Math.hypot` is overflow-safe but markedly slower, and
+ *  coordinates here are pixel-scale, so the plain form is safe and faster. */
+function planarDistance(a: Vec2, b: Vec2): number {
+  const dx = a.x - b.x
+  const dy = a.y - b.y
+  return Math.sqrt(dx * dx + dy * dy)
+}
+
 export type DesignLatticeMetrics = {
   /** Median nearest-neighbor distance between design points. */
   medianNearest: number
@@ -29,7 +37,7 @@ export function computeDesignLatticeMetrics(points: readonly PatternPoint[]): De
         continue
       }
       const candidate = points[second]!
-      nearest = Math.min(nearest, Math.hypot(origin.x - candidate.x, origin.y - candidate.y))
+      nearest = Math.min(nearest, planarDistance(origin, candidate))
     }
     if (Number.isFinite(nearest)) {
       nearestDistances.push(nearest)
@@ -91,7 +99,7 @@ export function createDesignGrid(
         }
         for (const position of bucket) {
           const candidate = points[position]!
-          if (Math.hypot(candidate.x - point.x, candidate.y - point.y) <= radius) {
+          if (planarDistance(candidate, point) <= radius) {
             result.push(position)
           }
         }
@@ -109,7 +117,7 @@ export function createDesignGrid(
         continue
       }
       const candidate = points[position]!
-      const distance = Math.hypot(candidate.x - point.x, candidate.y - point.y)
+      const distance = planarDistance(candidate, point)
       if (
         distance < bestDistance ||
         (distance === bestDistance && best !== undefined && position < best)

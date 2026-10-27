@@ -26,13 +26,15 @@ export type ChainCandidateOptions = {
 }
 
 function distance(a: Vec2, b: Vec2): number {
-  return Math.hypot(a.x - b.x, a.y - b.y)
+  const dx = a.x - b.x
+  const dy = a.y - b.y
+  return Math.sqrt(dx * dx + dy * dy)
 }
 
 function unitVector(from: Vec2, to: Vec2): Vec2 | undefined {
   const dx = to.x - from.x
   const dy = to.y - from.y
-  const length = Math.hypot(dx, dy)
+  const length = Math.sqrt(dx * dx + dy * dy)
   if (length < 1e-9) {
     return undefined
   }
@@ -99,7 +101,7 @@ export function computeChainDirections(
         if (score > bestScore + 1e-9 || (Math.abs(score - bestScore) <= 1e-9 && lengthSum < bestLengthSum)) {
           const dx = firstUnit.x - secondUnit.x
           const dy = firstUnit.y - secondUnit.y
-          const length = Math.hypot(dx, dy)
+          const length = Math.sqrt(dx * dx + dy * dy)
           if (length > 1e-9) {
             bestScore = score
             bestLengthSum = lengthSum

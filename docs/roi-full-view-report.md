@@ -120,14 +120,9 @@ The checkpoint was exported with:
 python/.venv/bin/python scripts/exportRoiRunntime.py
 ```
 
-At the time of this experiment the checkpoint was exported to a graph that
-matched PyTorch to 1.3×10⁻⁷ and worked at all browser input heights (96–224 px in
-16 px steps).
-
-> The export path has since changed: the app no longer runs a graph runtime and
-> loads `public/models/roi_net.safetensors` instead. See
-> [`runntime-evaluation.md`](runntime-evaluation.md) and
-> [`model-weights.md`](model-weights.md). The metrics above are unaffected.
+The export matches PyTorch to 1.3×10⁻⁷ and works at every browser input height
+(96–224 px in 16 px steps). The deployed artifact is
+`public/models/roi_net.safetensors`; see [`model-weights.md`](model-weights.md).
 
 ## Files
 

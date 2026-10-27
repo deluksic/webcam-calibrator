@@ -3,16 +3,21 @@ import { createContext, createMemo, createSignal, latest, onSettled, untrack, us
 import { createEffect } from 'solid-js'
 
 import { cameraDeviceScore } from './cameraDeviceScore'
-import type { Resolution } from './cameraStreamAcquire'
+import type { CameraResolution } from './cameraStreamAcquire'
 import {
+  DEFAULT_RESOLUTION,
   acquireVideoStream,
   listVideoInputDevices,
   primeCameraPermission,
+  resolutionFromKey,
+  resolutionKey,
   stopCameraStream,
+  supportedResolutions,
 } from './cameraStreamAcquire'
 
 const { navigator } = globalThis
 const QUERY = new URLSearchParams(globalThis.location.search)
+const INITIAL_RESOLUTION = resolutionFromKey(QUERY.get('resolution')) ?? DEFAULT_RESOLUTION
 
 export type CameraStreamContextValue = {
   /** Sorted videoinput devices (async memo — `await devices()` in `<Show>`). */
@@ -20,8 +25,11 @@ export type CameraStreamContextValue = {
   selectedCameraDeviceId: Accessor<string | undefined>
   setSelectedCameraDeviceId: (id: string) => void
   stream: Accessor<MediaStream | undefined>
-  selectedResolution: Accessor<Resolution>
-  setSelectedResolution: Setter<Resolution>
+  /** Canonical `WxH` key of the requested capture resolution. */
+  selectedResolution: Accessor<string>
+  setSelectedResolution: Setter<string>
+  /** Candidate modes the selected camera reports it can reach. */
+  resolutionOptions: Accessor<readonly CameraResolution[]>
   registerCameraUsage: (id: symbol) => void
   unregisterCameraUsage: (id: symbol) => void
 }
@@ -47,9 +55,7 @@ export function CameraStreamProvider(props: ParentProps) {
   const [registeredCameraUsers, setRegisteredCameraUsers] = createSignal(new Set<symbol>(), { equals: false })
   const cameraIsNeeded = createMemo(() => registeredCameraUsers().size > 0)
   const cameraIsNeededLatch = createMemo<boolean>((prev) => prev || cameraIsNeeded())
-  const [selectedResolution, setSelectedResolution] = createSignal<Resolution>(
-    QUERY.get('resolution') === 'medium' ? 'medium' : 'low',
-  )
+  const [selectedResolution, setSelectedResolution] = createSignal<string>(resolutionKey(INITIAL_RESOLUTION))
 
   const [devices, setDevices] = createSignal<MediaDeviceInfo[]>(async () => {
     if (!cameraIsNeededLatch()) {
@@ -68,24 +74,24 @@ export function CameraStreamProvider(props: ParentProps) {
     return devices_[0]?.deviceId
   })
 
-  const deviceIdAndStream = createMemo<
-    { deviceId: string; resolution: Resolution; stream: MediaStream } | undefined
-  >(async (prev) => {
-    const id = selectedCameraDeviceId()
-    const resolution = selectedResolution()
-    if (!id || !cameraIsNeeded()) {
-      return undefined
-    }
-    if (prev?.deviceId === id && prev.resolution === resolution) {
-      return prev
-    }
-    // Many mobile browsers only allow one active camera: release before a new getUserMedia.
-    if (prev?.stream) {
-      stopCameraStream(prev.stream)
-    }
-    const stream = await acquireVideoStream(id, resolution)
-    return { deviceId: id, resolution, stream }
-  })
+  const deviceIdAndStream = createMemo<{ deviceId: string; resolution: string; stream: MediaStream } | undefined>(
+    async (prev) => {
+      const id = selectedCameraDeviceId()
+      const resolution = selectedResolution()
+      if (!id || !cameraIsNeeded()) {
+        return undefined
+      }
+      if (prev?.deviceId === id && prev.resolution === resolution) {
+        return prev
+      }
+      // Many mobile browsers only allow one active camera: release before a new getUserMedia.
+      if (prev?.stream) {
+        stopCameraStream(prev.stream)
+      }
+      const stream = await acquireVideoStream(id, resolutionFromKey(resolution) ?? DEFAULT_RESOLUTION)
+      return { deviceId: id, resolution, stream }
+    },
+  )
 
   createEffect(deviceIdAndStream, (pair) => {
     if (!pair) {
@@ -107,6 +113,44 @@ export function CameraStreamProvider(props: ParentProps) {
   })
 
   const stream = () => deviceIdAndStream()?.stream
+  const supportedCameraResolutions = createMemo(() => supportedResolutions(stream()))
+
+  const resolutionOptions = createMemo(() => {
+    const options = supportedCameraResolutions()
+    const selected = resolutionFromKey(selectedResolution())
+    if (!selected) {
+      return options
+    }
+    const selectedKey = resolutionKey(selected)
+    if (options.some((option) => resolutionKey(option) === selectedKey)) {
+      return options
+    }
+    // Keep a URL-requested mode selectable even when it is outside the
+    // camera's reported range; getUserMedia will pick the closest real mode.
+    return [...options, selected].sort((a, b) => a.width * a.height - b.width * b.height)
+  })
+
+  // A shared link (or a quick click before the first stream arrives) may ask
+  // for a mode this camera cannot reach. Snap to the largest supported mode
+  // that fits, so the select never keeps advertising an impossible size.
+  createEffect(
+    () => ({
+      supported: supportedCameraResolutions(),
+      selected: resolutionFromKey(selectedResolution()),
+    }),
+    ({ supported, selected }) => {
+      if (!selected || supported.length === 0) {
+        return
+      }
+      const selectedKey = resolutionKey(selected)
+      if (supported.some((option) => resolutionKey(option) === selectedKey)) {
+        return
+      }
+      const fitting = supported.filter((option) => option.width <= selected.width && option.height <= selected.height)
+      const snapped = fitting.at(-1) ?? supported[0]!
+      setSelectedResolution(resolutionKey(snapped))
+    },
+  )
 
   async function onDeviceChange() {
     setDevices(await navigator.mediaDevices.enumerateDevices())
@@ -140,6 +184,7 @@ export function CameraStreamProvider(props: ParentProps) {
     stream,
     selectedResolution,
     setSelectedResolution,
+    resolutionOptions,
     registerCameraUsage,
     unregisterCameraUsage,
   }

@@ -1,9 +1,6 @@
 /** runntime self-check: load the ROI net on runntime core, compare it against a
  *  PyTorch reference, and time it. Results go to #out as JSON so a headless
- *  Chrome run can read them.
- *
- *  This used to A/B against the previous runtime; those numbers are recorded in
- *  docs/runntime-evaluation.md. ORT is no longer a dependency. */
+ *  Chrome run can read them. */
 import { tensor, toArray } from '@runntime/core'
 
 import { initSharedGPU } from '@/gpu/init'

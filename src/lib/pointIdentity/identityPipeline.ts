@@ -1,5 +1,9 @@
 import { generateHexPattern } from '@/lib/pointIdentity/hexPattern'
-import { computeFingerprints, createIdentityIndexesByDepth } from '@/lib/pointIdentity/identity'
+import {
+  computeFingerprints,
+  createIdentityIndexesByDepth,
+  truncateFingerprints,
+} from '@/lib/pointIdentity/identity'
 import {
   createLocalIcpDesign,
   createLocalIcpOptions,
@@ -152,7 +156,18 @@ export function runIdentityPipeline(input: IdentityRunInput): IdentityRunOutput 
   }))
   const observedColors = points.map((point) => point.color)
   const observedGraph = buildProximityGraph(observedPoints, { pointsPerEdge })
-  const baselineFingerprints = computeFingerprints(observedGraph, observedColors, depth)
+  // Recovery needs MAX-depth fingerprints for proof power; the matcher needs
+  // depth-limited ones. Both come from a single traversal — the full-depth rings
+  // are the exact per-hop rings every shallower depth would produce.
+  const recoveryFingerprints = input.recovery
+    ? computeFingerprints(observedGraph, observedColors, MAX_FINGERPRINT_DEPTH)
+    : undefined
+  const baselineFingerprints =
+    recoveryFingerprints === undefined
+      ? computeFingerprints(observedGraph, observedColors, depth)
+      : depth === MAX_FINGERPRINT_DEPTH
+        ? recoveryFingerprints
+        : truncateFingerprints(recoveryFingerprints, depth)
   const baseline = matchObservedIdentity(
     design.indexesByDepth[depth - 1]!,
     observedGraph,
@@ -167,11 +182,7 @@ export function runIdentityPipeline(input: IdentityRunInput): IdentityRunOutput 
   )
 
   let finalPoints = baseline.points
-  if (input.recovery) {
-    const recoveryFingerprints =
-      depth === MAX_FINGERPRINT_DEPTH
-        ? baselineFingerprints
-        : computeFingerprints(observedGraph, observedColors, MAX_FINGERPRINT_DEPTH)
+  if (input.recovery && recoveryFingerprints !== undefined) {
     finalPoints = refineObservedIdentityWithLocalIcp({
       designPattern: design.pattern,
       designColors: design.colors,

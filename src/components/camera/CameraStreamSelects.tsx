@@ -1,8 +1,8 @@
 import { For, createMemo } from 'solid-js'
 
 import { cameraDeviceScore } from '@/components/camera/cameraDeviceScore'
+import { resolutionKey, resolutionLabel } from '@/components/camera/cameraStreamAcquire'
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
-import { RESOLUTION_LADDER, resolutionLabel, type Resolution } from '@/components/camera/cameraStreamAcquire'
 
 import styles from '@/components/camera/CameraStreamSelects.module.css'
 
@@ -21,18 +21,17 @@ export function CameraStreamSelects() {
         onChange={(e) => cam.setSelectedCameraDeviceId(e.currentTarget.value)}
       >
         <For each={devicesSorted()}>
-          {(item) => (
-            <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>
-          )}
+          {(item) => <option value={item().deviceId}>{item().label || `Camera ${item().deviceId.slice(0, 8)}`}</option>}
         </For>
       </select>
       <select
         class={styles.select}
+        aria-label="Camera resolution"
         value={cam.selectedResolution()}
-        onChange={(e) => cam.setSelectedResolution(e.currentTarget.value as Resolution)}
+        onChange={(e) => cam.setSelectedResolution(e.currentTarget.value)}
       >
-        <For each={Object.keys(RESOLUTION_LADDER)} keyed={false}>
-          {(resolution) => <option value={resolution()}>{resolutionLabel(resolution())}</option>}
+        <For each={cam.resolutionOptions()}>
+          {(resolution) => <option value={resolutionKey(resolution())}>{resolutionLabel(resolution())}</option>}
         </For>
       </select>
     </div>

@@ -285,30 +285,16 @@ Scripts that need a mask without the browser import
 `blob_lab.roi_mask.roi_mask_probability`, which runs the checkpoint directly, so
 no graph runtime is required.
 
-The ROI Lab is **WebGPU-only**. It shares one `GPUDevice` with TypeGPU and uses
-`Tensor.fromGpuBuffer` for both input and output, so there is no CPU inference
-fallback and no CPU round trip. ORT still needs its wasm bootstrap runtime to
-initialize the WebGPU EP; those files are not an inference fallback.
-The input is 256 px wide and the height follows the camera aspect (256×192 for
-4:3, 256×144 for 16:9); the full frame is resized, not center-cropped.
-
-ORT WebGPU EP findings on this model:
-
-- `Concat` produced wrong output, including with `preferredLayout: 'NHWC'`.
-- Conv blocks whose **input** had 6 channels produced wrong output; 3, 4, 8,
-  12, 16, and 24 input channels worked.
-- With both worked around, ORT WebGPU matches WASM exactly at every tested
-  height. On the demo composite it runs in ~4.8 ms with ~7.5 ms total frame
-  time (~28 FPS in the lab page).
+The ROI Lab is **WebGPU-only**. It shares one `GPUDevice` with TypeGPU, and the
+model reads the pipeline's own input buffer, so there is no CPU inference path
+and no CPU round trip. The input is 256 px wide and the height follows the camera
+aspect (256×192 for 4:3, 256×144 for 16:9); the full frame is resized, not
+center-cropped.
 
 The TypeGPU examples that informed the shared-device and mask-texture path are:
 
 - <https://github.com/software-mansion/TypeGPU/tree/main/apps/typegpu-docs/src/examples/image-processing/background-segmentation>
 - <https://typegpu.com/examples/#example=image-processing--selfie-segmentation>
-
-The ORT wasm bootstrap files are copied to `public/ort/` and loaded with the
-ROI page. They are about 26 MiB. They initialize the ORT runtime/WebGPU EP;
-model inference does not fall back to WASM.
 
 ## Camera realism: sharpening and oblique poses
 

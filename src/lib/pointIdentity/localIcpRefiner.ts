@@ -153,7 +153,9 @@ type LocalChoice = {
 }
 
 function distance(first: Vec2, second: Vec2): number {
-  return Math.hypot(first.x - second.x, first.y - second.y)
+  const dx = first.x - second.x
+  const dy = first.y - second.y
+  return Math.sqrt(dx * dx + dy * dy)
 }
 
 function pairKey(pairs: readonly LocalPair[]): string {

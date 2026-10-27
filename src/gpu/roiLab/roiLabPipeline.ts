@@ -387,8 +387,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 
 // Serialises pipeline creation so a replacement never reconfigures the shared
 // canvas while the previous pipeline is still tearing down (that ordering left
-// the swap chain at the old size — a black frame). Historically this also
-// guarded ORT's one-session-at-a-time limit.
+// the swap chain at the old size — a black frame).
 let sessionSlot: Promise<void> = Promise.resolve()
 
 async function takeSessionSlot(): Promise<() => void> {
@@ -446,8 +445,8 @@ export async function createRoiLabPipeline(
    * distinct indices, gives every stage a fresh and correctly paired timestamp.
    *
    * A "pass" stage writes both boundaries itself; a "bracket" stage uses two
-   * no-op marker passes around a region we do not own (ORT inference, the
-   * multi-pass detection stage, the render pass).
+   * no-op marker passes around a region we do not encode ourselves (the model
+   * graph, the multi-pass detection stage, the render pass).
    */
   const GPU_STAGES = ['preprocess', 'inference', 'detection', 'background', 'cameraCopy', 'render'] as const
   type GpuStage = (typeof GPU_STAGES)[number]

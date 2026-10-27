@@ -1,4 +1,5 @@
 import { findChainCandidates, type ChainCandidate } from '@/lib/pointIdentity/chainCandidates'
+import { buildPointGrid, scanNearestCells } from '@/lib/spatialGrid'
 import type {
   EdgeKind,
   GraphRejections,
@@ -34,13 +35,15 @@ type ChainLine = {
 }
 
 function distance(a: Vec2, b: Vec2): number {
-  return Math.hypot(a.x - b.x, a.y - b.y)
+  const dx = a.x - b.x
+  const dy = a.y - b.y
+  return Math.sqrt(dx * dx + dy * dy)
 }
 
 function unitVector(from: Vec2, to: Vec2): Vec2 | undefined {
   const dx = to.x - from.x
   const dy = to.y - from.y
-  const length = Math.hypot(dx, dy)
+  const length = Math.sqrt(dx * dx + dy * dy)
   if (length < 1e-9) {
     return undefined
   }
@@ -192,7 +195,6 @@ function countComponents(adjacency: ReadonlyArray<readonly number[]>): number {
 }
 
 /** Keeps the grid from degenerating on pathological (spiky) distributions. */
-const MAX_GRID_CELLS = 8192
 
 /**
  * Insert one candidate into the running top-k, preserving the original
@@ -233,10 +235,8 @@ function offerNeighbor(
  * identical rather than approximate:
  *
  * Cells are visited in Chebyshev rings around the query cell. Once the ring
- * radius `r` has been scanned, every cell outside it starts at least `r * cell`
- * away on one axis, so any unseen point is at distance >= `r * cell`. Stopping
- * only when the current k-th distance is strictly below that bound therefore
- * cannot skip a point that belongs in the top-k.
+ * The neighbour search itself is the shared grid scan in `@/lib/spatialGrid`,
+ * which is also what the CPU neighbour filter uses.
  */
 export function computeNeighborhoods(points: readonly PatternPoint[]): {
   neighborLists: number[][]
@@ -251,93 +251,40 @@ export function computeNeighborhoods(points: readonly PatternPoint[]): {
     return { neighborLists, localScales }
   }
 
-  let minX = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let minY = Number.POSITIVE_INFINITY
-  let maxY = Number.NEGATIVE_INFINITY
-  for (const point of points) {
-    minX = Math.min(minX, point.x)
-    maxX = Math.max(maxX, point.x)
-    minY = Math.min(minY, point.y)
-    maxY = Math.max(maxY, point.y)
-  }
-  const spanX = Math.max(maxX - minX, 1e-6)
-  const spanY = Math.max(maxY - minY, 1e-6)
-
-  // Aim for ~one point per cell; grow the cell if the field is too spiky.
-  let cell = Math.max(1e-6, Math.sqrt((spanX * spanY) / count))
-  let cols = Math.floor(spanX / cell) + 1
-  let rows = Math.floor(spanY / cell) + 1
-  while (cols * rows > MAX_GRID_CELLS) {
-    cell *= 1.5
-    cols = Math.floor(spanX / cell) + 1
-    rows = Math.floor(spanY / cell) + 1
-  }
-
-  const buckets: Array<number[] | undefined> = Array.from({ length: cols * rows })
-  const cellX = new Int32Array(count)
-  const cellY = new Int32Array(count)
+  const xs = new Float64Array(count)
+  const ys = new Float64Array(count)
   for (let index = 0; index < count; index += 1) {
-    const point = points[index]!
-    const gx = Math.min(cols - 1, Math.max(0, Math.floor((point.x - minX) / cell)))
-    const gy = Math.min(rows - 1, Math.max(0, Math.floor((point.y - minY) / cell)))
-    cellX[index] = gx
-    cellY[index] = gy
-    const key = gy * cols + gx
-    const bucket = buckets[key]
-    if (bucket === undefined) {
-      buckets[key] = [index]
-    } else {
-      bucket.push(index)
-    }
+    xs[index] = points[index]!.x
+    ys[index] = points[index]!.y
   }
-
-  const origin = { x: 0, y: 0 }
-  const scan = (gx: number, gy: number, index: number): void => {
-    if (gx < 0 || gx >= cols || gy < 0 || gy >= rows) {
-      return
-    }
-    const bucket = buckets[gy * cols + gx]
-    if (bucket === undefined) {
-      return
-    }
-    for (const candidate of bucket) {
-      if (candidate === index) {
-        continue
-      }
-      offerNeighbor(bestDistances, bestIndices, distance(origin, points[candidate]!), candidate)
-    }
-  }
+  const grid = buildPointGrid(xs, ys, count)
 
   for (let index = 0; index < count; index += 1) {
     const point = points[index]!
-    origin.x = point.x
-    origin.y = point.y
     bestDistances.fill(Number.POSITIVE_INFINITY)
     bestIndices.fill(-1)
-    const gx = cellX[index]!
-    const gy = cellY[index]!
+    const offer = (candidate: number, dx: number, dy: number): void => {
+      offerNeighbor(bestDistances, bestIndices, Math.sqrt(dx * dx + dy * dy), candidate)
+    }
 
-    for (let ring = 0; ; ring += 1) {
-      if (ring === 0) {
-        scan(gx, gy, index)
-      } else {
-        for (let offset = -ring; offset <= ring; offset += 1) {
-          scan(gx + offset, gy - ring, index)
-          scan(gx + offset, gy + ring, index)
+    if (grid === undefined) {
+      // Too few points, or every point on one line: a scan beats building a grid.
+      for (let candidate = 0; candidate < count; candidate += 1) {
+        if (candidate === index) {
+          continue
         }
-        for (let offset = -ring + 1; offset <= ring - 1; offset += 1) {
-          scan(gx - ring, gy + offset, index)
-          scan(gx + ring, gy + offset, index)
-        }
+        const other = points[candidate]!
+        offer(candidate, other.x - point.x, other.y - point.y)
       }
-      const kth = bestDistances[NEIGHBOR_SAMPLE - 1]!
-      if (kth < ring * cell) {
-        break
-      }
-      if (gx - ring <= 0 && gx + ring >= cols - 1 && gy - ring <= 0 && gy + ring >= rows - 1) {
-        break
-      }
+    } else {
+      scanNearestCells(
+        grid,
+        point.x,
+        point.y,
+        index,
+        () => bestDistances[NEIGHBOR_SAMPLE - 1]!,
+        offer,
+      )
     }
 
     const neighborCount = Math.min(NEIGHBOR_SAMPLE, Math.max(0, count - 1))

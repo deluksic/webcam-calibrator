@@ -497,6 +497,35 @@ export function fingerprintKeyAtDepth(fingerprint: PointFingerprint, depth: numb
   return key
 }
 
+/** Limits each fingerprint to its first `depth` rings.
+ *
+ *  A full-depth fingerprint already contains the exact BFS rings for every
+ *  shallower depth, so a caller that needs both can traverse the graph once and
+ *  derive the shallow keys here instead of running a second BFS pass. */
+export function truncateFingerprints(
+  fingerprints: readonly PointFingerprint[],
+  depth: number,
+): PointFingerprint[] {
+  return fingerprints.map((fingerprint) => {
+    const limit = Math.max(0, Math.min(depth, fingerprint.rings.length))
+    if (limit === fingerprint.rings.length) {
+      return fingerprint
+    }
+    const rings = fingerprint.rings.slice(0, limit)
+    let key = fingerprintRootKey(fingerprint.color, fingerprint.endpoint)
+    for (const ring of rings) {
+      key += `|${fingerprintRingKey(ring)}`
+    }
+    return {
+      index: fingerprint.index,
+      color: fingerprint.color,
+      endpoint: fingerprint.endpoint,
+      rings,
+      key,
+    }
+  })
+}
+
 export function computeFingerprints(
   graph: ProximityGraph,
   colors: readonly BinaryColor[],

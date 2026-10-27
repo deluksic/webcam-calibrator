@@ -11,7 +11,11 @@ const NEIGHBOR_SAMPLE = 12
 const LOCAL_SCALE_SAMPLE = 6
 
 function distance(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  return Math.hypot(a.x - b.x, a.y - b.y)
+  // Deliberately the same arithmetic as the implementation: the oracle compares
+  // exact doubles, so a different (even if more accurate) formula fails here.
+  const dx = a.x - b.x
+  const dy = a.y - b.y
+  return Math.sqrt(dx * dx + dy * dy)
 }
 
 /** The original O(n²) implementation, kept as the reference oracle. */

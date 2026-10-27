@@ -24,4 +24,4 @@ The vendored ruNNtime `core` sources are **not committed**. `pnpm dev` and `pnpm
 
 ## Model weights
 
-The model is a `safetensors` blob (`roi_net.safetensors`, ~150 KiB of f16 weights with BatchNorm folded in) rebuilt from the blob_lab checkpoint by `pnpm model:export`. It runs on a vendored [ruNNtime](https://github.com/software-mansion/runntime) core — see [`docs/runntime-evaluation.md`](docs/runntime-evaluation.md). `model-manifest.json` pins the asset and its SHA-256; `pnpm dev` and `pnpm build` fetch it into `public/models/`. See [`docs/model-weights.md`](docs/model-weights.md).
+The model is a `safetensors` blob (`roi_net.safetensors`, ~150 KiB of f16 weights with BatchNorm folded in) rebuilt from the blob_lab checkpoint by `pnpm model:export`. It runs on a vendored [ruNNtime](https://github.com/software-mansion/runntime) `core`, cloned at build time. `model-manifest.json` pins the asset and its SHA-256; `pnpm dev` and `pnpm build` fetch it into `public/models/`. See [`docs/model-weights.md`](docs/model-weights.md).

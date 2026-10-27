@@ -5,8 +5,6 @@
  *  entry, so `dist/` never contains it. Its `prepack` build also fails when run
  *  from `node_modules`. Cloning the sources and importing them directly is the
  *  only route that does not involve forking or vendoring code into git.
- *
- *  See docs/runntime-evaluation.md.
  */
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'

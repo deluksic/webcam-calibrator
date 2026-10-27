@@ -8,6 +8,8 @@
  * point only if all three z-scores are inside 4 sigma.
  */
 
+import { buildPointGrid, scanNearestCells, type PointGrid } from '@/lib/spatialGrid'
+
 export type RoiRefinedPeak = {
   x: number
   y: number
@@ -194,31 +196,62 @@ function fillNearestNeighbours(
   neighbourCount: number,
   distances: Float64Array,
   result: Int32Array,
+  grid?: PointGrid,
 ): void {
   const point = peaks[indices[localIndex]!]!
   let filled = 0
-  for (let candidate = 0; candidate < indices.length; candidate += 1) {
-    if (candidate === localIndex) {
-      continue
-    }
-    const other = peaks[indices[candidate]!]!
-    const dx = other.x - point.x
-    const dy = other.y - point.y
+  const offer = (candidate: number, dx: number, dy: number): void => {
     const distance = dx * dx + dy * dy
     if (filled < neighbourCount) {
       distances[filled] = distance
       result[filled] = candidate
       siftUp(distances, result, filled)
       filled += 1
-      continue
+      return
     }
     if (!heapIsWorse(distances[0]!, result[0]!, distance, candidate)) {
-      continue
+      return
     }
     distances[0] = distance
     result[0] = candidate
     siftDown(distances, result, filled, 0)
   }
+
+  if (grid === undefined) {
+    for (let candidate = 0; candidate < indices.length; candidate += 1) {
+      if (candidate === localIndex) {
+        continue
+      }
+      const other = peaks[indices[candidate]!]!
+      offer(candidate, other.x - point.x, other.y - point.y)
+    }
+    return
+  }
+
+  scanNearestCells(
+    grid,
+    point.x,
+    point.y,
+    localIndex,
+    // The heap holds squared distances; the ring bound is linear.
+    () =>
+      filled === neighbourCount ? Math.sqrt(distances[0]!) : Number.POSITIVE_INFINITY,
+    offer,
+  )
+}
+
+/** Grid over one polarity's points, or undefined when a linear scan wins
+ *  (few points, or every point on one line). */
+function buildGrid(indices: readonly number[], peaks: readonly RoiRefinedPeak[]): PointGrid | undefined {
+  const count = indices.length
+  const xs = new Float64Array(count)
+  const ys = new Float64Array(count)
+  for (let index = 0; index < count; index += 1) {
+    const point = peaks[indices[index]!]!
+    xs[index] = point.x
+    ys[index] = point.y
+  }
+  return buildPointGrid(xs, ys, count)
 }
 
 function neighbourStatistics(values: Float64Array, count: number): { mean: number; standardDeviation: number } {
@@ -329,13 +362,22 @@ export function filterRefinedPeaks(
       }
       continue
     }
+    const grid = buildGrid(indices, peaks)
     const localNeighbours = new Int32Array(neighbourCount)
     const nearestDistances = new Float64Array(neighbourCount)
     const neighbourValues = new Float64Array(neighbourCount)
     const inlierValues = new Float64Array(neighbourCount)
     for (let localIndex = 0; localIndex < indices.length; localIndex += 1) {
       const globalIndex = indices[localIndex]!
-      fillNearestNeighbours(indices, peaks, localIndex, neighbourCount, nearestDistances, localNeighbours)
+      fillNearestNeighbours(
+        indices,
+        peaks,
+        localIndex,
+        neighbourCount,
+        nearestDistances,
+        localNeighbours,
+        grid,
+      )
       let peakPass = false
       let hessianPassing = 0
       for (let feature = 0; feature < FEATURE_COUNT; feature += 1) {
