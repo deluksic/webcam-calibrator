@@ -65,16 +65,14 @@ export function CalibrationAdvancedMetrics(props: CalibrationAdvancedMetricsProp
             <>
               <div class={styles.statsSection}>Pipeline timings</div>
               <div>
-                stats {timings().statsMs.toFixed(2)} · pre {timings().preprocessMs.toFixed(2)} · queue{' '}
-                {timings().queueWaitMs.toFixed(2)} · inf-run {timings().inferenceRunMs.toFixed(2)} · inf-drain{' '}
-                {timings().inferenceDrainMs.toFixed(2)} · copy {timings().cameraCopyMs.toFixed(2)} · mask{' '}
+                stats {timings().statsMs.toFixed(2)} · pre {timings().preprocessMs.toFixed(2)} · inf{' '}
+                {timings().inferenceRunMs.toFixed(2)} · copy {timings().cameraCopyMs.toFixed(2)} · mask{' '}
                 {timings().maskMs.toFixed(2)} · bg {timings().backgroundMs.toFixed(2)} · detect{' '}
                 {timings().detectionEncodeMs.toFixed(2)} · readback {timings().readbackMs.toFixed(2)} (
                 {(timings().readbackBytes / 1024).toFixed(1)} KiB
                 {timings().readbackTruncated ? ', truncated' : ''}) · filter {timings().neighbourFilterMs.toFixed(2)} ·
-                identity {timings().identityMs.toFixed(2)} · frame-drain {timings().frameDrainMs.toFixed(2)} · hist{' '}
-                {timings().histogramMs.toFixed(2)} · account {timings().accountedMs.toFixed(2)} / total{' '}
-                {timings().totalMs.toFixed(2)} ms
+                identity {timings().identityMs.toFixed(2)} · hist {timings().histogramMs.toFixed(2)} · account{' '}
+                {timings().accountedMs.toFixed(2)} / total {timings().totalMs.toFixed(2)} ms
               </div>
               <div>
                 GPU pre {timings().gpuMs.preprocess?.toFixed(2) ?? '—'} · mask {timings().gpuMs.mask?.toFixed(2) ?? '—'}{' '}

@@ -173,7 +173,7 @@ export const RoiLabView: Component = () => {
   const [panX, setPanX] = createSignal(0)
   const [panY, setPanY] = createSignal(0)
   const [bufferStats, setBufferStats] = createSignal('')
-  const [inferenceMs, setInferenceMs] = createSignal(0)
+  const [inferenceFallbackMs, setInferenceFallbackMs] = createSignal(0)
   const [totalMs, setTotalMs] = createSignal(0)
   const [fps, setFps] = createSignal(0)
   const [histogramData, setHistogramData] = createSignal<RoiHistogramUpdate>()
@@ -602,7 +602,7 @@ export const RoiLabView: Component = () => {
                     setFps(1000 / Math.max(1, now - lastFrameAt))
                   }
                   lastFrameAt = now
-                  setInferenceMs(timings.inferenceMs)
+                  setInferenceFallbackMs(timings.steps.inferenceRunMs)
                   setTotalMs(timings.totalMs)
                   setIdentityPerf({
                     readbackMs: timings.readbackMs,
@@ -1120,8 +1120,6 @@ export const RoiLabView: Component = () => {
                 </dd>
                 <dt>Inference submit</dt>
                 <dd>{timings().inferenceRunMs.toFixed(2)} ms</dd>
-                <dt>Frame drain</dt>
-                <dd>{timings().frameDrainMs.toFixed(2)} ms</dd>
                 <dt>Accounted / total</dt>
                 <dd>
                   {timings().accountedMs.toFixed(2)} / {timings().totalMs.toFixed(2)} ms
@@ -1140,7 +1138,7 @@ export const RoiLabView: Component = () => {
             )}
           </Show>
           <dt>Inference</dt>
-          <dd>{stepTimings()?.gpuMs.inference?.toFixed(2) ?? inferenceMs().toFixed(2)} ms</dd>
+          <dd>{stepTimings()?.gpuMs.inference?.toFixed(2) ?? inferenceFallbackMs().toFixed(2)} ms</dd>
           <dt>Total</dt>
           <dd>{totalMs().toFixed(2)} ms</dd>
           <dt>Process FPS</dt>

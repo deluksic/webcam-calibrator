@@ -8,7 +8,7 @@ import { RESULTS_MSAA_SAMPLE_COUNT } from '@/gpu/pipelines/resultsMsaa'
 import { createRoiBackgroundStage } from '@/gpu/roiLab/roiBackgroundPipeline'
 import { createRoiCircleStage } from '@/gpu/roiLab/roiCirclePipeline'
 import { createRoiGraphStage, type RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
-import type { RoiDetectedPoint } from '@/gpu/roiLab/roiPeakTypes'
+import type { RoiDetectedPoint, RoiRefinedPeakReadback } from '@/gpu/roiLab/roiPeakTypes'
 import { createRoiRefinedPeakStage } from '@/gpu/roiLab/roiRefinedPeakPipeline'
 import { analyzeRoiHistogram, ROI_HISTOGRAM_BINS, type RoiHistogramAnalysis } from '@/lib/roiHistogram'
 import { type RoiNeighbourFilterResult, type RoiRefinedPeak } from '@/lib/roiNeighbourFilter'
@@ -310,30 +310,31 @@ export type RoiStepTimings = {
   /** Cost of encoding the GPU mean/std reduction passes. Nothing is read back. */
   statsMs: number
   preprocessMs: number
-  queueWaitMs: number
   /** `await session.run(...)` only. */
   inferenceRunMs: number
-  /** Queue drain immediately after ORT inference. */
-  inferenceDrainMs: number
-  /** Backward-compatible total = run + drain. */
-  inferenceMs: number
   cameraCopyMs: number
   debugInputMs: number
   maskMs: number
   backgroundMs: number
   detectionEncodeMs: number
+  /**
+   * Awaiting the previous frame's peak readback. Its copy was queued at the end
+   * of that frame, so by the time this frame consumes it the GPU has had a full
+   * frame to run. Anything above a few hundredths of a millisecond means the GPU
+   * is behind the frame loop.
+   */
   readbackMs: number
-  readbackCandidates: number
-  readbackRejected: number
   readbackBytes: number
   readbackTruncated: boolean
   neighbourFilterMs: number
+  /**
+   * Exposed tail of the identity await. Identity starts before this frame is
+   * encoded, so the worker's cost is hidden underneath the encoding.
+   */
   identityMs: number
   /** Frames between the one being encoded and the one just presented. */
   identityLagFrames: number
   renderMs: number
-  /** Wait for all frame GPU work before histogram submission. */
-  frameDrainMs: number
   /** Histogram reset/accumulate submission (and every 4th frame analysis scheduling). */
   histogramMs: number
   /** Sum of the non-overlapping step intervals (should be close to totalMs). */
@@ -348,7 +349,6 @@ export type RoiStepTimings = {
 
 export type RoiLabPipeline = {
   processFrame: (video: HTMLVideoElement) => Promise<{
-    inferenceMs: number
     totalMs: number
     readbackMs: number
     identityMs: number
@@ -1040,12 +1040,36 @@ export async function createRoiLabPipeline(
     return { statsMs: imageStatsMs }
   }
 
-  let pendingFrame:
+  const emptyReadback = (): RoiRefinedPeakReadback => ({
+    peaks: [],
+    bytesCopied: 0,
+    truncated: false,
+  })
+  const emptyFilter = (): RoiNeighbourFilterResult => ({
+    keep: [],
+    kept: [],
+    zScores: new Float64Array(0),
+    trimmedCounts: new Uint8Array(0),
+  })
+
+  /**
+   * Peaks are read back on frame N and consumed on frame N+1.
+   *
+   * `mapAsync` only resolves once every pass queued before the copy has run, so
+   * awaiting it on the frame that queued it stalled the CPU for the whole GPU
+   * pipeline — the single largest sync on the frame path. The copy is now queued
+   * at the end of a frame and mapped at the start of the next, by which time the
+   * GPU has long finished, so the await is free.
+   *
+   * The pixels stay paired with their graph: the slot consumed here is the one
+   * presented here, and the alternating slots guarantee it is not overwritten
+   * until two frames later.
+   */
+  let pendingPeakReadback:
     | {
         slot: FrameSlot
         frameId: number
-        identity: Promise<RoiGraphData | undefined>
-        analysis: RoiPeakFrameAnalysis
+        readback: Promise<RoiRefinedPeakReadback>
       }
     | undefined
 
@@ -1053,6 +1077,39 @@ export async function createRoiLabPipeline(
     const start = performance.now()
     const slot = slots[nextSlot]!
     nextSlot = nextSlot === 0 ? 1 : 0
+
+    // ---- results of the previous frame, consumed while this one is encoded ----
+    const consumed = onIdentity === undefined ? undefined : pendingPeakReadback
+    let readbackMs = 0
+    let neighbourFilterMs = 0
+    let readback = emptyReadback()
+    let filterResult = emptyFilter()
+    let identity: Promise<RoiGraphData | undefined> | undefined
+
+    if (consumed !== undefined) {
+      const readbackStart = performance.now()
+      readback = await consumed.readback
+      readbackMs = performance.now() - readbackStart
+
+      // The 4 sigma filter is CPU-only; the identity pipeline receives the
+      // surviving points, exactly like the Python model.
+      const neighbourStart = performance.now()
+      filterResult = await filterRefinedPeaksInWorker(readback.peaks)
+      neighbourFilterMs = performance.now() - neighbourStart
+
+      // Start identity now. It runs in the worker underneath the encoding below,
+      // so only whatever it has not finished by the end of this frame is exposed.
+      try {
+        identity = Promise.resolve(onIdentity?.(filterResult.kept, consumed.frameId)).catch((cause: unknown) => {
+          console.error('[roi-lab] identity callback failed', cause)
+          return undefined
+        })
+      } catch (cause: unknown) {
+        console.error('[roi-lab] identity callback failed', cause)
+      }
+    }
+
+    // ---- this frame ----
     const preprocessStart = performance.now()
     const { statsMs } = preprocessFrame(video)
     const preprocessMs = performance.now() - preprocessStart
@@ -1066,9 +1123,6 @@ export async function createRoiLabPipeline(
     await session.run({ input: inputGpuTensor }, { mask: outputGpuTensor })
     inferenceBracket.end()
     const inferenceRunMs = performance.now() - inferenceStart
-    const queueWaitMs = 0
-    const inferenceDrainMs = 0
-    const inferenceMs = inferenceRunMs
 
     // Copy the current frame into the persistent camera texture. The overlay
     // samples that copy instead of the short-lived external texture, so a
@@ -1102,86 +1156,49 @@ export async function createRoiLabPipeline(
     detectionBracket.end()
     const detectionEncodeMs = performance.now() - detectionStart
 
-    const readbackStart = performance.now()
-    const readback =
-      onIdentity !== undefined
-        ? await slot.peakStage.readPeaks()
-        : {
-            peaks: [],
-            count: 0,
-            candidateCount: 0,
-            rejectedCount: 0,
-            bytesCopied: 0,
-            truncated: false,
-          }
-    const readbackMs = performance.now() - readbackStart
+    // Queue this frame's peak copy, but never await it. It is mapped at the top
+    // of the next frame, once the GPU has had a full frame to run.
+    const queuedReadback = onIdentity === undefined ? undefined : slot.peakStage.submitPeaksReadback()
+    // A frame that is never consumed (only possible on teardown) must not leave
+    // an unhandled rejection behind.
+    void queuedReadback?.catch(() => {})
 
-    // The 4 sigma filter is CPU-only; the identity pipeline receives the
-    // surviving points, exactly like the Python model.
-    const neighbourStart = performance.now()
-    const filterResult: RoiNeighbourFilterResult =
-      onIdentity !== undefined
-        ? await filterRefinedPeaksInWorker(readback.peaks)
-        : {
-            keep: [],
-            kept: [],
-            zScores: new Float64Array(0),
-            trimmedCounts: new Uint8Array(0),
-          }
-    const detectedPoints = filterResult.kept
-    const neighbourFilterMs = performance.now() - neighbourStart
-    const peakAnalysis: RoiPeakFrameAnalysis = {
-      frameId,
-      peaks: readback.peaks,
-      filter: filterResult,
-    }
-
-    // Start identity now. It runs in a worker while the previous frame is
-    // presented, and while the next frame is encoded.
-    let identity: Promise<RoiGraphData | undefined> | undefined
-    if (onIdentity !== undefined) {
-      try {
-        identity = Promise.resolve(onIdentity(detectedPoints, frameId)).catch((cause: unknown) => {
-          console.error('[roi-lab] identity callback failed', cause)
-          return undefined
-        })
-      } catch (cause: unknown) {
-        console.error('[roi-lab] identity callback failed', cause)
-      }
-    }
-
-    // Present the frame whose identity is ready. Its slot still holds that
-    // frame's pixels, so the overlay and the image always belong together.
+    // Present the previously read-back frame. Identity was started before this
+    // frame was encoded, so most of its cost is already hidden; only the tail is
+    // exposed here.
     let identityMs = 0
     let renderMs = 0
     let presentedFrameId: number | undefined
-    if (pendingFrame !== undefined) {
-      const waitStart = performance.now()
-      const graph = await pendingFrame.identity
-      identityMs = performance.now() - waitStart
-      const renderStart = performance.now()
-      renderBracket.begin()
-      if (!destroyed) {
-        presentFrame(pendingFrame.slot, graph)
-        presentedPeakAnalysis = pendingFrame.analysis
-        presentedFrameId = pendingFrame.frameId
-      }
-      renderBracket.end()
-      renderMs = performance.now() - renderStart
-    } else if (identity === undefined) {
+    if (onIdentity === undefined) {
       // No identity stage at all: present this frame directly.
       if (!destroyed) {
         presentFrame(slot, undefined)
-        presentedPeakAnalysis = peakAnalysis
+        presentedPeakAnalysis = { frameId, peaks: [], filter: emptyFilter() }
+      }
+    } else if (consumed !== undefined) {
+      const waitStart = performance.now()
+      const graph = await identity
+      identityMs = performance.now() - waitStart
+      // Teardown may have run while the worker was busy.
+      if (!destroyed) {
+        const renderStart = performance.now()
+        renderBracket.begin()
+        presentFrame(consumed.slot, graph)
+        presentedPeakAnalysis = {
+          frameId: consumed.frameId,
+          peaks: readback.peaks,
+          filter: filterResult,
+        }
+        presentedFrameId = consumed.frameId
+        renderBracket.end()
+        renderMs = performance.now() - renderStart
       }
     }
-    pendingFrame = identity === undefined ? undefined : { slot, frameId, identity, analysis: peakAnalysis }
+    pendingPeakReadback = queuedReadback === undefined ? undefined : { slot, frameId, readback: queuedReadback }
 
-    // Let the queued readbacks and final render finish before a caller can
-    // destroy this pipeline during a resolution/stream change.
-    const frameDrainStart = performance.now()
-    await device.queue.onSubmittedWorkDone()
-    const frameDrainMs = performance.now() - frameDrainStart
+    // No queue drain here: it used to force the render to finish before the next
+    // frame could even be encoded, leaving the GPU idle every frame. Teardown
+    // drains once instead (see `destroy`).
 
     // Histogram work is queued after the overlay; only its CPU analysis is
     // asynchronous, and it feeds the next frame's thresholds.
@@ -1197,9 +1214,7 @@ export async function createRoiLabPipeline(
     const totalMs = performance.now() - start
     const accountedMs =
       preprocessMs +
-      queueWaitMs +
       inferenceRunMs +
-      inferenceDrainMs +
       cameraCopyMs +
       debugInputMs +
       maskMs +
@@ -1209,30 +1224,23 @@ export async function createRoiLabPipeline(
       neighbourFilterMs +
       identityMs +
       renderMs +
-      frameDrainMs +
       histogramMs
     const steps = smoothTimings({
       statsMs,
       preprocessMs,
-      queueWaitMs,
       inferenceRunMs,
-      inferenceDrainMs,
-      inferenceMs,
       cameraCopyMs,
       debugInputMs,
       maskMs,
       backgroundMs,
       detectionEncodeMs,
       readbackMs,
-      readbackCandidates: readback.candidateCount,
-      readbackRejected: readback.rejectedCount,
       readbackBytes: readback.bytesCopied,
       readbackTruncated: readback.truncated,
       neighbourFilterMs,
       identityMs,
       identityLagFrames: presentedFrameId === undefined ? 0 : frameId - presentedFrameId,
       renderMs,
-      frameDrainMs,
       histogramMs,
       accountedMs,
       overheadMs: totalMs - accountedMs,
@@ -1241,7 +1249,6 @@ export async function createRoiLabPipeline(
       gpuMs: { ...gpuMs },
     })
     return {
-      inferenceMs: steps.inferenceMs,
       totalMs: steps.totalMs,
       readbackMs: steps.readbackMs,
       identityMs: steps.identityMs,
@@ -1309,35 +1316,46 @@ export async function createRoiLabPipeline(
       }
       destroyed = true
       context.unconfigure()
-      void session.release().finally(freeSessionSlot)
-      if (readbackBusy) {
-        // The queued copy still references both buffers; let mapAsync settle
-        // before destroying them.
-        readbackPendingDestroy = true
-      } else {
-        if (histogramReadback.mapState === 'mapped') {
-          histogramReadback.unmap()
-        }
-        histogramBuffer.destroy()
-        histogramReadback.destroy()
-      }
-      inputBuffer.destroy()
-      outputBuffer.destroy()
-      imageStatsSamples.destroy()
-      imageStatsBuffer.destroy()
-      timingQuerySet?.destroy()
-      timingResolveBuffer?.destroy()
-      timingReadBuffer?.destroy()
-      for (const slot of slots) {
-        slot.maskTexture.destroy()
-        slot.modelInputTexture.destroy()
-        slot.cameraTexture.destroy()
-        slot.backgroundStage.destroy()
-        slot.peakStage.destroy()
-      }
-      graphStage.destroy()
-      msaaTexture.destroy()
       disposeIdentityWorker()
+      // The frame path no longer drains the queue, so the last render and any
+      // in-flight peak readback may still be running. Drain once here, then free
+      // the GPU resources and yield the session slot. A replacement pipeline
+      // waits for that slot before it configures this same canvas, so the swap
+      // chain is never reconfigured underneath a live render (the black-frame
+      // regression the per-frame drain used to guard against).
+      const releaseGpuResources = () => {
+        if (readbackBusy) {
+          // The queued copy still references both buffers; let mapAsync settle
+          // before destroying them.
+          readbackPendingDestroy = true
+        } else {
+          if (histogramReadback.mapState === 'mapped') {
+            histogramReadback.unmap()
+          }
+          histogramBuffer.destroy()
+          histogramReadback.destroy()
+        }
+        inputBuffer.destroy()
+        outputBuffer.destroy()
+        imageStatsSamples.destroy()
+        imageStatsBuffer.destroy()
+        timingQuerySet?.destroy()
+        timingResolveBuffer?.destroy()
+        timingReadBuffer?.destroy()
+        for (const slot of slots) {
+          slot.maskTexture.destroy()
+          slot.modelInputTexture.destroy()
+          slot.cameraTexture.destroy()
+          slot.backgroundStage.destroy()
+          slot.peakStage.destroy()
+        }
+        graphStage.destroy()
+        msaaTexture.destroy()
+      }
+      void Promise.all([session.release().catch(() => {}), device.queue.onSubmittedWorkDone()]).finally(() => {
+        releaseGpuResources()
+        freeSessionSlot()
+      })
     },
   }
 }

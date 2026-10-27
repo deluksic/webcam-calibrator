@@ -54,9 +54,6 @@ export const RoiRefinedPeakSchema = d.arrayOf(RoiRefinedPeakGpu, ROI_PEAK_MAX_CA
 
 export type RoiRefinedPeakReadback = {
   peaks: RoiRefinedPeak[]
-  count: number
-  candidateCount: number
-  rejectedCount: number
   bytesCopied: number
   truncated: boolean
 }

@@ -194,7 +194,16 @@ const plateauBlocked = tgpu.fn(
 
 export type RoiRefinedPeakStage = {
   encode: () => void
-  readPeaks: () => Promise<RoiRefinedPeakReadback>
+  /**
+   * Queues the counter/peak copy and starts mapping it.
+   *
+   * The returned promise resolves once the copy has run and the records are on
+   * the CPU. Callers queue the copy on one frame and await the promise on the
+   * next: `mapAsync` only resolves after every pass queued before the copy, so
+   * awaiting it on the frame that queued it stalls the CPU for the whole GPU
+   * pipeline.
+   */
+  submitPeaksReadback: () => Promise<RoiRefinedPeakReadback>
   setThresholds: (blackCut: number, whiteCut: number, valid: boolean) => void
   blurredBuffer: TgpuBuffer<d.WgslArray<d.F32>> & StorageFlag
   circleBuffer: ReturnType<TgpuRoot['createBuffer']>
@@ -565,6 +574,50 @@ export function createRoiRefinedPeakStage(
   })
 
   let readbackBusy = false
+  let readbackPending = false
+
+  const headerBytes = COUNTER_COUNT * 4
+  const peakBytes = ROI_PEAK_MAX_CANDIDATES * ROI_REFINED_PEAK_RECORD_BYTES
+  const bytesCopied = headerBytes + peakBytes
+
+  const emptyReadback = (): RoiRefinedPeakReadback => ({
+    peaks: [],
+    bytesCopied: 0,
+    truncated: false,
+  })
+
+  const mapReadback = async (): Promise<RoiRefinedPeakReadback> => {
+    try {
+      await readbackBuffer.mapAsync(GPUMapMode.READ, 0, bytesCopied)
+      const view = new DataView(readbackBuffer.getMappedRange(0, bytesCopied))
+      const rawCandidates = view.getUint32(COUNTER_CANDIDATES * 4, true)
+      const rawRefined = view.getUint32(COUNTER_REFINED * 4, true)
+      const count = Math.min(rawRefined, ROI_PEAK_MAX_CANDIDATES)
+      const peaks = []
+      for (let index = 0; index < count; index += 1) {
+        const offset = headerBytes + index * ROI_REFINED_PEAK_RECORD_BYTES
+        peaks.push({
+          x: view.getFloat32(offset, true),
+          y: view.getFloat32(offset + 4, true),
+          peak: view.getFloat32(offset + 8, true),
+          eigenvalue1: view.getFloat32(offset + 12, true),
+          eigenvalue2: view.getFloat32(offset + 16, true),
+          hessianXY: view.getFloat32(offset + 20, true),
+          polarity: (view.getUint32(offset + 24, true) === 0 ? 0 : 1) as 0 | 1,
+        })
+      }
+      peaks.sort((first, second) => first.y - second.y || first.x - second.x)
+      return {
+        peaks,
+        bytesCopied,
+        truncated: rawRefined > ROI_PEAK_MAX_CANDIDATES || rawCandidates > ROI_PEAK_MAX_CANDIDATES,
+      }
+    } finally {
+      if (readbackBuffer.mapState === 'mapped') {
+        readbackBuffer.unmap()
+      }
+    }
+  }
 
   return {
     blurredBuffer,
@@ -587,65 +640,23 @@ export function createRoiRefinedPeakStage(
       fitPipeline.with(fitBindGroup).dispatchThreads(ROI_PEAK_MAX_CANDIDATES)
       publishPipeline.with(publishBindGroup).dispatchThreads()
     },
-    async readPeaks() {
-      if (readbackBusy) {
-        return {
-          peaks: [],
-          count: 0,
-          candidateCount: 0,
-          rejectedCount: 0,
-          bytesCopied: 0,
-          truncated: false,
-        }
+    submitPeaksReadback() {
+      // One readback per stage at a time. Slots alternate, so a stage is only
+      // touched every other frame; a conflict here means a caller awaited too
+      // late and the previous map is still outstanding.
+      if (readbackBusy || readbackPending) {
+        return Promise.resolve(emptyReadback())
       }
+      readbackPending = true
       readbackBusy = true
-      const headerBytes = COUNTER_COUNT * 4
-      const bytesCopied = headerBytes + ROI_PEAK_MAX_CANDIDATES * ROI_REFINED_PEAK_RECORD_BYTES
-      try {
-        const encoder = root.device.createCommandEncoder({ label: 'roi-refined-peak-readback' })
-        encoder.copyBufferToBuffer(root.unwrap(counterBuffer), 0, readbackBuffer, 0, headerBytes)
-        encoder.copyBufferToBuffer(
-          root.unwrap(refinedBuffer),
-          0,
-          readbackBuffer,
-          headerBytes,
-          ROI_PEAK_MAX_CANDIDATES * ROI_REFINED_PEAK_RECORD_BYTES,
-        )
-        root.device.queue.submit([encoder.finish()])
-        await readbackBuffer.mapAsync(GPUMapMode.READ, 0, bytesCopied)
-        const view = new DataView(readbackBuffer.getMappedRange(0, bytesCopied))
-        const rawCandidates = view.getUint32(COUNTER_CANDIDATES * 4, true)
-        const rawRefined = view.getUint32(COUNTER_REFINED * 4, true)
-        const rejectedCount = view.getUint32(COUNTER_REJECTS * 4, true)
-        const count = Math.min(rawRefined, ROI_PEAK_MAX_CANDIDATES)
-        const peaks = []
-        for (let index = 0; index < count; index += 1) {
-          const offset = headerBytes + index * ROI_REFINED_PEAK_RECORD_BYTES
-          peaks.push({
-            x: view.getFloat32(offset, true),
-            y: view.getFloat32(offset + 4, true),
-            peak: view.getFloat32(offset + 8, true),
-            eigenvalue1: view.getFloat32(offset + 12, true),
-            eigenvalue2: view.getFloat32(offset + 16, true),
-            hessianXY: view.getFloat32(offset + 20, true),
-            polarity: (view.getUint32(offset + 24, true) === 0 ? 0 : 1) as 0 | 1,
-          })
-        }
-        peaks.sort((first, second) => first.y - second.y || first.x - second.x)
-        return {
-          peaks,
-          count,
-          candidateCount: rawCandidates,
-          rejectedCount,
-          bytesCopied,
-          truncated: rawRefined > ROI_PEAK_MAX_CANDIDATES || rawCandidates > ROI_PEAK_MAX_CANDIDATES,
-        }
-      } finally {
-        if (readbackBuffer.mapState === 'mapped') {
-          readbackBuffer.unmap()
-        }
+      const encoder = root.device.createCommandEncoder({ label: 'roi-refined-peak-readback' })
+      encoder.copyBufferToBuffer(root.unwrap(counterBuffer), 0, readbackBuffer, 0, headerBytes)
+      encoder.copyBufferToBuffer(root.unwrap(refinedBuffer), 0, readbackBuffer, headerBytes, peakBytes)
+      root.device.queue.submit([encoder.finish()])
+      return mapReadback().finally(() => {
+        readbackPending = false
         readbackBusy = false
-      }
+      })
     },
     destroy() {
       horizontalBuffer.destroy()
