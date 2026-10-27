@@ -2,10 +2,14 @@
 dist/
 output/
 
+# Generated spike assets
+public/spike/
+
 # Dependencies
 node_modules/
 .pnpm-store/
 python/.venv/
+__pycache__/
 
 # OS
 .DS_Store
@@ -19,5 +23,4 @@ Thumbs.db
 python/notebooks/natural_images/
 python/notebooks/real_positives/
 python/notebooks/blob_lab_data/
-public/ort/
-*.onnx
+public/models/*.safetensors

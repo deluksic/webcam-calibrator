@@ -46,7 +46,7 @@ from roi_histogram_nms import histogram_cuts, segment  # noqa: E402
 from simple_neighbor_pipeline import (  # noqa: E402
     _load_manual_mask,
     _neighbor_filter,
-    _onnx_roi_and_background,
+    _roi_and_background,
 )
 from simple_patch_pipeline import _candidates, _fit_cubic_5x5  # noqa: E402
 
@@ -270,7 +270,7 @@ def run_real(out_dir: Path) -> list[dict[str, Any]]:
     ]
     records: list[dict[str, Any]] = []
     for image_path, manual_path in cases:
-        prep = _onnx_roi_and_background(image_path, residual_gain=1.0)
+        prep = _roi_and_background(image_path, residual_gain=1.0)
         result = _candidate_stage(prep["flattened"], prep["roi_mask"])
         empty_truth = np.zeros((0, 2), dtype=np.float64)
         entry = _evaluate_candidates(result, empty_truth)
@@ -310,7 +310,7 @@ def run_negatives(out_dir: Path, limit_per_group: int) -> list[dict[str, Any]]:
     wall = sorted(NATURAL.glob("wall_user_*.jpg"))[:limit_per_group]
     records: list[dict[str, Any]] = []
     for path in [*office, *wall]:
-        prep = _onnx_roi_and_background(path, residual_gain=1.0)
+        prep = _roi_and_background(path, residual_gain=1.0)
         result = _candidate_stage(prep["flattened"], prep["roi_mask"])
         empty_truth = np.zeros((0, 2), dtype=np.float64)
         entry = _evaluate_candidates(result, empty_truth)

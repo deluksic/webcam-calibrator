@@ -5,7 +5,7 @@ import { clamp, max, select } from 'typegpu/std'
 /**
  * Low-frequency illumination estimate for the ROI.
  *
- * The low-resolution ONNX input is already a downsampled, per-frame-normalized
+ * The low-resolution model input is already a downsampled, per-frame-normalized
  * luma image. We blur it with a mask-aware normalized convolution, reconstruct
  * raw luma with the same frame mean/std (read from the GPU stats buffer, so no
  * readback is involved), and expose the result as a sampled texture. The

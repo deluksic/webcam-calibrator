@@ -121,8 +121,8 @@ for name, image, mask in (
     ("demo_target", ROOT / "public" / "demo" / "roi_target.png", None),
     ("demo_real_01", ROOT / "public" / "demo" / "roi_real_01.jpg", None),
 ):
-    from roi_histogram_nms import roi_mask_from_onnx
+    from roi_histogram_nms import roi_mask_from_checkpoint
 
     gray = load_gray(image)
-    roi = load_mask(mask, gray.shape) if mask is not None else roi_mask_from_onnx(image)
+    roi = load_mask(mask, gray.shape) if mask is not None else roi_mask_from_checkpoint(image)
     make_case(name, gray, roi)

@@ -2,9 +2,9 @@
 
 ## Overview
 
-In-browser camera calibration against a fixed hex marker target; no server. Capture, ONNX segmentation, marker identity, and calibration all run client-side.
+In-browser camera calibration against a fixed hex marker target; no server. Capture, ROI segmentation, marker identity, and calibration all run client-side.
 
-**Stack:** SolidJS 2.0, TypeGPU (WebGPU), ONNX Runtime Web, CSS modules.
+**Stack:** SolidJS 2.0, TypeGPU (WebGPU), ruNNtime (vendored core), CSS modules.
 
 ---
 
@@ -17,7 +17,7 @@ In-browser camera calibration against a fixed hex marker target; no server. Capt
 | **Calibrate** | Live ROI/identity feed; **Start** only with ≥12 identified markers; snapshot/auto-first; frame pool; worker identity match and solve + live reprojection; guidance + collapsed advanced metrics |
 | **Results**   | WebGPU orbit view of refined target points; **Export JSON** (hex schema v2); **Save to library** & **Continue Calibration**                                                                     |
 | **Point Lab** | Hex pattern, fingerprint, and local homography/ICP experiments                                                                                                                                  |
-| **ROI Lab**   | ONNX mask, blurred histogram, cubic refined peaks, CPU neighbour filter, and identity diagnostics with a seed scan                                                                              |
+| **ROI Lab**   | ROI mask, blurred histogram, cubic refined peaks, CPU neighbour filter, and identity diagnostics with a seed scan                                                                              |
 
 **Camera** — shared [`CameraStreamContext`](../src/components/camera/CameraStreamContext.tsx) at the root. **Calibrate** capture: [`HexCameraPipeline`](../src/components/camera/HexCameraPipeline.tsx). Removed routes `/hex-target`, `/debug`, `/gradient-profiles` are not redirected.
 
@@ -25,7 +25,7 @@ In-browser camera calibration against a fixed hex marker target; no server. Capt
 
 ## Detection pipeline
 
-1. ROI ONNX mask at 256 px wide with aspect-following height.
+1. ROI mask at 256 px wide with aspect-following height.
 2. Mask-aware high-pass, Gaussian σ1.0, and a masked histogram of the blurred image → black / gray / white cuts.
 3. 3×3 extrema, 5×5 cubic peak fit, definite-Hessian filter on the GPU.
 4. GPU readback of refined peaks and features; CPU same-polarity 4σ neighbour filter.

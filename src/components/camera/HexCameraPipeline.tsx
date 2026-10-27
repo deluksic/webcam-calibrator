@@ -2,7 +2,7 @@ import type { Component } from 'solid-js'
 import { Show, createEffect, createMemo, createSignal, createTrackedEffect } from 'solid-js'
 
 import { CalibrateFocusOverlay } from '@/components/calibration/CalibrateFocusOverlay'
-import { initSharedGPUForOnnx } from '@/gpu/init'
+import { initSharedGPU } from '@/gpu/init'
 import type { RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
 import {
   ROI_MODEL_WIDTH,
@@ -21,7 +21,7 @@ import { createFrameLoop } from '@/utils/createFrameLoop'
 
 import styles from '@/components/camera/HexCameraPipeline.module.css'
 
-const MODEL_URL = `${import.meta.env.BASE_URL}models/roi_tiny_no_concat.onnx`
+const MODEL_URL = `${import.meta.env.BASE_URL}models/roi_net.safetensors`
 
 export type SnapshotCallback = (frame: CalibrationFrameObservation) => void
 
@@ -195,7 +195,7 @@ export const HexCameraPipeline: Component<HexCameraPipelineProps> = (props) => {
         if (cancelled) {
           return
         }
-        const shared = await initSharedGPUForOnnx()
+        const shared = await initSharedGPU()
         if (cancelled) {
           return
         }

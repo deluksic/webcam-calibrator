@@ -117,17 +117,17 @@ setup.
 The checkpoint was exported with:
 
 ```bash
-uv run python scripts/export_roi_noconcat_onnx.py
+python/.venv/bin/python scripts/exportRoiRunntime.py
 ```
 
-The ONNX graph has no `Concat` nodes, matches PyTorch to 1.3×10⁻⁷, and works at
-all browser input heights (96–224 px in 16 px steps). The exported file is
-`public/models/roi_tiny_no_concat.onnx` (303,700 bytes, SHA-256
-`1207adee2f7fee9bc8caa67483bfaa75902abc112ff57e441fdf1422e1a2641e`).
+At the time of this experiment the checkpoint was exported to a graph that
+matched PyTorch to 1.3×10⁻⁷ and worked at all browser input heights (96–224 px in
+16 px steps).
 
-`model-manifest.json` now points at a `models-v2` release with that hash. Upload
-the ONNX under the `models-v2` tag before a fresh checkout or CI run fetches
-weights; a matching local file is reused without a download.
+> The export path has since changed: the app no longer runs a graph runtime and
+> loads `public/models/roi_net.safetensors` instead. See
+> [`runntime-evaluation.md`](runntime-evaluation.md) and
+> [`model-weights.md`](model-weights.md). The metrics above are unaffected.
 
 ## Files
 
@@ -135,6 +135,5 @@ weights; a matching local file is reused without a download.
 - Metrics: `python/notebooks/blob_lab_data/roi_metrics.json`
 - Before/after comparison: `python/notebooks/blob_lab_data/roi_view_eval.json`
 - Old checkpoint backup: `python/notebooks/blob_lab_data/roi_net_best_before_fullview.pt`
-- Old ONNX backup: `python/notebooks/blob_lab_data/roi_tiny_no_concat_before_fullview.onnx`
 - Full-view previews: `python/notebooks/blob_lab_data/roi_fullview_candidate_preview/`
 - Evaluation overlays: `python/notebooks/blob_lab_data/roi_view_eval_after_preview/`

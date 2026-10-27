@@ -250,7 +250,7 @@ Do not use a one-pixel heatmap. Three better options:
 
 | Need | Method | Why it matters here | Caveat |
 |---|---|---|---|
-| Lightweight proposals | [XFeat](https://arxiv.org/abs/2404.19174) (CVPR 2024), [SiLK](https://arxiv.org/abs/2304.06194) (ICCV 2023), [SuperPoint](https://arxiv.org/abs/1712.07629) | Robust detectors at high resolution; sub-million to ~1.3M params; ONNX/WebGPU friendly | Generic; still needs geometric verification |
+| Lightweight proposals | [XFeat](https://arxiv.org/abs/2404.19174) (CVPR 2024), [SiLK](https://arxiv.org/abs/2304.06194) (ICCV 2023), [SuperPoint](https://arxiv.org/abs/1712.07629) | Robust detectors at high resolution; sub-million to ~1.3M params; WebGPU friendly | Generic; still needs geometric verification |
 | Homography-aware keypoint selection | [BoNeSS-ST](https://arxiv.org/abs/2503.18767) (2025) | Selects repeatable points with low measurement error for homography, not just high repeatability | Research code; adapt ideas rather than drop in |
 | High-resolution heatmaps | [HRNet](https://arxiv.org/abs/1902.09212), [HigherHRNet](https://arxiv.org/abs/1902.00593) | Keeps high-resolution features for small targets | More parameters; use a tiny variant |
 | Subpixel / coordinate decoding | [DSNT](https://arxiv.org/abs/1801.07372), [DARK](https://arxiv.org/abs/1910.06278), [SimCC](https://arxiv.org/abs/2107.03332) | Removes integer-peak quantization; current 0.8 px error is far from the 0.2 px target | Some methods assume a single instance per heatmap |

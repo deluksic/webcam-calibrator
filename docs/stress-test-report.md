@@ -12,7 +12,7 @@
   `roi_real_01.jpg`.
 - 9 negatives: 6 office + 3 wall images with no target.
 
-Candidate stage: ONNX ROI + production-style high-pass for real images; synthetic
+Candidate stage: ROI model + production-style high-pass for real images; synthetic
 target mask for synthetic images; histogram cuts; 3×3 extrema; 5×5 cubic;
 definite-Hessian filter. Neighbour filter at 20 and 40 same-polarity neighbours,
 trim 2σ, accept 4σ.

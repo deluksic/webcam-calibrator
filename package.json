@@ -1,6 +1,6 @@
 {
   "name": "webcam-calibrator",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -9,6 +9,7 @@
     "fmt": "oxfmt",
     "lint": "oxlint",
     "test": "vitest run",
+    "model:export": "python/.venv/bin/python scripts/exportRoiRunntime.py",
     "model:fetch": "tsx scripts/fetchModel.ts",
     "model:verify": "tsx scripts/verifyModel.ts",
     "stress:identity": "tsx scripts/pointIdentityStress.ts"
@@ -22,8 +23,8 @@
     "@typegpu/noise": "^0.12.1",
     "@typegpu/sdf": "^0.12.2",
     "comlink": "^4.4.2",
-    "onnxruntime-web": "^1.30.0",
     "qrcode-generator": "^2.0.4",
+    "runntime": "github:software-mansion/runntime#b7aaa6444bd01c3359c095fdd5112410ba384f41&path:/packages/runntime",
     "solid-js": "2.0.0-beta.7",
     "typegpu": "^0.12.8",
     "wgpu-matrix": "^3.4.2"
@@ -59,7 +60,8 @@
       "typescript": "npm:tsover@latest"
     },
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "runntime"
     ]
   }
 }

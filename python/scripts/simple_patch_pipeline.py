@@ -13,7 +13,7 @@ Exact pipeline requested:
   -> plots: refined candidates + saddle rejects, all patch cluster scatters,
      per-patch feature histograms.
 
-The synthetic target mask from the dataset is used directly; no ONNX run.
+The synthetic target mask from the dataset is used directly; no model run.
 """
 
 from __future__ import annotations

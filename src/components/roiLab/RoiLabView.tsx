@@ -4,7 +4,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-j
 import { useCameraStream } from '@/components/camera/CameraStreamContext'
 import { CameraStreamSelects } from '@/components/camera/CameraStreamSelects'
 import { PeakInspector } from '@/components/roiLab/PeakInspector'
-import { initSharedGPUForOnnx } from '@/gpu/init'
+import { initSharedGPU } from '@/gpu/init'
 import type { RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
 import {
   ROI_MODEL_WIDTH,
@@ -32,7 +32,7 @@ import styles from '@/components/roiLab/RoiLabView.module.css'
 
 const { performance } = globalThis
 const QUERY = new URLSearchParams(globalThis.location.search)
-const MODEL_URL = `${import.meta.env.BASE_URL}models/roi_tiny_no_concat.onnx`
+const MODEL_URL = `${import.meta.env.BASE_URL}models/roi_net.safetensors`
 const DEMO_IMAGE_URL = QUERY.get('image') ?? `${import.meta.env.BASE_URL}demo/roi_target.png`
 const DEMO_MODE = QUERY.has('demo')
 const [DEMO_WIDTH, DEMO_HEIGHT] = (() => {
@@ -164,6 +164,10 @@ export const RoiLabView: Component = () => {
   const [ready, setReady] = createSignal(false)
   const [phase, setPhase] = createSignal('loading')
   const [roiPipeline, setRoiPipeline] = createSignal<RoiLabPipeline>()
+  /** Weight-file size, read from the pipeline so the UI never hardcodes it. */
+  const [modelBytes, setModelBytes] = createSignal(0)
+  /** Trainable parameters, likewise inferred from the model rather than written down. */
+  const [modelParams, setModelParams] = createSignal(0)
   /** Bumped when the GPU device is lost so the pipeline effect rebuilds. */
   const [pipelineRetryNonce, setPipelineRetryNonce] = createSignal(0)
   let gpuLossRestarts = 0
@@ -543,7 +547,7 @@ export const RoiLabView: Component = () => {
       void (async () => {
         try {
           console.log('[roi-lab] init shared GPU')
-          const shared = await initSharedGPUForOnnx()
+          const shared = await initSharedGPU()
           if (cancelled) {
             return
           }
@@ -578,6 +582,8 @@ export const RoiLabView: Component = () => {
           )
           console.log('[roi-lab] pipeline ready')
           setRoiPipeline(pipeline)
+          setModelBytes(pipeline.modelBytes)
+          setModelParams(pipeline.modelParams)
           if (cancelled) {
             pipeline.destroy()
             return
@@ -802,7 +808,7 @@ export const RoiLabView: Component = () => {
       <aside class={styles.controls}>
         <h1 class={styles.title}>ROI Lab</h1>
         <p class={styles.note}>
-          Histogram-driven peak detection inside the target mask. The tiny U-Net is a 74.0k-parameter ONNX model at 256
+          Histogram-driven peak detection inside the target mask. The tiny U-Net is {modelParams() ? `${(modelParams() / 1000).toFixed(1)}k-parameter` : 'a small'} model at 256
           px wide, with the height following the camera aspect. A full-resolution histogram of the blurred image picks
           black/gray/white cuts, then 3×3 extrema are refined with a 5×5 cubic fit and a definite-Hessian test. Peaks
           shows the refined candidates before the worker 4σ same-polarity neighbour filter; Identity shows the observed
@@ -1085,8 +1091,10 @@ export const RoiLabView: Component = () => {
           <dd>tiny ROI U-Net</dd>
           <dt>Input</dt>
           <dd>256 × height</dd>
-          <dt>ONNX</dt>
-          <dd>297 KiB</dd>
+          <dt>Weights</dt>
+          <dd>{modelBytes() ? `${(modelBytes() / 1024).toFixed(0)} KiB` : '—'}</dd>
+          <dt>Parameters</dt>
+          <dd>{modelParams() ? `${(modelParams() / 1000).toFixed(1)}k` : '—'}</dd>
           <Show when={stepTimings()}>
             {(timings) => (
               <>
@@ -1147,8 +1155,8 @@ export const RoiLabView: Component = () => {
           <dd>{error() ? `error: ${phase()}` : paused() ? 'paused' : ready() ? 'running' : phase()}</dd>
         </dl>
         <p class={styles.status}>
-          The 74.0k-parameter GPU-compatible model runs on ONNX Runtime WebGPU using shared GPU buffers for input and
-          output. Input is 256 px wide with dynamic height (e.g. 256×192 for 4:3, 256×144 for 16:9), so the full camera
+          The GPU-compatible model runs in f16 on ruNNtime core (TypeGPU), reading and writing the
+          pipeline's own GPU buffers. Input is 256 px wide with dynamic height (e.g. 256×192 for 4:3, 256×144 for 16:9), so the full camera
           frame is kept.
         </p>
       </aside>

@@ -4,7 +4,7 @@ In-browser camera calibration against a **hex target** of black and white marker
 
 [Webcam Calibrator](https://deluksic.github.io/webcam-calibrator)
 
-**Requires:** a recent Chromium-class browser with WebGPU (Chrome/Edge 113+, or Firefox Nightly with WebGPU enabled).
+**Requires:** a recent Chromium-class browser with WebGPU (Chrome/Edge 113+, or Firefox Nightly with WebGPU enabled) **and the `shader-f16` feature**. The ROI model runs in half precision; GPUs without `shader-f16` (Adreno 5xx and most 6xx, NVIDIA Pascal) are rejected at startup with a clear error.
 
 ## What you can do
 
@@ -22,4 +22,4 @@ For how it works under the hood, see [`docs/architecture.md`](docs/architecture.
 
 ## Model weights
 
-The ONNX model is not committed. `model-manifest.json` pins a GitHub release asset and its SHA-256; `pnpm dev` and `pnpm build` fetch it into the ignored `public/models/` directory, and the Pages workflow fetches it before building. See [`docs/model-weights.md`](docs/model-weights.md).
+The model is a `safetensors` blob (`roi_net.safetensors`, ~150 KiB of f16 weights with BatchNorm folded in) rebuilt from the blob_lab checkpoint by `pnpm model:export`. It runs on a vendored [ruNNtime](https://github.com/software-mansion/runntime) core — see [`docs/runntime-evaluation.md`](docs/runntime-evaluation.md). `model-manifest.json` pins the asset and its SHA-256; `pnpm dev` and `pnpm build` fetch it into `public/models/`. See [`docs/model-weights.md`](docs/model-weights.md).

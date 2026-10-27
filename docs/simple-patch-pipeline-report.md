@@ -7,7 +7,7 @@
 > edge-clamped 5×5 fits.
 
 One synthetic oblique 1280×960 frame. The synthetic target mask is used directly;
-no ONNX run.
+no model run.
 
 ## Exact pipeline
 

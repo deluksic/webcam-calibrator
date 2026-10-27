@@ -1,4 +1,4 @@
-import * as ort from 'onnxruntime-web/webgpu'
+import { evalValues, materialized } from '@runntime/core'
 import { common, d, std, tgpu } from 'typegpu'
 import type { TgpuRoot } from 'typegpu'
 import { atomicAdd, atomicStore } from 'typegpu/std'
@@ -10,6 +10,7 @@ import { createRoiCircleStage } from '@/gpu/roiLab/roiCirclePipeline'
 import { createRoiGraphStage, type RoiGraphData } from '@/gpu/roiLab/roiGraphPipeline'
 import type { RoiDetectedPoint, RoiRefinedPeakReadback } from '@/gpu/roiLab/roiPeakTypes'
 import { createRoiRefinedPeakStage } from '@/gpu/roiLab/roiRefinedPeakPipeline'
+import { loadRoiNet } from '@/gpu/roi/roiRunntime'
 import { analyzeRoiHistogram, ROI_HISTOGRAM_BINS, type RoiHistogramAnalysis } from '@/lib/roiHistogram'
 import { type RoiNeighbourFilterResult, type RoiRefinedPeak } from '@/lib/roiNeighbourFilter'
 import { disposeIdentityWorker, filterRefinedPeaksInWorker, warmIdentityWorker } from '@/workers/identityClient'
@@ -19,16 +20,18 @@ const { performance } = globalThis
 /**
  * Browser-side ROI segmentation.
  *
- * ONNX graph: normalized grayscale 1×H×192 -> mask probability 1×H×192.
+ * Model graph: normalized grayscale 1×H×256 -> mask probability 1×H/2×128,
+ * run on ruNNtime core (f16, hwc4). Weights come from a safetensors blob built
+ * by scripts/exportRoiRunntime.py.
  * Per-image mean/std are reduced on the GPU every frame and consumed on the
  * GPU: `0.4 + 0.2 * z` (z = (luma - mean) / std) is written from a shader that
  * reads the stats buffer directly, so nothing is read back to the CPU. This
  * matches the per-image standardization used for training without adding
- * reduction ops to the ONNX graph.
+ * reduction ops to the model graph.
  *
- * The ONNX Runtime WebGPU EP shares the TypeGPU device and queue. The compute
- * pass fills the input buffer, `session.run` reads/writes GPU buffers, then a
- * second compute pass turns the output buffer into a sampled mask texture.
+ * The model reads the same TypeGPU storage buffer the prepare pass fills, so
+ * nothing round-trips to the CPU. Its output is copied into `outputBuffer` and
+ * a second compute pass turns that into a sampled mask texture.
  */
 
 export const ROI_MODEL_WIDTH = 256
@@ -151,7 +154,7 @@ const accumulateRoiHistogram = (x: number, y: number) => {
  *
  * GPU timestamps are recorded by the device, so the delta between two markers
  * is the exact device time of everything queued between them — including passes
- * we do not own and cannot instrument, such as ONNX Runtime's inference.
+ * that the TypeGPU bracket helpers cannot instrument directly.
  */
 const timestampMarker = (index: number) => {
   'use gpu'
@@ -310,7 +313,7 @@ export type RoiStepTimings = {
   /** Cost of encoding the GPU mean/std reduction passes. Nothing is read back. */
   statsMs: number
   preprocessMs: number
-  /** `await session.run(...)` only. */
+  /** Encode of the model graph plus the mask copy into `outputBuffer`. */
   inferenceRunMs: number
   cameraCopyMs: number
   debugInputMs: number
@@ -362,6 +365,10 @@ export type RoiLabPipeline = {
   setPaused: (paused: boolean) => void
   /** Peaks and filter decisions for the frame currently on screen. */
   getPresentedPeakAnalysis: () => RoiPeakFrameAnalysis | undefined
+  /** Bytes of the weight file actually fetched, so the UI never hardcodes it. */
+  modelBytes: number
+  /** Trainable scalar count of the loaded model. */
+  modelParams: number
   dumpStats: () => Promise<{
     input: { min: number; mean: number; max: number }
     output: { min: number; mean: number; max: number }
@@ -378,9 +385,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   ])
 }
 
-// ORT WebGPU allows only one session to be created at a time. Rapid camera
-// resolution changes can otherwise overlap session creation and fail with
-// "another WebGPU EP inference session is being created".
+// Serialises pipeline creation so a replacement never reconfigures the shared
+// canvas while the previous pipeline is still tearing down (that ordering left
+// the swap chain at the old size — a black frame). Historically this also
+// guarded ORT's one-session-at-a-time limit.
 let sessionSlot: Promise<void> = Promise.resolve()
 
 async function takeSessionSlot(): Promise<() => void> {
@@ -829,22 +837,14 @@ export async function createRoiLabPipeline(
     throw new Error(`Failed to fetch ROI model: ${response.status} ${response.statusText}`)
   }
   const modelData = await response.arrayBuffer()
-  onStatus?.(`model ${(modelData.byteLength / 1024).toFixed(0)} KiB; creating session`)
-  // ORT WebGPU still bootstraps its wasm runtime even though inference runs
-  // on the WebGPU EP. Vite copies the package runtime assets into public/ort
-  // at dev/build time; that directory is generated and ignored.
-  ort.env.wasm.wasmPaths = `${import.meta.env.BASE_URL}ort/`
-  onStatus?.('creating WebGPU session')
+  onStatus?.(`model ${(modelData.byteLength / 1024).toFixed(0)} KiB; loading weights`)
   const freeSessionSlot = await takeSessionSlot()
-  let session: Awaited<ReturnType<typeof ort.InferenceSession.create>>
+  let net: Awaited<ReturnType<typeof loadRoiNet>>
   try {
-    session = await withTimeout(
-      ort.InferenceSession.create(modelData, {
-        executionProviders: ['webgpu'],
-        graphOptimizationLevel: 'all',
-      }),
+    net = await withTimeout(
+      loadRoiNet(root, modelData),
       45_000,
-      'ONNX Runtime WebGPU session creation timed out.',
+      'ROI model weight load timed out.',
     )
   } catch (cause) {
     freeSessionSlot()
@@ -852,16 +852,12 @@ export async function createRoiLabPipeline(
   }
   onStatus?.('running')
   warmIdentityWorker()
-  const inputGpuBuffer = root.unwrap(inputBuffer)
   const outputGpuBuffer = root.unwrap(outputBuffer)
-  const inputGpuTensor = ort.Tensor.fromGpuBuffer(inputGpuBuffer, {
-    dataType: 'float32',
-    dims: [1, 1, modelHeight, modelWidth],
-  })
-  const outputGpuTensor = ort.Tensor.fromGpuBuffer(outputGpuBuffer, {
-    dataType: 'float32',
-    dims: [1, 1, maskHeight, maskWidth],
-  })
+  // The model reads the very buffer the prepare pass writes: no upload, no copy.
+  const modelInputValue = materialized(
+    { elems: modelWidth * modelHeight, dtype: 'f32', dims: [1, modelHeight, modelWidth] },
+    inputBuffer,
+  )
   // Configure the canvas only after the session slot is held. The previous
   // pipeline unconfigures this same canvas as part of destroy(); reconfiguring
   // before that completes leaves the swap chain at the old size (black frame).
@@ -1114,13 +1110,21 @@ export async function createRoiLabPipeline(
     const { statsMs } = preprocessFrame(video)
     const preprocessMs = performance.now() - preprocessStart
 
-    // No queue flushes around inference: ORT shares this device and queue, so
-    // our prepare dispatch (writing `inputBuffer`) and our mask dispatch
-    // (reading `outputBuffer`) are already ordered around ORT's work. The CPU
-    // never reads either buffer here, so nothing needs a completion signal.
+    // No queue flushes: the model encodes onto this device and queue, so our
+    // prepare dispatch (writing `inputBuffer`) and our mask dispatch (reading
+    // `outputBuffer`) are ordered around it. The CPU never reads either buffer,
+    // so nothing needs a completion signal.
     const inferenceStart = performance.now()
     inferenceBracket.begin()
-    await session.run({ input: inputGpuTensor }, { mask: outputGpuTensor })
+    const maskValue = net.model.forward(modelInputValue)
+    evalValues([maskValue])
+    // The graph allocates its output from ruNNtime's pool, so hand the result to
+    // the pipeline's own buffer before the next eval can recycle it. One 48 KiB
+    // device copy keeps every downstream stage untouched.
+    const maskSource = root.unwrap(maskValue.buffer)
+    const maskCopy = device.createCommandEncoder({ label: 'roi-mask-copy' })
+    maskCopy.copyBufferToBuffer(maskSource, 0, outputGpuBuffer, 0, maskWidth * maskHeight * 4)
+    device.queue.submit([maskCopy.finish()])
     inferenceBracket.end()
     const inferenceRunMs = performance.now() - inferenceStart
 
@@ -1296,6 +1300,8 @@ export async function createRoiLabPipeline(
     getPresentedPeakAnalysis() {
       return presentedPeakAnalysis
     },
+    modelBytes: modelData.byteLength,
+    modelParams: net.paramCount,
     async dumpStats() {
       if (readingStats) {
         throw new Error('A buffer readback is already in progress.')
@@ -1352,7 +1358,7 @@ export async function createRoiLabPipeline(
         graphStage.destroy()
         msaaTexture.destroy()
       }
-      void Promise.all([session.release().catch(() => {}), device.queue.onSubmittedWorkDone()]).finally(() => {
+      void device.queue.onSubmittedWorkDone().finally(() => {
         releaseGpuResources()
         freeSessionSlot()
       })

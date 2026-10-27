@@ -1,6 +1,6 @@
 # Hex Blob Detection
 
-This document records the original detection plan for the hex square target. The production path is now implemented with an ONNX ROI mask, histogram segmentation, connected components, and point-identity matching; see [`architecture.md`](architecture.md).
+This document records the original detection plan for the hex square target. The production path is now implemented with a neural ROI mask, histogram segmentation, connected components, and point-identity matching; see [`architecture.md`](architecture.md).
 
 ## Goal
 
@@ -263,7 +263,7 @@ change the blob detection pipeline above.
 
 ## Implementation status
 
-The production path uses the implemented ONNX mask + illumination flattening + histogram + component
+The production path uses the implemented ROI mask + illumination flattening + histogram + component
 pipeline. Identity/calibration integration is complete: resolved and safe
 recovered markers become object/image point correspondences for the calibration
 worker. Temporal tracking and printed targets remain future work.

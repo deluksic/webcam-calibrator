@@ -54,7 +54,7 @@ clean candidate set there is no garbage for it to remove.
 
 ## Real photo `real_positive_01.jpg`
 
-ONNX ROI model input `256×144`; production-style high-pass:
+ROI model input `256×144`; production-style high-pass:
 
 - model-resolution mask-weighted **25×25 box blur** (radius 12), divided by the
   blurred mask weight, upsampled;
@@ -105,7 +105,7 @@ target count, not a per-point verified match.
 Closer view of the same phone target, with specular reflection on the right side
 of the screen.
 
-- ONNX ROI model input `256×144`; high-pass as above.
+- ROI model input `256×144`; high-pass as above.
 - Histogram cuts: black **118**, white **138**, background **126**.
 - Candidate stage: raw **435**, accepted **433**, saddle/indefinite **2**,
   fit failures **0**.

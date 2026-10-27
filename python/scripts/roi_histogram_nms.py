@@ -23,11 +23,11 @@ import numpy as np
 
 from blob_lab.heatmap_dataset import HeatmapDatasetConfig, generate_heatmap_dataset
 from blob_lab.peaks import Peak, detect_peaks, match_peaks
+from blob_lab.roi_mask import roi_mask_probability
 from blob_lab.target_layout import build_hex_target_layout
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "python" / "notebooks" / "blob_lab_data" / "roi_nms"
-ONNX_MODEL = ROOT / "public" / "models" / "roi_tiny_no_concat.onnx"
 
 
 def load_gray(path: Path) -> np.ndarray:
@@ -50,31 +50,15 @@ def load_mask(path: Path, shape: tuple[int, int]) -> np.ndarray:
     return mask >= 127
 
 
-def roi_mask_from_onnx(image_path: Path, model_path: Path = ONNX_MODEL) -> np.ndarray:
-    import onnxruntime as ort
-
+def roi_mask_from_checkpoint(image_path: Path) -> np.ndarray:
+    """Full-resolution boolean target mask for one frame."""
     image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
     if image is None:
         raise FileNotFoundError(image_path)
     height, width = image.shape[:2]
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-
-    stats_small = cv2.resize(rgb, (64, 36), interpolation=cv2.INTER_AREA)
-    stats_luma = stats_small @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
-    mean = float(stats_luma.mean())
-    std = max(0.05, float(stats_luma.std()))
-
-    model_width = 256
-    raw_height = round(model_width * height / width)
-    model_height = min(224, max(96, math.ceil(raw_height / 16) * 16))
-    resized = cv2.resize(rgb, (model_width, model_height), interpolation=cv2.INTER_LINEAR)
-    luma = resized @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
-    normalized = ((luma - mean) / std)[None, None].astype(np.float32)
-
-    session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
-    output = session.run(["mask"], {"input": normalized})[0]
-    mask = np.asarray(output[0, 0], dtype=np.float32)
-    full = cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR)
+    probability, _height = roi_mask_probability(rgb)
+    full = cv2.resize(probability, (width, height), interpolation=cv2.INTER_LINEAR)
     return full >= 0.5
 
 
@@ -556,7 +540,7 @@ def run_real_case(
     if mask_path is not None:
         roi = load_mask(mask_path, gray.shape)
     else:
-        roi = roi_mask_from_onnx(image_path)
+        roi = roi_mask_from_checkpoint(image_path)
     cuts = histogram_cuts(gray, roi)
     black, white = segment(gray, roi, cuts)
     result = evaluate(

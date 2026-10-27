@@ -8,7 +8,7 @@ the surviving points.
 ## Split
 
 ```text
-ONNX ROI mask + mask-aware background
+ROI mask + mask-aware background
   → GPU: Gaussian σ1.0 blur of the flattened luma
   → GPU: 256-bin histogram of the blurred image, masked
   → CPU: black/white cuts from the blurred histogram

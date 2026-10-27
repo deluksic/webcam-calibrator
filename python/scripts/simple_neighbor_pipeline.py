@@ -45,6 +45,11 @@ from roi_bicubic_fits import (  # noqa: E402
     match_from_distances,
     point_distances,
 )
+from blob_lab.roi_mask import (  # noqa: E402
+    MODEL_WIDTH,
+    luma_statistics,
+    roi_mask_model_resolution,
+)
 from roi_histogram_nms import histogram_cuts, segment  # noqa: E402
 from simple_patch_pipeline import (  # noqa: E402
     _candidates,
@@ -54,7 +59,6 @@ from simple_patch_pipeline import (  # noqa: E402
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-ONNX_MODEL = ROOT / "public" / "models" / "roi_tiny_no_concat.onnx"
 DEFAULT_OUT = ROOT / "python" / "notebooks" / "blob_lab_data" / "simple_neighbor_pipeline"
 
 FEATURE_KEYS = ("peak", "eigenvalue_1", "eigenvalue_2", "hessian_xy")
@@ -190,7 +194,7 @@ def _load_gray(path: Path) -> np.ndarray:
     return image.astype(np.float32) / 255.0
 
 
-def _onnx_roi_and_background(image_path: Path, *, residual_gain: float) -> dict[str, Any]:
+def _roi_and_background(image_path: Path, *, residual_gain: float) -> dict[str, Any]:
     """Production-style CNN ROI + mask-aware long-wavelength high-pass.
 
     Mirrors roiBackgroundPipeline: model-resolution mask-weighted luma is box
@@ -198,8 +202,6 @@ def _onnx_roi_and_background(image_path: Path, *, residual_gain: float) -> dict[
     subtracted from the full-resolution luma:
         flattened = clamp(0.5 + (luma - background) * residual_gain, 0, 1)
     """
-    import onnxruntime as ort
-
     color = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
     if color is None:
         raise FileNotFoundError(image_path)
@@ -207,25 +209,9 @@ def _onnx_roi_and_background(image_path: Path, *, residual_gain: float) -> dict[
     rgb = cv2.cvtColor(color, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
 
-    stats_small = cv2.resize(rgb, (64, 36), interpolation=cv2.INTER_AREA)
-    stats_luma = stats_small @ np.asarray([0.299, 0.587, 0.114], dtype=np.float32)
-    mean = float(stats_luma.mean())
-    std = max(0.05, float(stats_luma.std()))
-
-    model_width = 256
-    raw_height = round(model_width * height / width)
-    model_height = min(224, max(96, int(np.ceil(raw_height / 16.0)) * 16))
-    resized = cv2.resize(rgb, (model_width, model_height), interpolation=cv2.INTER_LINEAR)
-    luma_model = resized @ np.asarray([0.299, 0.587, 0.114], dtype=np.float32)
-    normalized = ((luma_model - mean) / std)[None, None].astype(np.float32)
-
-    session = ort.InferenceSession(str(ONNX_MODEL), providers=["CPUExecutionProvider"])
-    output = session.run(["mask"], {"input": normalized})[0]
-    probability = np.asarray(output[0, 0], dtype=np.float32)
-    probability_model = cv2.resize(
-        probability, (model_width, model_height), interpolation=cv2.INTER_LINEAR
-    )
+    probability_model, luma_model, model_height = roi_mask_model_resolution(rgb)
     probability_model = np.clip(probability_model, 0.0, 1.0)
+    mean, std = luma_statistics(rgb)
 
     weighted = luma_model * probability_model
     weight = probability_model
@@ -239,7 +225,7 @@ def _onnx_roi_and_background(image_path: Path, *, residual_gain: float) -> dict[
     background_model = np.where(
         weight_blur > 1e-3,
         weighted_blur / np.maximum(weight_blur, 1e-3),
-        mean,
+        float(luma_model.mean()),
     ).astype(np.float32)
     background = cv2.resize(
         background_model, (width, height), interpolation=cv2.INTER_LINEAR
@@ -248,15 +234,15 @@ def _onnx_roi_and_background(image_path: Path, *, residual_gain: float) -> dict[
         0.5 + (gray - background) * float(residual_gain), 0.0, 1.0
     ).astype(np.float32)
     roi_mask = cv2.resize(
-        probability, (width, height), interpolation=cv2.INTER_LINEAR
+        probability_model, (width, height), interpolation=cv2.INTER_LINEAR
     ) >= 0.5
     return {
         "gray": gray,
         "flattened": flattened,
         "background": background,
         "roi_mask": roi_mask,
-        "probability": probability,
-        "model_width": model_width,
+        "probability": probability_model,
+        "model_width": MODEL_WIDTH,
         "model_height": model_height,
         "stats_mean": mean,
         "stats_std": std,
@@ -540,7 +526,7 @@ def run(args: argparse.Namespace) -> None:
     preprocessing = None
     if args.image is not None:
         image_path = Path(args.image)
-        prep = _onnx_roi_and_background(image_path, residual_gain=args.residual_gain)
+        prep = _roi_and_background(image_path, residual_gain=args.residual_gain)
         gray = prep["gray"]
         processed = prep["flattened"]
         cnn_mask = prep["roi_mask"]
@@ -645,7 +631,7 @@ def run(args: argparse.Namespace) -> None:
         "sample": int(sample),
         "blur_sigma": float(args.blur_sigma),
         "image": str(args.image) if args.image is not None else None,
-        "onnx_model": str(ONNX_MODEL) if args.image is not None else None,
+        "checkpoint": "python/notebooks/blob_lab_data/roi_net_best.pt" if args.image is not None else None,
         "background": {
             "method": "mask-weighted 25x25 box blur at 256px-wide model resolution, upsample, subtract",
             "residual_gain": float(args.residual_gain),

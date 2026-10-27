@@ -25,7 +25,7 @@ from roi_histogram_nms import (  # noqa: E402
     _contrast_response,
     histogram_cuts,
     quadratic_maximum,
-    roi_mask_from_onnx,
+    roi_mask_from_checkpoint,
     segment,
 )
 
@@ -92,7 +92,7 @@ def main() -> None:
 
     image = cv2.imread(str(args.image), cv2.IMREAD_COLOR)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
-    roi = roi_mask_from_onnx(args.image)
+    roi = roi_mask_from_checkpoint(args.image)
     cuts = histogram_cuts(gray, roi)
     black, white = segment(gray, roi, cuts)
 

@@ -1,4 +1,3 @@
-import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -9,23 +8,6 @@ import solidPlugin from 'vite-plugin-solid'
 import { ensureModelAsset } from './scripts/modelAsset'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
-const ortSourceDir = path.resolve(root, 'node_modules/onnxruntime-web/dist')
-const ortAssetDir = path.resolve(root, 'public/ort')
-const ORT_RUNTIME_ASSETS = [
-  'ort-wasm-simd-threaded.asyncify.mjs',
-  'ort-wasm-simd-threaded.asyncify.wasm',
-] as const
-
-function copyOrtRuntimeAssets(): void {
-  fs.mkdirSync(ortAssetDir, { recursive: true })
-  for (const filename of ORT_RUNTIME_ASSETS) {
-    const source = path.join(ortSourceDir, filename)
-    if (fs.existsSync(source)) {
-      fs.copyFileSync(source, path.join(ortAssetDir, filename))
-    }
-  }
-}
-
 function modelWeights(): Plugin {
   const log = (message: string): void => {
     console.log(`[model] ${message}`)
@@ -45,41 +27,6 @@ function modelWeights(): Plugin {
   }
 }
 
-function ortRuntimeAssets(): Plugin {
-  return {
-    name: 'ort-runtime-assets',
-    buildStart() {
-      copyOrtRuntimeAssets()
-    },
-    configureServer(server) {
-      copyOrtRuntimeAssets()
-      server.middlewares.use((request, response, next) => {
-        const pathname = (request.url ?? '').split('?')[0] ?? ''
-        const marker = pathname.indexOf('/ort/')
-        if (marker === -1) {
-          next()
-          return
-        }
-        const filename = path.basename(pathname)
-        const filePath = path.join(ortAssetDir, filename)
-        if (!filename || !fs.existsSync(filePath)) {
-          next()
-          return
-        }
-        response.statusCode = 200
-        response.setHeader(
-          'Content-Type',
-          filename.endsWith('.wasm')
-            ? 'application/wasm'
-            : 'text/javascript',
-        )
-        response.setHeader('Cache-Control', 'no-cache')
-        fs.createReadStream(filePath).pipe(response)
-      })
-    },
-  }
-}
-
 export default defineConfig({
   // GitHub project pages: set VITE_BASE_URL=/<repo>/ in CI (see .github/workflows)
   base: process.env.VITE_BASE_URL || '/',
@@ -87,16 +34,22 @@ export default defineConfig({
   // deps with esbuild only (no unplugin-typegpu), so `tgpu.fn` / shader metadata breaks.
   // Production uses Rollup + our plugins. Excluding these forces the transform pipeline in dev.
   optimizeDeps: {
-    exclude: ['typegpu', '@typegpu/color', '@typegpu/geometry'],
+    // ruNNtime ships TS sources straight into the Vite transform pipeline (same
+    // reason as the TypeGPU entries below): esbuild pre-bundling would drop the
+    // unplugin-typegpu metadata that its kernels need.
+    exclude: ['typegpu', '@typegpu/color', '@typegpu/geometry', 'runntime'],
   },
   resolve: {
     alias: {
       '@': path.resolve(root, 'src'),
+      // `runntime/core` is not in the package's `exports` map (only ./zoo), so
+      // this alias resolves straight to the source file. Drop it — and rename
+      // the imports back — once the package exports ./core.
+      '@runntime/core': path.resolve(root, 'node_modules/runntime/src/core/index.ts'),
     },
   },
   plugins: [
     modelWeights(),
-    ortRuntimeAssets(),
     // tsover(), disabled because slow
     typegpuPlugin(),
     solidPlugin(),

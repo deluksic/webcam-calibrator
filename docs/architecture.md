@@ -2,11 +2,11 @@
 
 ## Overview
 
-The browser app calibrates a camera against an editable hex target. All vision work is client-side. The ONNX model is fetched from a GitHub release asset using [`model-manifest.json`](../model-manifest.json) before dev/build; see [`model-weights.md`](model-weights.md).
+The browser app calibrates a camera against an editable hex target. All vision work is client-side. The model (`safetensors`, run on a vendored ruNNtime core) is fetched from a GitHub release asset using [`model-manifest.json`](../model-manifest.json) before dev/build; see [`model-weights.md`](model-weights.md).
 
 ```text
 camera frame
-  → ROI ONNX mask (256 px wide, aspect-following height)
+  → ROI mask (256 px wide, aspect-following height)
   → mask-aware high-pass, Gaussian σ1.0
   → blurred histogram cuts: black / gray / white
   → raw high-pass black/white class, 3×3 extrema on the blurred image
@@ -27,8 +27,8 @@ The target is configured on the Target page: columns, rows, points per cell edge
 
 - **Views** ([`App.tsx`](../src/components/App.tsx)): **Home**, **Target** ([`HexTargetView.tsx`](../src/components/HexTargetView.tsx) — editable target, QR Calibrate link, fullscreen, JSON export), **Calibrate** ([`CalibrationView.tsx`](../src/components/CalibrationView.tsx)), **Results** ([`ResultsView.tsx`](../src/components/results/ResultsView.tsx)), **Point Lab**, **ROI Lab**. Removed routes (`/hex-target`, `/debug`, `/gradient-profiles`) are not redirected.
 - **Camera** — [`CameraStreamProvider`](../src/components/camera/CameraStreamContext.tsx) at the app root; stream acquisition and device constraints in [`cameraStreamAcquire.ts`](../src/components/camera/cameraStreamAcquire.ts).
-- **GPU lifecycle** — [`init.ts`](../src/gpu/init.ts) creates one adapter/device/root for capture, Target, and Results. Target deliberately reuses the ONNX/capture device instead of caching a second root; renderers unconfigure their canvas on destroy. Target, ROI Lab, and Calibrate all rebuild after a WebGPU device loss (mobile orientation, GPU-process reset); ROI Lab also treats a rejected `mapAsync` as a loss signal.
-- **Live capture** — [`HexCameraPipeline.tsx`](../src/components/camera/HexCameraPipeline.tsx) wraps [`roiLabPipeline.ts`](../src/gpu/roiLab/roiLabPipeline.ts): ONNX mask, refined-peak readback, identity-worker neighbour filter, identity graph overlay, snapshot capture, and a lightweight reprojection overlay. The pipeline keeps two frame slots (encode N+1 while presenting N) and `HexCameraPipeline` hands identity to [`hexMatch.worker.ts`](../src/workers/hexMatch.worker.ts), so marker matching overlaps the next frame's GPU work instead of blocking the camera loop.
+- **GPU lifecycle** — [`init.ts`](../src/gpu/init.ts) creates one adapter/device/root for capture, Target, and Results. Target deliberately reuses the capture device instead of caching a second root; renderers unconfigure their canvas on destroy. Target, ROI Lab, and Calibrate all rebuild after a WebGPU device loss (mobile orientation, GPU-process reset); ROI Lab also treats a rejected `mapAsync` as a loss signal.
+- **Live capture** — [`HexCameraPipeline.tsx`](../src/components/camera/HexCameraPipeline.tsx) wraps [`roiLabPipeline.ts`](../src/gpu/roiLab/roiLabPipeline.ts): ROI mask, refined-peak readback, identity-worker neighbour filter, identity graph overlay, snapshot capture, and a lightweight reprojection overlay. The pipeline keeps two frame slots (encode N+1 while presenting N) and `HexCameraPipeline` hands identity to [`hexMatch.worker.ts`](../src/workers/hexMatch.worker.ts), so marker matching overlaps the next frame's GPU work instead of blocking the camera loop.
 - **Calibration session** — [`CalibrationRunContext`](../src/components/calibration/CalibrationRunContext.tsx) owns the frame pool, the background worker solve, and the latest result shared with Results.
 
 ## Target geometry and identity
@@ -37,7 +37,7 @@ The target is configured on the Target page: columns, rows, points per cell edge
 - [`target.ts`](../src/lib/hexTarget/target.ts) — pattern/color generation from a config, proximity graph, depth indexes, a cached design-side ICP bundle, and normalized object points.
 - [`hexBlobTarget.ts`](../src/lib/hexBlobTarget.ts) — display layout: integer pixel squares, padding, resolution-independent design points.
 - [`match.ts`](../src/lib/hexTarget/match.ts) — observed graph + hash match + local-ICP recovery. Returns matched identities, observed edges, and counts. Calibrate runs it in [`hexMatch.worker.ts`](../src/workers/hexMatch.worker.ts), which caches the target model across frames.
-- [`roiBackgroundPipeline.ts`](../src/gpu/roiLab/roiBackgroundPipeline.ts) — mask-aware low-frequency illumination estimate from the ONNX downsample.
+- [`roiBackgroundPipeline.ts`](../src/gpu/roiLab/roiBackgroundPipeline.ts) — mask-aware low-frequency illumination estimate from the model downsample.
 - [`calibrationPoints.ts`](../src/lib/hexTarget/calibrationPoints.ts) — accepts resolved markers and safe recovered markers; rejects duplicate design IDs for the frame.
 
 Object coordinates are the design-space marker centers divided by the median lattice spacing, with `z = 0`. Calibration is therefore scale-free; extrinsics are in “design-spacing” units. The export names this unit explicitly.

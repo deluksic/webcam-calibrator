@@ -263,22 +263,27 @@ The recommended browser checkpoint is
 
 ## Browser ROI lab
 
-`/roi-lab` runs the exported ONNX model on the webcam feed. The mask is
-composited over the video and is ready to be fed into the full-resolution peak
-finder. `/?demo=1#/roi-lab` streams a static target-on-office composite through
-a canvas, so the page can be exercised without a camera.
+`/roi-lab` runs the deployed model on the webcam feed. The mask is composited
+over the video and is ready to be fed into the full-resolution peak finder.
+`/?demo=1#/roi-lab` streams a static target-on-office composite through a canvas,
+so the page can be exercised without a camera.
 
-Export the browser model after training:
+Export the browser weights after training (from the repository root):
 
 ```bash
-uv run python scripts/export_roi_noconcat_onnx.py
+pnpm model:export     # runs scripts/exportRoiRunntime.py in the venv
 ```
 
-This writes `public/models/roi_tiny_no_concat.onnx` (~297 KiB). It is a
-GPU-compatible version of the larger backbone (74.0k parameters): the decoder's channel
-concatenations are algebraically folded into separate convolutions plus `Add`,
-and the two 6-channel conv inputs are zero-padded to 8 channels. The output
-matches PyTorch to ~1e-7.
+This writes `public/models/roi_net.safetensors` (~150 KiB). It holds the same
+73.6k-scalar deployed model as f16 weights, with each BatchNorm folded into its
+preceding convolution in f32 before the final rounding. The web app loads it
+through the vendored ruNNtime core; it matches PyTorch to ~1e-7 in f32 and to
+~9e-3 per pixel at the f16 precision actually deployed. See
+[`docs/model-weights.md`](../docs/model-weights.md).
+
+Scripts that need a mask without the browser import
+`blob_lab.roi_mask.roi_mask_probability`, which runs the checkpoint directly, so
+no graph runtime is required.
 
 The ROI Lab is **WebGPU-only**. It shares one `GPUDevice` with TypeGPU and uses
 `Tensor.fromGpuBuffer` for both input and output, so there is no CPU inference
@@ -413,7 +418,7 @@ statistics are recomputed. Per-point neighbour histograms with the mean, ±σ
 band, and the point value are written under `per_point/`. See
 [`docs/simple-neighbor-filter-report.md`](../docs/simple-neighbor-filter-report.md).
 
-Real-photo runs with the ONNX ROI and production-style high-pass:
+Real-photo runs with the ROI model and production-style high-pass:
 
 ```bash
 uv run python scripts/simple_neighbor_pipeline.py \
