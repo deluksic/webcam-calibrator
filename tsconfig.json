@@ -2,7 +2,7 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./src/*"],
-      "@runntime/core": ["./node_modules/runntime/src/core/index.ts"]
+      "@runntime/core": ["./vendor/runntime/packages/runntime/src/core/index.ts"]
     },
     "target": "ESNext",
     "module": "ESNext",

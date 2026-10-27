@@ -20,6 +20,8 @@ For how it works under the hood, see [`docs/architecture.md`](docs/architecture.
 
 **Dev:** Solid.js, Vite — `pnpm dev`, `pnpm build`, `pnpm test`.
 
+The vendored ruNNtime `core` sources are **not committed**. `pnpm dev` and `pnpm build` clone them into the git-ignored `vendor/` directory at a pinned commit (`scripts/coreAsset.ts`); `pnpm vendor:core` does the same on demand. Because that layer is unpublished, CI clones it explicitly before building.
+
 ## Model weights
 
 The model is a `safetensors` blob (`roi_net.safetensors`, ~150 KiB of f16 weights with BatchNorm folded in) rebuilt from the blob_lab checkpoint by `pnpm model:export`. It runs on a vendored [ruNNtime](https://github.com/software-mansion/runntime) core — see [`docs/runntime-evaluation.md`](docs/runntime-evaluation.md). `model-manifest.json` pins the asset and its SHA-256; `pnpm dev` and `pnpm build` fetch it into `public/models/`. See [`docs/model-weights.md`](docs/model-weights.md).

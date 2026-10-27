@@ -30,6 +30,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Clone ruNNtime core
+        # `core` is not published upstream; vendor/ is git-ignored and cloned at
+        # a pinned commit (scripts/fetchCore.ts).
+        run: pnpm vendor:core
+
       - name: Fetch model weights
         run: pnpm model:fetch
 

@@ -2,6 +2,9 @@
 dist/
 output/
 
+# Vendored ruNNtime core, cloned by `pnpm vendor:core` (see docs/runntime-evaluation.md)
+vendor/
+
 # Generated spike assets
 public/spike/
 

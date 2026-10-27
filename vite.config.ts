@@ -5,6 +5,7 @@ import typegpuPlugin from 'unplugin-typegpu/vite'
 import { defineConfig, type Plugin } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 
+import { ensureRunntimeCore } from './scripts/coreAsset'
 import { ensureModelAsset } from './scripts/modelAsset'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
@@ -27,6 +28,19 @@ function modelWeights(): Plugin {
   }
 }
 
+function runntimeCore(): Plugin {
+  // `core` is not published upstream, so the sources are cloned into vendor/
+  // before anything resolves the '@runntime/core' alias.
+  const ensure = (): void => {
+    ensureRunntimeCore({ log: (message) => console.log(`[core] ${message}`) })
+  }
+  return {
+    name: 'runntime-core',
+    buildStart: ensure,
+    configureServer: ensure,
+  }
+}
+
 export default defineConfig({
   // GitHub project pages: set VITE_BASE_URL=/<repo>/ in CI (see .github/workflows)
   base: process.env.VITE_BASE_URL || '/',
@@ -37,19 +51,20 @@ export default defineConfig({
     // ruNNtime ships TS sources straight into the Vite transform pipeline (same
     // reason as the TypeGPU entries below): esbuild pre-bundling would drop the
     // unplugin-typegpu metadata that its kernels need.
-    exclude: ['typegpu', '@typegpu/color', '@typegpu/geometry', 'runntime'],
+    exclude: ['typegpu', '@typegpu/color', '@typegpu/geometry'],
   },
   resolve: {
     alias: {
       '@': path.resolve(root, 'src'),
-      // `runntime/core` is not in the package's `exports` map (only ./zoo), so
-      // this alias resolves straight to the source file. Drop it — and rename
-      // the imports back — once the package exports ./core.
-      '@runntime/core': path.resolve(root, 'node_modules/runntime/src/core/index.ts'),
+      // ruNNtime's `core` is not published (the package exports only ./zoo and
+      // has no built entry for it), so its sources are cloned into vendor/ by
+      // scripts/fetchCore.ts and imported directly.
+      '@runntime/core': path.resolve(root, 'vendor/runntime/packages/runntime/src/core/index.ts'),
     },
   },
   plugins: [
     modelWeights(),
+    runntimeCore(),
     // tsover(), disabled because slow
     typegpuPlugin(),
     solidPlugin(),
